@@ -88,10 +88,13 @@ provisioning service onto the POOLS 1-4 machinery. Compute-30 landed first and
 moved service composition to `provisioning/compute/service`, VM/Ansible behavior
 to `domains/vms/provisioning/adapter`, and bare-metal behavior to
 `domains/bare_metal/provisioning/adapter`; POOLS-7 consumes that layout rather
-than performing another service extraction. The shared physical-settlement
-lifecycle, persistence, scheduler, and recovery destination remains the new
-`kit/physical-settlement` package decided by this change's design review.
-`kit/site` and `kit/resource-pools` may be modified where genuinely
+than performing another service extraction. The shared fulfillment and
+physical-settlement lifecycle, persistence, scheduler, provider contracts, and
+recovery destination is the new `kit/fulfillment` package decided by this
+change's design review. It sits above `kit/site` and `kit/resource-pools` in an
+explicit one-way kit dependency hierarchy; authority kits may not import
+`market_fulfillment`, deployed services, or domain adapters, including for type
+checking. `kit/site` and `kit/resource-pools` may be modified where genuinely
 cross-domain, and the `apicredits` domain is explicitly in scope for the same
 capacity-reservation-against-a-pooled-view reshape, not just VM.
 
@@ -152,7 +155,7 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
   — required for this change's `pool_id`-correctness fix to be complete
   end-to-end on the storefront side; see "Status" above.
 - Follows the implemented `market-platform-compute-30-extract-service`
-  package layout. Compute-30 did not create `kit/physical-settlement` or
+  package layout. Compute-30 did not create `kit/fulfillment` or
   implement this change's durable lifecycle.
 - Related, not blocking, follow-on: `provisioning-result-push-delivery`
   (not yet started) — adds a push transport for `SettlementResult`
@@ -164,8 +167,9 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
 ## Impact
 
 Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
-`kit/physical-settlement` (scheduler/policy relocation, settlement
-persistence, recovery, and pull-based result/status query contracts —
+`kit/resource-pools` (removal of fulfillment-provider responsibilities),
+`kit/fulfillment` (scheduler/policy and provider-contract consolidation,
+settlement persistence, recovery, and pull-based result/status query contracts —
 push delivery is `provisioning-result-push-delivery`'s scope, not this
 change's),
 the extracted compute provisioning service (models, migrations, generic

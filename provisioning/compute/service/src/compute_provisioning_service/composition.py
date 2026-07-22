@@ -9,7 +9,7 @@ from typing import Any
 from compute_provisioning import ExecutorAdapter, ExecutorAdapterRegistry
 from compute_provisioning.app import ComputeProvisioningRouterMount
 from compute_provisioning.release import ExecutorReleaseDispatcher, ExecutorReleasePort
-from market_resource_pools import FulfillmentProvider, ProviderRegistry
+from market_fulfillment import FulfillmentProvider, ProviderRegistry
 
 
 @dataclass(frozen=True)

@@ -14,10 +14,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
-from market_resource_pools import (
+from market_fulfillment import (
     FulfillmentStatusFailedError,
     ProviderConfigInvalidError,
     ProviderOperationState,
@@ -27,7 +27,7 @@ from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 def _request() -> PhysicalSettlementRequest:
     return PhysicalSettlementRequest(
-        allocation_id="alloc-1", agreement_id="agreement-1", market="vms", requirements={"vm_target":"vm-alloc-1","vm_ram":4096,"vm_vcpus":2,"vm_disk_size":"40G","ssh_pubkey":"ssh-ed25519 AAAA"}
+        capacity_reservation_id="alloc-1", market="vms", requirements={"vm_target":"vm-alloc-1","vm_ram":4096,"vm_vcpus":2,"vm_disk_size":"40G","ssh_pubkey":"ssh-ed25519 AAAA"}
     )
 
 

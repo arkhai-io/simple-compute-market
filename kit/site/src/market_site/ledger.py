@@ -124,8 +124,11 @@ def _windows_overlap(
 
 
 # Claim keys that request a unit count rather than matching an attribute.
-# "units" is the generic key; "gpu_count" is the VM domain's alias.
-_UNIT_CLAIM_KEYS = ("units", "gpu_count")
+# "units" is the generic key. Domain-specific aliases (e.g. the VM
+# domain's "gpu_count") are supplied by the composition root via
+# CapacityLedgerService(unit_claim_keys=...) rather than hardcoded here,
+# so this module carries no VM-specific knowledge.
+_DEFAULT_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units",)
 _DIMENSIONS_CLAIM_KEY = "dimensions"
 
 # The dimension that SiteResource.total_units / SiteAllocation.units /
@@ -134,10 +137,14 @@ _DIMENSIONS_CLAIM_KEY = "dimensions"
 PRIMARY_DIMENSION = "gpu_count"
 
 
-def _requested_units(claim: Mapping[str, Any] | None) -> int:
+def _requested_units(
+    claim: Mapping[str, Any] | None,
+    *,
+    unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+) -> int:
     """Legacy single-quantity parse, kept for the primary-dimension mirror."""
     claim = claim or {}
-    key = next((k for k in _UNIT_CLAIM_KEYS if claim.get(k) is not None), None)
+    key = next((k for k in unit_claim_keys if claim.get(k) is not None), None)
     if key is None:
         return 1
     raw = claim[key]
@@ -163,7 +170,11 @@ def _to_decimal(value: Any, *, label: str) -> Decimal:
     return amount
 
 
-def _requested_dimensions(claim: Mapping[str, Any] | None) -> dict[str, Decimal]:
+def _requested_dimensions(
+    claim: Mapping[str, Any] | None,
+    *,
+    unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+) -> dict[str, Decimal]:
     """Parse a claim's quantity request as a dimensions map.
 
     ``dimensions`` is authoritative when *present* — not merely truthy.
@@ -172,13 +183,13 @@ def _requested_dimensions(claim: Mapping[str, Any] | None) -> dict[str, Decimal]
     the legacy single-quantity parse, which would otherwise default to a
     request the caller never actually made.
     Only the *absence* of the key falls back to the legacy
-    single-quantity claim (``units``/``gpu_count``), translated to
-    ``{"gpu_count": n}`` so every existing caller's claim shape keeps
+    single-quantity claim (``units``/domain-specific aliases), translated
+    to ``{"gpu_count": n}`` so every existing caller's claim shape keeps
     working unchanged.
     """
     claim = claim or {}
     if _DIMENSIONS_CLAIM_KEY not in claim:
-        return {PRIMARY_DIMENSION: Decimal(_requested_units(claim))}
+        return {PRIMARY_DIMENSION: Decimal(_requested_units(claim, unit_claim_keys=unit_claim_keys))}
     raw = claim[_DIMENSIONS_CLAIM_KEY]
     if not isinstance(raw, Mapping) or not raw:
         raise ValueError(
@@ -289,7 +300,10 @@ def _capacity_change_kind(
 
 
 def _resource_matches(
-    resource: SiteResource, claim: Mapping[str, Any] | None
+    resource: SiteResource,
+    claim: Mapping[str, Any] | None,
+    *,
+    unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
 ) -> bool:
     if not claim:
         return True
@@ -307,7 +321,7 @@ def _resource_matches(
         "gpu_count": resource.total_units,
     }
     for key, expected in claim.items():
-        if key in _UNIT_CLAIM_KEYS or key == _DIMENSIONS_CLAIM_KEY:
+        if key in unit_claim_keys or key == _DIMENSIONS_CLAIM_KEY:
             continue
         actual = attrs.get(key, top_level.get(key))
         if actual != expected:
@@ -323,14 +337,23 @@ class CapacityLedgerService:
         session_factory: sessionmaker[Session],
         *,
         required_attributes: Sequence[str] = (),
+        unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
         named key a non-empty string. Multi-domain provisioners should pass
         none and put domain-specific eligibility in reservation claims.
+
+        ``unit_claim_keys`` lists the claim keys that request a unit count
+        rather than match an attribute (``"units"`` is the generic key).
+        Defaults to the domain-neutral ``("units",)``; the VM composition
+        root passes ``("units", "gpu_count")`` explicitly to keep its
+        existing claim shape working. Kept out of the ledger's own default
+        so this module carries no VM-specific knowledge.
         """
         self._session_factory = session_factory
         self._required_attributes = tuple(required_attributes)
+        self._unit_claim_keys = tuple(unit_claim_keys)
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -452,7 +475,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
-        requested = _requested_dimensions(claim)
+        requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
@@ -475,7 +498,7 @@ class CapacityLedgerService:
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``."""
-        requested = _requested_dimensions(claim)
+        requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         deal = dict(deal_ref or {})
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -1081,7 +1104,7 @@ class CapacityLedgerService:
             .all()
         )
         for resource in rows:
-            if not _resource_matches(resource, claim):
+            if not _resource_matches(resource, claim, unit_claim_keys=self._unit_claim_keys):
                 continue
             attrs = resource.attributes or {}
             if any(

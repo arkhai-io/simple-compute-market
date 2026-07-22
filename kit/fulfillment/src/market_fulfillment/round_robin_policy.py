@@ -1,12 +1,13 @@
-"""Deterministic round-robin policy for eligible settlement candidates."""
+"""Deterministic round-robin settlement scheduling policy.
+
+The policy is domain-neutral: it orders and selects normalized settlement
+candidates without importing VM, executor, or provider-specific vocabulary.
+See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
+"""
 
 from __future__ import annotations
 
-from compute_provisioning import (
-    NoEligibleSettlementResourceError,
-    SettlementCandidate,
-    SettlementRequirement,
-)
+from .settlement_types import NoEligibleSettlementResourceError, SettlementCandidate, SettlementRequirement
 
 
 class DeterministicRoundRobinPolicy:

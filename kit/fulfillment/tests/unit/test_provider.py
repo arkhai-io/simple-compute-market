@@ -1,5 +1,5 @@
 import pytest
-from market_resource_pools import ProviderNotFoundError, ProviderRegistry, FulfillmentValidationIssue, FulfillmentValidationResult
+from market_fulfillment import ProviderNotFoundError, ProviderRegistry, FulfillmentValidationIssue, FulfillmentValidationResult
 
 def test_validation_result_validity():
     assert FulfillmentValidationResult().valid

@@ -100,3 +100,9 @@ Job-kind dispatch and deal-event routing across multiple storefront domains are 
 A **Capacity Reservation** records accepted capacity, the agreement/deal relationship, requested shape or units, lifecycle state, and any hold expiry. A reservation is not itself a concrete provisioning decision.
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
+
+## Relationship to fulfillment scheduling
+
+The site authority admits and persists capacity reservations. The higher-layer [fulfillment capability](../fulfillment/spec.md) binds an admitted reservation to a Settlement Resource and records that assignment through the site boundary before provider dispatch.
+
+A reservation belongs to one explicit `site_id`; scheduling does not fall back to another site after admission. Cross-site ranking is storefront aggregation policy applied before reservation. Type-only imports from the site authority into fulfillment are prohibited because they would invert the kit dependency hierarchy.

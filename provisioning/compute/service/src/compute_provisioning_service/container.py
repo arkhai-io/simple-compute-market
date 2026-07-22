@@ -20,7 +20,7 @@ from compute_provisioning_service.services.compute_contract_service import Compu
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
-from compute_provisioning_service.services.physical_settlement_scheduler import PhysicalSettlementScheduler
+from market_fulfillment import PhysicalSettlementScheduler
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
@@ -176,6 +176,10 @@ class Container(containers.DeclarativeContainer):
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
+        # "gpu_count" is this domain's alias for the generic "units" claim
+        # key — kept explicit here rather than hardcoded in kit/site so the
+        # ledger stays domain-neutral.
+        unit_claim_keys=("units", "gpu_count"),
     )
 
     physical_settlement_scheduler = providers.Singleton(
@@ -183,6 +187,11 @@ class Container(containers.DeclarativeContainer):
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
         session_factory=session_factory,
+        # PhysicalSettlementScheduler does not silently default
+        # resource_kind to "compute.gpu" -- the VM composition root
+        # supplies it explicitly here to keep existing scheduling behavior
+        # unchanged.
+        default_resource_kind="compute.gpu",
     )
 
     # ------------------------------------------------------------------

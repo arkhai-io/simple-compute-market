@@ -1,67 +1,343 @@
-# Arkhai Market Stack — Architecture Overview
+# Arkhai Market Stack — Architecture Reference
 
-This page is a non-normative orientation guide. Current behavioral and architectural contracts live in [`openspec/specs/`](../../openspec/specs/); proposed work lives in [`openspec/changes/`](../../openspec/changes/). Do not add requirements or backlog items here.
+> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog.
 
-## System shape
+## Document map
 
-Arkhai is a reference implementation of an agent-driven marketplace. Buyers discover seller listings through a shared registry, negotiate through signed synchronous HTTP rounds, materialize settlement plans, and service their obligations over time. Seller storefronts publish market-facing capacity and delegate authoritative physical allocation and fulfillment to site/provisioning services.
+| Section | Purpose |
+|---|---|
+| [System overview](#system-overview) | Marketplace purpose and production shape |
+| [Composition from above and below](#composition-from-above-and-below) | Core, kit, domain, and composition-root ownership |
+| [Package and dependency layers](#package-and-dependency-layers) | Enforceable one-way package rules |
+| [Runtime service map](#runtime-service-map) | Processes, authorities, and principal calls |
+| [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state |
+| [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
+| [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
+| [Deployment topology](#deployment-topology) | Local and deployed structure |
+| [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
+| [Testing strategy](#testing-strategy) | Test levels and boundary validation |
+| [Subsystem specification index](#subsystem-specification-index) | Permanent detailed contracts |
+
+## System overview
+
+Arkhai is a reference implementation of an agent-driven marketplace. Buyers discover listings through registries, negotiate with seller storefronts through signed synchronous HTTP rounds, materialize settlement plans, and service obligations over time. Market-domain code defines what is traded; shared role packages provide schema-opaque control flow; reusable kit capabilities provide identity, policy, settlement, capacity, resource-pool, and fulfillment machinery.
+
+Physical delivery is deliberately separate from commercial agreement. A seller may advertise fungible capacity or intentionally expose a specific resource. The storefront owns market-facing listings and deal state. Site authorities own admitted capacity. Resource-pool services own provisioning routing metadata. Fulfillment scheduling binds admitted capacity to a settlement resource, and providers execute against that selected resource.
 
 ```text
 buyer (`market`) ── discovery ──> registry
        │                            ▲
        └─ signed negotiation ──> storefront
                                   │
-                                  ├─ settlement/claims ──> EVM / Alkahest
-                                  └─ capacity/fulfillment ──> site authority + provisioner
+                                  ├─ settlement servicing ──> chain / mechanism provider
+                                  └─ capacity + fulfillment ──> site authority / compute provisioner
 ```
 
-Local development adds an Anvil fixture. Production permits independently operated registries, seller stacks, and ephemeral or long-running buyers.
+Production permits independently operated registries and seller stacks. Buyers may be ephemeral CLI invocations or long-running agents. Local development adds an Anvil fixture and test-only composition.
 
-## Composition model
+## Composition from above and below
 
-Core role packages own schema-opaque market control flow. Domain packages own deterministic listing/message/Terms/materialization/receipt semantics for one market. Kit packages supply reusable identity, policy, settlement-mechanism, configuration, site, and provisioning capabilities from below. Concrete composition roots inject domain and kit implementations into core roles.
+A behavior belongs in the market core when it is invariant across listing schemas. Behavior that varies by schema is supplied from below through injected domain or kit hooks.
 
-The normative dependency and plugin contracts are in the [market composition specification](../../openspec/specs/market-composition/spec.md).
+The schema-opaque market composition is:
 
-## Capability map
+```text
+terms   = negotiate(messages...)
+plan    = settle(terms)
+receipt = service(plan)
+```
 
-| Area | Normative specification |
+Core owns the structure around these phases: signed transport, round sequencing, persistence mechanics, deterministic handoffs, and lifecycle engines. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities. Composition roots wire concrete domain and kit implementations into role packages.
+
+Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
+
+The registry is the schema-centralizing point for discovery. A registry publishes one filter/listing schema and remains opaque to market-domain payloads beyond its configured validation and filter vocabulary. A market-domain operator composes the relevant buyer and storefront plugins around that registry schema.
+
+See the [market composition specification](../../openspec/specs/market-composition/spec.md).
+
+## Package and dependency layers
+
+### Repository layers
+
+```text
+composition roots / deployed services
+        ↓
+domain packages and role implementations
+        ↓
+kit capabilities
+        ↓
+core carrier and role contracts
+```
+
+Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
+
+### Kit layers
+
+Kit is not a flat peer group. It has an explicit one-way hierarchy:
+
+1. **Foundation capabilities** — identity, configuration, generic policy, and settlement-mechanism primitives.
+2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
+3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
+
+```text
+kit/fulfillment
+    ├──> kit/site
+    └──> kit/resource-pools
+
+kit/site ───────────────> foundation only
+kit/resource-pools ─────> foundation only
+```
+
+Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
+
+The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fulfillment`. It owns both scheduling and provider-neutral fulfillment contracts. Keeping those contracts together avoids a reverse dependency from resource-pool administration into provisioning execution while preserving module-level separation between pure carriers and operational scheduling.
+
+Within `market_fulfillment`, carrier modules such as identifiers, envelopes, requests, resources, and provider protocols must not import concrete services. Scheduler implementations may depend on the site and resource-pool authorities explicitly permitted by this layer.
+
+## Runtime service map
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                    Settlement mechanism                      │
+│          EVM / Alkahest today; other codecs possible        │
+└───────────────────┬──────────────────────────┬───────────────┘
+                    │                          │
+          ┌─────────▼─────────┐       ┌────────▼──────────┐
+          │ Registry         │       │ Seller storefront │
+          │ listings/schema  │◄──────┤ publication       │
+          └─────────▲─────────┘       │ negotiation       │
+                    │                 │ settlement claims │
+                    │                 └────────┬──────────┘
+          ┌─────────┴─────────┐                │
+          │ Buyer (`market`)  │                │ capacity / fulfillment
+          │ discovery         │                ▼
+          │ negotiation       │       ┌────────────────────┐
+          │ settlement       │       │ Compute provisioner │
+          └───────────────────┘       │ site authority      │
+                                      │ resource pools      │
+                                      │ scheduler/providers │
+                                      │ jobs/lease release  │
+                                      └─────────┬──────────┘
+                                                │
+                                      ┌─────────▼──────────┐
+                                      │ VM / bare-metal /  │
+                                      │ future executors   │
+                                      └────────────────────┘
+```
+
+The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time.
+
+## Authority boundaries
+
+| State or decision | Authority | Notes |
+|---|---|---|
+| Listing schema and discovery filters | Registry operator | Published through `filter-spec.yaml`; storefronts and buyers consume the schema |
+| Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
+| Capacity admission and reservation | Site authority | Serialization point for competing reservations |
+| Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
+| Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
+| Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
+| Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
+| Lease expiry and physical release | Provisioning lifecycle plus site authority | Capacity is released only after executor/provider success or explicit force release |
+| On-chain/mechanism claim state | Settlement servicing engine | Mechanism-neutral core with kit/domain codecs and policies |
+
+### Storefront capacity boundary
+
+The storefront owns capacity offerings and projections used to publish and negotiate listings. It is not the source of truth for physical resources. A projection may be stale; authoritative admission occurs at the site authority.
+
+Specific-resource listings are a valid opt-in: the seller exposes a concrete resource and permits the buyer to constrain placement. The ordinary fungible path reserves capacity and lets fulfillment scheduling select a settlement resource.
+
+Storefront capacity pools and provisioning resource pools are separate concepts. Mapping is explicit configuration or attributes, never a cross-service foreign key.
+
+### Site authority
+
+A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites, and one site may serve several storefronts.
+
+Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
+
+### Resource pools
+
+Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
+
+## Shared vocabulary and identities
+
+### Terms
+
+| Term | Definition | Primary authority |
+|---|---|---|
+| **Market Agreement** | Commercial terms accepted after negotiation | Core/domain and storefront |
+| **Capacity Offering** | Market-facing representation of sellable capacity | Storefront |
+| **Capacity Projection** | Storefront view of capacity believed sellable | Storefront, sourced from sites |
+| **Capacity Reservation** | Admitted hold against authoritative capacity | Site authority |
+| **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
+| **Resource Pool** | Provisioning-owned group and provider-routing context | Resource-pool service |
+| **Capacity Settlement Assignment** | Durable binding of a capacity reservation to one settlement resource | Site/fulfillment boundary |
+| **Settlement Resource** | Physical resource selected to satisfy a reservation | Fulfillment scheduler |
+| **Physical Settlement** | Provider-specific execution that makes the agreed resource available | Fulfillment provider |
+| **Fulfillment** | Post-acceptance lifecycle encompassing assignment, provider execution, status, teardown, and results | Fulfillment capability |
+| **Provisioned Resource** | One output created by fulfillment, such as a VM or pod | Domain/provider |
+| **Settlement Record** | Durable lifecycle record linking reservation, resource, provider snapshot, operations, and results | Compute provisioning lifecycle |
+
+Avoid `SettlementTarget` as a noun. Use `SettlementResource`; method names may use `select_target_resource` only where it improves call-site clarity.
+
+### Identifiers
+
+Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encoded composite keys and callers must not derive routing data from them.
+
+| Identifier | Meaning |
 |---|---|
-| Core/kit/domain boundaries and executable ownership | [Market composition](../../openspec/specs/market-composition/spec.md) |
-| Registry publication and schema-driven discovery | [Registry discovery](../../openspec/specs/registry-discovery/spec.md) |
-| Buyer-driven rounds and deterministic Terms | [Negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md) |
-| Plans, claims, heartbeats, and mechanism codecs | [Settlement servicing](../../openspec/specs/settlement-servicing/spec.md) |
-| Seller surfaces and listing publication | [Storefront publication](../../openspec/specs/storefront-publication/spec.md) |
-| Capacity authority, reservations, aggregation, and events | [Site capacity](../../openspec/specs/site-capacity/spec.md) |
-| Resource pool administration, provider configuration, and host membership | [Resource pool management](../../openspec/specs/resource-pool-management/spec.md) |
-| Scheduling, fulfillment, jobs, and lease release | [Physical provisioning](../../openspec/specs/physical-provisioning/spec.md) |
-| Buyer plugins, policies, aggregation, and recovery | [Buyer orchestration](../../openspec/specs/buyer-orchestration/spec.md) |
-| Deployment, persistence, migrations, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |
-| Test levels, fixtures, e2e staging, and compatibility | [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md) |
+| `capacity_reservation_id` | Admitted capacity and idempotency boundary for scheduling/begin fulfillment |
+| `fulfillment_id` | Durable post-acceptance fulfillment aggregate |
+| `settlement_resource_id` | Selected underlying supply resource |
+| `provisioned_resource_id` | One provider-created output; one fulfillment may create several |
+| `result_id` | One durable settlement/fulfillment result |
+| `site_id` | Explicit authority/routing identity; never encoded into another ID |
+| `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
-## Official physical-settlement vocabulary
+Commercial agreement identity does not cross the generic provisioning boundary merely for correlation. Storefronts retain commercial context and translate it into fulfillment requirements. The capacity reservation is the generic physical-lifecycle identity.
 
-Use **Market Agreement**, **Capacity Offering**, **Capacity Projection**, **Capacity Reservation**, **Physical Resource**, **Resource Pool**, **Physical Settlement**, **Settlement Resource**, **PhysicalSettlementScheduler**, **FulfillmentProvider**, and **Settlement Record**. Stable cross-service identities include the agreement/deal reference and `allocation_id`; `pool_id` and `resource_id` remain boundary-sensitive; scheduling establishes `settlement_resource_id`. Provider metadata stays opaque outside the provider/lifecycle boundary.
+## Major lifecycle flows
 
-See [site capacity](../../openspec/specs/site-capacity/spec.md) and [physical provisioning](../../openspec/specs/physical-provisioning/spec.md) for the contracts behind these terms. The storefront translates negotiated terms into concrete fulfillment requirements; provisioning validates those requirements against the held allocation and owns idempotent physical dispatch, provider resolution, settlement-resource assignment, and execution against the scheduler-selected Settlement Resource. Provider-neutral fulfillment contracts live in `kit/resource-pools`, while domain-specific requirement parsing and provider translation remain with the domain.
+### Discovery and negotiation
 
-## Planning and operations
+The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
 
-- OpenSpec index and contributor workflow: [`openspec/README.md`](../../openspec/README.md)
-- Active and deferred changes: [`openspec/changes/`](../../openspec/changes/)
-- Role-facing setup and troubleshooting: [`buyer-quickstart.md`](../buyer-quickstart.md), [`seller-quickstart.md`](../seller-quickstart.md), and [`indexer-quickstart.md`](../indexer-quickstart.md)
-- Configuration reference: [`../configuration.md`](../configuration.md)
-- Role boundaries: [`../roles.md`](../roles.md)
-- Validation runbook: [`VALIDATION_RUNBOOK.md`](VALIDATION_RUNBOOK.md)
-- Release procedure: [`RELEASING.md`](RELEASING.md)
+```text
+registry listing
+    ↓
+buyer opening message
+    ↓
+signed synchronous rounds
+    ↓
+shared canonical history
+    ↓
+Terms
+```
 
-## Legacy section map
+### Settlement servicing
 
-Source comments may still mention historical section names while they migrate to direct spec links:
+Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or abandon/reclaim expired obligations. Core owns the lifecycle engine; kit codecs own mechanism translation; domain policy selects and interprets conditions.
 
-- “Buyer negotiation policy surface” → [Buyer orchestration](../../openspec/specs/buyer-orchestration/spec.md)
-- “Capacity and the Site Authority” → [Site capacity](../../openspec/specs/site-capacity/spec.md)
-- “Settlement Lifecycle” → [Settlement servicing](../../openspec/specs/settlement-servicing/spec.md)
-- “API-credits market domain” → [Market composition](../../openspec/specs/market-composition/spec.md), [Storefront publication](../../openspec/specs/storefront-publication/spec.md), and [Site capacity](../../openspec/specs/site-capacity/spec.md)
-- “State Management and Schema Migration Strategy” → [Deployment and state](../../openspec/specs/deployment-state/spec.md)
-- “Testing Strategy” → [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md)
+```text
+Terms → SettlementPlan → active obligations → Receipt
+                         ├─ condition checks
+                         ├─ claims / collection
+                         ├─ heartbeats
+                         └─ expiry / reclaim
+```
+
+### Capacity reservation
+
+Negotiation-time availability is advisory. Authoritative reservation occurs at a site authority.
+
+1. The storefront reads snapshots for listing and policy decisions.
+2. Accepted terms create a TTL soft hold where required.
+3. Settlement commits or recreates the reservation before physical execution.
+4. Fulfillment runs against the committed reservation.
+5. Lease expiry or early termination invokes physical teardown before capacity release.
+
+### Fulfillment
+
+```text
+Capacity Reservation
+        ↓
+PhysicalSettlementRequest
+        ↓
+PhysicalSettlementScheduler.schedule_resource(...)
+        ↓
+Capacity Settlement Assignment / SettlementResource
+        ↓
+FulfillmentProvider.create(...)
+        ↓
+Provider result + zero or more Provisioned Resources
+        ↓
+status / teardown / durable results
+```
+
+Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
+
+Provider-specific dictionaries crossing domain or persistence boundaries use a versioned envelope with a non-empty `kind`, positive `schema_version`, and typed or explicitly validated payload. Readers reject unknown `(kind, schema_version)` pairs rather than guessing.
+
+The current round-robin scheduling policy is deterministic for the same candidate order and state. Multidimensional fit checks every requested dimension; a candidate missing a requested dimension has zero availability for that dimension.
+
+### Release
+
+Physical release is proof-driven. The lifecycle invokes the selected provider or executor teardown. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
+
+## Deployment topology
+
+### Local development
+
+Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. Domain stacks contain their registry schema, storefront, and supporting services. The root compose file combines the domain stacks for full e2e work.
+
+### Production and staging
+
+The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components. Stateful services use independent persistence. SQLite-backed single-writer services use `Recreate` with ReadWriteOnce volumes. Service configuration is delivered through mounted profile files; environment variables are reserved for profile resolution and subprocess-required settings.
+
+The compute provisioner runs migrations before service startup and checks schema version on startup. Other services should follow the same separation as their migration work is completed.
+
+## Build, packaging, and initialization
+
+Internal Python packages are built as wheels into the repository `.dist` directory. Consumers install those wheels with `--find-links`; they do not use editable relative sibling paths.
+
+The required development pattern is:
+
+```text
+build prerequisite internal wheels
+        ↓
+uv sync --find-links <repo>/.dist
+        ↓
+--upgrade-package / --reinstall-package changed internal distributions
+        ↓
+run focused tests
+```
+
+Docker builds copy `.dist` from the build context in every stage that resolves internal packages. Using a sibling source path forces an unnecessarily broad Docker context and can allow local source layout to differ from packaged behavior.
+
+Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
+
+Schema changes are additive by default. Non-additive changes use expand/contract across releases. Config-driven operational seeding belongs in runtime initialization; migrations may seed only deterministic system rows required to satisfy a new schema constraint.
+
+See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
+
+## Testing strategy
+
+Tests belong at the lowest level that can prove the behavior:
+
+1. **Unit tests** isolate a class or pure policy with injected collaborators.
+2. **Service integration tests** prove persistence, dependency wiring, HTTP mapping, or asynchronous state around one service.
+3. **Contract tests** share canonical producer/consumer fixtures across package boundaries.
+4. **System/e2e tests** run against deployed services over public/test HTTP seams and validate major lifecycle stages.
+
+Boundary changes require more than moved unit tests. Validation should cover:
+
+- package build and wheel contents;
+- typing markers and static type checks where contracts moved;
+- allowed dependency direction, including `TYPE_CHECKING` imports;
+- old import removal or explicit compatibility behavior;
+- changed consumer unit and integration suites;
+- composition startup and duplicate registration checks;
+- deterministic/idempotent retry behavior;
+- observable lifecycle events without arbitrary sleeps.
+
+The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
+
+See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
+
+## Subsystem specification index
+
+| Subsystem | Permanent specification |
+|---|---|
+| Core/kit/domain composition | [Market composition](../../openspec/specs/market-composition/spec.md) |
+| Registry publication and discovery | [Registry discovery](../../openspec/specs/registry-discovery/spec.md) |
+| Signed negotiation rounds | [Negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md) |
+| Settlement plans and servicing | [Settlement servicing](../../openspec/specs/settlement-servicing/spec.md) |
+| Storefront publication and projections | [Storefront publication](../../openspec/specs/storefront-publication/spec.md) |
+| Site capacity authority | [Site capacity](../../openspec/specs/site-capacity/spec.md) |
+| Resource-pool administration | [Resource-pool management](../../openspec/specs/resource-pool-management/spec.md) |
+| Scheduling and provider fulfillment | [Fulfillment](../../openspec/specs/fulfillment/spec.md) |
+| Executors, jobs, and lease release | [Physical provisioning](../../openspec/specs/physical-provisioning/spec.md) |
+| Buyer plugins and recovery | [Buyer orchestration](../../openspec/specs/buyer-orchestration/spec.md) |
+| Deployment, persistence, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |
+| Test hierarchy and compatibility | [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md) |
+| Specification/change workflow | [Planning governance](../../openspec/specs/planning-governance/spec.md) and [`openspec/README.md`](../../openspec/README.md) |

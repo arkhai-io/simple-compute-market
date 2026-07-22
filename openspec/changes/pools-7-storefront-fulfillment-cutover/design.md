@@ -247,10 +247,9 @@ nothing forcing them to. Resolved direction: extract a single
 `resource_satisfies_requirement(resource, requirement) -> bool` predicate
 that both call sites use — reservation calls it to gate admission ("does
 at least one host qualify"), scheduling calls it to build the eligible
-set for policy selection. Exact home for this predicate (alongside
-`PhysicalSettlementScheduler` in `compute_provisioning`, or in
-`kit/site` where the resource rows themselves live) is not decided;
-resolve during planning.
+set for policy selection. The predicate belongs with the authoritative site-capacity model in
+`kit/site`; `kit/fulfillment` consumes it for scheduling so reservation-time
+admission and scheduling-time eligibility cannot drift.
 
 ### `PhysicalSettlementScheduler` and `DeterministicRoundRobinPolicy`: package destination — SUPERSEDED, see "Shared package boundary" below
 
@@ -260,7 +259,7 @@ correct; kept for the historical reasoning, which still explains *why*
 `kit/resource-pools` doesn't work.** The final decision moved these (and
 the `pools-2` request/resource types that previously lived in
 `compute_provisioning`) into a new dedicated package,
-`kit/physical-settlement`, instead — a cleaner fix to the same circular-
+`kit/fulfillment`, instead — a cleaner fix to the same circular-
 dependency problem identified below, and a better scope fit than
 growing `compute_provisioning` (which was scoped as a thin cross-domain
 HTTP-helpers package, not a scheduling/persistence engine).
@@ -286,7 +285,7 @@ was written, the conclusion was that `PhysicalSettlementScheduler` and
 on that basis. **This conclusion is superseded** — see the note at the
 top of this section: the same reasoning (avoid the `kit/resource-pools`
 cycle) is satisfied more cleanly by a new dedicated package,
-`kit/physical-settlement`, which also took the `pools-2` request/resource
+`kit/fulfillment`, which also took the `pools-2` request/resource
 types with it rather than leaving them in `compute_provisioning`.
 
 This incidentally resolves part of the open, unresolved question
@@ -299,7 +298,7 @@ narrow, deliberate override `pools-3` already made once for
 "Domain-neutral contracts vs. domain-specific payloads." `compute-30`'s
 proposal has been updated (2026-07-21, corrected from an earlier pass
 that said `compute_provisioning` and was never actually applied) to
-reflect this as resolved — landing in `kit/physical-settlement`, not
+reflect this as resolved — landing in `kit/fulfillment`, not
 `compute_provisioning` — rather than open.
 
 Two pre-existing domain leaks were found while confirming this move is
@@ -343,6 +342,21 @@ normalization, units, and fairness) in order to unblock itself. Sequencing:
 reservation-admission and scheduling-eligibility work (including the
 shared `resource_satisfies_requirement` predicate above) consumes that
 result rather than working around its absence.
+
+**Accepted scope for this change:** `pools-6` pass 1 — the
+`dimensions`/`available` JSON-map mechanism on `SiteResource`,
+`SiteAllocation`, and `CapacityEvent`, and the scheduler's per-dimension
+fit check against it — is landed and is what POOLS-7 builds on. Pass 2
+(real vCPU/memory/disk fields on `Host`, still carrying only `gpu_count`)
+remains open `pools-6` scope; POOLS-7 proceeds against the landed pass-1
+wiring rather than blocking on pass 2 or adding a partial dimension field
+itself. This does not relax the prohibition above: it is a decision to
+accept the current `gpu_count`-only ceiling for this change, not to fill
+that ceiling in piecemeal. Admission and scheduling remain correct for
+every dimension a caller actually populates; there is simply nothing to
+check yet for dimensions no caller populates. Work that starts
+populating additional dimensions still needs `pools-6` pass 2's design
+questions on normalization, units, and fairness first.
 
 ## `SettlementRecord` shape (design review continued, 2026-07-17)
 
@@ -875,7 +889,7 @@ The same atomic rule applies when abandonment releases or supersedes reserved
 capacity.
 
 The shared lifecycle and concrete reusable SQLAlchemy implementation live in a
-new `kit/physical-settlement` package, not `kit/resource-pools` and not the
+new `kit/fulfillment` package, not `kit/resource-pools` and not the
 base `compute_provisioning` package. The kit owns domain-neutral scheduling,
 fulfillment persistence, repository, recovery-claim, provisioned-resource, and
 durable result state read by the pull query API; v1 has no result-delivery
@@ -978,22 +992,62 @@ UUIDv7 after reviewing repository conventions; ownership remains explicit via
 review whether any site-plus-pool composite identity is needed for routing or
 integrity.
 
-### Shared package boundary
+### Shared package boundary and kit dependency layers
 
-Create a new `kit/physical-settlement` package. This is intentionally separate
-from both `kit/resource-pools` and the base `compute_provisioning` package.
-The kit owns domain-neutral settlement and fulfillment lifecycle types,
-scheduler/policy code, versioned prepared-operation contracts, SQLAlchemy
-mappings and generic repositories, transition validation, recovery-claim
-infrastructure, provisioned-resource records, and durable result state read by
-pull queries. V1 does not add result-delivery outbox models. VM-specific Ansible
-providers and operator routes remain in the VM provisioning adapter; generic
-settlement APIs, worker composition, and service-owned migrations remain in the
-extracted compute provisioning service.
+Create a new `kit/fulfillment` package with distribution name
+`arkhai-kit-fulfillment` and import package `market_fulfillment`. “Fulfillment”
+is the repository package name; “physical settlement” remains the broader
+architectural process covering scheduling, fulfillment, teardown, and physical
+capacity reclamation. The package is intentionally separate from both
+`kit/resource-pools` and the base `compute_provisioning` package.
+
+Kit packages have explicit dependency layers:
+
+1. **Foundation:** identity, configuration, policy primitives, and other
+   packages that do not depend on site, pool, or fulfillment capabilities.
+2. **Capability authorities:** `kit/site` and `kit/resource-pools`. These own
+   physical capacity/reservations and resource-pool administration
+   respectively, and may depend only on foundation packages.
+3. **Provisioning lifecycle:** `kit/fulfillment`. It may depend on the site and
+   resource-pool authorities and on foundation packages. Neither authority
+   package may import `market_fulfillment`, and no kit package may import a
+   deployed service or domain adapter, including under `TYPE_CHECKING`.
+
+`kit/fulfillment` owns domain-neutral settlement and fulfillment lifecycle
+types, `FulfillmentProvider`/`ProviderRegistry` and provider-neutral result and
+status contracts, scheduler/policy code, versioned prepared-operation
+contracts, SQLAlchemy mappings and generic repositories, transition
+validation, recovery-claim infrastructure, provisioned-resource records, and
+durable result state read by pull queries. `kit/resource-pools` retains only
+resource-pool configuration, membership, and administration concerns. Moving
+provider contracts into `kit/fulfillment` removes the existing reverse
+`market_resource_pools -> compute_provisioning` type dependency without
+replacing it with a new cycle.
+
+Pure contracts and operational services remain in one distribution for now,
+separated by modules. Contract/carrier modules must not import concrete site or
+resource-pool services; scheduler and persistence modules may import the lower
+layer authorities. A separate contracts/runtime distribution is deferred until
+a real consumer, heavyweight dependency, independent-versioning need, or
+remaining cycle requires it. Intentional plugin points such as scheduling
+policies and fulfillment providers use protocols; stable internal authority
+services may remain concrete dependencies rather than receiving duplicative
+protocol facades solely for testability.
 
 The concrete SQLAlchemy implementation belongs in the shared kit when it is
 genuinely reusable across domains; services compose the shared metadata and
-apply migrations in their own databases.
+apply migrations in their own databases. V1 does not add result-delivery outbox
+models. VM-specific Ansible providers and operator routes remain in the VM
+provisioning adapter; generic fulfillment APIs, worker composition, and
+service-owned migrations remain in the extracted compute provisioning service.
+
+All touched Python projects use repository-local wheels from `.dist` for
+internal dependencies. They must not add editable relative-path sources that
+force repository-root Docker build contexts. Reinit targets build/install the
+required internal wheels and explicitly upgrade/reinstall them from `.dist`.
+The aggregate kit test target runs every kit subproject's default test suite and
+must prepare its wheel dependencies deterministically rather than relying on a
+stale `.dist` directory.
 
 ### Scheduling and fulfillment boundary
 
@@ -1157,3 +1211,20 @@ preserving ambiguous compatibility names indefinitely, including:
 - replacement of the old release path after backfilled settlement teardown is
   operational;
 - corresponding API/client/schema/fixture/test/architecture changes.
+
+## Design promotion record
+
+This record maps accepted durable decisions to current-state documentation. It is change history; the destination documents contain the normative present-tense contract.
+
+| Accepted decision | Permanent location |
+|---|---|
+| Kit follows foundation → authority → fulfillment dependency layers | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Scheduling and provider-neutral fulfillment contracts share `kit/fulfillment` | `openspec/specs/fulfillment/spec.md#ownership` |
+| Lower authority kits may not import fulfillment, including under `TYPE_CHECKING` | `openspec/specs/fulfillment/spec.md#dependency-boundary` |
+| Capacity reservation, fulfillment, settlement-resource, provisioned-resource, and result IDs are opaque UUIDv7 strings | `openspec/specs/fulfillment/spec.md#identities` |
+| Commercial agreement identity stays outside the generic physical settlement request | `openspec/specs/fulfillment/spec.md#physical-settlement-request` |
+| Multidimensional candidate fit treats missing dimensions as zero | `openspec/specs/fulfillment/spec.md#multidimensional-eligibility` |
+| Scheduling selects a resource before provider execution; providers do not substitute placement | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Cross-domain/durable generic payloads use immutable versioned envelopes | `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
+| Internal dependencies are installed from `.dist`, not editable sibling paths | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |
+| Aggregate kit tests run every kit subproject suite | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |

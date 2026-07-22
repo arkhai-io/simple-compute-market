@@ -1,10 +1,13 @@
-"""Replaceable policy contracts for capacity settlement scheduling."""
+"""Policy contract for selecting among eligible settlement candidates.
+
+See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
+"""
 
 from __future__ import annotations
 
 from typing import Protocol, Sequence
 
-from .physical_settlement import SettlementCandidate, SettlementRequirement
+from .settlement_types import SettlementCandidate, SettlementRequirement
 
 
 class SettlementSchedulingPolicy(Protocol):

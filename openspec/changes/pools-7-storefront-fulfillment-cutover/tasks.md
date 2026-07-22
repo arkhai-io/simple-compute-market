@@ -1,13 +1,27 @@
 ## 1. Finalize shared contracts and package skeleton
 
-- [ ] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order.
-- [ ] 1.1 Create `kit/physical-settlement` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
-- [ ] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format.
-- [ ] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`.
-- [ ] 1.4 Move domain-neutral physical-settlement request/resource types, `PhysicalSettlementScheduler`, and `DeterministicRoundRobinPolicy` into the new kit without introducing VM/storefront dependencies.
-- [ ] 1.5 Remove provisioning commercial identity from shared contracts: delete `agreement_id` and rename `allocation_id` to `capacity_reservation_id` across new interfaces.
-- [ ] 1.6 Add versioned payload envelopes for prepared provider create/teardown inputs, provider metadata, and `SettlementResult`; prohibit unversioned cross-domain generic dictionaries.
-- [ ] 1.7 Add package-boundary/import tests proving dependency direction and carrier purity.
+- [x] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order. **Resolved 2026-07-21 (design.md, "Dependency on POOLS-6"): pass 1 (the dimensions-map mechanism) is landed and is what this change builds on; pass 2 (real per-dimension `Host` fields) remains open `pools-6` scope. Proceeding against pass-1 wiring as a deliberate, documented decision, not a silent gap.**
+- [x] 1.1 Create `kit/fulfillment` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
+- [x] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format. **Resolved: UUIDv7 via the `uuid6` package (design.md, "Final planning decisions").**
+- [x] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`. **Resolved: not needed (design.md, "Final planning decisions").**
+- [x] 1.4 Move domain-neutral fulfillment request/resource types, `PhysicalSettlementScheduler`, and `DeterministicRoundRobinPolicy` into the new kit without introducing VM/storefront dependencies.
+- [x] 1.5 Remove provisioning commercial identity from shared contracts: delete `agreement_id` and rename `allocation_id` to `capacity_reservation_id` across new interfaces.
+- [x] 1.6 Add versioned payload envelopes for prepared provider create/teardown inputs, provider metadata, and `SettlementResult`; prohibit unversioned cross-domain generic dictionaries. (Envelope shape only this section — concrete payload kinds land with the sections that need them, per envelopes.py's docstring.)
+- [x] 1.7 Add package-boundary/import tests proving dependency direction and carrier purity.
+
+### Section 1 correction pass
+
+- [x] 1.8 Rename the shared package to `kit/fulfillment` / `arkhai-kit-fulfillment` / `market_fulfillment` and update touched consumers.
+- [x] 1.9 Move `FulfillmentProvider`, `ProviderRegistry`, and provider-neutral lifecycle contracts from `kit/resource-pools` into `kit/fulfillment`; remove the reverse lower-layer dependency.
+- [x] 1.10 Keep pure carrier modules separate from operational scheduler modules and document the foundation → authority → fulfillment dependency hierarchy.
+- [x] 1.11 Keep opaque UUIDv7 string identifiers; do not introduce explicit wrapper types.
+- [x] 1.12 Require non-empty envelope kinds, positive versions, typed payload validation, JSON round trips, and immutable envelopes.
+- [x] 1.13 Add `py.typed` and verify the built fulfillment wheel contains it.
+- [x] 1.14 Remove newly introduced editable sibling-path dependencies from touched projects and consume internal packages from `.dist`.
+- [x] 1.15 Make the aggregate kit test target build prerequisite wheels and run every kit suite, including site, resource-pools, and fulfillment.
+- [x] 1.16 Expand package-boundary tests to include type-only imports and lower-layer kit constraints.
+- [x] 1.17 Replace removed or renamed paths with review-only tombstones and remove production comments referring to tombstones. Manual deletion remains required after review.
+- [x] 1.18 Update `ARCHITECTURE.md` and POOLS-7 design/proposal with package ownership, dependency direction, wheel conventions, and terminology.
 
 ## 2. Reshape site capacity and identifiers
 
@@ -112,7 +126,7 @@ design.
 
 - [ ] 11.1 Remove superseded `allocation_id`, `SiteAllocation`, direct-host storefront placement, process-local settlement maps/locks, and obsolete executor/provider fields after migrations and callers are complete.
 - [ ] 11.2 Fix `most_available`'s claim-blindness bug (it accepts a `claim` parameter but never filters by it) and keep `fill_first`/`most_available` as pure pre-reservation site-selection policy — they have never performed host-level physical placement, only ordered which site to attempt first, so there is no placement logic to remove. Per `design.md`'s "Site fallback after POOLS-4": site fallback/ranking is meaningful only before a capacity reservation exists; once one exists it is owned by exactly one site with no fallback. Do not delete or restructure these policies beyond the claim-blindness fix.
-- [ ] 11.3 Update the extracted compute service composition, package dependencies, wheel/reinit targets, Docker image, and deployment configuration for `kit/physical-settlement` and its watchdog workers; register VM/Ansible behavior through `domains/vms/provisioning/adapter`.
+- [ ] 11.3 Update the extracted compute service composition, package dependencies, wheel/reinit targets, Docker image, and deployment configuration for `kit/fulfillment` and its watchdog workers; register VM/Ansible behavior through `domains/vms/provisioning/adapter`.
 - [ ] 11.4 Ensure logs, traces, exception payloads, and request logging redact credentials and prepared secret material.
 - [ ] 11.5 Run repository-wide import, typing, migration, unit, integration, and end-to-end suites and fix all renamed-contract consumers.
 
@@ -122,3 +136,21 @@ design.
 - [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
 - [ ] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.
+
+## Section 1 documentation-system retrofit
+
+- [x] Preserve the completed Section 1 task history and add this retrofit as a separate completed workstream.
+- [x] Add root `AGENTS.md` with discuss/plan/implement, documentation-promotion, production-comment, wheel, validation, and tombstone rules.
+- [x] Expand `openspec/README.md` with permanent-vs-change placement rules, subsystem-spec structure, documentation-impact declarations, promotion records, and completion criteria.
+- [x] Rebuild `docs/development/ARCHITECTURE.md` as the current repository-wide map for system shape, package layers, authorities, vocabulary, major flows, deployment, packaging, and tests.
+- [x] Add `openspec/specs/fulfillment/spec.md` and promote approved POOLS scheduling/provider/identifier/envelope decisions into it.
+- [x] Cross-link site-capacity, resource-pool-management, physical-provisioning, and deployment-state specs to the fulfillment and wheel-development boundaries they own.
+- [x] Add the POOLS-7 design-promotion record mapping accepted decisions to permanent documentation.
+- [x] Replace Section 1 changelog/task/change-document comments and docstrings with present-tense rationale and stable spec references.
+
+
+### Section 1 validation corrections
+
+- [x] Replace stale `allocation_id` local references in fulfillment teardown and status paths with `capacity_reservation_id`.
+- [x] Configure the isolated VM lease-lifecycle test ledger with the same `gpu_count` claim alias used by the production composition root.
+- [x] Re-run the affected fulfillment and lease-lifecycle tests as part of repository validation.

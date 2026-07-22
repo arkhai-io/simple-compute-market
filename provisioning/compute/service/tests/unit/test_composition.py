@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 from compute_provisioning import CredentialEnvelope, ResultEnvelope
-from market_resource_pools import (
+from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,
     ProviderNotFoundError,

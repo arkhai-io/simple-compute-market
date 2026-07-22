@@ -1,4 +1,10 @@
-"""Executor-neutral contracts for capacity settlement scheduling."""
+"""Domain-neutral physical settlement request and resource carriers.
+
+The provisioning boundary is capacity-reservation-centric. Commercial agreement
+identity remains with the storefront, while normalized multidimensional
+requirements cross into fulfillment.
+See ``openspec/specs/fulfillment/spec.md#physical-settlement-request``.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,7 @@ class PhysicalSettlementError(Exception):
 
 
 class SettlementEntityNotFoundError(PhysicalSettlementError):
-    """A referenced allocation, agreement, pool, or resource does not exist."""
+    """A referenced capacity reservation, pool, or resource does not exist."""
 
 
 class SettlementRequestMismatchError(PhysicalSettlementError):
@@ -31,8 +37,9 @@ class NoEligibleSettlementResourceError(PhysicalSettlementError):
 class PhysicalSettlementRequest(BaseModel):
     """Request to create or retrieve one Capacity Settlement Assignment."""
 
-    allocation_id: str = Field(description="Capacity Reservation identifier and idempotency key.")
-    agreement_id: str = Field(description="Agreement served by this settlement.")
+    capacity_reservation_id: str = Field(
+        description="Capacity Reservation identifier and idempotency key."
+    )
     market: str = Field(description="Market domain identity, for example 'vms'.")
     requirements: dict[str, Any] = Field(default_factory=dict)
     resource_id: str | None = Field(
@@ -93,11 +100,3 @@ class SettlementResource(BaseModel):
     resource_kind: str
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class CapacitySettlementAssignment(BaseModel):
-    """Idempotent allocation-to-resource scheduling decision."""
-
-    allocation_id: str
-    agreement_id: str
-    resource: SettlementResource

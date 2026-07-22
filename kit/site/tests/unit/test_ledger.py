@@ -25,6 +25,12 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
+    # This suite exercises VM-flavored claim shapes ("gpu_count"-only
+    # allocations, "compute-kvm1-001"-style resource ids), so it opts into
+    # the "gpu_count" unit-claim alias explicitly the same way the VM
+    # composition root does — the ledger's own default is domain-neutral
+    # ("units",).
+    kwargs.setdefault("unit_claim_keys", ("units", "gpu_count"))
     return CapacityLedgerService(sessionmaker(bind=engine), **kwargs)
 
 
@@ -818,8 +824,8 @@ def test_registration_event_delta_is_capacity_minus_previous_capacity(
 
 def test_explicit_empty_dimensions_map_is_rejected(seeded: CapacityLedgerService):
     """{"dimensions": {}} declares nothing to request -- must fail loudly,
-    not silently fall through to the legacy single-quantity default of 1
-    (a real bug found in code review: presence was checked as truthiness)."""
+    not silently fall through to the legacy single-quantity default of 1.
+    Presence, not truthiness, is what must be checked here."""
     with pytest.raises(ValueError):
         seeded.probe(claim={"dimensions": {}})
     with pytest.raises(ValueError):

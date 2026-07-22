@@ -6,10 +6,10 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
-from market_resource_pools import (
+from market_fulfillment import (
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -148,7 +148,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_disk_size=req.vm_disk_size, vm_os_variant=req.vm_os_variant, ssh_pubkey=req.ssh_pubkey,
             gpu_provisioned=req.gpu_provisioned, vm_gpu_count=req.vm_gpu_count,
             vm_gpu_device=req.vm_gpu_device, vm_gpu_devices=req.vm_gpu_devices,
-            vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.allocation_id,
+            vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.capacity_reservation_id,
             playbook_path=pool_config.playbook_path,
         )
         self._validate_extra_vars(base_params, pool_config.extra_vars)
@@ -172,14 +172,14 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         return FulfillmentResult(provider_metadata=metadata.model_dump())
 
     async def teardown(
-        self, allocation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
+        self, capacity_reservation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
     ) -> FulfillmentResult:
         try:
             metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
             pool_config = self._validate_resource(resource)
             base_params = AnsibleJobParams(
                 vm_host=metadata.vm_host, vm_action="vm_remove", vm_target=metadata.vm_target,
-                escrow_uid=allocation_id, playbook_path=pool_config.playbook_path,
+                escrow_uid=capacity_reservation_id, playbook_path=pool_config.playbook_path,
             )
             self._validate_extra_vars(base_params, pool_config.extra_vars)
             params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
@@ -195,7 +195,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
 
     async def get_status(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         resource: SettlementResource,
         provider_metadata: dict[str, Any],
     ) -> ProviderStatus:

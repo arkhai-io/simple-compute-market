@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
-    from compute_provisioning import PhysicalSettlementRequest, SettlementResource
+    from .settlement_types import PhysicalSettlementRequest, SettlementResource
 
 class ProviderOperationState(str, Enum):
     pending='pending'; succeeded='succeeded'; failed='failed'; unknown='unknown'
@@ -36,9 +36,9 @@ class FulfillmentProvider(ABC):
     @abstractmethod
     async def create(self, request:'PhysicalSettlementRequest', resource:'SettlementResource')->FulfillmentResult: ...
     @abstractmethod
-    async def teardown(self, allocation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->FulfillmentResult: ...
+    async def teardown(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->FulfillmentResult: ...
     @abstractmethod
-    async def get_status(self, allocation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
+    async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
 
 class FulfillmentError(Exception): pass
 class ProviderNotFoundError(FulfillmentError): pass

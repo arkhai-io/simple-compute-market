@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from compute_provisioning import PhysicalSettlementRequest, SettlementResource
-from market_resource_pools import (
+from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import (
     FulfillmentConflictError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -19,7 +19,7 @@ from market_resource_pools import (
     ProviderStatus,
 )
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
-from market_resource_pools import ProviderRegistry
+from market_fulfillment import ProviderRegistry
 
 
 class _FakeProvider(FulfillmentProvider):
@@ -43,8 +43,7 @@ class _FakeProvider(FulfillmentProvider):
 
 def _request(**overrides) -> PhysicalSettlementRequest:
     defaults = dict(
-        allocation_id="alloc-1",
-        agreement_id="agreement-1",
+        capacity_reservation_id="alloc-1",
         market="vms",
         requirements={"units": 1},
     )
@@ -88,10 +87,15 @@ class TestCreateIdempotency:
         assert provider.create_calls == 1
         assert second is first
 
-    async def test_conflicting_agreement_raises_before_dispatch(self, service, provider):
+    async def test_conflicting_requirements_raises_before_dispatch(self, service, provider):
+        # agreement_id no longer exists on PhysicalSettlementRequest
+        # requirements are the normalized values this equivalence
+        # check now has left, besides market and the resource, to prove a
+        # same-capacity_reservation_id retry with a genuinely different
+        # request is rejected rather than silently treated as a retry.
         await service.create(_request(), _resource())
         with pytest.raises(FulfillmentConflictError):
-            await service.create(_request(agreement_id="agreement-2"), _resource())
+            await service.create(_request(requirements={"units": 2}), _resource())
         assert provider.create_calls == 1
 
     async def test_conflicting_resource_raises_before_dispatch(self, service, provider):
