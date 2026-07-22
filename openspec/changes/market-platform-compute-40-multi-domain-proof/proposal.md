@@ -1,16 +1,17 @@
 ## Why
 
-Extraction alone does not prove that the new boundaries are truly domain- and executor-neutral; a renamed VM service could still hide VM assumptions in dispatch, event routing, or physical accounting. A focused VM and bare-metal proof must exercise the common domain and provisioning contracts against one shared compute authority.
+The repository now has shared domain contracts, an extracted compute service, concurrent VM/bare-metal adapters, and multi-site capacity aggregation, but those pieces have not been proven as one seller-to-site topology. A deterministic proof must show that separately composed VM and bare-metal storefronts can each use several provisioning authorities, that each authority can serve both storefronts, and that selected-site, executor, and Physical Resource ownership survive the full lifecycle without global defaults.
 
 ## What Changes
 
-- Add end-to-end scenarios in which one extracted compute provisioner loads VM and bare-metal adapters concurrently.
-- Dispatch provisioning and release by allocation-recorded executor kind rather than VM-specific routes, provider identity, or defaults.
-- Route deal-scoped events to the owning storefront using the deal reference recorded on the allocation, not one process-global storefront setting.
-- Exercise VM-shareable and bare-metal-exclusive allocations against the same physical host and verify conflict behavior before executor work starts.
-- Verify generic provisioning modules and shared site modules do not import concrete VM or bare-metal request/result models.
-- Parameterize the focused test/deployment topology only as required for the two compute domains.
-- State: **Blocked on the common domain contract and extracted compute service.**
+- Add a deterministic 2×2 topology with VM and bare-metal storefronts connected to two compute provisioning authorities.
+- Exercise all four storefront-to-site edges through reservation, scheduling, fulfillment, result observation, teardown, and capacity restoration.
+- Require dispatch and release from recorded executor identity; remove or reject the remaining implicit `"vm"` fallback when durable executor identity is absent.
+- Verify selected-site routing survives storefront restart and never falls back to another authority after reservation.
+- Verify each provisioner concurrently loads VM and bare-metal adapters without provider/executor conflation.
+- Exercise VM-shareable and bare-metal-exclusive claims against one Physical Resource within an authority and reject conflicts before executor work.
+- Use pull-based status/result reconciliation as the correctness baseline; authenticated reverse delivery remains a separate follow-on.
+- State: **Blocked on `pools-7-storefront-fulfillment-cutover` and `market-platform-bare-metal-10-storefront-composition`; already-landed prerequisite evidence is recorded in `tasks.md`.**
 
 ## Capabilities
 
@@ -20,28 +21,28 @@ None.
 
 ### Modified Capabilities
 
-- `site-capacity`: One authority routes allocation events and enforces cross-mode physical accounting for multiple compute storefront/domain consumers.
-- `physical-provisioning`: One compute service dispatches VM and bare-metal jobs and releases through independently registered adapters.
-- `market-composition`: VM and bare-metal composition roots consume the shared domain contract while retaining separate deterministic semantics.
+- `site-capacity`: Prove trusted selected-site ownership and no post-reservation fallback across a many-to-many storefront/site topology.
+- `physical-provisioning`: Require durable executor identity without VM fallback and prove both provisioners serve both compute domains concurrently.
+- `test-compatibility`: Add a deterministic 2×2 topology scenario covering all storefront/provisioner relationships and lifecycle isolation.
 
 ## Non-Goals
 
-- Do not add a storage, bandwidth, or other non-compute resource domain.
-- Do not require a second physical site; multi-site deployment is separate from multi-executor and multi-domain correctness.
-- Do not introduce generic packing, fractional claims, or cross-seller capacity markets.
-- Do not create a third provisioning API or retain domain-specific shared clients.
-- Do not generalize POOLS-3's Ansible fulfillment provider into bare-metal support or add multiple provider bindings for one physical resource solely for this proof.
+- Do not host VM and bare-metal market contracts in one storefront process.
+- Do not add another resource domain, a third provisioning API, or cross-seller capacity markets.
+- Do not implement the bare-metal storefront, POOLS-7 lifecycle, or result-push delivery inside this proof.
+- Do not require provider-backed fulfillment for every executor or infer executor identity from a fulfillment provider.
+- Do not use real hardware timing as the sole acceptance evidence.
 
 ## Dependencies and Related Changes
 
-- Requires `market-platform-domain-10-contract` for the common domain composition surface.
-- Requires `market-platform-compute-30-extract-service`, which in turn requires the site-lifecycle and provisioning-contract changes.
-- Treats landed POOLS-3 provider contracts and capacity rebinding as available primitives, not as evidence that bare-metal has provider-backed fulfillment or that provider identity may replace executor identity.
-- Requires the POOLS-4 capacity-identity contract for proof fixtures: every compute listing/claim is scoped by `pool_id` or `resource_id`, unscoped claims are invalid, and `resource_id` takes precedence when both are supplied.
-- Replaces the ambiguous second-executor/second-site scope formerly tracked by `prove-multi-domain-capacity`.
+- Archived Market Platform domain/compute changes and POOLS-3/4/6 provide the shared contracts, extracted service, adapters, capacity identity, and cross-mode admission foundation.
+- `market-platform-bare-metal-10-storefront-composition` provides the second complete storefront composition.
+- `pools-7-storefront-fulfillment-cutover` provides durable selected-site scheduling, fulfillment status/result, restart recovery, and teardown.
+- `provisioning-result-push-delivery` may later add authenticated reverse delivery, but this proof uses pull reconciliation and does not block on it.
+- `pools-8-capacity-projection-and-listing-hints` may improve publication inputs but is not required if deterministic proof listings are created from authoritative fixtures.
 
 ## Impact
 
-- Affected tests and topology: VM and bare-metal storefront/provisioning integration, allocation dispatch, event routing, and physical-host conflict scenarios.
-- Runtime APIs should not change; this change may expose and remove remaining VM-specific assumptions required to satisfy the existing contracts.
-- Deployment templates may gain per-domain instance parameters needed by the focused proof.
+- Affected tests/topology: two storefront applications, two compute provisioning services, VM and bare-metal adapters, site-capacity fixtures, fulfillment clients, and lifecycle result polling.
+- Runtime behavior changes only where the proof exposes invalid VM-default dispatch or missing durable selected-site routing; those fixes belong to the owning capability rather than test-only branches.
+- Deployment/test configuration gains explicit per-storefront site bindings for the deterministic 2×2 scenario.

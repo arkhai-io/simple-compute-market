@@ -1,28 +1,37 @@
 ## ADDED Requirements
 
-### Requirement: Concurrent VM and bare-metal adapters
+### Requirement: Explicit executor identity proof
 
-One extracted compute provisioner MUST load VM and bare-metal adapter bundles concurrently and dispatch action and release behavior from the committed allocation's executor identity. Registered fulfillment-provider identities MUST remain orthogonal infrastructure-mechanism choices and MUST NOT participate in, infer, or override executor-adapter selection; this proof does not require provider-backed fulfillment for both domains.
+Provisioning action, result, teardown, and release dispatch MUST use executor identity durably recorded with the allocation or fulfillment. Missing, unknown, or conflicting executor identity MUST fail without infrastructure work and MUST NOT fall back to VM or another default adapter. Fulfillment-provider identity MUST remain orthogonal and MUST NOT infer or replace executor identity.
 
-#### Scenario: VM and bare-metal jobs run
+#### Scenario: Durable executor identity is absent
 
-- **WHEN** valid committed allocations submit their respective create/grant actions
-- **THEN** each action is validated and executed by its registered adapter and both expose the common durable job lifecycle
+- **WHEN** a lifecycle operation reaches dispatch without a recorded executor identity
+- **THEN** the provisioner rejects or quarantines the operation without invoking a VM or bare-metal adapter
 
 #### Scenario: Request attempts executor substitution
 
-- **WHEN** a caller submits an executor kind that differs from the committed allocation
-- **THEN** the provisioner rejects the request before infrastructure work and preserves the recorded allocation identity
+- **WHEN** a caller supplies an executor kind different from the durable allocation or fulfillment record
+- **THEN** the provisioner rejects the request before infrastructure work and preserves the recorded identity
 
-#### Scenario: Provider cannot substitute an executor
+#### Scenario: Provider identity is available
 
-- **WHEN** a provider identity is registered or available for a settlement resource
-- **THEN** action and release dispatch still select the adapter only from the committed allocation's executor identity and do not route another executor kind merely because that mechanism is available
+- **WHEN** a FulfillmentProvider is registered for the selected Settlement Resource
+- **THEN** action and release dispatch still select the executor adapter only from recorded executor identity
 
-#### Scenario: Both allocation types release
+### Requirement: Multi-owner multi-domain provisioner proof
 
-- **WHEN** VM teardown and bare-metal reclaim complete for their leases
-- **THEN** release dispatch selects the corresponding adapters and each site allocation becomes available exactly once
+Each provisioning authority in the proof MUST load VM and bare-metal adapter bundles concurrently and MUST serve lifecycle operations originating from both storefront compositions without process-global storefront or executor selection.
+
+#### Scenario: One authority serves both storefronts
+
+- **WHEN** VM and bare-metal storefronts schedule agreements at the same provisioning authority
+- **THEN** their jobs, results, teardown, and releases remain correlated to their own reservations and recorded executor identities
+
+#### Scenario: Both authorities serve both domains
+
+- **WHEN** the complete two-site proof runs
+- **THEN** each authority executes at least one VM lifecycle and one bare-metal lifecycle through the common compute contract
 
 ### Requirement: Generic provisioning dependency proof
 

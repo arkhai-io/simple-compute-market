@@ -1,34 +1,39 @@
 ## ADDED Requirements
 
-### Requirement: Multi-domain compute authority proof
+### Requirement: Many-to-many selected-site ownership proof
 
-One site authority MUST serve VM and bare-metal storefront ownership contexts while routing deal-scoped events by each allocation's recorded owner and publishing domain-neutral capacity versions.
+Separately composed VM and bare-metal storefronts MUST each bind to more than one provisioning authority through operator-trusted site configuration. Every Capacity Reservation MUST retain the selected authority so scheduling, fulfillment, result observation, teardown, and release use that authority without post-reservation fallback.
 
-#### Scenario: Two storefronts hold allocations
+#### Scenario: Both storefronts use both sites
 
-- **WHEN** VM and bare-metal deals reserve capacity through one authority
-- **THEN** each allocation retains its own deal/storefront reference and subsequent lifecycle events reach only that owner
+- **WHEN** deterministic VM and bare-metal agreements are placed across two configured provisioning authorities
+- **THEN** all four storefront-to-site relationships complete while each lifecycle remains bound to the authority that admitted its Capacity Reservation
 
-#### Scenario: Process-global storefront setting differs
+#### Scenario: Storefront restarts after reservation
 
-- **WHEN** an allocation's recorded owner differs from any service default callback setting
-- **THEN** event routing follows the allocation record rather than the process-global default
+- **WHEN** a storefront loses process-local routing caches after one site admitted a reservation
+- **THEN** it reloads the durable selected-site binding and routes the next state-changing call only to that authority
 
-### Requirement: Cross-mode execution exclusion
+#### Scenario: Selected site is unavailable
 
-Shareable VM allocations and exclusive bare-metal allocations referring to one Physical Resource MUST conflict before executor work is submitted.
+- **WHEN** the authority owning an existing reservation is unavailable during fulfillment or teardown
+- **THEN** the storefront reports or retries against that authority and does not submit the operation to another configured site
+
+### Requirement: Cross-mode execution exclusion proof
+
+Within one provisioning authority, shareable VM allocations and exclusive bare-metal allocations referring to one Physical Resource MUST conflict before executor work is submitted, regardless of pool, provider, or access aliases.
 
 #### Scenario: VM allocation already holds the host
 
-- **WHEN** a bare-metal deal requests exclusive use of that Physical Resource
+- **WHEN** a bare-metal agreement requests exclusive use of a Physical Resource with held VM capacity
 - **THEN** reservation fails and no bare-metal executor job is created
 
-#### Scenario: Alternate identities refer to the same physical resource
+#### Scenario: Bare-metal allocation already holds the host
 
-- **WHEN** pool identity, provider reference, access alias, or a `resource_id`-preferred claim refers to a machine already represented by another allocation
-- **THEN** all representations resolve to one authoritative Physical Resource identity and cannot bypass VM-shareable versus bare-metal-exclusive conflict accounting
+- **WHEN** a VM agreement requests shareable capacity on a Physical Resource held exclusively for bare metal
+- **THEN** reservation fails and no VM executor job is created
 
 #### Scenario: Conflicting allocation is released
 
-- **WHEN** executor release succeeds and the authoritative allocation release commits
+- **WHEN** executor teardown succeeds and authoritative allocation release commits
 - **THEN** capacity version advances and a later eligible reservation may proceed
