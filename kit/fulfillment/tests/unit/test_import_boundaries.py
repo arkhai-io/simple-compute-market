@@ -4,17 +4,14 @@ the kit dependency contract. Mirrors the AST-scan pattern used by ``kit/site/tes
 test_import_boundaries.py`` and ``provisioning/compute/service/tests/
 unit/test_import_boundaries.py``.
 
-Dependency direction (design.md, "Shared package boundary" and "Final
-planning decisions"): ``kit/fulfillment`` depends on ``kit/site``
+Dependency direction (``openspec/specs/fulfillment/spec.md#dependency-boundary``): ``kit/fulfillment`` depends on ``kit/site``
 (``market_site``) and ``kit/resource-pools`` (``market_resource_pools``).
 Nothing here may depend on ``compute_provisioning``, the extracted
 compute provisioning service, any VM/bare-metal domain package, or the
 storefront -- those depend on this package, not the reverse. In
 particular, this package must never import ``compute_provisioning`` or
 ``compute_provisioning_service``: that would recreate exactly the
-circular-dependency problem that ruled out ``kit/resource-pools`` as this
-code's home in the first place (design.md, "PhysicalSettlementScheduler
-and DeterministicRoundRobinPolicy: package destination").
+reverse dependency that the permanent fulfillment boundary prohibits.
 """
 
 import ast

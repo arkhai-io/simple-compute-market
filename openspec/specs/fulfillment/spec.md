@@ -148,7 +148,7 @@ The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatchin
 Two independently-persisted, independently-immutable-once-written request shapes govern two independent equivalence checks, because they answer different questions for different callers:
 
 - **Scheduling equivalence** governs `schedule_resource`/`select_resource` retries. It compares `market` and the normalized `SettlementRequirement` (`scheduling_requirements`) against the stored values. A caller-supplied resource constraint, if present, is checked separately for consistency against the row's `settlement_resource_id` once assigned — it is not folded into the `market`/`requirements` comparison, since it is an optional pre-selection constraint on the request, not part of the requirement identity being scheduled.
-- **Fulfillment equivalence** governs `begin_fulfillment` retries. It compares `market` and the domain-specific `fulfillment_request` envelope against the stored values. There is no caller-supplied resource to compare on this path: `begin_fulfillment` loads the already-scheduled `SettlementResource` from the row rather than trusting one supplied by the caller.
+- **Fulfillment equivalence** governs `begin_fulfillment` acceptance and retries. The supplied `market` must match the immutable market established by scheduling, including on the first acceptance, and the domain-specific `fulfillment_request` envelope must match once written. Acceptance never rewrites the scheduled market. There is no caller-supplied resource to compare on this path: `begin_fulfillment` loads the already-scheduled `SettlementResource` from the row rather than trusting one supplied by the caller.
 
 Either check rejects a retry whose stored values differ as a conflict; it does not silently return the existing assignment for a shape the caller no longer means.
 
@@ -163,7 +163,13 @@ There is no persisted `SettlementResult` model. A caller-facing fulfillment resu
 
 Prepared provider create/teardown input is captured as a `VersionedEnvelope`-typed payload on the aggregate, frozen before the transaction that marks the corresponding dispatch-pending state commits, so a recovery retry dispatches from what was accepted rather than a live re-read of pool or provider configuration.
 
-Multi-replica recovery-claim fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The concurrency-safe claiming query for the periodic recovery sweep is implemented against the deployed backend by the sweep itself; this capability defines only the claim-column shape those claims are recorded in.
+Repository callers provide validated canonical `SettlementRequirement` and `VersionedEnvelope` models. Persistence serializes their JSON-compatible model form and uses structural equality; it does not accept arbitrary dictionaries as an equivalence boundary or infer equivalence among unvalidated representations.
+
+The generic lifecycle transition operation may update only prepared create/teardown operation payloads, provider and teardown metadata, and failure reason/message fields. Aggregate identity, scheduled-resource identity, market, scheduling requirements, fulfillment identity/request, lifecycle state, recovery leases, timestamps, and unknown fields are not writable through lifecycle updates. Unsupported updates are rejected before state or in-memory row mutation.
+
+The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Aggregate creation remains protected by the `capacity_reservation_id` primary key; an observed uniqueness race is resolved by re-reading the winning row and applying the ordinary equivalence rule.
+
+Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository exposes only a single-worker SQLite selection primitive at this layer. The provisioning-owned recovery workflow defines duplicate-dispatch prevention and any concurrent acquisition semantics.
 
 #### Scenario: Expired claim is reclaimed
 

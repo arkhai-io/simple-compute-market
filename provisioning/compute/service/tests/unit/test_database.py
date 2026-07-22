@@ -235,6 +235,33 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     reservation = ledger.get_reservation("pre-existing-alloc")
     assert reservation["dimensions"] == {"gpu_count": 3}
 
+    assert {"settlement_records", "provisioned_resources"}.issubset(
+        inspector.get_table_names()
+    )
+    settlement_indexes = {
+        index["name"] for index in inspector.get_indexes("settlement_records")
+    }
+    provisioned_indexes = {
+        index["name"] for index in inspector.get_indexes("provisioned_resources")
+    }
+    assert "ix_settlement_records_fulfillment_id" in settlement_indexes
+    assert "ix_settlement_records_settlement_resource_id" in settlement_indexes
+    assert "ix_provisioned_resources_capacity_reservation_id" in provisioned_indexes
+    assert "ix_provisioned_resources_fulfillment_id" in provisioned_indexes
+    provisioned_foreign_keys = inspector.get_foreign_keys("provisioned_resources")
+    assert {fk["referred_table"] for fk in provisioned_foreign_keys} == {
+        "settlement_records"
+    }
+
+    # New fulfillment tables are mounted by current metadata and initialization
+    # remains safe to run repeatedly.
+    run_migrations(
+        engine,
+        default_playbook_path="/configured/playbook.yaml",
+        default_inventory_group="legacy_hosts",
+    )
+    check_schema_version(engine)
+
     assert "resource_pools" in inspector.get_table_names()
     assert "ansible_pool_configs" in inspector.get_table_names()
     assert "pool_id" in host_columns

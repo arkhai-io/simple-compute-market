@@ -1602,3 +1602,14 @@ The persistence repository accepts validated canonical Pydantic models and versi
 The Section 3 tables are new and do not require versioned migration scripts. Service-level tests must nevertheless prove that provisioning database initialization mounts the fulfillment metadata, is idempotent, and leaves the expected SQLite tables, constraints, foreign keys, and operational indexes.
 
 Production code and stable tests must reference only permanent current-state documentation. References to this change's `design.md`, POOLS task numbers, migration chronology, or review tombstones are temporary planning material and must not remain in production comments or permanent specifications.
+
+
+## Section 3 correction design-promotion record
+
+| Material decision | Permanent documentation |
+|---|---|
+| Scheduled market remains immutable through first fulfillment acceptance and retries | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| SQLite acceptance uses a database-wide immediate writer reservation rather than claimed row-lock semantics | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Recovery columns are durable, while the Section 3 selector is single-worker only and final acquisition semantics belong to provisioning recovery | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Generic lifecycle updates are limited to prepared operation payloads, provider metadata, and failure fields | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Repository callers supply validated canonical models and envelopes | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and `openspec/specs/fulfillment/spec.md#versioned-envelopes` |

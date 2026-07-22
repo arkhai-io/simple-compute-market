@@ -4,9 +4,9 @@ Every method takes a caller-supplied ``Session`` and never commits: a caller
 composing one transaction across this repository and another (for example,
 ``market_site``'s reservation ledger) owns the transaction boundary and
 commits once, after every write it needs has been made against the same
-session. This is what lets ``schedule_resource``'s capacity rebind and its
-settlement-assignment write share one transaction (design.md, "Transaction
-boundary and shared package ownership").
+session. This lets scheduling compose capacity rebinding and settlement
+assignment in one transaction. See
+``openspec/specs/fulfillment/spec.md#durable-settlement-persistence``.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import ProvisionedResource, SettlementRecord, SettlementRecordState
@@ -27,6 +29,49 @@ from .settlement_types import (
     SettlementResource,
 )
 from .transitions import validate_transition
+
+
+
+_LIFECYCLE_UPDATE_FIELDS = frozenset(
+    {
+        "prepared_create_operation",
+        "prepared_teardown_operation",
+        "provider_metadata",
+        "teardown_provider_metadata",
+        "failure_reason",
+        "failure_message",
+    }
+)
+
+
+def _begin_sqlite_write_transaction(db: Session) -> None:
+    """Reserve SQLite's single writer slot before reading mutable state.
+
+    ``BEGIN IMMEDIATE`` is SQLite's database-level write reservation. It is
+    intentionally used instead of claiming row-lock semantics that SQLite
+    does not provide. The caller still owns commit or rollback.
+    """
+
+    connection = db.connection()
+    if connection.dialect.name == "sqlite":
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+def _scheduling_matches(
+    record: SettlementRecord,
+    *,
+    market: str,
+    serialized_requirements: dict,
+    resource_id_constraint: str | None,
+) -> bool:
+    return (
+        record.market == market
+        and record.scheduling_requirements == serialized_requirements
+        and (
+            resource_id_constraint is None
+            or resource_id_constraint == record.settlement_resource_id
+        )
+    )
 
 
 def _serialize_requirement(requirement: SettlementRequirement) -> dict:
@@ -93,13 +138,11 @@ class SettlementRepository:
         existing = self.get(db, capacity_reservation_id)
         serialized_requirements = _serialize_requirement(scheduling_requirements)
         if existing is not None:
-            if (
-                existing.market == market
-                and existing.scheduling_requirements == serialized_requirements
-                and (
-                    resource_id_constraint is None
-                    or resource_id_constraint == existing.settlement_resource_id
-                )
+            if _scheduling_matches(
+                existing,
+                market=market,
+                serialized_requirements=serialized_requirements,
+                resource_id_constraint=resource_id_constraint,
             ):
                 return existing
             raise SettlementRequestMismatchError(
@@ -119,9 +162,26 @@ class SettlementRepository:
             resource_attributes=dict(resource.attributes),
             state=SettlementRecordState.assigned.value,
         )
-        db.add(record)
-        db.flush()
-        return record
+        try:
+            with db.begin_nested():
+                db.add(record)
+                db.flush()
+            return record
+        except IntegrityError:
+            # A concurrent creator may have won the primary-key race. Re-read
+            # the durable row and apply the ordinary equivalence rule.
+            existing = self.get(db, capacity_reservation_id)
+            if existing is not None and _scheduling_matches(
+                existing,
+                market=market,
+                serialized_requirements=serialized_requirements,
+                resource_id_constraint=resource_id_constraint,
+            ):
+                return existing
+            raise SettlementRequestMismatchError(
+                f"capacity_reservation_id={capacity_reservation_id!r} was concurrently "
+                "scheduled with a different market, requirements, or resource constraint"
+            ) from None
 
     # ------------------------------------------------------------------
     # Fulfillment acceptance: begin_fulfillment's idempotency boundary
@@ -143,13 +203,24 @@ class SettlementRepository:
         row rather than trusting one from the caller.
         """
 
-        record = self.get(db, capacity_reservation_id)
+        _begin_sqlite_write_transaction(db)
+        statement = (
+            select(SettlementRecord)
+            .where(SettlementRecord.capacity_reservation_id == capacity_reservation_id)
+            .with_for_update()
+        )
+        record = db.execute(statement).scalar_one_or_none()
         if record is None:
             raise SettlementEntityNotFoundError(
                 f"no settlement assignment exists for capacity_reservation_id="
                 f"{capacity_reservation_id!r}; schedule_resource must run first"
             )
         serialized_request = _serialize_envelope(fulfillment_request)
+        if record.market != market:
+            raise FulfillmentConflictError(
+                f"capacity_reservation_id={capacity_reservation_id!r} was scheduled for "
+                f"market={record.market!r}, not {market!r}"
+            )
         if record.fulfillment_id is not None:
             if record.market == market and record.fulfillment_request == serialized_request:
                 return record
@@ -160,7 +231,6 @@ class SettlementRepository:
 
         validate_transition(record.state, SettlementRecordState.dispatch_pending.value)
         record.fulfillment_id = new_fulfillment_id()
-        record.market = market
         record.fulfillment_request = serialized_request
         record.state = SettlementRecordState.dispatch_pending.value
         db.flush()
@@ -175,15 +245,22 @@ class SettlementRepository:
         db: Session,
         capacity_reservation_id: str,
         target_state: str,
-        **field_updates: object,
+        **lifecycle_updates: object,
     ) -> SettlementRecord:
-        """Move the row to ``target_state``, applying ``field_updates``.
+        """Move the row to ``target_state``, applying allowed lifecycle updates.
 
         A retry that finds the row already at ``target_state`` is a no-op
         return rather than a table lookup -- self-transitions are
         intentionally absent from the transition table (see
         ``transitions.validate_transition``).
         """
+
+        unsupported = set(lifecycle_updates) - _LIFECYCLE_UPDATE_FIELDS
+        if unsupported:
+            raise ValueError(
+                "transition lifecycle updates are not permitted for: "
+                + ", ".join(sorted(unsupported))
+            )
 
         record = self.get(db, capacity_reservation_id)
         if record is None:
@@ -194,7 +271,7 @@ class SettlementRepository:
         if record.state != target_state:
             validate_transition(record.state, target_state)
             record.state = target_state
-        for field, value in field_updates.items():
+        for field, value in lifecycle_updates.items():
             setattr(record, field, value)
         db.flush()
         return record
@@ -231,7 +308,7 @@ class SettlementRepository:
     # Recovery claims
     # ------------------------------------------------------------------
 
-    def claim_pending(
+    def select_pending_for_single_worker(
         self,
         db: Session,
         *,
@@ -241,13 +318,12 @@ class SettlementRepository:
         worker_id: str,
         now: datetime | None = None,
     ) -> list[SettlementRecord]:
-        """Claim up to ``limit`` rows in one of ``states`` with no live claim.
+        """Lease pending rows for one SQLite recovery worker.
 
-        Establishes the claim-column shape this section defines. The
-        multi-replica-safe concurrent-claim query (``SELECT ... FOR UPDATE
-        SKIP LOCKED`` or the deployed backend's equivalent) is the periodic
-        recovery watchdog's concern and is implemented against the real
-        dialect where that watchdog is built.
+        This helper records the durable lease shape and supports a deployment
+        with exactly one recovery worker. It is not a concurrent worker-claim
+        protocol; Section 7's recovery workflow owns duplicate-dispatch
+        prevention under the service's final execution model.
         """
 
         now = now or datetime.now(timezone.utc)
@@ -260,7 +336,6 @@ class SettlementRepository:
             )
             .order_by(SettlementRecord.created_at.asc())
             .limit(limit)
-            .with_for_update()
             .all()
         )
         for record in candidates:
