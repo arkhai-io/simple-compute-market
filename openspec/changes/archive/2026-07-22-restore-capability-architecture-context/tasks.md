@@ -35,8 +35,8 @@
 
 ## 6. Validation and closure
 
-- [ ] 6.1 Check all permanent Markdown links and confirm every indexed capability has a valid `spec.md` and every listed companion exists.
-- [ ] 6.2 Run focused API-credits tests that establish the promoted baseline; record passed suites and disclose any unrun system evidence.
-- [ ] 6.3 Run strict validation for this change, `planning-governance`, `api-credits`, and all permanent OpenSpec items; distinguish unrelated pre-existing failures.
-- [ ] 6.4 Confirm permanent documents contain no change IDs, task references, migration chronology, stale endpoint inventories, or unresolved claims presented as current architecture.
-- [ ] 6.5 Complete the design-promotion record, synchronize delta specs, and archive the change only after all permanent destinations are present.
+- [x] 6.1 Check all permanent Markdown links and confirm every indexed capability has a valid `spec.md` and every listed companion exists. Local-target validation covered 32 permanent Markdown files.
+- [x] 6.2 Run focused API-credits tests that establish the promoted baseline; record passed suites and disclose any unrun system evidence. Passed domain (5), service (14), storefront (47 after rebuilding the current core-storefront wheel), buyer (16), Python middleware (5), TypeScript typecheck/tests (5), and Rust unit/adapter/conformance tests (6). The deployed API-credits e2e scenario was not run.
+- [x] 6.3 Run strict validation for this change, `planning-governance`, `api-credits`, and all permanent OpenSpec items; distinguish unrelated pre-existing failures. The change and all permanent specs passed; full validation passed 35 of 37 items, with the pre-existing no-delta stubs `pools-8-capacity-projection-and-listing-hints` and `provisioning-result-push-delivery` remaining invalid.
+- [x] 6.4 Confirm permanent documents contain no change IDs, task references, migration chronology, stale endpoint inventories, or unresolved claims presented as current architecture.
+- [x] 6.5 Complete the design-promotion record, synchronize delta specs, and archive the change only after all permanent destinations are present.
