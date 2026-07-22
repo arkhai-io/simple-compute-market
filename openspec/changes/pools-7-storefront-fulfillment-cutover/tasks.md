@@ -69,6 +69,14 @@
 - [x] 2.36 Complete the previously open validation tasks 2.14-2.20 against the final models and public contracts, run repository-standard focused and aggregate suites, and record environment failures separately from repository failures.
 - [x] 2.37 Promote final durable Section 2 behavior into `openspec/specs/site-capacity/spec.md`, `openspec/specs/resource-pool-management/spec.md`, `openspec/specs/storefront-publication/spec.md`, `openspec/specs/fulfillment/spec.md`, and `docs/development/ARCHITECTURE.md` as appropriate. Complete the design-promotion record with exact permanent locations and remove temporary migration/changelog commentary from production code.
 
+### Post-review corrections (2026-07-22)
+
+- [x] Restore the `site_id` storefront-only trust-boundary correction in `design.md`'s "Cross-domain identities" section, which had reverted to pre-correction wording (a stale-base-file artifact from resuming mid-session); repoint it at the now-implemented `storefront-publication` spec requirement and `ARCHITECTURE.md` section.
+- [x] Remove `docs/development/ARCHITECTURE.md`'s duplicate "Site inventory..." section (two near-identical headers had been added back to back); merged into one.
+- [x] Remove the one remaining stale `design.md`-referencing comment in `kit/fulfillment/scheduler.py`'s `pool_id` fallback.
+- [x] Remove `sync_site_resources` (`market_storefront/services/capacity_client.py`) and its two tests: dead code, superseded by the `site_resource_pools`/`capacity_inventory.py` projection path (task 2.27) but never actually deleted.
+- [x] Add test coverage for `refresh_after_topology_error` (the reactive topology-drift-refresh path from task 2.32/2.35), which had zero coverage anywhere despite being marked tested: drift-detected, no-drift, and no-observed-identity-fallback cases, at the `core_storefront.site_projections.ProjectionCache` level where the behavior actually lives.
+
 ## 3. Add shared settlement persistence
 
 - [ ] 3.1 Define shared SQLAlchemy mappings for the fulfillment/settlement aggregate, provisioned-resource outputs, versioned prepared operations, and recovery claims. No result-delivery outbox in v1 — result/credential retrieval is pull-based (section 8); see `design.md`, "`SettlementResult` delivery: pull for v1, push deferred to a separate change."

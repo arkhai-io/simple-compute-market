@@ -987,10 +987,24 @@ reservation exists there is no cross-site fallback: an unknown reservation,
 pool, or resource identifier is rejected rather than reinterpreted or
 forwarded. Pool, resource, reservation, fulfillment, and provisioned-resource
 identifiers MUST be globally unique opaque identifiers. Planning may select
-UUIDv7 after reviewing repository conventions; ownership remains explicit via
-`site_id` rather than encoded into identifier strings. Requirements MUST also
-review whether any site-plus-pool composite identity is needed for routing or
-integrity.
+UUIDv7 after reviewing repository conventions; ownership is carried by
+explicit fields rather than encoded into identifier strings. Requirements MUST
+also review whether any site-plus-pool composite identity is needed for
+routing or integrity.
+
+**`site_id` is a storefront-only concern, not provisioning-service schema:**
+`site_id` is owned at the storefront aggregation boundary, bound to an
+operator-configured provisioning connection — never read from or trusted
+from a provisioning service's own report of itself, since a provisioning
+service is not a trustworthy authority over its own identity (a
+counterparty could otherwise spoof another site's identity). Provisioning
+services' own capacity persistence is already scoped by that service's
+database authority and does not duplicate the storefront-owned identity on
+every pool, resource, or reservation row. See
+`openspec/specs/storefront-publication/spec.md`, "Trusted provisioning-site
+identity," for the enforced requirement and scenario, and
+`docs/development/ARCHITECTURE.md`, "Site inventory, capacity accounting,
+and projections," for where this sits repository-wide.
 
 ### Shared package boundary and kit dependency layers
 

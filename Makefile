@@ -505,8 +505,14 @@ review-wheelhouse: ## Resolve locked third-party wheels for offline review/test 
 		PYTHON_SPEC="$$(sed -n 's/^requires-python = "//; s/"$$//; p' "$$LOCKFILE" | head -1)"; \
 		PYTHON_VERSION="$$(printf '%s\n' "$$PYTHON_SPEC" | sed -n 's/.*>= *\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; \
 		[ -n "$$PYTHON_VERSION" ] || PYTHON_VERSION="$$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"; \
+		set --; \
+		if [ -f "$$PROJECT_DIR/pyproject.toml" ]; then \
+			for INDEX_URL in $$(python3 -c 'import sys, tomllib; data=tomllib.load(open(sys.argv[1], "rb")); print(" ".join(item["url"] for item in data.get("tool", {}).get("uv", {}).get("index", []) if item.get("url")))' "$$PROJECT_DIR/pyproject.toml"); do \
+				set -- "$$@" --extra-index-url "$$INDEX_URL"; \
+			done; \
+		fi; \
 		python3 -m pip download --disable-pip-version-check --no-deps --ignore-requires-python \
-			--python-version "$$PYTHON_VERSION" --find-links "$(CURDIR)/.dist" \
+			--python-version "$$PYTHON_VERSION" --find-links "$(CURDIR)/.dist" "$$@" \
 			--dest "$$TMPDIR/wheelhouse" -r "$$MANIFEST"; \
 	done < "$$TMPDIR/locks.txt"; \
 	cp "$$TMPDIR/locks.txt" "$$TMPDIR/manifests/locks.txt"; \

@@ -68,3 +68,43 @@ def test_concurrent_refreshes_are_coalesced():
         # The lock prevents partial overlap; callers see complete generations.
         assert cache.view().state == ProjectionState.loaded
     asyncio.run(run())
+
+
+def test_refresh_after_topology_error_detects_drift_and_updates_cache():
+    """The reactive path a topology-sensitive HTTP failure (404/409/422)
+    triggers: report whether the identity observed before the failure is
+    now stale, and if so, the cache already reflects the new generation."""
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        observed = (await cache.load()).identity
+        client.identity = ProjectionIdentity(2, "b")
+        client.value = ["two"]
+        drifted = await cache.refresh_after_topology_error(observed)
+        assert drifted is True
+        assert cache.view().value == ["two"]
+        assert cache.view().identity == client.identity
+    asyncio.run(run())
+
+
+def test_refresh_after_topology_error_reports_no_drift_when_unchanged():
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        observed = (await cache.load()).identity
+        drifted = await cache.refresh_after_topology_error(observed)
+        assert drifted is False
+        assert cache.view().value == ["one"]
+    asyncio.run(run())
+
+
+def test_refresh_after_topology_error_falls_back_to_current_identity_when_none_observed():
+    """A caller with no prior observed identity (e.g. first-ever call)
+    passes None; the cache's own last-known identity is the baseline."""
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        await cache.load()
+        drifted = await cache.refresh_after_topology_error(None)
+        assert drifted is False
+    asyncio.run(run())

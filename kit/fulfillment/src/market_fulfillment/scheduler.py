@@ -206,10 +206,9 @@ class PhysicalSettlementScheduler:
         for payload in self._capacity_ledger.list_resources():
             attributes = dict(payload.get("attributes") or {})
             # Prefer the real pool_id column; the attributes JSON fallback
-            # covers rows registered before a caller started passing the
-            # real column explicitly (design.md, "SiteResource is
-            # retired" -- retiring the storefront's attributes-JSON-only
-            # push is a separate, later step from this column existing).
+            # covers resources registered before a caller passed the real
+            # column explicitly, and any resource type that still relies
+            # on attributes-only registration.
             pool_id = payload.get("pool_id") or attributes.get("pool_id")
             if not isinstance(pool_id, str) or pool_id not in pools:
                 continue
