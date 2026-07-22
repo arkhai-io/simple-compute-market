@@ -1,8 +1,8 @@
 ## 1. Governance and index
 
-- [ ] 1.1 Add `openspec/specs/README.md` as the canonical index linking every capability's `spec.md` and available `architecture.md`.
-- [ ] 1.2 Update `openspec/README.md`, `docs/development/ARCHITECTURE.md`, `AGENTS.md`, and `openspec/config.yaml` to define normative specs, companion architecture prose, cross-system documentation, and explicit promotion ownership without duplicating the index.
-- [ ] 1.3 Promote the companion-document lifecycle requirement into `openspec/specs/planning-governance/spec.md` and record its permanent destination in `design.md`.
+- [x] 1.1 Add `openspec/specs/README.md` as the canonical index linking every capability's `spec.md` and available `architecture.md`.
+- [x] 1.2 Update `openspec/README.md`, `docs/development/ARCHITECTURE.md`, `AGENTS.md`, and `openspec/config.yaml` to define normative specs, companion architecture prose, cross-system documentation, and explicit promotion ownership without duplicating the index.
+- [x] 1.3 Promote the companion-document lifecycle requirement into `openspec/specs/planning-governance/spec.md` and record its permanent destination in `design.md`.
 
 ## 2. Composition architecture
 
@@ -31,7 +31,7 @@
 - [x] 5.1 Verify API-credits authority, pricing, issuance, quota, settlement, and middleware behavior against current implementation and focused unit/conformance/e2e evidence.
 - [x] 5.2 Synchronize the new normative contract to `openspec/specs/api-credits/spec.md`.
 - [x] 5.3 Add `openspec/specs/api-credits/architecture.md` covering market authorization versus usage identity, quota authority, idempotency boundaries, middleware role, and current limits.
-- [ ] 5.4 Add API credits to the capability index and repository-wide service/authority maps without adding endpoint or package inventories.
+- [x] 5.4 Add API credits to the capability index and repository-wide service/authority maps without adding endpoint or package inventories.
 
 ## 6. Validation and closure
 
