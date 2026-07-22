@@ -92,38 +92,25 @@ Implementation:
       the deferred negotiated-VM-sizing question and the pools-8
       validator-deletion dependency in the relevant proposals.
 
-## Pass 2 — Fairness / placement policy (not started)
+## Pass 2 — Fairness / placement policy (transferred)
 
-Design resolution — still open:
+Pass 2 remains unresolved and is independently tracked by
+`pools-6-fair-scheduling-policy`. These checked items record transfer, not
+implementation.
 
-- [ ] Confirm domain boundaries and whether VM and pod compute share a
-      provisioning domain.
-- [ ] Choose the fairness subject and fairness scope (raised in review
-      2026-07-20: buyer/agreement was the leading candidate but not
-      confirmed — pin this at the start of pass 2).
-- [ ] Choose pool weighting and the precedence of fit, fairness,
-      utilization, spreading, cost, and topology.
-- [ ] Specify indivisible resources, quotas, priorities, preemption, and
-      starvation behavior.
-- [ ] Specify historical accounting, persistence, decay, restart recovery,
-      and exact-resource accounting.
-- [ ] Specify provider-failure and explicit reassignment behavior.
+- [x] Transfer the domain-boundary and fairness-subject/scope decisions to the new change.
+- [x] Transfer pool weighting and objective-precedence decisions to the new change.
+- [x] Transfer indivisible-resource, quota, priority, preemption, and starvation semantics to the new change.
+- [x] Transfer historical accounting, persistence, decay, restart recovery, and exact-resource accounting to the new change.
+- [x] Transfer provider-failure and explicit-reassignment semantics to the new change.
+- [x] Transfer external-library evaluation and policy simulation work to the new change.
+- [x] Transfer explanation, metrics, and debugging-surface design to the new change.
+- [x] Transfer second-policy implementation and transactional fairness-state persistence to the new change.
+- [x] Transfer simulation, concurrency, restart, starvation, adversarial-shape, and promotion work to the new change.
 
-Evaluation:
+## Archive synchronization
 
-- [ ] Evaluate maintained external scheduler libraries against the policy
-      protocol and operational constraints.
-- [ ] Compare lowest projected dominant utilization, capacity-weighted pool
-      fairness, and consumer-aware DRF through simulations.
-- [ ] Define policy explanation, metrics, and debugging surfaces.
-
-Implementation after design approval:
-
-- [ ] Implement a second policy beside round-robin to prove interface
-      generality.
-- [ ] Persist fairness state transactionally with capacity claims and
-      assignments.
-- [ ] Add simulation, concurrency, restart, starvation, and
-      adversarial-shape tests.
-- [ ] Promote approved requirements into baseline OpenSpec and update
-      architecture pointers only after behavior becomes current state.
+- [x] Confirm pass-1 multidimensional accounting and eligibility are present in `openspec/specs/site-capacity/spec.md` and `openspec/specs/fulfillment/spec.md`.
+- [x] Promote per-dimension capacity-event deltas to `openspec/specs/site-capacity/spec.md#requirement-capacity-and-deal-events`.
+- [x] Record pass-1 promotion destinations and pass-2 transfer in `design.md`.
+- [x] Preserve the provisional physical-provisioning delta as historical design input without merging it into permanent specifications.

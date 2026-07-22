@@ -257,9 +257,18 @@ validator can be deleted outright, not migrated, once `pools-8` lands.
 ## Non-Work / Deferred Decisions (pass 2)
 
 Pass 1's dimension model, admission correctness, and VM-domain wiring are
-resolved above and ready to implement. Everything below is pass 2 —
-fairness/placement policy selection — and remains genuinely open. This
-design must be revised in a later discuss → plan → implement session
-before pass-2 normative requirements or code are added. Confirmed so far:
-fairness subject leaned toward buyer/agreement in the 2026-07-20 review
-but was not pinned down; treat it as still open.
+implemented. Fairness/placement policy selection remains genuinely open and is
+tracked independently by `pools-6-fair-scheduling-policy`.
+
+## Design promotion record
+
+| Accepted decision | Permanent location or disposition |
+|---|---|
+| Named multidimensional capacity, exact concurrent holds, missing dimension as zero availability, and legacy GPU translation | `openspec/specs/site-capacity/spec.md#requirement-multidimensional-capacity-accounting`; `openspec/specs/fulfillment/spec.md#multidimensional-eligibility` |
+| One concrete resource row must fit every dimension; unrelated rows are not aggregated | `openspec/specs/site-capacity/spec.md#requirement-multidimensional-capacity-accounting` |
+| Admission and scheduling use one shared feasibility predicate | `openspec/specs/site-capacity/spec.md#relationship-to-fulfillment-scheduling`; `openspec/specs/fulfillment/spec.md#multidimensional-eligibility` |
+| Deterministic round-robin remains the current selection policy | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Capacity events expose per-dimension deltas | `openspec/specs/site-capacity/spec.md#requirement-capacity-and-deal-events` |
+| `total_units` compatibility mirror | Superseded by the capacity-bucket accounting model; no permanent promotion |
+| Storefront-local capacity validator deletion | Deferred to `pools-8-capacity-projection-and-listing-hints` |
+| Fairness policy selection, persistence, explanation, and simulation | Transferred to `pools-6-fair-scheduling-policy` |

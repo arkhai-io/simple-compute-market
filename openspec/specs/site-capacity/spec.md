@@ -65,7 +65,7 @@ A storefront MAY aggregate multiple site clients as soft state but MUST route ea
 - **THEN** the aggregator may reserve at the eligible site and records which site owns the allocation
 
 ### Requirement: Capacity and deal events
-Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront.
+Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront. Capacity deltas for multidimensional resources MUST report the per-dimension availability change so consumers do not infer one dimension from another.
 
 #### Scenario: Capacity is released
 - **WHEN** an allocation release commits in the site ledger

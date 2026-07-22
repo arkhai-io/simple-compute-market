@@ -158,7 +158,7 @@ only tracks pass-2 questions.
 
 ## Status of the requirement delta
 
-The `## ADDED Requirements` in this change's `specs/physical-provisioning/spec.md` use the standard openspec delta header — openspec's delta model has no separate "proposed but not yet decided" state, every change is a proposal until archived. Pass 1's design is now resolved (above) and ready to implement; pass 2's is not. The "Non-Work / Deferred Decisions" list below and the open questions in `design.md` cover only pass 2 and must be resolved in a follow-up design session before pass-2 requirements are implemented or this change is archived.
+Pass 1 is implemented and promoted to the site-capacity and fulfillment specifications. The provisional `specs/physical-provisioning/spec.md` delta describes unimplemented pass-2 policy behavior and is retained only as historical design input; it is not merged into permanent specifications. Pass 2 and all unresolved policy decisions are transferred to `pools-6-fair-scheduling-policy` so this completed admission-correctness change can be archived independently.
 
 ## Candidate directions
 
@@ -202,3 +202,17 @@ session must answer them before a fairness/placement policy is implemented.
 - What happens after provider failure: preserve assignment, explicitly invalidate it, or reschedule?
 - Which policy decisions and score components must be emitted for observability?
 - Can a maintained external library satisfy the contracts without importing an incompatible runtime model?
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge promoted
+
+- Multidimensional admission, exact concurrent holds, legacy compatibility, and per-dimension event deltas are recorded in `openspec/specs/site-capacity/spec.md`.
+- Shared multidimensional scheduling eligibility and deterministic round-robin remain recorded in `openspec/specs/fulfillment/spec.md`.
+- Repository-wide capacity and fulfillment vocabulary is recorded in `docs/development/ARCHITECTURE.md`.
+- Fair-policy requirements are transferred, not promoted, to `pools-6-fair-scheduling-policy`.
