@@ -91,9 +91,31 @@ The composition will use POOLS-7 scheduling, fulfillment status, result, and tea
 
 Rollback disables the bare-metal storefront role and closes its published listings. Shared compute/site authorities and VM storefront behavior remain unchanged. Any persistent schema addition must be backward-compatible during rollback or have an explicit down-migration/data-retention procedure.
 
+## Implementation Inventory
+
+### Reuse from core without moving VM code
+
+The bare-metal composition will import shared behavior directly from these `core/storefront` boundaries:
+
+- application construction and lifecycle: `app_composition.py`, `app_lifecycle.py`, `app_startup.py`, `openapi.py`, and `auth.py`;
+- schema-opaque negotiation and servicing mechanics: `negotiation_sync.py`, `services/negotiation_service.py`, `heartbeats.py`, `settlement_lifecycle.py`, and `stage_log.py`;
+- advisory capacity and publication primitives: `capacity.py`, `capacity_remote.py`, `aggregation.py`, `site_projections.py`, and the `publication_*` and `registry_publication.py` modules;
+- generic protocol carriers and SQLite base/migration utilities where their contracts are sufficient.
+
+`AggregateCapacityClient` is reusable for independent site snapshots, but it is not durable selected-site fulfillment routing. The bare-metal composition will retain site choice through its own injected lifecycle port until POOLS-7 supplies the production contract.
+
+### Keep VM semantics in the VM composition
+
+The following VM services are not reused or imported: `vm_fulfillment_service.py`, `vm_fulfillment_planner.py`, `vm_job_spec_service.py`, `provisioning_orchestration_service.py`, `resource_capacity_validator.py`, `listing_service.py`, `publication_service.py`, `admin_settle_service.py`, `claims_runtime.py`, and the VM `utils/settlement_jobs.py`, `sync_negotiation.py`, persistence, and migration modules. They encode VM host selection, VM capacity claims, `executor_kind="vm"`, VM access/SSH state, VM negotiation terms, or VM settlement hooks.
+
+The VM controllers, middleware wrappers, container, startup, CLI, and `server.py` are composition wiring rather than shared role APIs. Bare metal will provide small independent equivalents around core factories instead of importing `market_storefront`. Core settle models containing `vm_host`, `vm_target`, `ssh_public_key`, or tenant credentials are not adopted as bare-metal domain carriers; any common settle endpoint must first become a schema-opaque envelope proven by both compositions.
+
+### Refactor threshold
+
+No VM module moves into core merely to establish the new package. A behavior may be extracted only after a focused VM regression test and a bare-metal consumer prove it is schema-opaque. The first package/composition increment therefore uses existing core seams, bare-metal-owned policy/adapters, and injected fake lifecycle ports. Alkahest helpers may be imported from `core_storefront` if the selected bare-metal settlement mechanism uses them; VM wrappers are never imported.
+
 ## Open Questions
 
-- Which existing VM seller services are truly schema-opaque enough to move into core storefront without creating an upward dependency?
 - Does the initial deployment use a dedicated bare-metal storefront image or one shared storefront image with separate composition entry points? Packaging evidence should decide before implementation tasks for deployment begin.
 - What buyer-visible representation should carry short-lived access results once POOLS-7 finalizes credential/result retrieval semantics?
 
