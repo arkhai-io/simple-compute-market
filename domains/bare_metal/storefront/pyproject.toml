@@ -8,6 +8,7 @@ dependencies = [
     "arkhai-bare-metal>=0.2.0",
     "arkhai-core>=0.2.0",
     "arkhai-core-storefront>=0.2.0",
+    "arkhai-kit-policy",
     "fastapi~=0.115.8",
     "typer>=0.12.0",
     "uvicorn~=0.34.0",
@@ -19,6 +20,7 @@ bare-metal-storefront = "arkhai_bare_metal_storefront.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<10.0.0",
+    "pytest-asyncio>=0.25,<2.0",
 ]
 
 [tool.uv]
@@ -39,3 +41,5 @@ packages = ["src/arkhai_bare_metal_storefront"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

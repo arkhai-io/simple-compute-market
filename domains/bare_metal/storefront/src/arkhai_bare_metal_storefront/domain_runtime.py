@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from arkhai_bare_metal.domain_runtime import market_domain
-from market_core import MarketDomainContract, validate_domain_contract
+from market_core import (
+    DomainCapability,
+    ImmutableStorefrontCapability,
+    MarketDomainContract,
+    validate_domain_contract,
+)
+
+from .negotiation import default_seller_round_hook
 
 
 def _build_market_domain_contract() -> MarketDomainContract:
-    """Validate the capabilities currently implemented by the composition."""
-    return validate_domain_contract(market_domain())
+    """Build the validated capabilities implemented by this composition."""
+    base = market_domain()
+    return validate_domain_contract(
+        replace(
+            base,
+            declared_capabilities=(
+                base.declared_capabilities | {DomainCapability.STOREFRONT}
+            ),
+            storefront=ImmutableStorefrontCapability(
+                run_negotiation_policy=default_seller_round_hook,
+            ),
+        ),
+    )
 
 
 BARE_METAL_STOREFRONT_DOMAIN = _build_market_domain_contract()

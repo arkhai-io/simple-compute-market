@@ -18,9 +18,11 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
     assert contract.has_capability(DomainCapability.PUBLICATION)
     assert contract.publication is not None
     assert callable(contract.publication.source_factory)
+    assert contract.has_capability(DomainCapability.STOREFRONT)
+    assert contract.storefront is not None
+    assert callable(contract.storefront.run_negotiation_policy)
 
     for capability in (
-        DomainCapability.STOREFRONT,
         DomainCapability.SETTLEMENT,
         DomainCapability.FULFILLMENT,
         DomainCapability.COMPUTE_PROVISIONING,

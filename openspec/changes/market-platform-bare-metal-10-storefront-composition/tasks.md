@@ -8,7 +8,7 @@
 ## 2. Complete bare-metal seller contract
 
 - [x] 2.1 Add the bare-metal storefront composition root and inject its validated `MarketDomainContract` through `core_storefront.app_composition.build_storefront_app`.
-- [ ] 2.2 Implement deterministic bare-metal negotiation policy for listing constraints, lease duration, access method, and buyer access input, with accepted and rejected round tests.
+- [x] 2.2 Implement deterministic bare-metal negotiation policy for listing constraints, lease duration, access method, and buyer access input, with accepted and rejected round tests.
 - [ ] 2.3 Implement settlement verification and plan construction for bare-metal agreed terms using shared settlement ports and versioned domain envelopes.
 - [ ] 2.4 Implement schema-opaque persistence/use of bare-metal listing, message, terms, materialization, receipt, and result payloads without adding VM-shaped columns or generic branches.
 - [ ] 2.5 Complete publication wiring from trusted site projections and preserve domain-owned machine, Physical Resource, access-method, and capability semantics.

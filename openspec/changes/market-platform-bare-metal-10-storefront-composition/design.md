@@ -38,6 +38,10 @@ Copying the VM executable wholesale was rejected because it would preserve VM as
 
 ### Complete the domain contract through explicit seller hooks
 
+The initial negotiation policy supports SSH access with a buyer-supplied public key. Buyer-controlled `access_ref` is rejected rather than treated as an access, credential, or routing authority; seller/provisioner-issued access references belong in fulfillment results. Additional access methods require explicit method-specific validation before being enabled.
+
+Commercial pricing remains in the shared listing's accepted-escrow/rate data rather than being added to `BareMetalListing`. The bare-metal policy receives the seller reference amount calculated at the generic commercial boundary, validates the domain payload, and then applies shared escrow-shape and listed-price mechanics. The composition unwraps the shared `ProvisionTerms` envelope into a validated `BareMetalMessage`; a local hook protocol carries that message because broadening the existing scalar-oriented shared hook before another domain needs the shape would be premature.
+
 The composition will supply:
 
 - publication from authoritative site projections;
