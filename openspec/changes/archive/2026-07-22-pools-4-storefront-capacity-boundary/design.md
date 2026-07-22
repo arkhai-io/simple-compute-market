@@ -153,3 +153,14 @@ unpublish it. The close path deliberately remains available for an invalid row:
 removal is the safe escape hatch and must not require the row to satisfy the new
 publication invariant. Negotiation and fulfillment retain their fail-closed
 validation backstops.
+
+## Design promotion record
+
+| Accepted decision | Permanent location or disposition |
+|---|---|
+| Site ranking does not select a concrete physical resource | `openspec/specs/site-capacity/spec.md#requirement-multi-site-aggregation`; `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
+| Listings require a valid pool or resource identity, and `resource_id` takes precedence | `openspec/specs/site-capacity/spec.md#requirement-storefront-capacity-claim-identity` |
+| Missing settlement orders fail before capacity operations | `openspec/specs/site-capacity/spec.md#requirement-storefront-capacity-claim-identity` |
+| Legacy-invalid listings fail closed but retain an explicit close path | `openspec/specs/site-capacity/spec.md#requirement-storefront-capacity-claim-identity` |
+| Provisioning owns inventory while storefronts own projections and offerings | `openspec/specs/site-capacity/spec.md#requirement-site-authoritative-capacity`; `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
+| `compute_inventory_pools` table rename | Migration implementation detail; no permanent specification destination |

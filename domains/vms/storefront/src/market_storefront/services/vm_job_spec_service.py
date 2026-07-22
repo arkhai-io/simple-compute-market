@@ -35,14 +35,12 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
     A listing carrying both ``pool_id`` and ``resource_id`` is treated as an
     intentionally specific-resource listing: ``pool_id`` is dropped from the
     claim so matching pins to the named resource rather than requiring both
-    to match (POOLS-4 design review, 2026-07-16).
+    to match.
 
-    The returned claim also carries a ``dimensions`` map (POOLS-6 pass 1)
-    built from ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb`` — the
-    listing's fixed, seller-declared shape — so admission actually checks
-    memory/disk/vCPU fit a physical host, not just GPU count. This is the
-    concrete gap POOLS-6 pass 1 closes: previously nothing forwarded these
-    already-existing ``ComputeResource`` fields past this point.
+    The returned claim also carries a ``dimensions`` map built from
+    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb``. These are the
+    listing's fixed, seller-declared shape, so admission checks that every
+    requested dimension fits rather than checking GPU count alone.
 
     Raises ``ValueError`` if the order is missing or yields neither ``pool_id``
     nor ``resource_id`` — an under-specified claim would otherwise silently

@@ -137,3 +137,10 @@
 - [x] Add regression coverage proving failed resume leaves pause state unchanged
       and the explicit close operation remains available.
 
+## Archive synchronization
+
+- [x] Merge capacity-claim identity, precedence, missing-order, and legacy-row behavior into `openspec/specs/site-capacity/spec.md#requirement-storefront-capacity-claim-identity`.
+- [x] Record permanent destinations and classify the SQLite rename as migration implementation detail in `design.md`.
+- [x] Add focused listing, claim-building, fulfillment-planning, and publication evidence to the permanent site-capacity specification.
+- [x] Remove temporary change provenance from affected production comments and docstrings.
+

@@ -96,3 +96,16 @@ That work is done; it is not part of this change's remaining scope. The
 - **Compatibility:** breaking only for a caller relying on being able to
   publish a compute listing with neither `pool_id` nor `resource_id` set —
   verified no such caller exists in this repository today.
+
+## Permanent documentation impact
+
+- [ ] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge promoted
+
+- Capacity-claim identity validation, resource-over-pool precedence, missing-order failure, and legacy-invalid listing remediation are recorded in `openspec/specs/site-capacity/spec.md#requirement-storefront-capacity-claim-identity`.
+- The architecture ownership boundary was reviewed and already describes the accepted storefront/site split; no architecture edit is required.
+- The storefront SQLite table rename is migration implementation detail and has no permanent specification destination.

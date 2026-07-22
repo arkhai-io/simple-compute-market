@@ -13,6 +13,43 @@ A site authority MUST own physical resource capacity and allocations; a storefro
 - **WHEN** listing reconciliation cannot obtain an authoritative snapshot
 - **THEN** it skips capacity-driven close/reopen actions rather than treating ignorance as zero capacity
 
+### Requirement: Storefront capacity-claim identity
+VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `vm_host` or `resource_id`.
+
+Claim construction MUST reject a missing, empty, or malformed settlement order and any extracted claim lacking both identities before probing or reserving capacity. Stored listings that violate the identity invariant MUST fail closed on publication or republication. Resuming such a listing MUST return an actionable conflict before changing pause state or contacting a registry; the seller-authenticated close operation MUST remain available without implicit identity backfill or automatic unpublication.
+
+#### Scenario: Pool-only listing creates an ordinary reservation
+- **WHEN** a buyer reserves through a listing carrying `pool_id` without `resource_id`
+- **THEN** the claim carries `pool_id` and capacity/shape attributes without requiring or selecting a specific host or resource
+
+#### Scenario: Resource-only listing creates a specific reservation
+- **WHEN** a buyer reserves through a listing carrying `resource_id` without `pool_id`
+- **THEN** the claim carries the explicit `resource_id` and does not require pool-scoped matching
+
+#### Scenario: Listing carries both capacity identities
+- **WHEN** a listing carries both `pool_id` and `resource_id`
+- **THEN** the claim carries `resource_id` and drops `pool_id`
+
+#### Scenario: Listing carries neither capacity identity
+- **WHEN** a compute listing is created without `pool_id` or `resource_id`
+- **THEN** model validation rejects it before persistence or publication
+
+#### Scenario: Listing carries a malformed capacity identity
+- **WHEN** a supplied identity is empty, whitespace-only, malformed, or too long
+- **THEN** model validation rejects it before persistence or publication
+
+#### Scenario: Settlement order is absent or malformed
+- **WHEN** VM fulfillment receives no valid non-empty settlement order
+- **THEN** fulfillment fails before probing or reserving capacity rather than constructing an unscoped claim
+
+#### Scenario: Legacy-invalid listing is resumed
+- **WHEN** an operator resumes a stored listing that lacks a valid capacity identity
+- **THEN** the storefront returns an actionable conflict without changing pause state or contacting a registry
+
+#### Scenario: Legacy-invalid listing is explicitly closed
+- **WHEN** the operator invokes the seller-authenticated close operation after the validation conflict
+- **THEN** the storefront removes it from active registry discovery without inventing a capacity identity
+
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
@@ -88,13 +125,16 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 ## Evidence
 
 - Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
-- Multidimensional capacity (declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, per-dimension event deltas): `kit/site/tests/unit/test_ledger.py` (POOLS-6 pass 1 tests).
+- Multidimensional capacity, including declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, and per-dimension event deltas: `kit/site/tests/unit/test_ledger.py`.
 - Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
 - Storefront-to-site HTTP contract: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
+- Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
+- Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
+- Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
 
-Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline; they remain proposed in `prove-multi-domain-capacity`.
+Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
 
 ## Capacity settlement lifecycle
 
