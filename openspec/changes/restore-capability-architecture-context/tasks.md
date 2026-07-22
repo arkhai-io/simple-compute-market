@@ -6,11 +6,11 @@
 
 ## 2. Composition architecture
 
-- [ ] 2.1 Add `openspec/specs/market-composition/architecture.md` covering composition from above and below, typed phase boundaries, package ownership, and current limits.
-- [ ] 2.2 Add `openspec/specs/registry-discovery/architecture.md` covering schema centralization, signed publisher authority, query-semantic concurrency, and current limits.
-- [ ] 2.3 Add `openspec/specs/negotiation-protocol/architecture.md` covering canonical signed rounds, transport/policy separation, terms/payment separation, and durability limits.
-- [ ] 2.4 Add `openspec/specs/storefront-publication/architecture.md` covering seller authority, advisory projection semantics, reconciliation, and site routing trust.
-- [ ] 2.5 Add `openspec/specs/buyer-orchestration/architecture.md` covering plugin-host ownership, domain/policy/core input separation, persisted runs, and recovery boundaries.
+- [x] 2.1 Add `openspec/specs/market-composition/architecture.md` covering composition from above and below, typed phase boundaries, package ownership, and current limits.
+- [x] 2.2 Add `openspec/specs/registry-discovery/architecture.md` covering schema centralization, signed publisher authority, query-semantic concurrency, and current limits.
+- [x] 2.3 Add `openspec/specs/negotiation-protocol/architecture.md` covering canonical signed rounds, transport/policy separation, terms/payment separation, and durability limits.
+- [x] 2.4 Add `openspec/specs/storefront-publication/architecture.md` covering seller authority, advisory projection semantics, reconciliation, and site routing trust.
+- [x] 2.5 Add `openspec/specs/buyer-orchestration/architecture.md` covering plugin-host ownership, domain/policy/core input separation, persisted runs, and recovery boundaries.
 
 ## 3. Capacity and fulfillment architecture
 
