@@ -13,6 +13,21 @@ The repository MUST use OpenSpec main specs as the canonical source for current 
 - **WHEN** a contributor identifies a behavior or architecture change
 - **THEN** it is captured in an OpenSpec change rather than a flat documentation backlog
 
+### Requirement: Audience-owned documentation
+Current user-facing behavior and troubleshooting MUST live in documentation addressed to the buyer, seller, registry operator, provisioner, or contributor who acts on it. Current normative behavior MUST also be represented by its owning OpenSpec capability specification, and intended changes MUST remain in OpenSpec changes rather than role guides.
+
+#### Scenario: Current operational constraint is verified
+- **WHEN** a buyer, seller, registry operator, provisioner, or test contributor can encounter a verified constraint
+- **THEN** the relevant role guide explains the symptom and safe action while the owning capability spec records the current contract
+
+#### Scenario: Behavior is intended to change
+- **WHEN** the desired outcome differs from current implementation
+- **THEN** an active OpenSpec change owns the intended delta and role documentation does not present it as current behavior
+
+#### Scenario: Documentation has no actionable audience
+- **WHEN** a legacy issue or documentation placeholder cannot identify a reader and safe action
+- **THEN** it is removed, rejected, or retained in the change as unresolved rather than added to a generic known-issues page
+
 ### Requirement: Complete migration provenance
 Migrated planning material MUST record its source, classification, destination or removal rationale, evidence, and verification state.
 
@@ -82,6 +97,7 @@ A capability MAY maintain `architecture.md` beside its normative `spec.md` for d
 - Canonical contributor workflow and capability index: `openspec/README.md`.
 - Artifact-generation context and quality rules: `openspec/config.yaml`.
 - Lossless migration provenance: `openspec/changes/archive/2026-07-13-migrate-planning-to-openspec/migration-ledger.json` and its archived artifacts.
-- Non-normative legacy redirects and operational separation: `docs/development/ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, `provisioning-migration-plan.md`, and `KNOWN_ISSUES.md`.
+- Role-owned operational guidance: `docs/buyer-quickstart.md`, `docs/seller-quickstart.md`, `docs/indexer-quickstart.md`, `docs/domain-authoring/README.md`, and `e2e-tests/tests/e2e/roles/README.md`.
+- Non-normative legacy redirects and operational separation: `docs/development/ARCHITECTURE.md`, `TODO.md`, `design-remaining-work.md`, and `provisioning-migration-plan.md`.
 
 Strict OpenSpec validation checks artifact structure. Evidence strength, current-versus-proposed classification, coherent change boundaries, and stale inline-note disposition still require code-aware review.
