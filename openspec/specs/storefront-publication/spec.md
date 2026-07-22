@@ -53,6 +53,22 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - **WHEN** a domain codec or hook rejects a payload
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
 
+### Requirement: Trusted provisioning-site identity
+A storefront MUST bind each provisioning connection to an operator-configured `site_id`. It MUST derive routing and ownership from that trusted binding rather than accepting a counterparty-provided site identity.
+
+#### Scenario: Provisioner reports a conflicting site identity
+- **WHEN** a configured provisioning connection reports a `site_id` different from the storefront binding
+- **THEN** the storefront retains the configured identity and rejects or ignores the conflicting assertion
+
+### Requirement: Storefronts cache independent site projections
+Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains host-granular inside the provisioning site authority.
+
+A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
+
+#### Scenario: One projection refresh fails
+- **WHEN** a storefront cannot refresh one site projection after previously loading a complete generation
+- **THEN** it retains that generation as stale without replacing the other independently versioned projection
+
 ## Evidence
 
 - Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
@@ -62,18 +78,3 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 
 Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior.
-
-### Requirement: Trusted provisioning-site identity
-A storefront MUST bind each provisioning connection to an operator-configured `site_id`. It MUST derive routing and ownership from that trusted binding rather than accepting a counterparty-provided site identity.
-
-#### Scenario: Provisioner reports a conflicting site identity
-- **WHEN** a configured provisioning connection reports a `site_id` different from the storefront binding
-- **THEN** the storefront retains the configured identity and rejects or ignores the conflicting assertion
-
-
-## Site projection consumption
-
-Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains host-granular inside the provisioning site authority.
-
-### Requirement: Storefronts cache independent site projections
-A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
