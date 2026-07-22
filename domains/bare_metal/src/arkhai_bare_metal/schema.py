@@ -352,6 +352,7 @@ class BareMetalLeaseView(BaseModel):
 class BareMetalAccessResult(BaseModel):
     """Result shape for bare-metal grant/reclaim executor slots."""
 
+    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
     action: str = Field(
         description="Bare-metal executor lifecycle action that completed.",
     )
