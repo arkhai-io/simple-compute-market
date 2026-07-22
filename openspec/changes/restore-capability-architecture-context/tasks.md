@@ -14,11 +14,11 @@
 
 ## 3. Capacity and fulfillment architecture
 
-- [ ] 3.1 Add `openspec/specs/settlement-servicing/architecture.md` covering lifecycle servicing, codec/hook ownership, heartbeat replay rationale, and current limits.
-- [ ] 3.2 Add `openspec/specs/site-capacity/architecture.md` covering authoritative admission, private accounting, projection/event privacy, routing identity, and current limits.
-- [ ] 3.3 Add `openspec/specs/resource-pool-management/architecture.md` covering routing metadata, provider-owned validation, membership, draining, reconciliation, and current limits.
-- [ ] 3.4 Add `openspec/specs/fulfillment/architecture.md` covering dependency placement, scheduler/provider separation, identifiers/envelopes, and process-local persistence limits.
-- [ ] 3.5 Add `openspec/specs/physical-provisioning/architecture.md` covering compute composition, adapter registration, durable jobs with transient workers, proof-driven release, and current limits.
+- [x] 3.1 Add `openspec/specs/settlement-servicing/architecture.md` covering lifecycle servicing, codec/hook ownership, heartbeat replay rationale, and current limits.
+- [x] 3.2 Add `openspec/specs/site-capacity/architecture.md` covering authoritative admission, private accounting, projection/event privacy, routing identity, and current limits.
+- [x] 3.3 Add `openspec/specs/resource-pool-management/architecture.md` covering routing metadata, provider-owned validation, membership, draining, reconciliation, and current limits.
+- [x] 3.4 Add `openspec/specs/fulfillment/architecture.md` covering dependency placement, scheduler/provider separation, identifiers/envelopes, and process-local persistence limits.
+- [x] 3.5 Add `openspec/specs/physical-provisioning/architecture.md` covering compute composition, adapter registration, durable jobs with transient workers, proof-driven release, and current limits.
 
 ## 4. Operations architecture
 
