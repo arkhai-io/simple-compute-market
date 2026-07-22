@@ -16,6 +16,7 @@ reinit: ## Upgrade and reinstall changed internal wheel dependencies
 		--upgrade-package arkhai-bare-metal    --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \
+		--upgrade-package arkhai-kit-alkahest   --reinstall-package arkhai-kit-alkahest \
 		--upgrade-package arkhai-kit-policy     --reinstall-package arkhai-kit-policy
 
 test: reinit ## Run the storefront package tests

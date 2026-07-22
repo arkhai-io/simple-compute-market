@@ -33,7 +33,7 @@ def test_app_rejects_inconsistent_domain_before_startup() -> None:
         get_market_domain_contract(),
         declared_capabilities=(
             get_market_domain_contract().declared_capabilities
-            | {DomainCapability.SETTLEMENT}
+            | {DomainCapability.FULFILLMENT}
         ),
     )
 

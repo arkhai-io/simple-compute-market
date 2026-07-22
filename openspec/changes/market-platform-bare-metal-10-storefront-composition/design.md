@@ -118,7 +118,9 @@ The VM controllers, middleware wrappers, container, startup, CLI, and `server.py
 
 No VM module moves into core merely to establish the new package. A behavior may be extracted only after a focused VM regression test and a bare-metal consumer prove it is schema-opaque. The first package/composition increment therefore uses existing core seams, bare-metal-owned policy/adapters, and injected fake lifecycle ports. Alkahest helpers may be imported from `core_storefront` if the selected bare-metal settlement mechanism uses them; VM wrappers are never imported.
 
-The initial application shell injects and validates the current publication-only bare-metal contract. It does not install placeholder seller capabilities: negotiation, settlement, and fulfillment are added atomically only with their real hooks in the following tasks. The shell's injectable domain, lifespan, and router seams allow those increments without replacing the application boundary.
+The initial application shell injects and validates only capabilities with real hooks. Negotiation and settlement are added atomically as their implementations land; fulfillment remains absent until its lifecycle port exists. The shell's injectable domain, lifespan, and router seams allow those increments without replacing the application boundary. Capability implementation and contract wiring are accepted in tasks 2.2–2.5; task 2.6 proves runtime HTTP reachability, so no placeholder route or direct VM settlement path is introduced earlier.
+
+Bare-metal buyer provision input uses the versioned `{kind: "bare_metal.v1", version: 1, payload: ...}` envelope. Version 1 permits SSH with a nonblank public key and forbids unknown payload fields. The domain codec unwraps and validates that envelope before policy execution; canonical agreed `BareMetalTerms` then adds machine and Physical Resource identities from the trusted listing rather than buyer input.
 
 ## Open Questions
 

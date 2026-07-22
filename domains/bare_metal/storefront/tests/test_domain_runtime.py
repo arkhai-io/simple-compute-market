@@ -21,9 +21,12 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
     assert contract.has_capability(DomainCapability.STOREFRONT)
     assert contract.storefront is not None
     assert callable(contract.storefront.run_negotiation_policy)
+    assert contract.has_capability(DomainCapability.SETTLEMENT)
+    assert contract.settlement is not None
+    assert callable(contract.settlement.verify)
+    assert callable(contract.settlement.build_plan)
 
     for capability in (
-        DomainCapability.SETTLEMENT,
         DomainCapability.FULFILLMENT,
         DomainCapability.COMPUTE_PROVISIONING,
     ):

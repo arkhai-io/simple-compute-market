@@ -4,6 +4,13 @@ from .publication import (
     available_bare_metal_listings,
     bare_metal_listing_key,
 )
+from .provision_terms import (
+    BARE_METAL_PROVISION_KIND,
+    BARE_METAL_PROVISION_VERSION,
+    BareMetalProvisionPayload,
+    BareMetalProvisionTerms,
+    make_bare_metal_provision_terms,
+)
 from .schema import (
     BARE_METAL_ACCESS_ACTIONS,
     BARE_METAL_EXECUTOR_KIND,
@@ -41,6 +48,8 @@ from .storefront_publication import (
 __all__ = [
     "BARE_METAL_ACCESS_ACTIONS",
     "BARE_METAL_EXECUTOR_KIND",
+    "BARE_METAL_PROVISION_KIND",
+    "BARE_METAL_PROVISION_VERSION",
     "BARE_METAL_SCHEMA_KIND",
     "EXCLUSIVE_ALLOCATION_MODE",
     "NODE_GRANT_ACCESS_ACTION",
@@ -53,6 +62,8 @@ __all__ = [
     "BareMetalListing",
     "BareMetalMaterialization",
     "BareMetalMessage",
+    "BareMetalProvisionPayload",
+    "BareMetalProvisionTerms",
     "BareMetalReceipt",
     "BareMetalTerms",
     "available_bare_metal_listings",
@@ -64,6 +75,7 @@ __all__ = [
     "ensure_derived_bare_metal_listings_table",
     "load_derived_bare_metal_listing",
     "mark_derived_bare_metal_listings_closed",
+    "make_bare_metal_provision_terms",
     "materialization_to_lease_create",
     "open_bare_metal_listing_keys",
     "record_derived_bare_metal_listing",
