@@ -637,65 +637,108 @@ class CapacityLedgerService:
     ) -> dict[str, Any] | None:
         """Atomically bind a held reservation to the selected physical resource.
 
-        Availability accounting is unchanged by this method: it still keys
-        off ``resource_id``, which this method still moves on an actual
-        reassignment, exactly as before ``settlement_resource_id`` existed.
-        ``settlement_resource_id`` is a scheduling-state marker, not a
-        second accounting key. After assignment it identifies the concrete
-        resource selected for fulfillment.
-
-        Repeating the same assignment is idempotent.
+        Opens and commits its own transaction. Callers that must combine this
+        rebind with another repository's write in one transaction (for
+        example, persisting a settlement/fulfillment assignment alongside it)
+        should use ``assign_settlement_resource_in_session`` against a session
+        they already hold open, not this method.
         """
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
-            reservation = self._find_reservation(db, capacity_reservation_id=capacity_reservation_id)
-            if reservation is None:
-                return None
-            if reservation.state not in HELD_RESERVATION_STATES:
-                raise CapacityConflictError(
-                    f"reservation {capacity_reservation_id} is {reservation.state}; cannot assign settlement resource"
-                )
-            if self._backing_resource_id(db, reservation.capacity_reservation_id) == settlement_resource_id:
-                if reservation.settlement_resource_id != settlement_resource_id:
-                    reservation.settlement_resource_id = settlement_resource_id
-                    db.commit()
-                return self._reservation_payload(reservation)
-            destination = self._bucket_by_backing_resource(db, settlement_resource_id)
-            if destination is None or not destination.enabled:
-                raise CapacityConflictError(
-                    f"settlement resource {settlement_resource_id!r} is unavailable"
-                )
-            reservation_dims = _reservation_dimensions(reservation)
-            held = self._held_dimensions(db, settlement_resource_id)
-            capacity = _resource_capacity(destination)
-            insufficient = any(
-                capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
-                for dim, amount in reservation_dims.items()
+            result = self.assign_settlement_resource_in_session(
+                db,
+                capacity_reservation_id=capacity_reservation_id,
+                settlement_resource_id=settlement_resource_id,
             )
-            if insufficient:
-                raise CapacityConflictError(
-                    f"settlement resource {settlement_resource_id!r} lacks capacity"
-                )
-            source_id = self._backing_resource_id(db, reservation.capacity_reservation_id)
-            debit = self._debit_for_reservation(db, reservation.capacity_reservation_id)
-            if debit is None:
-                raise CapacityConflictError(f"reservation {capacity_reservation_id} has no capacity debit")
-            debit.capacity_bucket_id = destination.capacity_bucket_id
-            reservation.settlement_resource_id = settlement_resource_id
-            reservation.vm_host = (destination.attributes or {}).get("vm_host")
-            serialized_dims = _serialize_dimensions(reservation_dims)
-            db.add(CapacityEvent(
-                kind="capacity_released_for_reassignment",
-                resource_id=source_id,
-                dimensions=serialized_dims,
-            ))
-            db.add(CapacityEvent(
-                kind="capacity_assigned_for_settlement",
-                resource_id=settlement_resource_id,
-                dimensions=_serialize_dimensions({k: -v for k, v in reservation_dims.items()}),
-            ))
             db.commit()
+            return result
+
+    def assign_settlement_resource_in_session(
+        self, db: Session, *, capacity_reservation_id: str, settlement_resource_id: str
+    ) -> dict[str, Any] | None:
+        """Session-scoped core of ``assign_settlement_resource``.
+
+        Does not commit or expire stale holds: the caller owns the
+        transaction boundary and decides when those happen relative to its
+        own writes in the same session. Availability accounting is
+        unchanged by this method: it still keys off ``resource_id``, which
+        this method still moves on an actual reassignment, exactly as
+        before ``settlement_resource_id`` existed. ``settlement_resource_id``
+        is a scheduling-state marker, not a second accounting key. After
+        assignment it identifies the concrete resource selected for
+        fulfillment. Repeating the same assignment is idempotent.
+        """
+        reservation = self._find_reservation(db, capacity_reservation_id=capacity_reservation_id)
+        if reservation is None:
+            return None
+        if reservation.state not in HELD_RESERVATION_STATES:
+            raise CapacityConflictError(
+                f"reservation {capacity_reservation_id} is {reservation.state}; cannot assign settlement resource"
+            )
+        if self._backing_resource_id(db, reservation.capacity_reservation_id) == settlement_resource_id:
+            if reservation.settlement_resource_id != settlement_resource_id:
+                reservation.settlement_resource_id = settlement_resource_id
             return self._reservation_payload(reservation)
+        destination = self._bucket_by_backing_resource(db, settlement_resource_id)
+        if destination is None or not destination.enabled:
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} is unavailable"
+            )
+        reservation_dims = _reservation_dimensions(reservation)
+        held = self._held_dimensions(db, settlement_resource_id)
+        capacity = _resource_capacity(destination)
+        insufficient = any(
+            capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
+            for dim, amount in reservation_dims.items()
+        )
+        if insufficient:
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} lacks capacity"
+            )
+        source_id = self._backing_resource_id(db, reservation.capacity_reservation_id)
+        debit = self._debit_for_reservation(db, reservation.capacity_reservation_id)
+        if debit is None:
+            raise CapacityConflictError(f"reservation {capacity_reservation_id} has no capacity debit")
+        debit.capacity_bucket_id = destination.capacity_bucket_id
+        reservation.settlement_resource_id = settlement_resource_id
+        reservation.vm_host = (destination.attributes or {}).get("vm_host")
+        serialized_dims = _serialize_dimensions(reservation_dims)
+        db.add(CapacityEvent(
+            kind="capacity_released_for_reassignment",
+            resource_id=source_id,
+            dimensions=serialized_dims,
+        ))
+        db.add(CapacityEvent(
+            kind="capacity_assigned_for_settlement",
+            resource_id=settlement_resource_id,
+            dimensions=_serialize_dimensions({k: -v for k, v in reservation_dims.items()}),
+        ))
+        return self._reservation_payload(reservation)
+
+    def lock_reservation(
+        self, db: Session, capacity_reservation_id: str
+    ) -> CapacityReservation | None:
+        """Return the reservation row locked ``FOR UPDATE`` within ``db``.
+
+        For callers building one transaction across the reservation and
+        another repository's write (for example, a settlement/fulfillment
+        assignment) — ``get_reservation`` and ``_find_reservation`` read
+        without a row lock and are not a substitute for this when a
+        concurrent scheduling attempt against the same reservation must be
+        serialized rather than race.
+        """
+        return db.get(CapacityReservation, capacity_reservation_id, with_for_update=True)
+
+    def backing_resource_id_in_session(
+        self, db: Session, capacity_reservation_id: str
+    ) -> str | None:
+        """Public, session-scoped exposure of the private backing-resource lookup.
+
+        Lets a caller already holding ``db`` open (for example, while
+        evaluating scheduling eligibility inside one atomic transaction)
+        read this without opening a second session.
+        """
+        return self._backing_resource_id(db, capacity_reservation_id)
 
     def commit(
         self,

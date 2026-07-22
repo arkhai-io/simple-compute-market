@@ -66,11 +66,14 @@ def test_fulfillment_modules_do_not_import_downstream_packages():
 
 def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies():
     """Carrier purity: settlement_types.py, scheduling.py,
-    round_robin_policy.py, and envelopes.py are plain data/policy
-    contracts and must stay importable with no runtime dependency beyond
-    pydantic -- only scheduler.py (which actually queries the ledger and
-    pool service) and ids.py (which needs uuid6) may reach outside this
-    package plus pydantic/sqlalchemy/uuid6.
+    round_robin_policy.py, envelopes.py, transitions.py, db.py, and
+    repository.py are plain data/policy/persistence contracts and must stay
+    importable with no runtime dependency beyond pydantic/sqlalchemy -- only
+    scheduler.py (which actually queries the ledger and pool service) may
+    reach outside this package plus pydantic/sqlalchemy/uuid6. The
+    persistence modules operate on opaque capacity_reservation_id strings and
+    this package's own settlement/envelope types; they must not import
+    market_site or market_resource_pools to do so.
     """
     package_root = Path(__file__).parents[2] / "src" / "market_fulfillment"
     allowed_external_by_module = {
@@ -82,6 +85,9 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "envelopes.py": {"pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_site"},
         "provider.py": set(),
+        "transitions.py": set(),
+        "db.py": {"sqlalchemy"},
+        "repository.py": {"sqlalchemy"},
     }
     violations = []
     for source_path in package_root.glob("*.py"):

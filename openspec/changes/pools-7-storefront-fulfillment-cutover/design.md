@@ -1311,6 +1311,16 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Physical inventory and vertically grouped capacity are independent pull projections | `openspec/specs/site-capacity/spec.md#requirement-physical-inventory-and-grouped-capacity-are-separate-projections` |
 | Storefront projection caches load at startup, poll independent identities, retain stale complete generations, and refresh reactively without automatic mutation retry | `openspec/specs/storefront-publication/spec.md#requirement-storefronts-cache-independent-site-projections` |
 | Repository-wide projection ownership and allocation boundary | `docs/development/ARCHITECTURE.md#site-inventory-and-capacity-projections` |
+| One settlement/fulfillment aggregate keyed by `capacity_reservation_id`; `fulfillment_id` is a generated column, not a second key | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Scheduling equivalence and fulfillment equivalence are two independent, separately-persisted checks | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| No persisted `SettlementResult`; results are a read-time projection over the aggregate and its provisioned resources | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Recovery-claim fields live on the aggregate row, not a separate claims table | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| The scheduled market is immutable and every fulfillment acceptance must match it | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Settlement persistence documents and tests SQLite transaction guarantees rather than portable row-lock claims | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Recovery selection in Section 3 is provisional; Section 7 owns the final operational claim protocol | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Generic lifecycle updates are limited to the shared mutable lifecycle payload and cannot alter aggregate invariants | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Repository callers provide validated canonical models; persistence performs structural JSON equality rather than arbitrary-input canonicalization | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| `CapacityLedgerService` session-accepting entry points let a higher-layer caller compose one transaction across reservation state and settlement assignment | `openspec/specs/site-capacity/spec.md#relationship-to-fulfillment-scheduling` |
 
 ### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
 
@@ -1401,3 +1411,194 @@ capacity-projection structures; derive authoritative rows; migrate active
 reservation debits; reconstruct and validate capacity invariants; switch the
 repositories; and retire `SiteResource` only after validation succeeds.
 
+## Section 3 settlement persistence design decisions (2026-07-22)
+
+Resolves ambiguities identified while planning `tasks.md` Section 3 ("Add
+shared settlement persistence"). The earlier "`SettlementRecord` shape" and
+"Final planning decisions" sections above were written at different times and
+do not, on their own, fully specify the aggregate's identity shape or its
+equivalence-check scope. This section is authoritative where it adds detail
+those sections left implicit.
+
+### Aggregate identity: one row keyed by `capacity_reservation_id`
+
+The durable aggregate's primary key is `capacity_reservation_id`, not
+`fulfillment_id` — consistent with task 3.4 ("enforce one fulfillment
+aggregate per `capacity_reservation_id`") and the earlier "one row, one state
+machine" decision. `fulfillment_id` is a nullable-until-accepted, unique
+column on that same row, generated the first time `begin_fulfillment`
+transitions the row past `assigned`. An idempotent `begin_fulfillment` retry
+returns the stored value rather than regenerating it. This is accepted as a
+soft commit: if fulfillment-side bookkeeping later needs materially more
+metadata than fits one row, that is new evidence to reopen this, not a reason
+to design around it now.
+
+### Recovery-claim fields live on the aggregate row
+
+Multi-replica claim/lease fields (`claimed_by`, `claim_expires_at`, an attempt
+counter) are columns on the aggregate row, not a separate claims table. One
+aggregate has at most one pending provider operation at a time, so a separate
+table would only add a join with no independent-claiming benefit.
+
+### Prepared provider input uses the existing versioned-envelope pattern
+
+`prepared_create_operation` and `prepared_teardown_operation` are
+`VersionedEnvelope`-typed JSON columns on the aggregate, populated once each,
+before the transaction that marks the corresponding `*_dispatch_pending`
+state commits (per "Provider input snapshot: prepare/dispatch split" above).
+This is the same envelope contract already defined in
+`market_fulfillment.envelopes`, extended to a new payload kind rather than
+introducing a second versioning mechanism.
+
+### No persisted `SettlementResult`
+
+`get_fulfillment_result` (task 8.2) is a computed projection over the
+aggregate's current state/failure fields and its `ProvisionedResource`
+children, read on demand — it is not backed by its own persisted result row.
+Persisting a `SettlementResult`-shaped object independently of the aggregate
+would create a second place credential-adjacent data could live; since
+credentials are fetched live and never persisted (see "`SettlementResult`
+delivery" above), and there is no `SettlementResult` CRUD API planned, there
+is no case that needs it durable on its own. The versioned-envelope
+requirement for "settlement/fulfillment result payloads crossing a durable
+boundary" is satisfied by `provider_metadata`/`teardown_provider_metadata`,
+which already cross that boundary; it does not require inventing a
+result object solely to have something to envelope.
+
+### Two separate persisted requirement shapes, two separate equivalence checks
+
+Earlier discussion conflated scheduling-time and fulfillment-time
+idempotency into one comparison. They are distinct, apply to different
+calls, and must be persisted and compared separately:
+
+- **`scheduling_requirements`** — the normalized `SettlementRequirement`
+  shape (`resource_kind`, `dimensions`, `attributes`) that `schedule_resource`
+  evaluated. Immutable once written. A `schedule_resource` retry compares
+  `market` + `scheduling_requirements` against the stored values; if the
+  request also supplies a `resource_id` constraint, that is checked
+  separately as consistency against the row's `settlement_resource_id`
+  (once assigned), not folded into the `market`/`requirements` comparison.
+  Any mismatch on either axis is a conflict, not a silent return of the
+  existing assignment. (The current in-memory scheduler only performs the
+  `resource_id`-consistency half of this and does not compare
+  `scheduling_requirements` on retry at all — this is a real gap Section 3/4
+  closes, not existing behavior to preserve.)
+- **`fulfillment_request`** — the domain-specific payload passed to
+  `begin_fulfillment` (the eventual replacement for today's
+  `VmFulfillmentRequirements`-shaped input), persisted as its own versioned
+  envelope, immutable once written. Because `begin_fulfillment` loads the
+  already-scheduled `SettlementResource` from the row rather than accepting
+  one from the caller (task 6.1), there is no caller-supplied resource to
+  compare on this path — equivalence here is `market` + `fulfillment_request`
+  only.
+
+`PhysicalSettlementRequest.resource_id` (an optional pre-selection
+constraint) and `SettlementResource.settlement_resource_id` (the confirmed
+assignment) intentionally share the same physical-resource identifier space
+at different lifecycle stages — a `SettlementCandidate.resource_id` is the
+same value as the owning `CapacityBucket.backing_resource_id`, and scheduling
+adopts it directly into `settlement_resource_id` once selected. This is not
+a naming inconsistency and does not need reconciling as part of this change.
+
+### Ledger additions needed for one atomic scheduling transaction
+
+Task 4.3 requires locking/validating the reservation, selecting a resource,
+rebinding capacity, and writing the settlement assignment in one transaction
+spanning `market_site` (the reservation/ledger authority) and
+`market_fulfillment` (the new aggregate). `CapacityLedgerService`'s private
+helpers already thread a caller's `db: Session` through internally
+(`_backing_resource_id`, `_bucket_by_backing_resource`,
+`_debit_for_reservation`); every *public* method, however, opens and commits
+its own session, with no seam for an external caller to fold a ledger call
+into a larger transaction. `market_site` cannot depend on
+`market_fulfillment` to get one, so the fix is at the `market_site` boundary,
+consumed by the scheduler (which already depends on both):
+
+- `lock_reservation(db, capacity_reservation_id) -> CapacityReservation | None`
+  — new. Existing reads (`get_reservation`, `_find_reservation`) do a plain
+  `db.get(...)` with no row lock; nothing today provides the locked read
+  task 4.3 requires.
+- `assign_settlement_resource_in_session(db, *, capacity_reservation_id,
+  settlement_resource_id)` — the existing `assign_settlement_resource` body
+  extracted as a session-accepting core; the public method becomes a thin
+  wrapper (open session, delegate, commit) so existing callers are
+  unaffected.
+- `backing_resource_id_in_session(db, capacity_reservation_id) -> str | None`
+  — public exposure of the existing `_backing_resource_id`, so the
+  scheduler's candidate-eligibility credit-back computation can read it
+  against the same open session instead of opening a second one.
+
+The scheduler opens one session from the already-shared `session_factory`
+(`compute_provisioning_service/container.py` already constructs
+`CapacityLedgerService` from that same singleton) and drives both the
+ledger's session-scoped core and the new fulfillment repository against it
+before a single commit.
+
+### Correction: `resize_reservation`'s settlement-abandonment call violates the dependency boundary as sketched
+
+Recorded now, ahead of Section 4 implementing `resize_reservation` (task
+4.5), because the violation is in this file's own earlier pseudocode and is
+better caught before it is copied into code than after:
+
+The "Requirements change under negotiation" section's `resize_reservation`
+sketch has the ledger call `self._mark_settlement_abandoned(db,
+old_allocation_id)` directly inside its own transaction. `market_site` MUST
+NOT import `market_fulfillment`, including under `TYPE_CHECKING` (see
+`openspec/specs/fulfillment/spec.md#dependency-boundary`) — "marking a
+settlement record abandoned" is a fulfillment-layer concept, so a literal
+implementation of that pseudocode would introduce exactly the reverse
+dependency the layering rule exists to prevent.
+
+**Resolved:** `resize_reservation` accepts an optional hook parameter typed
+as a `Protocol` defined in `market_site` itself, referencing no fulfillment
+types:
+
+```python
+class SettlementAbandonmentHook(Protocol):
+    def __call__(self, db: Session, capacity_reservation_id: str) -> None: ...
+```
+
+`resize_reservation(..., on_supersede: SettlementAbandonmentHook | None =
+None)` invokes the hook inside its own transaction when superseding a
+reservation that may have an assigned settlement record. `market_fulfillment`
+supplies the concrete implementation at composition time. `market_site`
+remains ignorant of what "settlement" is; the dependency-inversion is owned
+by whichever higher layer wires the two services together. This does not
+change `resize_reservation`'s atomicity properties, only how it reaches the
+settlement-abandonment side effect without an upward import.
+
+
+
+## Section 3 code-review decisions (2026-07-22)
+
+These decisions refine the Section 3 persistence design after review. They preserve the generic, domain-agnostic repository surface while protecting invariants owned by `kit/fulfillment`.
+
+### Scheduled market is immutable through fulfillment acceptance
+
+`market` is established when the settlement assignment is first persisted. `begin_fulfillment`/`accept_fulfillment` must match that stored market on both the first acceptance and every retry. The repository must never rewrite the aggregate's market while accepting fulfillment. A mismatch is a fulfillment conflict before provider submission.
+
+### SQLite concurrency contract
+
+The compute provisioning service uses SQLite and has no planned PostgreSQL deployment. Section 3 must therefore describe and test the strongest concurrency guarantee actually available in that environment rather than claiming portable `SELECT ... FOR UPDATE` semantics. Fulfillment acceptance must serialize access to the existing aggregate within an explicit SQLite transaction so concurrent callers cannot durably create or return different `fulfillment_id` values. Aggregate creation remains guarded by the `capacity_reservation_id` primary key; an observable insert race must be translated by re-reading the winning row and applying the ordinary equivalent/conflicting request rules.
+
+### Recovery selection remains provisional until Section 7
+
+The recovery columns belong on the aggregate row, but the Section 3 helper is not the final multi-worker claim protocol. It must be named and documented as a single-worker SQLite persistence primitive. Section 7 owns the operational worker model, acquisition/lease semantics, duplicate-dispatch prevention, and the tests that prove those guarantees. Permanent Section 3 documentation may describe the durable claim fields and lease intent, but must not present the provisional helper as the completed recovery algorithm.
+
+### Generic lifecycle updates with kit-owned restrictions
+
+The repository retains a generic `transition(..., **lifecycle_updates)` operation so domain adapters can carry versioned provider inputs and metadata without domain-specific kit methods. The generic surface does not make every aggregate column mutable.
+
+The shared mutable lifecycle set is limited to prepared create/teardown operation envelopes, provider/teardown metadata, and failure reason/message fields. Aggregate identity, scheduled resource identity, accepted fulfillment identity and request, lifecycle state, recovery-claim fields, and database-managed timestamps are not writable through `lifecycle_updates`. Unknown fields are rejected. Validation occurs before changing state or any field so an invalid call leaves the session object unmodified.
+
+Domain-specific structure remains inside validated versioned envelopes and metadata payloads. Adding a new top-level settlement column is a shared-schema decision and requires an explicit permanent-contract update.
+
+### Canonical models are a caller obligation
+
+The persistence repository accepts validated canonical Pydantic models and versioned envelopes. It serializes those models to JSON-compatible structures and compares structural equality; it does not canonicalize arbitrary dictionaries or infer equivalence among unvalidated representations. Public scheduling and fulfillment boundaries are responsible for constructing the canonical models before calling the repository.
+
+### New-table initialization and documentation hygiene
+
+The Section 3 tables are new and do not require versioned migration scripts. Service-level tests must nevertheless prove that provisioning database initialization mounts the fulfillment metadata, is idempotent, and leaves the expected SQLite tables, constraints, foreign keys, and operational indexes.
+
+Production code and stable tests must reference only permanent current-state documentation. References to this change's `design.md`, POOLS task numbers, migration chronology, or review tombstones are temporary planning material and must not remain in production comments or permanent specifications.

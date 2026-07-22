@@ -56,11 +56,13 @@ def run_migrations(
     # and SQLAlchemy's cross-metadata FK resolution during create_all needs
     # the referenced table to already exist.
     from sqlalchemy import inspect
+    from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
 
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
 
     # Preserve the legacy reservation table name until the versioned rename
     # migration has claimed the current name. Other site tables may be created

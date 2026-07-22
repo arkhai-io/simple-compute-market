@@ -173,3 +173,14 @@ from market_site.db import (  # noqa: F401
     CapacityEvent,
     CapacityReservation,
 )
+
+# The settlement/fulfillment aggregate lives in the shared
+# market_fulfillment package; re-exported here for the same reason. The
+# tables ride market_fulfillment's own metadata — init_db creates it
+# alongside this service's own Base, market_site's, and
+# market_resource_pools'.
+from market_fulfillment.db import (  # noqa: F401
+    ProvisionedResource,
+    SettlementRecord,
+    SettlementRecordState,
+)

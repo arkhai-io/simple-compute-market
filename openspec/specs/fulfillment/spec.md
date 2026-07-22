@@ -15,7 +15,8 @@ The fulfillment capability owns:
 - provider-neutral create, status, and teardown contracts;
 - provider registration and resolution;
 - structured validation and stable generic fulfillment errors;
-- versioned envelopes for provider/domain dictionaries that cross persistence or package boundaries.
+- versioned envelopes for provider/domain dictionaries that cross persistence or package boundaries;
+- the durable settlement/fulfillment aggregate's schema, state machine, equivalence checks, and repository.
 
 It does not own:
 
@@ -23,8 +24,8 @@ It does not own:
 - authoritative capacity admission and reservation storage;
 - resource-pool CRUD or provider configuration persistence;
 - VM, bare-metal, Kubernetes, storage, or other provider-specific request/result vocabulary;
-- durable settlement-record persistence until the owning compute-provisioning lifecycle implements it;
-- executor job queues or lease-watchdog policy.
+- executor job queues or lease-watchdog policy;
+- the periodic multi-replica recovery sweep that consumes recovery claims (see "Durable settlement persistence").
 
 ## Ownership
 
@@ -133,6 +134,42 @@ The same `capacity_reservation_id` and equivalent request MUST return the existi
 - **WHEN** a provider cannot use the selected resource
 - **THEN** it reports validation or execution failure and does not choose a replacement resource
 
+## Durable settlement persistence
+
+One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
+
+The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `failed`, `torn_down`, and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
+
+#### Scenario: Illegal state skip
+
+- **WHEN** a caller attempts to move the aggregate directly from `assigned` to `active`
+- **THEN** the transition validator rejects it
+
+Two independently-persisted, independently-immutable-once-written request shapes govern two independent equivalence checks, because they answer different questions for different callers:
+
+- **Scheduling equivalence** governs `schedule_resource`/`select_resource` retries. It compares `market` and the normalized `SettlementRequirement` (`scheduling_requirements`) against the stored values. A caller-supplied resource constraint, if present, is checked separately for consistency against the row's `settlement_resource_id` once assigned — it is not folded into the `market`/`requirements` comparison, since it is an optional pre-selection constraint on the request, not part of the requirement identity being scheduled.
+- **Fulfillment equivalence** governs `begin_fulfillment` retries. It compares `market` and the domain-specific `fulfillment_request` envelope against the stored values. There is no caller-supplied resource to compare on this path: `begin_fulfillment` loads the already-scheduled `SettlementResource` from the row rather than trusting one supplied by the caller.
+
+Either check rejects a retry whose stored values differ as a conflict; it does not silently return the existing assignment for a shape the caller no longer means.
+
+#### Scenario: Conflicting fulfillment retry
+
+- **WHEN** `begin_fulfillment` is retried for the same `capacity_reservation_id` with a different `fulfillment_request`
+- **THEN** it reports a fulfillment conflict rather than returning the first fulfillment's result
+
+A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id`, denormalized `fulfillment_id`, and an optional domain-specific `domain_resource_ref`. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
+
+There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.
+
+Prepared provider create/teardown input is captured as a `VersionedEnvelope`-typed payload on the aggregate, frozen before the transaction that marks the corresponding dispatch-pending state commits, so a recovery retry dispatches from what was accepted rather than a live re-read of pool or provider configuration.
+
+Multi-replica recovery-claim fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The concurrency-safe claiming query for the periodic recovery sweep is implemented against the deployed backend by the sweep itself; this capability defines only the claim-column shape those claims are recorded in.
+
+#### Scenario: Expired claim is reclaimed
+
+- **WHEN** a claimed row's claim has expired and no other claim has replaced it
+- **THEN** a subsequent claim attempt may claim it again
+
 ## Provider contract
 
 A `FulfillmentProvider` implements asynchronous:
@@ -221,3 +258,7 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - Dependency boundaries: `kit/fulfillment/tests/unit/test_import_boundaries.py` and repository-level architecture tests as introduced.
 - Provider contracts and registry behavior: `kit/fulfillment/tests/unit/test_provider.py` and compute provisioning service tests.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`; scheduling-time exceeds-reservation rejection: `kit/fulfillment/tests/unit/test_scheduler.py`.
+- Durable aggregate schema and constraints: `kit/fulfillment/tests/unit/test_settlement_db.py`.
+- State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
+- Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_repository.py`.
+- Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
