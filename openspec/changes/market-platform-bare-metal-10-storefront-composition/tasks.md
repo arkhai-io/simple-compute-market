@@ -1,6 +1,6 @@
 ## 1. Baseline and package boundary
 
-- [ ] 1.1 Correct `openspec/specs/storefront-publication/spec.md` and `openspec/specs/market-composition/spec.md` so the permanent baseline distinguishes the current bare-metal publication plugin from a complete storefront composition.
+- [x] 1.1 Correct `openspec/specs/storefront-publication/spec.md` and verify `openspec/specs/market-composition/spec.md` distinguish the current bare-metal publication plugin from a complete storefront composition.
 - [ ] 1.2 Inventory VM storefront services by core orchestration, VM semantics, and composition wiring; record exact reuse/refactor decisions in `design.md` before moving code.
 - [ ] 1.3 Turn `domains/bare_metal/storefront` into a buildable Python distribution with `src/`, tests, entry point, wheel-only internal dependencies, Makefile init/reinit/build/test targets, and no editable sibling sources.
 - [ ] 1.4 Add package/import-boundary tests proving core and kit packages do not import the bare-metal storefront and the composition does not import VM implementations.

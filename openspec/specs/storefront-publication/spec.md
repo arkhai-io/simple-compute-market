@@ -43,10 +43,10 @@ A domain that supports seller publication MUST provide its publication source an
 - **THEN** it produces domain listings through its contract and the shared runner publishes or reconciles their opaque payloads
 
 ### Requirement: Domain runtime composition
-The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus publication, negotiation-policy, settlement-verification, plan-construction, and fulfillment hooks. VM, bare-metal, and API-credit composition roots MUST supply their implementations explicitly, and generic storefront services MUST NOT import or branch on those concrete domains.
+The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus the lifecycle hooks declared by that domain. A concrete storefront composition MUST supply its implementations explicitly, and generic storefront services MUST NOT import or branch on concrete domains.
 
-#### Scenario: Storefront composition selects a domain
-- **WHEN** a VM, bare-metal, or API-credit storefront is assembled
+#### Scenario: Current storefront composition selects a domain
+- **WHEN** a VM or API-credit storefront is assembled
 - **THEN** its composition root supplies a validated domain contract used by every shared storefront service that interprets domain behavior
 
 #### Scenario: Domain validation fails
@@ -77,4 +77,4 @@ A storefront SHALL load the resource-pool and capacity-bucket projections at sta
 - Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 
-Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior.
+Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.
