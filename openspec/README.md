@@ -5,7 +5,7 @@ OpenSpec separates the system's durable current contract from the temporary work
 - `specs/<capability>/spec.md` describes the implemented normative contract: behavior, ownership, invariants, and lifecycle semantics.
 - `specs/<capability>/architecture.md` may preserve durable current-state models, motivations, trade-offs, relationships, and limitations in freeform prose.
 - `specs/README.md` is the canonical capability documentation index.
-- `changes/` describes a transition: proposal, alternatives, unresolved questions, delta requirements, migration concerns, and implementation tasks.
+- `changes/` describes a transition: proposal, alternatives, unresolved questions, delta requirements, migration concerns, and implementation tasks. [`changes/README.md`](changes/README.md) groups active changes into delivery campaigns without replacing each change's acceptance boundary.
 - `changes/archive/` records completed transitions after their durable results have been synchronized into `specs/` and, where repository-wide, `docs/development/ARCHITECTURE.md`.
 - `config.yaml` supplies repository context and artifact-quality rules.
 
