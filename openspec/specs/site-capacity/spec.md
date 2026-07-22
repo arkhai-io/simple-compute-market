@@ -50,6 +50,21 @@ Claim construction MUST reject a missing, empty, or malformed settlement order a
 - **WHEN** the operator invokes the seller-authenticated close operation after the validation conflict
 - **THEN** the storefront removes it from active registry discovery without inventing a capacity identity
 
+### Requirement: Reservation scheduling view
+A capacity reservation MUST expose its identity, lifecycle state, hold expiry, reserved dimensions, resource kind, and generic scheduling constraints through the site-authority boundary. Scheduling MUST reject a missing or expired reservation and any request that conflicts with the reservation's generic physical requirements. Commercial agreement identity and terms remain at the storefront and MUST NOT be required by generic scheduling.
+
+#### Scenario: Reservation is missing
+- **WHEN** scheduling references a `capacity_reservation_id` that the site authority does not know
+- **THEN** scheduling reports a missing-reservation error before policy selection
+
+#### Scenario: Reservation hold expired
+- **WHEN** scheduling references an uncommitted hold whose expiry has passed
+- **THEN** scheduling reports reservation expiry before policy selection
+
+#### Scenario: Request exceeds reserved dimensions
+- **WHEN** a scheduling request asks for more of a dimension than the reservation holds
+- **THEN** scheduling reports a request mismatch before assignment or provider execution
+
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
@@ -103,10 +118,6 @@ The site authority MUST own Physical Resources, settlement-relevant Resource Poo
 #### Scenario: Generic site package is installed alone
 - **WHEN** site authority modules are imported without VM or bare-metal provisioning packages
 - **THEN** resource, reservation, allocation, and event behavior remains available without concrete executor imports
-
-#### Scenario: Administrative pool is created before settlement integration
-- **WHEN** an operator creates or assigns hosts to a provisioning resource pool during POOLS-1
-- **THEN** existing site-capacity reservation and allocation selection behavior remains unchanged
 
 ### Requirement: Idempotent release recording
 The site authority MUST record release exactly once for an allocation and advance capacity version only when the authoritative allocation transition commits.

@@ -100,7 +100,7 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. This extraction does not join POOLS-3's provider-only fulfillment path to executor dispatch.
+Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
 
 #### Scenario: Two adapters claim one executor kind
 
@@ -129,18 +129,18 @@ After callers and deployments migrate, generic provisioning service and client p
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
-- Multidimensional scheduling eligibility (fit rejected on a secondary dimension even when GPU count would fit, legacy gpu-only requests unaffected): `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py` (POOLS-6 pass 1 tests).
+- Multidimensional scheduling eligibility, including secondary-dimension rejection and legacy GPU-only requests: `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py`.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
 
-`PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Durable mechanism-neutral settlement recovery remains deferred to `pools-7-storefront-fulfillment-cutover`.
+`PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Process-local state is not a durable mechanism-neutral recovery guarantee.
 
 ## Capacity settlement lifecycle
 
 Physical provisioning distinguishes **Capacity Reservation → Capacity Settlement Assignment → Physical Settlement → Provisioned Resource / Active Workload**. Generic scheduling chooses an eligible Settlement Resource. Physical Settlement is provider-specific execution on that assigned resource. Provider-specific reachability, credentials, topology, and execution failures remain downstream of generic scheduling eligibility.
 
-The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, a per-dimension quantity map (`dimensions`/`available`, checked against every dimension a candidate declares — POOLS-6 pass 1), pool identity, and opaque attributes and do not import market-specific executor persistence models.
+The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, a per-dimension quantity map (`dimensions`/`available`, checked against every requested dimension), pool identity, and opaque attributes and do not import market-specific executor persistence models.
 
 ## Relationship to fulfillment
 

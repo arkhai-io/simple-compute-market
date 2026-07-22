@@ -122,4 +122,17 @@ Rejected as scope creep. The current problem is deterministic eligible placement
 
 ### Import an existing full scheduler
 
-Deferred. Established schedulers generally own worker models, queues, or cluster runtimes larger than this policy boundary. POOLS-6 will evaluate maintained libraries against the protocol before custom multidimensional policy is selected.
+Deferred. Established schedulers generally own worker models, queues, or cluster runtimes larger than this policy boundary. Richer policy evaluation is tracked independently from this deterministic baseline.
+
+## Design promotion record
+
+| Accepted decision | Permanent location or disposition |
+|---|---|
+| Capacity reservation, settlement assignment, provider execution, and provisioned output are distinct lifecycle stages | `openspec/specs/site-capacity/spec.md#capacity-settlement-lifecycle`; `openspec/specs/physical-provisioning/spec.md#capacity-settlement-lifecycle` |
+| Scheduling is provider- and executor-neutral and policy receives only eligible candidates | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Automatic placement is deterministic pool-then-resource round-robin; explicit resources bypass choice but not eligibility | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Schedulable resources belong to one enabled pool and disablement drains new assignments | `openspec/specs/resource-pool-management/spec.md#scheduling-membership-and-draining` |
+| Process-local assignment and cursor state is not distributed idempotency | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Durable assignment/cursor persistence, caller cutover, and multi-replica recovery | Transferred to `pools-7-storefront-fulfillment-cutover` sections 3–4, 7, and 9 |
+| Deferring the initial concrete claim until scheduling | Superseded by `openspec/specs/site-capacity/spec.md#internal-capacity-accounting`: admission creates a private bucket debit and scheduling may atomically rebind it |
+| Original package and commercial-identity placement | Superseded by `market_fulfillment` ownership and the reservation-local identity rules in `openspec/specs/fulfillment/spec.md` |

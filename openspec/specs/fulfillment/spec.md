@@ -117,16 +117,35 @@ A scheduling request MAY narrow the dimensions it asks for relative to what the 
 
 `PhysicalSettlementScheduler` owns placement. It enumerates eligible candidates through the site and pool authorities, delegates ordering/selection to a `SettlementSchedulingPolicy`, and returns a `SettlementResource`.
 
-The current policy is deterministic round-robin. For an unchanged ordered candidate set and policy state, selection is reproducible. Policy remains replaceable; static pool priority is not part of the resource-pool schema.
+The current policy is deterministic two-level round-robin. It sorts eligible pool IDs and chooses the pool after the last automatic selection, then sorts eligible resource IDs in that pool and chooses the resource after that pool's last automatic selection. If a previous cursor no longer names an eligible candidate, selection resumes at the first sorted eligible value. For an unchanged candidate set and policy state, selection is reproducible. Policy remains replaceable; static pool priority is not part of the resource-pool schema.
+
+An explicit resource constraint bypasses policy choice but not reservation, pool, resource, shape, attribute, or capacity eligibility, and it does not advance automatic-selection cursors.
 
 Scheduling and fulfillment execution are separate calls. A provider receives the already-selected `SettlementResource` and MUST NOT substitute another resource. If a selected resource becomes unusable, execution reports a typed failure and orchestration returns to the scheduler boundary according to lifecycle policy.
 
-The same `capacity_reservation_id` and equivalent request MUST return the existing assignment when durable assignment is available. A conflicting retry MUST fail rather than creating a second binding.
+The same `capacity_reservation_id` and equivalent request MUST return the existing assignment when assignment state is available. A conflicting retry MUST fail rather than creating a second binding. Current assignment and cursor storage is process-local: idempotency is guaranteed only within one running scheduler instance, not across restart or replica boundaries, until the compute lifecycle supplies durable assignment persistence.
+
+Scheduling errors distinguish a missing or expired reservation, a request that conflicts with reservation or existing-assignment state, and a valid request for which no candidate is eligible.
 
 #### Scenario: Equivalent scheduling retry
 
-- **WHEN** the same reservation and normalized requirements are scheduled again
-- **THEN** the existing settlement-resource assignment is returned
+- **WHEN** the same reservation and normalized requirements are scheduled again in the scheduler instance that holds the assignment
+- **THEN** the existing settlement-resource assignment is returned without advancing policy cursors
+
+#### Scenario: Previous cursor is no longer eligible
+
+- **WHEN** the previously selected pool or resource is absent from the eligible candidate set
+- **THEN** round-robin resumes deterministically from the first sorted eligible pool or resource
+
+#### Scenario: Explicit resource is ineligible
+
+- **WHEN** a request identifies a resource in a disabled pool or without sufficient capacity
+- **THEN** scheduling rejects it without invoking automatic policy or advancing cursors
+
+#### Scenario: Scheduler process restarts
+
+- **WHEN** an assignment exists only in process-local state and the scheduler restarts
+- **THEN** the process does not claim distributed idempotency and a retry may be evaluated as a new assignment
 
 #### Scenario: Provider attempts independent placement
 

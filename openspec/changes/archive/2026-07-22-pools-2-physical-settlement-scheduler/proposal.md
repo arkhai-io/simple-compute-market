@@ -62,3 +62,23 @@ The durable target atomically locks the reservation, checks for an existing assi
 Disabling a pool immediately prevents new assignments to its resources. Existing reservations, assignments, physical settlements, and workloads continue. Operators can therefore drain a pool without first terminating active work.
 
 Scheduling failures distinguish missing entities, mismatched requests, expired reservations, and absence of eligible resources so callers can choose appropriate recovery behavior.
+
+## Closure reconciliation
+
+Subsequent package extraction moved provider-neutral scheduling contracts and policy to `arkhai-kit-fulfillment` (`market_fulfillment`). Generic scheduling is keyed by `capacity_reservation_id` and validates reservation-local physical requirements; commercial agreement, market, and terms identity remain at the storefront. Multidimensional `dimensions`/`available` maps supersede the original single-unit carrier language.
+
+The implemented deterministic scheduler remains process-local. Durable assignment/cursor persistence, production caller wiring, and restart/multi-replica evidence are transferred to `pools-7-storefront-fulfillment-cutover`. The earlier intent to defer the initial concrete capacity claim until scheduling is superseded by private admission-time bucket debits with atomic scheduling-time rebind.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge promoted
+
+- Scheduling and assignment behavior is recorded in `openspec/specs/fulfillment/spec.md#scheduling-and-assignment`.
+- Reservation scheduling data and authority are recorded in `openspec/specs/site-capacity/spec.md#requirement-reservation-scheduling-view`.
+- Pool membership and draining semantics are recorded in `openspec/specs/resource-pool-management/spec.md#scheduling-membership-and-draining`.
+- Repository-wide lifecycle vocabulary and authority boundaries are recorded in `docs/development/ARCHITECTURE.md`.
