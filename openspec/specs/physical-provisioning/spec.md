@@ -117,6 +117,25 @@ Service composition MUST reject duplicate executor/action kinds, duplicate fulfi
 - **WHEN** service composition registers executor adapters and fulfillment providers
 - **THEN** each registration remains in its own namespace and provider availability does not select or replace an executor adapter
 
+### Requirement: Ansible fulfillment adapter
+
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `vm_host` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+
+#### Scenario: Pool configuration changes after create dispatch
+
+- **WHEN** an operator edits provider configuration after an Ansible create job is accepted
+- **THEN** the accepted job retains the resolved configuration snapshot captured at dispatch
+
+#### Scenario: Provider variables collide with job identity
+
+- **WHEN** pool-supplied extra variables attempt to override an authoritative host, target, action, sizing, or executor field
+- **THEN** validation rejects the operation before asynchronous dispatch
+
+#### Scenario: VM teardown is dispatched
+
+- **WHEN** teardown begins for an accepted VM fulfillment
+- **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
+
 ### Requirement: Clean ownership cutover
 
 After callers and deployments migrate, generic provisioning service and client paths under the VM domain MUST be removed rather than retained as aliases or compatibility distributions.

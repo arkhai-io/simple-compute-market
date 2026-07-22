@@ -123,3 +123,23 @@ system keyed by `claim_ref`.
 - **Compatibility:** existing Ansible job and credential behavior remains in
   place; the provider wraps and extends that machinery rather than replacing
   it.
+
+## Closure reconciliation
+
+Subsequent extraction and package-boundary work moved provider-neutral contracts and the registry to `arkhai-kit-fulfillment` (`market_fulfillment`), the generic process-local coordinator to the extracted compute service, and the Ansible implementation to the VM provisioning adapter. Generic fulfillment is keyed by `capacity_reservation_id`; commercial agreement identity remains at the storefront.
+
+The provider still executes against an already-selected settlement resource, validates synchronously, snapshots resolved Ansible inputs with accepted jobs, normalizes operation status, and retains exact host/target teardown identity. Durable fulfillment persistence, multi-process idempotency, recovery workers, public dry-run wiring, and persisted prepared-operation integration evidence are transferred to `pools-7-storefront-fulfillment-cutover`.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge promoted
+
+- Provider-neutral contracts, identity, validation, and provider/placement separation are recorded in `openspec/specs/fulfillment/spec.md`.
+- Concrete Ansible snapshot, validation, status, and teardown behavior is recorded in `openspec/specs/physical-provisioning/spec.md#requirement-ansible-fulfillment-adapter`.
+- Package hierarchy and service composition are recorded in `docs/development/ARCHITECTURE.md`.
+- Durable lifecycle work remains in `pools-7-storefront-fulfillment-cutover`.

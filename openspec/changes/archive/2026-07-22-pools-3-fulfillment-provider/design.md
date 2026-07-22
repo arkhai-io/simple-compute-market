@@ -486,8 +486,29 @@ This also settles where `FulfillmentProvider`/`ProviderRegistry`
 operate on are domain-neutral (`PhysicalSettlementRequest`/
 `SettlementResource` already live in `compute_provisioning`, per `pools-2`),
 keeping the classes themselves VM-service-local was an awkward split either
-way. Moving them to `kit/resource-pools` is a deliberate override of
-`pools-5-shared-provisioning-package`'s stated activation condition ("a
-second domain needs them, or `market-platform-compute-30-extract-service`
-lands first") — neither has happened yet. See `pools-5`'s proposal for the
-updated rationale.
+way. The final package boundary places them with provider-neutral scheduling
+contracts in `kit/fulfillment`.
+
+## Closure ownership reconciliation
+
+The authoritative implementation locations at archive time are:
+
+- provider-neutral requests, resources, provider protocols, status, errors, and registry: `kit/fulfillment/src/market_fulfillment/`;
+- generic process-local coordination: `provisioning/compute/service/src/compute_provisioning_service/services/fulfillment_service.py`;
+- VM requirements and the Ansible provider: `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/`.
+
+Earlier `kit/resource-pools`, VM-service, `allocation_id`, and generic
+`agreement_id` placement is superseded. Generic fulfillment uses
+`capacity_reservation_id`; the storefront retains commercial identity.
+
+## Design promotion record
+
+| Accepted decision | Permanent location or disposition |
+|---|---|
+| Fulfillment scheduling and provider-neutral execution contracts share the higher-level fulfillment kit | `openspec/specs/fulfillment/spec.md#ownership`; `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Providers execute against a selected resource and cannot perform replacement placement | `openspec/specs/fulfillment/spec.md#provider-contract` |
+| Provider and executor registration are independent namespaces | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/physical-provisioning/spec.md#requirement-validated-executor-registration` |
+| Ansible validates pool/resource inputs, snapshots resolved configuration, normalizes status, and preserves exact teardown identity | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-fulfillment-adapter` |
+| Capacity assignment transfers an existing debit rather than subtracting capacity twice | `openspec/specs/site-capacity/spec.md#internal-capacity-accounting` |
+| Process-local fulfillment identity is not durable concurrent idempotency | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| Durable persistence, recovery, public dry-run wiring, and persisted prepared-operation evidence | Transferred to `pools-7-storefront-fulfillment-cutover` sections 3, 6–8, and 10 |

@@ -126,9 +126,10 @@
       `FulfillmentProvider` here, not `AnsibleFulfillmentProvider` — this
       is a `FulfillmentService`-boundary test, not an Ansible-integration
       test.
-- [ ] Confirm existing `AnsibleJobService`/`AnsibleService`/scheduler test
+- [x] Confirm existing `AnsibleJobService`/`AnsibleService`/scheduler test
       suites pass unchanged (this change wraps, not replaces, that
-      machinery).
+      machinery). Archive validation rebuilt kit wheels, ran all kit suites,
+      and passed compute-service unit (307) and integration (138) tests.
 
 ## Docs
 
@@ -163,15 +164,16 @@
       collisions before provider dispatch.
 - [x] Add a side-effect-free `FulfillmentService.validate_create(...)` path and
       use that same validation from create.
-- [ ] Expose the shared validation path through the public dry-run endpoint when
-      the fulfillment controller is introduced.
+- [x] Transfer public side-effect-free dry-run endpoint wiring to
+      `pools-7-storefront-fulfillment-cutover` task 6.8; this change provides
+      the shared validation seam but no public controller.
 - [x] Add atomic capacity-ledger settlement assignment. Rebinding an allocation
       transfers its existing held units from the reservation resource to the
       selected settlement resource in one transaction; fulfillment MUST NOT
       subtract capacity again.
-- [ ] Add integration coverage that inspects persisted outbound Ansible create
-      and teardown parameters, including `vm_host`, `vm_target`, and every VM
-      create field.
+- [x] Transfer persisted outbound Ansible create/teardown parameter coverage to
+      `pools-7-storefront-fulfillment-cutover` task 6.9, where prepared provider
+      inputs become durable.
 - [x] Add capacity-rebind rollback/idempotency tests and document the current
       concurrent idempotency limitation.
 - [x] Update the provisioning service `reinit` target to upgrade and reinstall
@@ -181,3 +183,11 @@
 - [x] Record mutable provider-configuration snapshot and durable concurrent
       idempotency concerns in POOLS-7 rather than solving them with a
       process-local lock in POOLS-3.
+
+## Archive synchronization
+
+- [x] Reconcile package ownership with `arkhai-kit-fulfillment` (`market_fulfillment`), the extracted compute service, and the VM provisioning adapter.
+- [x] Reconcile fulfillment identity with `capacity_reservation_id` and keep commercial agreement identity outside generic physical fulfillment.
+- [x] Promote current provider, validation, Ansible snapshot, exact teardown, and normalized-status behavior to `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md#requirement-ansible-fulfillment-adapter`.
+- [x] Record durable fulfillment persistence and recovery as transferred to `pools-7-storefront-fulfillment-cutover` rather than as process-local guarantees.
+- [x] Remove temporary change and migration provenance from affected production comments and docstrings.

@@ -116,6 +116,8 @@
 - [ ] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.
 - [ ] 6.6 Persist provider job identity and normalized provider metadata without exposing VM-specific job state as the cross-domain lifecycle contract.
 - [ ] 6.7 Add tests for equivalent/conflicting retries, pool-config mutation after acceptance, duplicate submission races, and create/teardown command deduplication.
+- [ ] 6.8 Expose provider preparation through a public side-effect-free dry-run endpoint that uses the same validation path as `begin_fulfillment` without persisting or dispatching work.
+- [ ] 6.9 Add integration coverage that reads persisted prepared Ansible create and teardown inputs and verifies `vm_host`, `vm_target`, every VM create field, provider configuration snapshot, and exact teardown identity.
 
 ## 7. Add provisioning-owned recovery and lifecycle convergence
 
