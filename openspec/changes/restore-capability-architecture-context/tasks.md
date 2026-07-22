@@ -28,9 +28,9 @@
 
 ## 5. API-credits capability
 
-- [ ] 5.1 Verify API-credits authority, pricing, issuance, quota, settlement, and middleware behavior against current implementation and focused unit/conformance/e2e evidence.
-- [ ] 5.2 Synchronize the new normative contract to `openspec/specs/api-credits/spec.md`.
-- [ ] 5.3 Add `openspec/specs/api-credits/architecture.md` covering market authorization versus usage identity, quota authority, idempotency boundaries, middleware role, and current limits.
+- [x] 5.1 Verify API-credits authority, pricing, issuance, quota, settlement, and middleware behavior against current implementation and focused unit/conformance/e2e evidence.
+- [x] 5.2 Synchronize the new normative contract to `openspec/specs/api-credits/spec.md`.
+- [x] 5.3 Add `openspec/specs/api-credits/architecture.md` covering market authorization versus usage identity, quota authority, idempotency boundaries, middleware role, and current limits.
 - [ ] 5.4 Add API credits to the capability index and repository-wide service/authority maps without adding endpoint or package inventories.
 
 ## 6. Validation and closure
