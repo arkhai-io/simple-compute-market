@@ -22,9 +22,9 @@
 
 ## 4. Operations architecture
 
-- [ ] 4.1 Add `openspec/specs/deployment-state/architecture.md` covering role-separated topology, state ownership, migration/initialization boundaries, artifact packaging, and verified compatibility posture.
-- [ ] 4.2 Add `openspec/specs/test-compatibility/architecture.md` covering test jurisdiction, producer/consumer fixtures, deterministic asynchronous seams, staged e2e, and current exceptions.
-- [ ] 4.3 Keep unresolved publication, package-source, configuration, FRP, typed-client, e2e-extraction, and settlement-generalization claims in this change's deferred design section rather than permanent baseline documents.
+- [x] 4.1 Add `openspec/specs/deployment-state/architecture.md` covering role-separated topology, state ownership, migration/initialization boundaries, artifact packaging, and verified compatibility posture.
+- [x] 4.2 Add `openspec/specs/test-compatibility/architecture.md` covering test jurisdiction, producer/consumer fixtures, deterministic asynchronous seams, staged e2e, and current exceptions.
+- [x] 4.3 Keep unresolved publication, package-source, configuration, FRP, typed-client, e2e-extraction, and settlement-generalization claims in this change's deferred design section rather than permanent baseline documents.
 
 ## 5. API-credits capability
 
