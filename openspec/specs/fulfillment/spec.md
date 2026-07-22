@@ -32,7 +32,9 @@ The capability is distributed as `arkhai-kit-fulfillment` and imported as `marke
 
 Provider-neutral scheduling and provider execution contracts live together in this package. Resource-pool administration must not import fulfillment contracts merely to type its provider configuration, and fulfillment must not depend on a deployed provisioning service. Concrete providers and domain requirement translators live in domain adapters or service composition.
 
-## Dependency boundary
+## Requirements
+
+### Requirement: Dependency boundary
 
 `market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site` and `market_resource_pools`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
 
@@ -48,7 +50,7 @@ Carrier modules for IDs, envelopes, requests, requirements, resources, and provi
 - **WHEN** the VM provisioning composition registers an Ansible provider
 - **THEN** the adapter depends on `market_fulfillment` and VM/Ansible packages while the fulfillment kit remains free of VM vocabulary
 
-## Identities
+### Requirement: Fulfillment identities
 
 Fulfillment lifecycle IDs MUST be opaque UUIDv7 strings:
 
@@ -67,7 +69,7 @@ Commercial agreement IDs do not belong in the generic physical settlement reques
 - **WHEN** one provider operation produces two VMs or pods
 - **THEN** both outputs have distinct `provisioned_resource_id` values while sharing one `fulfillment_id` and capacity reservation
 
-## Physical settlement request
+### Requirement: Physical settlement request
 
 A `PhysicalSettlementRequest` MUST contain:
 
@@ -88,7 +90,7 @@ The request MUST NOT carry an `agreement_id` or legacy `allocation_id` alias. Do
 - **WHEN** accepted terms intentionally identify a concrete physical resource
 - **THEN** the request may constrain scheduling to that resource and the scheduler verifies eligibility rather than silently selecting another resource
 
-## Multidimensional eligibility
+### Requirement: Multidimensional eligibility
 
 A candidate is eligible only when it is enabled, satisfies pool and resource constraints, has the required resource kind, and has availability greater than or equal to every requested dimension.
 
@@ -113,7 +115,7 @@ A scheduling request MAY narrow the dimensions it asks for relative to what the 
 - **WHEN** a schedule request asks for more of a dimension than the capacity reservation holds for that same dimension
 - **THEN** scheduling rejects the request rather than silently admitting a shape reservation-time admission never verified fits anywhere
 
-## Scheduling and assignment
+### Requirement: Scheduling and assignment
 
 `PhysicalSettlementScheduler` owns placement. It enumerates eligible candidates through the site and pool authorities, delegates ordering/selection to a `SettlementSchedulingPolicy`, and returns a `SettlementResource`.
 
@@ -152,7 +154,7 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 - **WHEN** a provider cannot use the selected resource
 - **THEN** it reports validation or execution failure and does not choose a replacement resource
 
-## Provider contract
+### Requirement: Provider contract
 
 A `FulfillmentProvider` implements asynchronous:
 
@@ -181,7 +183,7 @@ A provider may expose side-effect-free `validate_create` or preparation behavior
 - **WHEN** the same reservation is retried with different requirements or a different selected resource
 - **THEN** orchestration reports a fulfillment conflict
 
-## Versioned envelopes
+### Requirement: Versioned envelopes
 
 Generic dictionaries crossing a domain, provider, process, or persistence boundary MUST be wrapped in `VersionedEnvelope` or a more specific typed model.
 
@@ -205,9 +207,9 @@ This contract applies to prepared provider inputs, provider metadata snapshots, 
 - **WHEN** a generic envelope is parameterized with a typed payload model and required payload fields are missing
 - **THEN** validation fails before dispatch or persistence
 
-## Error taxonomy
+### Requirement: Stable error taxonomy
 
-Generic orchestration distinguishes stable categories including:
+Generic orchestration MUST distinguish stable categories including:
 
 - provider missing or unavailable;
 - provider configuration invalid;
@@ -218,9 +220,14 @@ Generic orchestration distinguishes stable categories including:
 - reservation expired or missing;
 - request/assignment mismatch.
 
-Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors should identify retryability or operator action when the lifecycle begins persisting operations.
+Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors SHOULD identify retryability or operator action when the lifecycle persists operations.
 
-## Packaging and typing
+#### Scenario: Concrete provider reports an execution failure
+
+- **WHEN** a provider-specific create, status, or teardown operation fails
+- **THEN** the shared boundary maps it to a stable generic category while retaining safe diagnostics
+
+### Requirement: Packaging and typing
 
 The distribution MUST include `market_fulfillment/py.typed`. Consumers install it from the repository `.dist` wheel during local development and builds. Touched projects MUST NOT add editable relative sibling sources for internal kit dependencies.
 

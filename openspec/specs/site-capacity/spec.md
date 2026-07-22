@@ -133,7 +133,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - **WHEN** an executor lifecycle transition releases an allocation
 - **THEN** projection subscribers can reconcile from the capacity version and the owning storefront can correlate its deal event without either channel exposing the other's private payload
 
-## Evidence
+**Evidence**
 
 - Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
 - Multidimensional capacity, including declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, and per-dimension event deltas: `kit/site/tests/unit/test_ledger.py`.
@@ -147,13 +147,13 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 
 Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
 
-## Capacity settlement lifecycle
+**Capacity settlement lifecycle**
 
 A **Capacity Reservation** records accepted capacity, the agreement/deal relationship, requested shape or units, lifecycle state, and any hold expiry. A reservation is not itself a concrete provisioning decision.
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
 
-## Relationship to fulfillment scheduling
+**Relationship to fulfillment scheduling**
 
 The site authority admits and persists capacity reservations. The higher-layer [fulfillment capability](../fulfillment/spec.md) binds an admitted reservation to a Settlement Resource and records that assignment through the site boundary before provider dispatch.
 
@@ -170,13 +170,13 @@ Provisioning-owned site-capacity persistence MUST NOT redundantly store storefro
 - **AND** provisioning capacity rows remain scoped by the local database authority rather than a redundant site column
 
 
-## Internal capacity accounting
+**Internal capacity accounting**
 
 A storefront-facing capacity reservation identifies the durable hold by `capacity_reservation_id` and exposes lifecycle metadata, expiry, and reserved dimensions. It does not expose the provisioning authority's initial accounting choice.
 
 Within the site authority, a `CapacityBucket` is the host-level multidimensional accounting boundary. For the VM domain there is one current bucket per host. `backing_resource_id` links the bucket to its physical inventory record, while `CapacityReservationDebit` records the reservation's current bucket and debited dimensions. Scheduling may atomically replace that debit when it rebinds a reservation to another eligible host and then records `settlement_resource_id`.
 
-## Storefront projection families
+**Storefront projection families**
 
 The site authority publishes two independent pull projections:
 
@@ -188,5 +188,13 @@ Each projection family has its own monotonic revision and canonical snapshot dig
 ### Requirement: Capacity accounting is private to the site authority
 The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
 
+#### Scenario: Storefront reads a capacity reservation
+- **WHEN** a storefront reads an admitted reservation
+- **THEN** it receives lifecycle state and reserved dimensions without private bucket or backing-resource identity
+
 ### Requirement: Physical inventory and grouped capacity are separate projections
 A site authority SHALL expose `site_resource_pools` from authoritative domain inventory and `site_capacity_buckets` from current bucket availability. Each projection SHALL have an independent monotonic revision and canonical digest. Grouped capacity SHALL contain deterministic grouping criteria and `resource_count`, SHALL NOT contain physical-resource identifiers, and SHALL NOT be used as an allocation target.
+
+#### Scenario: Storefront refreshes grouped capacity
+- **WHEN** the capacity-bucket projection revision changes
+- **THEN** the storefront can replace that projection independently without receiving physical-resource identifiers or using a group as an allocation target
