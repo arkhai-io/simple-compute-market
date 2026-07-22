@@ -23,6 +23,9 @@ from compute_provisioning_service.container import container
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.middleware.auth import StorefrontAuthMiddleware
 from compute_provisioning_service.middleware.rate_limit import AgentRateLimitMiddleware
+from compute_provisioning_service.services.capacity_inventory import (
+    load_capacity_resource_inventory,
+)
 
 
 logging.basicConfig(
@@ -114,7 +117,7 @@ PROVISIONING_OPENAPI_TAGS = [
         "name": "bare-metal",
         "description": (
             "Bare-metal domain adapter — register and query SSH-access leases "
-            "against site allocations."
+            "against site reservations."
         ),
     },
     {
@@ -152,6 +155,7 @@ PROVISIONING_OPENAPI_TAGS = [
 #   /api/v1/bare-metal/leases/*      <- bare-metal domain lease adapter
 #   /api/v1/pools/*                  <- resource pool registry (CRUD, import, validate)
 # ---------------------------------------------------------------------------
+
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
@@ -190,7 +194,10 @@ app = build_compute_provisioning_app(
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(
-                lambda: _container_module.resolved_capacity_ledger_service
+                lambda: _container_module.resolved_capacity_ledger_service,
+                get_resource_inventory=lambda: load_capacity_resource_inventory(
+                    container.session_factory()
+                ),
             ),
             "/api/v1",
         ),

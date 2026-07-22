@@ -48,7 +48,7 @@ def _future() -> str:
 
 def _hold(**overrides) -> dict:
     base = {
-        "allocation_id": "alloc-1",
+        "capacity_reservation_id": "alloc-1",
         "resource_id": "res-1",
         "vm_host": "kvm1",
         "hold_expires_at": _future(),
@@ -68,16 +68,16 @@ async def test_valid_hold_commits_before_provisioning():
 
     reserved = await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(),
+        held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
     )
 
-    assert reserved["allocation_id"] == "alloc-1"
+    assert reserved["capacity_reservation_id"] == "alloc-1"
     assert capacity.reserve_calls == []  # no fresh reserve raced
     commit = capacity.commit_calls[0]
-    assert commit["allocation_id"] == "alloc-1"
+    assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_hold_committed"
 
@@ -96,7 +96,7 @@ async def test_fresh_reservation_commits_before_provisioning():
     )
 
     commit = capacity.commit_calls[0]
-    assert commit["allocation_id"] == "alloc-1"
+    assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["resource_id"] == "res-1"
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_reservation_committed"
@@ -125,7 +125,7 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(hold_expires_at=past),
+        held_reservation=_hold(hold_expires_at=past),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -142,7 +142,7 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
 
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(),
+        held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -155,7 +155,7 @@ async def test_no_hold_means_no_commit():
     _, stage_event = _events()
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=None,
+        held_reservation=None,
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -350,7 +350,7 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
     assert reserve["deal_ref"]["negotiation_id"] == "neg-1"
 
     hold = await db.load_capacity_hold(negotiation_id="neg-1")
-    assert hold["allocation_id"] == "alloc-1"
+    assert hold["capacity_reservation_id"] == "alloc-1"
     assert hold["payload"]["resource_id"] == "res-1"
 
 

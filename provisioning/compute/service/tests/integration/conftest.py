@@ -417,7 +417,7 @@ async def client_and_queue(
     release_dispatcher = ExecutorReleaseDispatcher(
         {
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
-                release_delegate=bare_metal_operations_service.reclaim_access_for_allocation,
+                release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
             ),
             VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
         },
@@ -432,8 +432,8 @@ async def client_and_queue(
         release_jobs=None,
         executor_release=release_dispatcher,
         capacity_released_notifier=(
-            lambda allocation: notify_storefront_capacity_released(
-                mock_settings, allocation
+            lambda reservation: notify_storefront_capacity_released(
+                mock_settings, reservation
             )
         ),
     )

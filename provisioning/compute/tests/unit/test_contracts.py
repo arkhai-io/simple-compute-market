@@ -19,7 +19,7 @@ from compute_provisioning import (
 
 def _action(**overrides):
     values = {
-        "allocation_id": "alloc-1",
+        "capacity_reservation_id": "alloc-1",
         "deal_ref": {"escrow_uid": "escrow-1"},
         "executor_kind": "vm",
         "action_kind": "create",
@@ -40,7 +40,7 @@ async def test_registry_validates_without_generic_field_inspection():
     submitted = []
 
     async def submit(envelope, value):
-        submitted.append((envelope.allocation_id, value))
+        submitted.append((envelope.capacity_reservation_id, value))
         return "job-1"
 
     adapter = FunctionalExecutorAdapter(
@@ -65,7 +65,7 @@ async def test_event_sink_deduplicates_only_after_successful_delivery():
     sink = IdempotentLifecycleEventSink(lambda event: _record(delivered, event.event_id))
     event = LifecycleEvent(
         event_id="event-1",
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         deal_ref={"escrow_uid": "escrow-1"},
         executor_kind="vm",
         event_kind="usage_ready",
@@ -94,7 +94,7 @@ async def test_client_maps_versioned_action_endpoint():
     ) as client:
         accepted = await client.submit_action(_action())
     assert accepted.job_id == "job-1"
-    assert accepted.allocation_id == "alloc-1"
+    assert accepted.capacity_reservation_id == "alloc-1"
 
 
 @pytest.mark.asyncio
@@ -108,7 +108,7 @@ async def test_client_maps_versioned_job_cancellation_endpoint():
                 "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
                 "job_id": "job-1",
                 "status": "cancelled",
-                "allocation_id": "alloc-1",
+                "capacity_reservation_id": "alloc-1",
                 "deal_ref": {"escrow_uid": "escrow-1"},
                 "executor_kind": "vm",
                 "action_kind": "create",

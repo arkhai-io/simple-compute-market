@@ -24,7 +24,7 @@ class FakeSite:
 
     def __init__(self) -> None:
         self.resources: dict[str, dict] = {}
-        self.allocations: dict[str, dict] = {}
+        self.reservations: dict[str, dict] = {}
         self.events: list[dict] = []
         self._versions = itertools.count(1)
         self._ids = itertools.count(1)
@@ -57,7 +57,7 @@ class FakeSite:
 
     def _available(self, rid: str) -> int:
         held = sum(
-            a["units"] for a in self.allocations.values()
+            a["units"] for a in self.reservations.values()
             if a["resource_id"] == rid
             and a["state"] in ("reserved", "provisioning", "leased", "releasing")
         )
@@ -100,78 +100,78 @@ class FakeSite:
         if path == "/api/v1/capacity/probe":
             return httpx.Response(200, json={"match": self._match(body["claim"])})
 
-        if path == "/api/v1/capacity/reservations":
+        if request.method == "POST" and path == "/api/v1/capacity/reservations":
             match = self._match(body["claim"])
             if match is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation_id = f"alloc-{next(self._ids)}"
-            self.allocations[allocation_id] = {
-                "allocation_id": allocation_id,
+                return httpx.Response(200, json={"reservation": None})
+            capacity_reservation_id = f"alloc-{next(self._ids)}"
+            self.reservations[capacity_reservation_id] = {
+                "capacity_reservation_id": capacity_reservation_id,
                 "resource_id": match["resource_id"],
                 "units": match["allocated_gpu_count"],
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
             }
             self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"allocation": {
+            return httpx.Response(200, json={"reservation": {
                 **match,
-                "allocation_id": allocation_id,
+                "capacity_reservation_id": capacity_reservation_id,
                 "hold_expires_at": None,
             }})
 
         if path.endswith("/commit"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
                 return httpx.Response(404, json={"detail": "not found"})
-            allocation["state"] = "leased"
-            allocation["lease_start_utc"] = body.get("lease_start_utc")
-            allocation["lease_end_utc"] = body.get("lease_end_utc")
-            self._emit("committed", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
+            reservation["state"] = "leased"
+            reservation["lease_start_utc"] = body.get("lease_start_utc")
+            reservation["lease_end_utc"] = body.get("lease_end_utc")
+            self._emit("committed", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": reservation})
 
         if path == "/api/v1/capacity/releases":
-            allocation = None
-            if body.get("allocation_id"):
-                allocation = self.allocations.get(body["allocation_id"])
+            reservation = None
+            if body.get("capacity_reservation_id"):
+                reservation = self.reservations.get(body["capacity_reservation_id"])
             else:
                 escrow = (body.get("deal_ref") or {}).get("escrow_uid")
-                allocation = next(
-                    (a for a in self.allocations.values()
+                reservation = next(
+                    (a for a in self.reservations.values()
                      if a["deal_ref"].get("escrow_uid") == escrow
                      and a["state"] != "released"),
                     None,
                 )
-            if allocation is None or allocation["state"] == "released":
-                return httpx.Response(200, json={"allocation": None})
-            allocation["state"] = "released"
-            allocation["failure_reason"] = body.get("failure_reason")
-            allocation["failure_message"] = body.get("failure_message")
-            self._emit("released", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": {
-                **allocation,
-                "allocated_gpu_count": allocation["units"],
+            if reservation is None or reservation["state"] == "released":
+                return httpx.Response(200, json={"reservation": None})
+            reservation["state"] = "released"
+            reservation["failure_reason"] = body.get("failure_reason")
+            reservation["failure_message"] = body.get("failure_message")
+            self._emit("released", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": {
+                **reservation,
+                "allocated_gpu_count": reservation["units"],
             }})
 
         if path.endswith("/truncate-lease"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation["lease_end_utc"] = body["lease_end_utc"]
-            self._emit("lease_truncated", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
+                return httpx.Response(200, json={"reservation": None})
+            reservation["lease_end_utc"] = body["lease_end_utc"]
+            self._emit("lease_truncated", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": reservation})
 
-        if path == "/api/v1/capacity/allocations":
+        if request.method == "GET" and path == "/api/v1/capacity/reservations":
             escrow = request.url.params.get("escrow_uid")
             state = request.url.params.get("state")
             rows = [
-                a for a in self.allocations.values()
+                a for a in self.reservations.values()
                 if (escrow is None or a["deal_ref"].get("escrow_uid") == escrow)
                 and (state is None or a["state"] == state)
             ]
             return httpx.Response(200, json={
-                "allocations": rows, "total": len(rows),
+                "reservations": rows, "total": len(rows),
             })
 
         if path == "/api/v1/capacity/events":

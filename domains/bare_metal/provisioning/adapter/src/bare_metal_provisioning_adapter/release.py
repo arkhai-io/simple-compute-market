@@ -1,4 +1,4 @@
-"""Bare-metal release adapter for leased site allocations."""
+"""Bare-metal release adapter for leased site reservations."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ BareMetalReleaseDelegate = Callable[
 ]
 
 
-def get_physical_host_id(allocation: dict[str, Any]) -> str | None:
-    executor_ref = allocation.get("executor_ref") or {}
+def get_physical_host_id(reservation: dict[str, Any]) -> str | None:
+    executor_ref = reservation.get("executor_ref") or {}
     if not isinstance(executor_ref, dict):
         return None
     physical_host_id = executor_ref.get(PHYSICAL_HOST_ID_REF_KEY)
@@ -33,10 +33,10 @@ class BareMetalReleaseExecutor:
     ) -> None:
         self._release_delegate = release_delegate
 
-    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
+    async def submit_release(self, reservation: dict[str, Any]) -> str | None:
         if self._release_delegate is None:
             return "direct-release"
-        result = self._release_delegate(allocation)
+        result = self._release_delegate(reservation)
         if inspect.isawaitable(result):
             result = await result
         return result

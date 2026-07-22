@@ -88,20 +88,20 @@ async def fulfill_api_credits_obligation(
     admin_key: str,
     stage_event: StageEventFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
-    held_allocation: dict[str, Any] | None = None,
+    held_reservation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Issue credits and submit settlement fulfillment.
 
-    ``held_allocation`` is the TTL soft hold the negotiation's
-    acceptance placed; its allocation_id rides the issuance call so the
+    ``held_reservation`` is the TTL soft hold the negotiation's
+    acceptance placed; its capacity_reservation_id rides the issuance call so the
     credits service commits that hold (open-ended) instead of racing a
     fresh reserve. The service is the single writer for quota + grant —
     a partial failure between issuance and the on-chain obligation is
     rolled back through the same admin surface.
     """
-    allocation_id = (
-        str(held_allocation.get("allocation_id"))
-        if held_allocation and held_allocation.get("allocation_id")
+    capacity_reservation_id = (
+        str(held_reservation.get("capacity_reservation_id"))
+        if held_reservation and held_reservation.get("capacity_reservation_id")
         else None
     )
     resource_id = offer_resource.get("resource_id")
@@ -110,7 +110,7 @@ async def fulfill_api_credits_obligation(
         if apply_failure_policy is not None:
             try:
                 await apply_failure_policy(
-                    allocation_id=allocation_id,
+                    capacity_reservation_id=capacity_reservation_id,
                     escrow_uid=escrow_uid,
                     listing_id=listing_id,
                     resource_id=resource_id,
@@ -145,7 +145,7 @@ async def fulfill_api_credits_obligation(
             key_mode=key_mode,
             key_id=key_id,
             buyer_wallet=buyer_wallet,
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             resource_id=str(resource_id) if resource_id else None,
         )
     except CreditsServiceError as error:
@@ -162,7 +162,7 @@ async def fulfill_api_credits_obligation(
         key_id=issued_key_id,
         quantity=int(issuance.get("quantity") or quantity),
         balance=issuance.get("balance"),
-        allocation_id=issuance.get("allocation_id") or allocation_id,
+        capacity_reservation_id=issuance.get("capacity_reservation_id") or capacity_reservation_id,
         already_issued=bool(issuance.get("already_issued")),
     )
 

@@ -373,10 +373,10 @@ class LeaseCreate(BaseModel):
             "validate it against any local table."
         )
     )
-    allocation_id: Optional[str] = Field(
+    capacity_reservation_id: Optional[str] = Field(
         default=None,
         description=(
-            "Storefront compute allocation identifier when the lease consumes "
+            "Storefront compute reservation identifier when the lease consumes "
             "part of a larger resource pool. Omitted for legacy whole-resource leases."
         ),
     )
@@ -412,7 +412,7 @@ class LeaseUpdate(BaseModel):
     """Body accepted by ``PATCH /api/v1/leases/{lease_id}``.
 
     All fields are optional; only non-None fields are written to the
-    allocation.  State transitions are performed via dedicated action endpoints.
+    reservation.  State transitions are performed via dedicated action endpoints.
     """
 
     vm_host: Optional[str] = Field(
@@ -513,7 +513,7 @@ class LeaseResponse(BaseModel):
 
     id: str
     resource_id: str
-    allocation_id: Optional[str] = None
+    capacity_reservation_id: Optional[str] = None
     escrow_uid: str
     vm_host: str
     vm_target: str

@@ -1,4 +1,4 @@
-"""Bare-metal lease registration over site allocations."""
+"""Bare-metal lease registration over site reservations."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from market_site.authority import SiteAuthorityPort
 
 
 class BareMetalLeaseService:
-    """Register bare-metal lease metadata on site allocations."""
+    """Register bare-metal lease metadata on site reservations."""
 
     def __init__(self, site_authority: SiteAuthorityPort) -> None:
         self._leases = ExecutorLeaseService(
@@ -39,7 +39,7 @@ class BareMetalLeaseService:
     def register_lease(self, body: BareMetalLeaseCreate) -> dict[str, Any]:
         return self._leases.register_lease(
             ExecutorLeaseRegistration(
-                allocation_id=body.allocation_id,
+                capacity_reservation_id=body.capacity_reservation_id,
                 escrow_uid=body.escrow_uid,
                 executor_kind=BARE_METAL_EXECUTOR_KIND,
                 executor_target=body.machine_id,
@@ -54,8 +54,8 @@ class BareMetalLeaseService:
         )
 
 
-def bare_metal_access_ref(allocation: dict[str, Any]) -> dict[str, Any] | None:
-    executor_ref = allocation.get("executor_ref")
+def bare_metal_access_ref(reservation: dict[str, Any]) -> dict[str, Any] | None:
+    executor_ref = reservation.get("executor_ref")
     if not isinstance(executor_ref, dict):
         return None
     access_ref = {

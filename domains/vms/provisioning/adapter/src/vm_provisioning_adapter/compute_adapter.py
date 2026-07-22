@@ -14,7 +14,7 @@ from market_site.authority import SiteAuthorityPort
 from vm_provisioning_operator.models import CreateVmRequest
 
 from compute_provisioning_service.services.compute_contract_service import (
-    AllocationNotProvisionableError,
+    ReservationNotProvisionableError,
 )
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
@@ -46,13 +46,13 @@ class VmComputeAdapter:
         envelope: ExecutorActionEnvelope,
         validated_parameters: CreateVmRequest,
     ) -> str:
-        allocation = self._site_authority.get_allocation(envelope.allocation_id) or {}
+        reservation = self._site_authority.get_reservation(envelope.capacity_reservation_id) or {}
         host = str(
-            allocation.get("executor_target") or allocation.get("vm_host") or ""
+            reservation.get("executor_target") or reservation.get("vm_host") or ""
         )
         if not host:
-            raise AllocationNotProvisionableError(
-                "VM allocation has no executor target"
+            raise ReservationNotProvisionableError(
+                "VM reservation has no executor target"
             )
         accepted = await self._operations.create_vm(
             host=host,

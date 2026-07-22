@@ -111,26 +111,26 @@ class TestCapacityClientEndpointCoverage:
         )
         assert reserved is not None
         committed = ledger.commit(
-            allocation_id=reserved["allocation_id"],
-            resource_id=reserved["resource_id"],
+            capacity_reservation_id=reserved["capacity_reservation_id"],
+            resource_id="compute-kvm1-001",
             lease_end_utc="2099-01-01T00:00:00+00:00",
         )
         assert committed is not None
 
         snapshot = await client.capacity_snapshot()
-        allocations = await client.list_capacity_allocations(
+        reservations = await client.list_capacity_reservations(
             escrow_uid="escrow-client-capacity"
         )
-        allocation = await client.get_capacity_allocation(reserved["allocation_id"])
+        reservation = await client.get_capacity_reservation(reserved["capacity_reservation_id"])
         truncated = await client.truncate_capacity_lease(
-            reserved["allocation_id"],
+            reserved["capacity_reservation_id"],
             datetime(2099, 1, 2, tzinfo=timezone.utc).isoformat(),
         )
 
         assert snapshot[0]["resource_id"] == "compute-kvm1-001"
-        assert allocations["total"] == 1
-        assert allocation["allocation_id"] == reserved["allocation_id"]
-        assert truncated["allocation_id"] == reserved["allocation_id"]
+        assert reservations["total"] == 1
+        assert reservation["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+        assert truncated["capacity_reservation_id"] == reserved["capacity_reservation_id"]
 
 
 class TestLeaseClientEndpointCoverage:
@@ -150,8 +150,8 @@ class TestLeaseClientEndpointCoverage:
         assert reserved is not None
 
         lease = await client.register_lease(
-            resource_id=reserved["resource_id"],
-            allocation_id=reserved["allocation_id"],
+            resource_id="compute-kvm1-001",
+            capacity_reservation_id=reserved["capacity_reservation_id"],
             escrow_uid="escrow-client-terminate",
             vm_host=HOST,
             vm_target=VM_NAME,

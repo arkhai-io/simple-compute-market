@@ -10,10 +10,10 @@ from compute_provisioning.release import ExecutorReleaseDispatcher
 class RecordingReleaseExecutor:
     def __init__(self, job_id: str | None) -> None:
         self.job_id = job_id
-        self.allocations: list[dict[str, Any]] = []
+        self.reservations: list[dict[str, Any]] = []
 
-    async def submit_release(self, allocation: dict[str, Any]) -> str | None:
-        self.allocations.append(allocation)
+    async def submit_release(self, reservation: dict[str, Any]) -> str | None:
+        self.reservations.append(reservation)
         return self.job_id
 
 
@@ -29,8 +29,8 @@ async def test_dispatcher_routes_by_executor_kind():
     result = await dispatcher.submit_release({"executor_kind": "bare_metal"})
 
     assert result == "bare-metal-job"
-    assert vm_executor.allocations == []
-    assert bare_metal_executor.allocations == [{"executor_kind": "bare_metal"}]
+    assert vm_executor.reservations == []
+    assert bare_metal_executor.reservations == [{"executor_kind": "bare_metal"}]
 
 
 @pytest.mark.asyncio
@@ -41,10 +41,10 @@ async def test_dispatcher_uses_injected_default_executor_kind():
         default_executor_kind="vm",
     )
 
-    result = await dispatcher.submit_release({"allocation_id": "alloc-1"})
+    result = await dispatcher.submit_release({"capacity_reservation_id": "alloc-1"})
 
     assert result == "vm-job"
-    assert vm_executor.allocations == [{"allocation_id": "alloc-1"}]
+    assert vm_executor.reservations == [{"capacity_reservation_id": "alloc-1"}]
 
 
 @pytest.mark.asyncio

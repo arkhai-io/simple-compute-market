@@ -505,9 +505,9 @@ class ProvisioningClient(_ProvisioningClientBase):
         lease_end_utc,
         lease_start_utc=None,
         create_job_id: Optional[str] = None,
-        allocation_id: Optional[str] = None,
+        capacity_reservation_id: Optional[str] = None,
     ) -> dict:
-        """POST /api/v1/leases — register a VM lease on a live allocation."""
+        """POST /api/v1/leases — register a VM lease on a live reservation."""
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
@@ -515,8 +515,8 @@ class ProvisioningClient(_ProvisioningClientBase):
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
-        if allocation_id is not None:
-            body["allocation_id"] = allocation_id
+        if capacity_reservation_id is not None:
+            body["capacity_reservation_id"] = capacity_reservation_id
         if lease_start_utc is not None:
             body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
         if create_job_id is not None:
@@ -602,33 +602,33 @@ class ProvisioningClient(_ProvisioningClientBase):
         """GET /api/v1/capacity/snapshot — advisory availability view."""
         return (await self._get("/api/v1/capacity/snapshot")).get("resources") or []
 
-    async def list_capacity_allocations(
+    async def list_capacity_reservations(
         self,
         state: Optional[str] = None,
         escrow_uid: Optional[str] = None,
     ) -> dict:
-        """GET /api/v1/capacity/allocations — ledger allocations."""
+        """GET /api/v1/capacity/reservations — ledger reservations."""
         params: dict = {}
         if state is not None:
             params["state"] = state
         if escrow_uid is not None:
             params["escrow_uid"] = escrow_uid
-        return await self._get("/api/v1/capacity/allocations", params=params)
+        return await self._get("/api/v1/capacity/reservations", params=params)
 
-    async def get_capacity_allocation(self, allocation_id: str) -> dict:
-        """GET /api/v1/capacity/allocations/{id} — one ledger allocation."""
+    async def get_capacity_reservation(self, capacity_reservation_id: str) -> dict:
+        """GET /api/v1/capacity/reservations/{id} — one ledger reservation."""
         return (await self._get(
-            f"/api/v1/capacity/allocations/{allocation_id}"
-        )).get("allocation") or {}
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}"
+        )).get("reservation") or {}
 
     async def truncate_capacity_lease(
-        self, allocation_id: str, lease_end_utc: str,
+        self, capacity_reservation_id: str, lease_end_utc: str,
     ) -> dict:
-        """POST /api/v1/capacity/allocations/{id}/truncate-lease."""
+        """POST /api/v1/capacity/reservations/{id}/truncate-lease."""
         return (await self._post(
-            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
             {"lease_end_utc": lease_end_utc},
-        )).get("allocation") or {}
+        )).get("reservation") or {}
 
 
 # ---------------------------------------------------------------------------
@@ -941,9 +941,9 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         lease_end_utc,
         lease_start_utc=None,
         create_job_id: Optional[str] = None,
-        allocation_id: Optional[str] = None,
+        capacity_reservation_id: Optional[str] = None,
     ) -> dict:
-        """POST /api/v1/leases — register a VM lease on a live allocation."""
+        """POST /api/v1/leases — register a VM lease on a live reservation."""
         body: dict = {
             "resource_id": resource_id,
             "escrow_uid": escrow_uid,
@@ -951,8 +951,8 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             "vm_target": vm_target,
             "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
         }
-        if allocation_id is not None:
-            body["allocation_id"] = allocation_id
+        if capacity_reservation_id is not None:
+            body["capacity_reservation_id"] = capacity_reservation_id
         if lease_start_utc is not None:
             body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
         if create_job_id is not None:
@@ -1026,33 +1026,33 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         """GET /api/v1/capacity/snapshot — advisory availability view."""
         return self._get("/api/v1/capacity/snapshot").get("resources") or []
 
-    def list_capacity_allocations(
+    def list_capacity_reservations(
         self,
         state: Optional[str] = None,
         escrow_uid: Optional[str] = None,
     ) -> dict:
-        """GET /api/v1/capacity/allocations — ledger allocations."""
+        """GET /api/v1/capacity/reservations — ledger reservations."""
         params: dict = {}
         if state is not None:
             params["state"] = state
         if escrow_uid is not None:
             params["escrow_uid"] = escrow_uid
-        return self._get("/api/v1/capacity/allocations", params=params)
+        return self._get("/api/v1/capacity/reservations", params=params)
 
-    def get_capacity_allocation(self, allocation_id: str) -> dict:
-        """GET /api/v1/capacity/allocations/{id} — one ledger allocation."""
+    def get_capacity_reservation(self, capacity_reservation_id: str) -> dict:
+        """GET /api/v1/capacity/reservations/{id} — one ledger reservation."""
         return self._get(
-            f"/api/v1/capacity/allocations/{allocation_id}"
-        ).get("allocation") or {}
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}"
+        ).get("reservation") or {}
 
     def truncate_capacity_lease(
-        self, allocation_id: str, lease_end_utc: str,
+        self, capacity_reservation_id: str, lease_end_utc: str,
     ) -> dict:
-        """POST /api/v1/capacity/allocations/{id}/truncate-lease."""
+        """POST /api/v1/capacity/reservations/{id}/truncate-lease."""
         return self._post(
-            f"/api/v1/capacity/allocations/{allocation_id}/truncate-lease",
+            f"/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease",
             {"lease_end_utc": lease_end_utc},
-        ).get("allocation") or {}
+        ).get("reservation") or {}
 
     # ------------------------------------------------------------------
     # Lease watchdog control

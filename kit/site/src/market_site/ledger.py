@@ -2,7 +2,7 @@
 
 The authoritative resource ledger for this site
 (docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
-unit-counted resources, allocation holds with their lease tail, and the
+unit-counted resources, reservation holds with their lease tail, and the
 anonymous versioned capacity-event feed. Storefronts reach it through
 the ``/api/v1/capacity`` HTTP surface, which mirrors the
 ``core_storefront.capacity.CapacityClient`` contract verb for verb.
@@ -22,7 +22,7 @@ checked against every dimension a candidate resource declares in its
 
 Legacy single-quantity claims (``units``/``gpu_count``) keep working.
 They translate internally to ``dimensions={"gpu_count": n}``.
-``SiteResource.total_units`` and ``SiteAllocation.units`` remain
+``CapacityBucket.total_units`` and ``CapacityReservation.units`` remain
 service-maintained mirrors for payload and caller compatibility.
 
 ``capacity``/``dimensions`` are the source of truth.
@@ -41,16 +41,19 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Mapping, Optional, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from .db import (
-    HELD_ALLOCATION_STATES,
-    AllocationState,
+    HELD_RESERVATION_STATES,
+    ReservationState,
     CapacityEvent,
-    SiteAllocation,
-    SiteResource,
+    CapacityBucket,
+    CapacityReservation,
+    CapacityReservationDebit,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,7 +134,7 @@ def _windows_overlap(
 _DEFAULT_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units",)
 _DIMENSIONS_CLAIM_KEY = "dimensions"
 
-# The dimension that SiteResource.total_units / SiteAllocation.units /
+# The dimension that CapacityBucket.total_units / CapacityReservation.units /
 # legacy single-quantity claims all mean. Every pre-pass-1 caller speaks
 # only this one dimension, so it's what they mirror into/out of.
 PRIMARY_DIMENSION = "gpu_count"
@@ -148,6 +151,8 @@ def _requested_units(
     if key is None:
         return 1
     raw = claim[key]
+    if isinstance(raw, bool):
+        raise ValueError(f"{key} must be an integer, got {raw!r}")
     try:
         requested = int(raw)
     except (TypeError, ValueError) as exc:
@@ -158,6 +163,8 @@ def _requested_units(
 
 
 def _to_decimal(value: Any, *, label: str) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be numeric, got {value!r}")
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -202,31 +209,10 @@ def _requested_dimensions(
 
 
 def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float | int]:
-    """JSON-column-safe representation: whole numbers as int, else float.
+    """Return a JSON-safe numeric dimension map.
 
-    KNOWN LIMITATION (code review, 2026-07-20): a non-integral amount
-    loses exact precision through this float conversion, e.g. 0.1 can't
-    be represented exactly in binary floating point. Pass 1's actual VM
-    dimensions (gpu_count/vcpu_count/ram_gb/disk_gb) are always integral
-    in practice, so this doesn't currently bite -- deferred rather than
-    fixed here per the same design-review decision that scoped pass 1 to
-    integral dimensions.
-
-    The suggested fix (serialize as a canonical decimal string via
-    ``format(amount, "f")``, parse back through ``Decimal`` on read) is
-    NOT purely a change to this function: `PhysicalSettlementScheduler`
-    (`provisioning/compute/service/src/compute_provisioning_service/services/
-    physical_settlement_scheduler.py`) does raw ``+``/``>=`` arithmetic
-    directly on `_resource_payload()`'s output in the same process (no
-    JSON round-trip -- it holds a direct `CapacityLedgerService`
-    reference), so a string-valued `available` map would break that
-    arithmetic immediately, not just at a wire boundary. A correct fix
-    needs the scheduler to Decimal-parse before arithmetic too, plus
-    updating every test that currently asserts numeric literals against
-    these payloads (`test_ledger.py`, `test_physical_settlement_
-    scheduler.py`, `test_remote_capacity_client.py`,
-    `test_two_phase_reserve.py`, `test_database.py`). Revisit if a real
-    fractional dimension is ever needed.
+    Current governed dimensions are integral. Non-integral values remain
+    numeric for compatibility with in-process scheduling arithmetic.
     """
     result: dict[str, float | int] = {}
     for key, amount in dimensions.items():
@@ -237,6 +223,8 @@ def _serialize_dimensions(dimensions: Mapping[str, Decimal]) -> dict[str, float 
 
 def _to_decimal_nonneg(value: Any, *, label: str) -> Decimal:
     """Like :func:`_to_decimal` but allows zero (a declared-but-empty dimension)."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be numeric, got {value!r}")
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -248,10 +236,10 @@ def _to_decimal_nonneg(value: Any, *, label: str) -> Decimal:
     return amount
 
 
-def _resource_capacity(resource: SiteResource) -> dict[str, Decimal]:
+def _resource_capacity(resource: CapacityBucket) -> dict[str, Decimal]:
     """A resource's declared total capacity per dimension.
 
-    Falls back to ``{"gpu_count": total_units}`` for pre-migration rows
+    Falls back to ``{"gpu_count": total_units}`` when the dimension map is absent
     that have never had ``capacity`` populated.
     """
     if resource.capacity:
@@ -262,18 +250,18 @@ def _resource_capacity(resource: SiteResource) -> dict[str, Decimal]:
     return {PRIMARY_DIMENSION: Decimal(int(resource.total_units or 0))}
 
 
-def _allocation_dimensions(allocation: SiteAllocation) -> dict[str, Decimal]:
-    """An allocation's held quantity per dimension.
+def _reservation_dimensions(reservation: CapacityReservation) -> dict[str, Decimal]:
+    """An reservation's held quantity per dimension.
 
-    Falls back to ``{"gpu_count": units}`` for pre-migration rows that
+    Falls back to ``{"gpu_count": units}`` for rows that
     have never had ``dimensions`` populated.
     """
-    if allocation.dimensions:
+    if reservation.dimensions:
         return {
             str(key): Decimal(str(value))
-            for key, value in allocation.dimensions.items()
+            for key, value in reservation.dimensions.items()
         }
-    return {PRIMARY_DIMENSION: Decimal(int(allocation.units or 0))}
+    return {PRIMARY_DIMENSION: Decimal(int(reservation.units or 0))}
 
 
 def _capacity_change_kind(
@@ -299,34 +287,117 @@ def _capacity_change_kind(
     return "capacity_changed"
 
 
-def _resource_matches(
-    resource: SiteResource,
+@dataclass(frozen=True)
+class ResourceFeasibilityView:
+    """Canonical resource facts used by admission and scheduling."""
+
+    resource_id: str
+    pool_id: str
+    resource_kind: str
+    available: Mapping[str, Any]
+    attributes: Mapping[str, Any]
+
+
+def resource_feasibility_view(
+    *,
+    resource_id: str,
+    pool_id: str | None,
+    resource_kind: str,
+    available: Mapping[str, Any],
+    attributes: Mapping[str, Any] | None = None,
+    resource_subtype: str | None = None,
+    value: Any = None,
+    units: Any = None,
+) -> ResourceFeasibilityView:
+    """Build the immutable, authoritative view used for feasibility checks."""
+    normalized = {
+        "resource_id": resource_id,
+        "resource_type": resource_kind,
+        "resource_subtype": resource_subtype,
+        "value": value,
+        "units": units,
+        "gpu_count": units,
+        **dict(attributes or {}),
+    }
+    authoritative_pool_id = pool_id or resource_id
+    normalized["pool_id"] = authoritative_pool_id
+    return ResourceFeasibilityView(
+        resource_id=resource_id,
+        pool_id=authoritative_pool_id,
+        resource_kind=resource_kind,
+        available=MappingProxyType(dict(available)),
+        attributes=MappingProxyType(normalized),
+    )
+
+
+def resource_satisfies_requirement(
+    *,
+    resource: ResourceFeasibilityView | None = None,
+    resource_kind: str | None = None,
+    available: Mapping[str, Any] | None = None,
+    attributes: Mapping[str, Any] | None = None,
+    required_resource_kind: str | None,
+    required_dimensions: Mapping[str, Any],
+    required_attributes: Mapping[str, Any] = {},
+) -> bool:
+    """Return whether a canonical resource view satisfies a requirement.
+
+    The scalar arguments remain as a compatibility surface for direct callers;
+    service code supplies the canonical view.
+    """
+    if resource is None:
+        resource = resource_feasibility_view(
+            resource_id="",
+            pool_id="",
+            resource_kind=resource_kind or "",
+            available=available or {},
+            attributes=attributes,
+        )
+    if required_resource_kind is not None and resource.resource_kind != required_resource_kind:
+        return False
+    if any(
+        resource.available.get(dimension, 0) < amount
+        for dimension, amount in required_dimensions.items()
+    ):
+        return False
+    return all(
+        resource.attributes.get(key) == value
+        for key, value in required_attributes.items()
+    )
+
+
+def _resource_feasibility_view(
+    resource: CapacityBucket, available: Mapping[str, Any]
+) -> ResourceFeasibilityView:
+    return resource_feasibility_view(
+        resource_id=resource.backing_resource_id,
+        pool_id=resource.pool_id,
+        resource_kind=resource.resource_type,
+        available=available,
+        attributes=resource.attributes,
+        resource_subtype=resource.resource_subtype,
+        value=resource.total_units,
+        units=resource.total_units,
+    )
+
+
+def _split_claim_requirement(
     claim: Mapping[str, Any] | None,
     *,
     unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
-) -> bool:
-    if not claim:
-        return True
-    attrs = resource.attributes or {}
-    top_level = {
-        "resource_id": resource.resource_id,
-        # Pools are an aggregator (storefront) concept; the degenerate
-        # single-resource pool is keyed by the resource_id, which is what
-        # claims carry for un-pooled inventory.
-        "pool_id": resource.resource_id,
-        "resource_type": resource.resource_type,
-        "resource_subtype": resource.resource_subtype,
-        "value": resource.total_units,
-        "units": resource.total_units,
-        "gpu_count": resource.total_units,
+) -> tuple[str | None, dict[str, Any]]:
+    """Split a claim into an optional resource-kind constraint and the
+    remaining exact-match attribute requirements, excluding quantity keys.
+    """
+    claim = claim or {}
+    attributes = {
+        key: expected
+        for key, expected in claim.items()
+        if key not in unit_claim_keys
+        and key != _DIMENSIONS_CLAIM_KEY
+        and key != "resource_type"
     }
-    for key, expected in claim.items():
-        if key in unit_claim_keys or key == _DIMENSIONS_CLAIM_KEY:
-            continue
-        actual = attrs.get(key, top_level.get(key))
-        if actual != expected:
-            return False
-    return True
+    return claim.get("resource_type"), attributes
 
 
 class CapacityLedgerService:
@@ -372,6 +443,7 @@ class CapacityLedgerService:
         total_units: int,
         resource_type: str = "compute.gpu",
         resource_subtype: str | None = None,
+        pool_id: str | None = None,
         attributes: Mapping[str, Any] | None = None,
         capacity: Mapping[str, Any] | None = None,
         enabled: bool = True,
@@ -395,9 +467,9 @@ class CapacityLedgerService:
         appearing is unambiguous.
         """
         with self._lock, self._session_factory() as db:
-            row = db.get(SiteResource, resource_id)
-            old_capacity = _resource_capacity(row) if row is not None else {}
-            old_enabled = bool(row.enabled) if row is not None else None
+            bucket = self._bucket_by_backing_resource(db, resource_id)
+            old_capacity = _resource_capacity(bucket) if bucket is not None else {}
+            old_enabled = bool(bucket.enabled) if bucket is not None else None
             new_dimensions = dict(capacity or {})
             if PRIMARY_DIMENSION in new_dimensions:
                 supplied = _to_decimal_nonneg(
@@ -415,10 +487,13 @@ class CapacityLedgerService:
                 for key, value in new_dimensions.items()
             }
             mirrored_units = int(new_capacity[PRIMARY_DIMENSION])
-            is_new = row is None
-            if is_new:
-                row = SiteResource(
-                    resource_id=resource_id,
+            is_new = bucket is None
+            effective_pool_id = pool_id
+            if bucket is None:
+                bucket = CapacityBucket(
+                    capacity_bucket_id=str(uuid.uuid4()),
+                    backing_resource_id=resource_id,
+                    pool_id=effective_pool_id,
                     resource_type=resource_type,
                     resource_subtype=resource_subtype,
                     total_units=mirrored_units,
@@ -426,14 +501,15 @@ class CapacityLedgerService:
                     attributes=dict(attributes or {}),
                     enabled=enabled,
                 )
-                db.add(row)
+                db.add(bucket)
             else:
-                row.resource_type = resource_type
-                row.resource_subtype = resource_subtype
-                row.total_units = mirrored_units
-                row.capacity = _serialize_dimensions(new_capacity)
-                row.attributes = dict(attributes or {})
-                row.enabled = enabled
+                bucket.pool_id = effective_pool_id
+                bucket.resource_type = resource_type
+                bucket.resource_subtype = resource_subtype
+                bucket.total_units = mirrored_units
+                bucket.capacity = _serialize_dimensions(new_capacity)
+                bucket.attributes = dict(attributes or {})
+                bucket.enabled = enabled
             delta = {
                 key: new_capacity.get(key, Decimal(0)) - old_capacity.get(key, Decimal(0))
                 for key in set(new_capacity) | set(old_capacity)
@@ -447,14 +523,14 @@ class CapacityLedgerService:
                 dimensions=_serialize_dimensions(delta),
             ))
             db.commit()
-            return self._resource_payload(db, db.get(SiteResource, resource_id))
+            return self._resource_payload(db, bucket)
 
     def list_resources(self) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
             rows = (
-                db.query(SiteResource)
-                .order_by(SiteResource.updated_at.asc())
+                db.query(CapacityBucket)
+                .order_by(CapacityBucket.updated_at.asc())
                 .all()
             )
             return [self._resource_payload(db, row) for row in rows]
@@ -516,12 +592,11 @@ class CapacityLedgerService:
                     datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
                 ).isoformat()
             mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
-            allocation = SiteAllocation(
-                allocation_id=str(uuid.uuid4()),
-                resource_id=resource.resource_id,
+            reservation = CapacityReservation(
+                capacity_reservation_id=str(uuid.uuid4()),
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
-                state=AllocationState.reserved.value,
+                state=ReservationState.reserved.value,
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
@@ -534,10 +609,16 @@ class CapacityLedgerService:
                 lease_start_utc=window_start.isoformat() if window_start else None,
                 lease_end_utc=window_end.isoformat() if window_end else None,
             )
-            db.add(allocation)
+            db.add(reservation)
+            db.flush()
+            db.add(CapacityReservationDebit(
+                capacity_reservation_id=reservation.capacity_reservation_id,
+                capacity_bucket_id=resource.capacity_bucket_id,
+                dimensions=_serialize_dimensions(requested),
+            ))
             db.add(CapacityEvent(
                 kind="reserved",
-                resource_id=resource.resource_id,
+                resource_id=resource.backing_resource_id,
                 dimensions=_serialize_dimensions({k: -v for k, v in requested.items()}),
             ))
             db.commit()
@@ -546,50 +627,63 @@ class CapacityLedgerService:
                 for key in set(available) | set(requested)
             }
             payload = self._match_payload(resource, available_after, requested)
-            payload["allocation_id"] = allocation.allocation_id
+            payload["capacity_reservation_id"] = reservation.capacity_reservation_id
+            payload["settlement_resource_id"] = reservation.settlement_resource_id
             payload["hold_expires_at"] = hold_expires_at
             return payload
 
     def assign_settlement_resource(
-        self, *, allocation_id: str, settlement_resource_id: str
+        self, *, capacity_reservation_id: str, settlement_resource_id: str
     ) -> dict[str, Any] | None:
-        """Atomically bind a held allocation to the selected physical resource.
+        """Atomically bind a held reservation to the selected physical resource.
 
-        Availability is derived from held allocations, so moving resource_id
-        transfers the existing consumption rather than subtracting it again.
+        Availability accounting is unchanged by this method: it still keys
+        off ``resource_id``, which this method still moves on an actual
+        reassignment, exactly as before ``settlement_resource_id`` existed.
+        ``settlement_resource_id`` is a scheduling-state marker, not a
+        second accounting key. After assignment it identifies the concrete
+        resource selected for fulfillment.
+
         Repeating the same assignment is idempotent.
         """
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
-            allocation = self._find_allocation(db, allocation_id=allocation_id)
-            if allocation is None:
+            reservation = self._find_reservation(db, capacity_reservation_id=capacity_reservation_id)
+            if reservation is None:
                 return None
-            if allocation.state not in HELD_ALLOCATION_STATES:
+            if reservation.state not in HELD_RESERVATION_STATES:
                 raise CapacityConflictError(
-                    f"allocation {allocation_id} is {allocation.state}; cannot assign settlement resource"
+                    f"reservation {capacity_reservation_id} is {reservation.state}; cannot assign settlement resource"
                 )
-            if allocation.resource_id == settlement_resource_id:
-                return self._allocation_payload(allocation)
-            destination = db.get(SiteResource, settlement_resource_id)
+            if self._backing_resource_id(db, reservation.capacity_reservation_id) == settlement_resource_id:
+                if reservation.settlement_resource_id != settlement_resource_id:
+                    reservation.settlement_resource_id = settlement_resource_id
+                    db.commit()
+                return self._reservation_payload(reservation)
+            destination = self._bucket_by_backing_resource(db, settlement_resource_id)
             if destination is None or not destination.enabled:
                 raise CapacityConflictError(
                     f"settlement resource {settlement_resource_id!r} is unavailable"
                 )
-            allocation_dims = _allocation_dimensions(allocation)
+            reservation_dims = _reservation_dimensions(reservation)
             held = self._held_dimensions(db, settlement_resource_id)
             capacity = _resource_capacity(destination)
             insufficient = any(
                 capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
-                for dim, amount in allocation_dims.items()
+                for dim, amount in reservation_dims.items()
             )
             if insufficient:
                 raise CapacityConflictError(
                     f"settlement resource {settlement_resource_id!r} lacks capacity"
                 )
-            source_id = allocation.resource_id
-            allocation.resource_id = settlement_resource_id
-            allocation.vm_host = (destination.attributes or {}).get("vm_host")
-            serialized_dims = _serialize_dimensions(allocation_dims)
+            source_id = self._backing_resource_id(db, reservation.capacity_reservation_id)
+            debit = self._debit_for_reservation(db, reservation.capacity_reservation_id)
+            if debit is None:
+                raise CapacityConflictError(f"reservation {capacity_reservation_id} has no capacity debit")
+            debit.capacity_bucket_id = destination.capacity_bucket_id
+            reservation.settlement_resource_id = settlement_resource_id
+            reservation.vm_host = (destination.attributes or {}).get("vm_host")
+            serialized_dims = _serialize_dimensions(reservation_dims)
             db.add(CapacityEvent(
                 kind="capacity_released_for_reassignment",
                 resource_id=source_id,
@@ -598,23 +692,23 @@ class CapacityLedgerService:
             db.add(CapacityEvent(
                 kind="capacity_assigned_for_settlement",
                 resource_id=settlement_resource_id,
-                dimensions=_serialize_dimensions({k: -v for k, v in allocation_dims.items()}),
+                dimensions=_serialize_dimensions({k: -v for k, v in reservation_dims.items()}),
             ))
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def commit(
         self,
         *,
-        resource_id: str,
-        allocation_id: str | None = None,
+        resource_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> dict[str, Any] | None:
         """Confirm a reservation into an active lease.
 
-        Idempotent: committing an already-leased allocation records the
+        Idempotent: committing an already-leased reservation records the
         derived lease window and clears any TTL hold. ``lease_end_utc=None``
         commits an open-ended hold (no lease tail — the watchdog never sees it).
         """
@@ -623,93 +717,93 @@ class CapacityLedgerService:
             lease_end_utc=lease_end_utc,
         )
         with self._lock, self._session_factory() as db:
-            allocation = self._find_allocation(
-                db, allocation_id=allocation_id,
-                resource_id=None if allocation_id else resource_id,
+            reservation = self._find_reservation(
+                db, capacity_reservation_id=capacity_reservation_id,
+                resource_id=None if capacity_reservation_id else resource_id,
             )
-            if allocation is None:
+            if reservation is None:
                 return None
-            if allocation.state not in HELD_ALLOCATION_STATES:
+            if reservation.state not in HELD_RESERVATION_STATES:
                 raise CapacityConflictError(
-                    f"allocation {allocation.allocation_id} is "
-                    f"{allocation.state}; cannot commit"
+                    f"reservation {reservation.capacity_reservation_id} is "
+                    f"{reservation.state}; cannot commit"
                 )
-            allocation.state = AllocationState.leased.value
+            reservation.state = ReservationState.leased.value
             if window_end is not None:
-                allocation.lease_end_utc = str(lease_end_utc)
-            allocation.hold_expires_at = None
+                reservation.lease_end_utc = str(lease_end_utc)
+            reservation.hold_expires_at = None
             if window_start is not None:
-                allocation.lease_start_utc = window_start.isoformat()
-            elif not allocation.lease_start_utc:
-                allocation.lease_start_utc = datetime.now(timezone.utc).isoformat()
-            db.add(CapacityEvent(kind="committed", resource_id=allocation.resource_id))
+                reservation.lease_start_utc = window_start.isoformat()
+            elif not reservation.lease_start_utc:
+                reservation.lease_start_utc = datetime.now(timezone.utc).isoformat()
+            db.add(CapacityEvent(kind="committed", resource_id=self._backing_resource_id(db, reservation.capacity_reservation_id)))
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def release(
         self,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
-        state: str = AllocationState.released.value,
+        state: str = ReservationState.released.value,
         failure_reason: str | None = None,
         failure_message: str | None = None,
     ) -> dict[str, Any] | None:
-        """Return a held/leased allocation's capacity to the pool."""
+        """Return a held/leased reservation's capacity to the pool."""
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
         with self._lock, self._session_factory() as db:
-            allocation = self._find_allocation(
-                db, allocation_id=allocation_id,
-                escrow_uid=None if allocation_id else escrow_uid,
+            reservation = self._find_reservation(
+                db, capacity_reservation_id=capacity_reservation_id,
+                escrow_uid=None if capacity_reservation_id else escrow_uid,
             )
-            if allocation is None:
+            if reservation is None:
                 return None
-            if allocation.state in {
-                AllocationState.released.value,
-                AllocationState.force_released.value,
+            if reservation.state in {
+                ReservationState.released.value,
+                ReservationState.force_released.value,
             }:
-                return self._allocation_payload(allocation)
-            if allocation.state not in HELD_ALLOCATION_STATES:
+                return self._reservation_payload(reservation)
+            if reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            allocation.state = state
-            allocation.released_at = datetime.now(timezone.utc).isoformat()
-            allocation.failure_reason = failure_reason
-            allocation.failure_message = failure_message
+            reservation.state = state
+            reservation.released_at = datetime.now(timezone.utc).isoformat()
+            reservation.failure_reason = failure_reason
+            reservation.failure_message = failure_message
             db.add(CapacityEvent(
                 kind="released",
-                resource_id=allocation.resource_id,
-                dimensions=_serialize_dimensions(_allocation_dimensions(allocation)),
+                resource_id=self._backing_resource_id(db, reservation.capacity_reservation_id),
+                dimensions=_serialize_dimensions(_reservation_dimensions(reservation)),
             ))
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def truncate_lease(
         self,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early; injected compute lifecycle observes the new expiry."""
         with self._lock, self._session_factory() as db:
-            allocation = self._find_allocation(db, allocation_id=allocation_id)
-            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+            reservation = self._find_reservation(db, capacity_reservation_id=capacity_reservation_id)
+            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            allocation.state = AllocationState.leased.value
-            allocation.lease_end_utc = str(lease_end_utc)
+            reservation.state = ReservationState.leased.value
+            reservation.lease_end_utc = str(lease_end_utc)
             db.add(CapacityEvent(
-                kind="lease_truncated", resource_id=allocation.resource_id,
+                kind="lease_truncated", resource_id=self._backing_resource_id(db, reservation.capacity_reservation_id),
             ))
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     # ------------------------------------------------------------------
-    # Lease tail (the merged vm_leases half of the allocation row)
+    # Lease tail (the merged vm_leases half of the reservation row)
     # ------------------------------------------------------------------
 
     def attach_lease(
         self,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         escrow_uid: str | None = None,
         vm_host: str | None = None,
         vm_target: str | None = None,
@@ -720,91 +814,91 @@ class CapacityLedgerService:
         lease_end_utc: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Record the lease tail on an existing held allocation.
+        """Record the lease tail on an existing held reservation.
 
         The ledger-mode replacement for registering a ``vm_leases`` row:
-        the allocation and its lease are one record, so the watchdog
+        the reservation and its lease are one record, so the watchdog
         tears down and releases in one local transaction. Emits no
         capacity event — availability already moved at commit time.
-        Returns None when no held allocation matches (the caller falls
+        Returns None when no held reservation matches (the caller falls
         back to the legacy lease table).
         """
         with self._lock, self._session_factory() as db:
-            allocation = self._find_allocation(
-                db, allocation_id=allocation_id,
-                escrow_uid=None if allocation_id else escrow_uid,
+            reservation = self._find_reservation(
+                db, capacity_reservation_id=capacity_reservation_id,
+                escrow_uid=None if capacity_reservation_id else escrow_uid,
             )
-            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
             if vm_host:
-                allocation.vm_host = vm_host
+                reservation.vm_host = vm_host
             if vm_target:
-                allocation.vm_target = vm_target
+                reservation.vm_target = vm_target
             self._sync_executor_fields(
-                allocation,
+                reservation,
                 executor_kind=executor_kind,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
             )
             if lease_start_utc:
-                allocation.lease_start_utc = str(lease_start_utc)
+                reservation.lease_start_utc = str(lease_start_utc)
             if lease_end_utc:
-                allocation.lease_end_utc = str(lease_end_utc)
+                reservation.lease_end_utc = str(lease_end_utc)
             if create_job_id:
-                allocation.create_job_id = create_job_id
-            if escrow_uid and not allocation.escrow_uid:
-                allocation.escrow_uid = escrow_uid
-            allocation.state = AllocationState.leased.value
+                reservation.create_job_id = create_job_id
+            if escrow_uid and not reservation.escrow_uid:
+                reservation.escrow_uid = escrow_uid
+            reservation.state = ReservationState.leased.value
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def list_lease_due(self, now: datetime) -> list[dict[str, Any]]:
-        """Leased allocations whose lease_end_utc has passed."""
+        """Leased reservations whose lease_end_utc has passed."""
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         due: list[dict[str, Any]] = []
         with self._lock, self._session_factory() as db:
             rows = (
-                db.query(SiteAllocation)
+                db.query(CapacityReservation)
                 .filter(
-                    SiteAllocation.state == AllocationState.leased.value,
-                    SiteAllocation.lease_end_utc.isnot(None),
+                    CapacityReservation.state == ReservationState.leased.value,
+                    CapacityReservation.lease_end_utc.isnot(None),
                 )
                 .all()
             )
-            for allocation in rows:
-                lease_end = parse_utc(allocation.lease_end_utc)
+            for reservation in rows:
+                lease_end = parse_utc(reservation.lease_end_utc)
                 if lease_end is not None and lease_end <= now:
-                    due.append(self._allocation_payload(allocation))
+                    due.append(self._reservation_payload(reservation))
         return due
 
     def begin_releasing(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Transition a leased allocation to releasing (teardown in flight).
+        """Transition a leased reservation to releasing (teardown in flight).
 
         No capacity event: releasing still holds the units — the workload
         may not be torn down yet.
         """
         with self._lock, self._session_factory() as db:
-            allocation = db.get(SiteAllocation, allocation_id)
-            if allocation is None or allocation.state not in HELD_ALLOCATION_STATES:
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            allocation.state = AllocationState.releasing.value
+            reservation.state = ReservationState.releasing.value
             self._sync_release_job_fields(
-                allocation,
+                reservation,
                 release_job_id=release_job_id or vm_remove_job_id,
             )
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def update_lease_fields(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         vm_host: str | None = None,
         vm_target: str | None = None,
@@ -817,73 +911,73 @@ class CapacityLedgerService:
         release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Update lease-tail fields on a non-terminal allocation.
+        """Update lease-tail fields on a non-terminal reservation.
 
         Unlike ``attach_lease``, this operates on any non-terminal state
-        (including ``releasing``) and never changes the allocation state.
-        Returns ``None`` when the allocation does not exist or is already
+        (including ``releasing``) and never changes the reservation state.
+        Returns ``None`` when the reservation does not exist or is already
         terminal.  Used by the operator PATCH endpoint to update expiry time,
         host coordinates, or job references without driving a state transition.
         """
         with self._lock, self._session_factory() as db:
-            allocation = db.get(SiteAllocation, allocation_id)
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
             terminal = {
-                AllocationState.released.value,
-                AllocationState.force_released.value,
-                AllocationState.provisioning_failed.value,
+                ReservationState.released.value,
+                ReservationState.force_released.value,
+                ReservationState.provisioning_failed.value,
             }
-            if allocation is None or allocation.state in terminal:
+            if reservation is None or reservation.state in terminal:
                 return None
             if vm_host is not None:
-                allocation.vm_host = vm_host
+                reservation.vm_host = vm_host
             if vm_target is not None:
-                allocation.vm_target = vm_target
+                reservation.vm_target = vm_target
             self._sync_executor_fields(
-                allocation,
+                reservation,
                 executor_kind=executor_kind,
                 executor_target=executor_target,
                 executor_ref=executor_ref,
             )
             if lease_start_utc is not None:
-                allocation.lease_start_utc = str(lease_start_utc)
+                reservation.lease_start_utc = str(lease_start_utc)
             if lease_end_utc is not None:
-                allocation.lease_end_utc = str(lease_end_utc)
+                reservation.lease_end_utc = str(lease_end_utc)
             self._sync_release_job_fields(
-                allocation,
+                reservation,
                 release_job_id=release_job_id or vm_remove_job_id,
             )
             if create_job_id is not None:
-                allocation.create_job_id = create_job_id
+                reservation.create_job_id = create_job_id
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     def find_active_lease_by_vm_target(
         self, vm_host: str, vm_target: str
     ) -> dict[str, Any] | None:
-        """Return the first active (held) lease allocation for a VM, or None.
+        """Return the first active (held) lease reservation for a VM, or None.
 
         Used by the ``POST /vms/{vm_name}/remove`` endpoint to cancel any
         watchdog-managed lease before submitting the explicit removal job,
         avoiding a double-fire when the lease would otherwise expire later.
         """
         with self._lock, self._session_factory() as db:
-            allocation = (
-                db.query(SiteAllocation)
+            reservation = (
+                db.query(CapacityReservation)
                 .filter(
-                    SiteAllocation.vm_host == vm_host,
-                    SiteAllocation.vm_target == vm_target,
-                    SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
-                    SiteAllocation.lease_end_utc.isnot(None),
+                    CapacityReservation.vm_host == vm_host,
+                    CapacityReservation.vm_target == vm_target,
+                    CapacityReservation.state.in_(HELD_RESERVATION_STATES),
+                    CapacityReservation.lease_end_utc.isnot(None),
                 )
-                .order_by(SiteAllocation.created_at.desc())
+                .order_by(CapacityReservation.created_at.desc())
                 .first()
             )
-            return self._allocation_payload(allocation) if allocation else None
+            return self._reservation_payload(reservation) if reservation else None
 
 
-    def update_allocation_state(
+    def update_reservation_state(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         state: str,
         failure_reason: str | None = None,
@@ -891,7 +985,7 @@ class CapacityLedgerService:
         vm_remove_job_id: str | None = None,
         release_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Update a site allocation state without emitting capacity events.
+        """Update a site reservation state without emitting capacity events.
 
         This is a generic state mutation primitive for lifecycle services.
         Releasing, release_failed, and unmanaged still consume capacity; use
@@ -899,20 +993,20 @@ class CapacityLedgerService:
         published.
         """
         with self._lock, self._session_factory() as db:
-            allocation = db.get(SiteAllocation, allocation_id)
-            if allocation is None:
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            if reservation is None:
                 return None
-            allocation.state = str(state)
+            reservation.state = str(state)
             if failure_reason is not None:
-                allocation.failure_reason = failure_reason
+                reservation.failure_reason = failure_reason
             if failure_message is not None:
-                allocation.failure_message = failure_message
+                reservation.failure_message = failure_message
             self._sync_release_job_fields(
-                allocation,
+                reservation,
                 release_job_id=release_job_id or vm_remove_job_id,
             )
             db.commit()
-            return self._allocation_payload(allocation)
+            return self._reservation_payload(reservation)
 
     # ------------------------------------------------------------------
     # Event feed
@@ -956,32 +1050,70 @@ class CapacityLedgerService:
             return events, int(latest)
 
     # ------------------------------------------------------------------
-    # Allocation queries (watchdog / deal-event plumbing)
+    # Reservation queries (watchdog / deal-event plumbing)
     # ------------------------------------------------------------------
 
-    def get_allocation(self, allocation_id: str) -> dict[str, Any] | None:
+    def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
         with self._lock, self._session_factory() as db:
-            allocation = db.get(SiteAllocation, allocation_id)
-            return self._allocation_payload(allocation) if allocation else None
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            return self._reservation_payload(reservation) if reservation else None
 
-    def get_allocation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
+    def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
         with self._lock, self._session_factory() as db:
-            allocation = self._find_allocation(db, escrow_uid=escrow_uid)
-            return self._allocation_payload(allocation) if allocation else None
+            reservation = self._find_reservation(db, escrow_uid=escrow_uid)
+            return self._reservation_payload(reservation) if reservation else None
 
-    def list_allocations(
+    def get_reservation_backing_resource_id(
+        self, capacity_reservation_id: str
+    ) -> str | None:
+        """Return the private inventory resource currently backing a reservation.
+
+        This lookup is for provisioning and scheduling bookkeeping. The backing
+        resource is intentionally absent from the storefront-facing reservation
+        payload because admission does not create a durable placement commitment.
+        """
+        with self._lock, self._session_factory() as db:
+            return self._backing_resource_id(db, capacity_reservation_id)
+
+    def list_reservations(
         self, *, state: str | None = None
     ) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as db:
-            q = db.query(SiteAllocation)
+            q = db.query(CapacityReservation)
             if state is not None:
-                q = q.filter(SiteAllocation.state == state)
-            rows = q.order_by(SiteAllocation.created_at.asc()).all()
-            return [self._allocation_payload(row) for row in rows]
+                q = q.filter(CapacityReservation.state == state)
+            rows = q.order_by(CapacityReservation.created_at.asc()).all()
+            return [self._reservation_payload(row) for row in rows]
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _debit_for_reservation(
+        db: Session, capacity_reservation_id: str
+    ) -> CapacityReservationDebit | None:
+        return db.get(CapacityReservationDebit, capacity_reservation_id)
+
+    @staticmethod
+    def _bucket_by_backing_resource(
+        db: Session, backing_resource_id: str
+    ) -> CapacityBucket | None:
+        return (
+            db.query(CapacityBucket)
+            .filter(CapacityBucket.backing_resource_id == backing_resource_id)
+            .one_or_none()
+        )
+
+    def _bucket_for_reservation(
+        self, db: Session, capacity_reservation_id: str
+    ) -> CapacityBucket | None:
+        debit = self._debit_for_reservation(db, capacity_reservation_id)
+        return db.get(CapacityBucket, debit.capacity_bucket_id) if debit is not None else None
+
+    def _backing_resource_id(self, db: Session, capacity_reservation_id: str) -> str | None:
+        bucket = self._bucket_for_reservation(db, capacity_reservation_id)
+        return bucket.backing_resource_id if bucket is not None else None
 
     def expire_due_holds(self) -> None:
         """Public entry point for a periodic watchdog to sweep expired holds.
@@ -1005,28 +1137,28 @@ class CapacityLedgerService:
         """
         now = datetime.now(timezone.utc)
         stale = (
-            db.query(SiteAllocation)
+            db.query(CapacityReservation)
             .filter(
-                SiteAllocation.state == AllocationState.reserved.value,
-                SiteAllocation.hold_expires_at.isnot(None),
+                CapacityReservation.state == ReservationState.reserved.value,
+                CapacityReservation.hold_expires_at.isnot(None),
             )
             .all()
         )
         lapsed = False
-        for allocation in stale:
-            expires = parse_utc(allocation.hold_expires_at)
+        for reservation in stale:
+            expires = parse_utc(reservation.hold_expires_at)
             if expires is None or expires > now:
                 continue
-            allocation.state = AllocationState.released.value
-            allocation.released_at = now.isoformat()
-            allocation.failure_reason = "hold_expired"
+            reservation.state = ReservationState.released.value
+            reservation.released_at = now.isoformat()
+            reservation.failure_reason = "hold_expired"
             db.add(CapacityEvent(
-                kind="released", resource_id=allocation.resource_id,
+                kind="released", resource_id=self._backing_resource_id(db, reservation.capacity_reservation_id),
             ))
             lapsed = True
             logger.info(
-                "[CAPACITY] TTL hold expired for allocation %s (resource=%s)",
-                allocation.allocation_id, allocation.resource_id,
+                "[CAPACITY] TTL hold expired for reservation %s (resource=%s)",
+                reservation.capacity_reservation_id, self._backing_resource_id(db, reservation.capacity_reservation_id),
             )
         if lapsed:
             db.commit()
@@ -1038,22 +1170,30 @@ class CapacityLedgerService:
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
     ) -> dict[str, Decimal]:
-        """Sum held quantity per dimension across overlapping allocations.
+        """Sum held quantity per dimension across overlapping reservations.
 
         Generalizes the old single-dimension ``_held_units``.
         """
+        bucket = self._bucket_by_backing_resource(db, resource_id)
+        if bucket is None:
+            return {}
         rows = (
-            db.query(SiteAllocation)
+            db.query(CapacityReservation)
+            .join(
+                CapacityReservationDebit,
+                CapacityReservationDebit.capacity_reservation_id
+                == CapacityReservation.capacity_reservation_id,
+            )
             .filter(
-                SiteAllocation.resource_id == resource_id,
-                SiteAllocation.state.in_(HELD_ALLOCATION_STATES),
+                CapacityReservationDebit.capacity_bucket_id == bucket.capacity_bucket_id,
+                CapacityReservation.state.in_(HELD_RESERVATION_STATES),
             )
             .all()
         )
         totals: dict[str, Decimal] = {}
 
-        def _accumulate(row: SiteAllocation) -> None:
-            for key, amount in _allocation_dimensions(row).items():
+        def _accumulate(row: CapacityReservation) -> None:
+            for key, amount in _reservation_dimensions(row).items():
                 totals[key] = totals.get(key, Decimal(0)) + amount
 
         if lease_start is None and lease_end is None:
@@ -1062,9 +1202,9 @@ class CapacityLedgerService:
             return totals
         for row in rows:
             if row.state in {
-                AllocationState.releasing.value,
-                AllocationState.release_failed.value,
-                AllocationState.unmanaged.value,
+                ReservationState.releasing.value,
+                ReservationState.release_failed.value,
+                ReservationState.unmanaged.value,
             }:
                 _accumulate(row)
                 continue
@@ -1096,16 +1236,17 @@ class CapacityLedgerService:
         requested: Mapping[str, Decimal],
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
-    ) -> tuple[SiteResource, dict[str, Decimal]] | None:
+    ) -> tuple[CapacityBucket, dict[str, Decimal]] | None:
         rows = (
-            db.query(SiteResource)
-            .filter(SiteResource.enabled.is_(True))
-            .order_by(SiteResource.updated_at.asc())
+            db.query(CapacityBucket)
+            .filter(CapacityBucket.enabled.is_(True))
+            .order_by(CapacityBucket.updated_at.asc())
             .all()
         )
+        required_resource_kind, required_attributes = _split_claim_requirement(
+            claim, unit_claim_keys=self._unit_claim_keys
+        )
         for resource in rows:
-            if not _resource_matches(resource, claim, unit_claim_keys=self._unit_claim_keys):
-                continue
             attrs = resource.attributes or {}
             if any(
                 not isinstance(attrs.get(key), str) or not attrs[key].strip()
@@ -1117,50 +1258,55 @@ class CapacityLedgerService:
             ):
                 continue
             capacity = _resource_capacity(resource)
-            held = self._held_dimensions(db, resource.resource_id, lease_start, lease_end)
+            held = self._held_dimensions(db, resource.backing_resource_id, lease_start, lease_end)
             available = {
                 key: capacity.get(key, Decimal(0)) - held.get(key, Decimal(0))
                 for key in capacity
             }
-            # Hard fit: every requested dimension must both be declared by
-            # this resource (a dimension the resource never mentions can't
-            # be assumed to have room) and have enough unallocated capacity.
-            fits = all(
-                available.get(dim, Decimal(0)) >= amount
-                for dim, amount in requested.items()
-            )
-            if not fits:
+            if not resource_satisfies_requirement(
+                resource=_resource_feasibility_view(resource, available),
+                required_resource_kind=required_resource_kind,
+                required_dimensions=requested,
+                required_attributes=required_attributes,
+            ):
                 continue
             return resource, available
         return None
 
-    def _find_allocation(
+    def _find_reservation(
         self,
         db: Session,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         escrow_uid: str | None = None,
         resource_id: str | None = None,
-    ) -> SiteAllocation | None:
-        if allocation_id:
-            return db.get(SiteAllocation, allocation_id)
-        q = db.query(SiteAllocation).filter(
-            SiteAllocation.state.in_(HELD_ALLOCATION_STATES)
+    ) -> CapacityReservation | None:
+        if capacity_reservation_id:
+            return db.get(CapacityReservation, capacity_reservation_id)
+        q = db.query(CapacityReservation).filter(
+            CapacityReservation.state.in_(HELD_RESERVATION_STATES)
         )
         if escrow_uid:
-            q = q.filter(SiteAllocation.escrow_uid == escrow_uid)
+            q = q.filter(CapacityReservation.escrow_uid == escrow_uid)
         elif resource_id:
-            q = q.filter(SiteAllocation.resource_id == resource_id)
+            bucket = self._bucket_by_backing_resource(db, resource_id)
+            if bucket is None:
+                return None
+            q = q.join(
+                CapacityReservationDebit,
+                CapacityReservationDebit.capacity_reservation_id
+                == CapacityReservation.capacity_reservation_id,
+            ).filter(CapacityReservationDebit.capacity_bucket_id == bucket.capacity_bucket_id)
         else:
             return None
-        return q.order_by(SiteAllocation.created_at.desc()).first()
+        return q.order_by(CapacityReservation.created_at.desc()).first()
 
-    def _resource_payload(self, db: Session, row: SiteResource) -> dict[str, Any]:
+    def _resource_payload(self, db: Session, row: CapacityBucket) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         capacity = _resource_capacity(row)
         held = self._held_dimensions(
             db,
-            row.resource_id,
+            row.backing_resource_id,
             now,
             now + timedelta(microseconds=1),
         )
@@ -1185,7 +1331,8 @@ class CapacityLedgerService:
             else:
                 state = "leased"
         return {
-            "resource_id": row.resource_id,
+            "resource_id": row.backing_resource_id,
+            "pool_id": row.pool_id,
             "resource_type": row.resource_type,
             "resource_subtype": row.resource_subtype,
             "unit": "count",
@@ -1201,7 +1348,7 @@ class CapacityLedgerService:
     def _has_physical_host_conflict(
         self,
         db: Session,
-        resource: SiteResource,
+        resource: CapacityBucket,
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
     ) -> bool:
@@ -1211,12 +1358,12 @@ class CapacityLedgerService:
             return False
 
         rows = (
-            db.query(SiteAllocation)
-            .filter(SiteAllocation.state.in_(HELD_ALLOCATION_STATES))
+            db.query(CapacityReservation)
+            .filter(CapacityReservation.state.in_(HELD_RESERVATION_STATES))
             .all()
         )
-        for allocation in rows:
-            held_resource = db.get(SiteResource, allocation.resource_id)
+        for reservation in rows:
+            held_resource = self._bucket_for_reservation(db, reservation.capacity_reservation_id)
             if held_resource is None:
                 continue
             if self._physical_host_id(held_resource) != physical_host_id:
@@ -1224,7 +1371,7 @@ class CapacityLedgerService:
             held_mode = self._allocation_mode(held_resource)
             if held_mode is None:
                 continue
-            if not self._allocation_overlaps(allocation, lease_start, lease_end):
+            if not self._reservation_overlaps(reservation, lease_start, lease_end):
                 continue
             if mode == ALLOCATION_MODE_EXCLUSIVE:
                 return True
@@ -1233,30 +1380,30 @@ class CapacityLedgerService:
         return False
 
     @staticmethod
-    def _allocation_overlaps(
-        allocation: SiteAllocation,
+    def _reservation_overlaps(
+        reservation: CapacityReservation,
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
     ) -> bool:
-        if allocation.state in {
-            AllocationState.releasing.value,
-            AllocationState.release_failed.value,
-            AllocationState.unmanaged.value,
+        if reservation.state in {
+            ReservationState.releasing.value,
+            ReservationState.release_failed.value,
+            ReservationState.unmanaged.value,
         }:
             return True
-        row_start = parse_utc(allocation.lease_start_utc)
-        row_end = parse_utc(allocation.lease_end_utc)
+        row_start = parse_utc(reservation.lease_start_utc)
+        row_end = parse_utc(reservation.lease_end_utc)
         if row_start is None and row_end is None:
             return True
         return _windows_overlap(lease_start, lease_end, row_start, row_end)
 
     @staticmethod
-    def _physical_host_id(resource: SiteResource) -> str | None:
+    def _physical_host_id(resource: CapacityBucket) -> str | None:
         value = (resource.attributes or {}).get(PHYSICAL_HOST_ID_ATTR)
         return str(value) if value else None
 
     @staticmethod
-    def _allocation_mode(resource: SiteResource) -> str | None:
+    def _allocation_mode(resource: CapacityBucket) -> str | None:
         value = str((resource.attributes or {}).get(ALLOCATION_MODE_ATTR) or "")
         if value in {ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE}:
             return value
@@ -1264,7 +1411,7 @@ class CapacityLedgerService:
 
     @staticmethod
     def _match_payload(
-        resource: SiteResource,
+        resource: CapacityBucket,
         available: Mapping[str, Decimal],
         requested: Mapping[str, Decimal],
     ) -> dict[str, Any]:
@@ -1272,7 +1419,7 @@ class CapacityLedgerService:
 
         pool/member are storefront (aggregator) concepts the site does not
         know; they are present-and-None for payload compatibility.
-        ``requested``/``available`` are full per-dimension maps (POOLS-6
+        ``requested``/``available`` are full per-dimension maps (
         pass 1); ``allocated_units``/``available_units`` and their
         ``*_gpu_count`` aliases stay byte-compatible by mirroring the
         primary (``gpu_count``) dimension.
@@ -1281,7 +1428,7 @@ class CapacityLedgerService:
         allocated_primary = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
         available_primary = int(available.get(PRIMARY_DIMENSION, Decimal(0)))
         return {
-            "resource_id": resource.resource_id,
+            "resource_id": resource.backing_resource_id,
             "pool_id": None,
             "member_id": None,
             "vm_host": attrs.get("vm_host"),
@@ -1302,63 +1449,63 @@ class CapacityLedgerService:
         }
 
     @staticmethod
-    def _allocation_payload(allocation: SiteAllocation) -> dict[str, Any]:
+    def _reservation_payload(reservation: CapacityReservation) -> dict[str, Any]:
         return {
-            "allocation_id": allocation.allocation_id,
-            "resource_id": allocation.resource_id,
+            "capacity_reservation_id": reservation.capacity_reservation_id,
+            "settlement_resource_id": reservation.settlement_resource_id,
             "pool_id": None,
-            "units": int(allocation.units or 0),
-            "allocated_gpu_count": int(allocation.units or 0),
-            "dimensions": _serialize_dimensions(_allocation_dimensions(allocation)),
-            "state": allocation.state,
-            "deal_ref": dict(allocation.deal_ref or {}),
-            "escrow_uid": allocation.escrow_uid,
-            "hold_expires_at": allocation.hold_expires_at,
-            "executor_kind": allocation.executor_kind,
-            "executor_target": allocation.executor_target,
-            "release_job_id": allocation.release_job_id,
-            "executor_ref": dict(allocation.executor_ref or {}),
-            "vm_host": allocation.vm_host,
-            "vm_target": allocation.vm_target,
-            "lease_start_utc": allocation.lease_start_utc,
-            "lease_end_utc": allocation.lease_end_utc,
-            "create_job_id": allocation.create_job_id,
-            "vm_remove_job_id": allocation.vm_remove_job_id,
-            "failure_reason": allocation.failure_reason,
-            "released_at": allocation.released_at,
+            "units": int(reservation.units or 0),
+            "allocated_gpu_count": int(reservation.units or 0),
+            "dimensions": _serialize_dimensions(_reservation_dimensions(reservation)),
+            "state": reservation.state,
+            "deal_ref": dict(reservation.deal_ref or {}),
+            "escrow_uid": reservation.escrow_uid,
+            "hold_expires_at": reservation.hold_expires_at,
+            "executor_kind": reservation.executor_kind,
+            "executor_target": reservation.executor_target,
+            "release_job_id": reservation.release_job_id,
+            "executor_ref": dict(reservation.executor_ref or {}),
+            "vm_host": reservation.vm_host,
+            "vm_target": reservation.vm_target,
+            "lease_start_utc": reservation.lease_start_utc,
+            "lease_end_utc": reservation.lease_end_utc,
+            "create_job_id": reservation.create_job_id,
+            "vm_remove_job_id": reservation.vm_remove_job_id,
+            "failure_reason": reservation.failure_reason,
+            "released_at": reservation.released_at,
         }
 
     @staticmethod
     def _sync_executor_fields(
-        allocation: SiteAllocation,
+        reservation: CapacityReservation,
         *,
         executor_kind: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
         if executor_kind is not None:
-            allocation.executor_kind = executor_kind
-        elif allocation.vm_host and not allocation.executor_kind:
-            allocation.executor_kind = VM_EXECUTOR_KIND
+            reservation.executor_kind = executor_kind
+        elif reservation.vm_host and not reservation.executor_kind:
+            reservation.executor_kind = VM_EXECUTOR_KIND
 
         if executor_target is not None:
-            allocation.executor_target = executor_target
-        elif allocation.vm_target and not allocation.executor_target:
-            allocation.executor_target = allocation.vm_target
+            reservation.executor_target = executor_target
+        elif reservation.vm_target and not reservation.executor_target:
+            reservation.executor_target = reservation.vm_target
 
         if executor_ref is not None:
-            allocation.executor_ref = dict(executor_ref)
-        elif allocation.vm_host and not allocation.executor_ref:
-            allocation.executor_ref = {"vm_host": allocation.vm_host}
+            reservation.executor_ref = dict(executor_ref)
+        elif reservation.vm_host and not reservation.executor_ref:
+            reservation.executor_ref = {"vm_host": reservation.vm_host}
 
     @staticmethod
     def _sync_release_job_fields(
-        allocation: SiteAllocation,
+        reservation: CapacityReservation,
         *,
         release_job_id: str | None,
     ) -> None:
         if release_job_id is None:
             return
-        allocation.release_job_id = release_job_id
-        if allocation.executor_kind in (None, VM_EXECUTOR_KIND):
-            allocation.vm_remove_job_id = release_job_id
+        reservation.release_job_id = release_job_id
+        if reservation.executor_kind in (None, VM_EXECUTOR_KIND):
+            reservation.vm_remove_job_id = release_job_id

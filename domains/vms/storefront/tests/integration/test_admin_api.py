@@ -330,13 +330,13 @@ async def _ledger_hold(capacity, *, gpu_count: int = 2) -> str:
         deal_ref={"listing_id": "listing-2x", "escrow_uid": "escrow-2x"},
     )
     assert reserved is not None
-    return str(reserved["allocation_id"])
+    return str(reserved["capacity_reservation_id"])
 
 
 class TestFulfillmentEvents:
     """Deal-scoped event endpoints over the site-authority ledger.
 
-    The allocation rows live in the ledger; these endpoints stage deal
+    The reservation rows live in the ledger; these endpoints stage deal
     context, reconcile derived listings against the aggregated
     availability, and (for capacity-released / failed) return the units
     through the capacity client.
@@ -362,7 +362,7 @@ class TestFulfillmentEvents:
                 extra_headers=c._admin_headers(),
             )
 
-        assert response["allocation_id"]
+        assert response["capacity_reservation_id"]
         assert response["resource_id"] == "pool-h200-1"
         assert response["gpu_count"] == 2
         assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
@@ -457,11 +457,11 @@ class TestFulfillmentEvents:
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
-            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
             response = await c._post(
                 "/api/v1/admin/fulfillment/events/usage-started",
                 {
-                    "allocation_id": allocation_id,
+                    "capacity_reservation_id": capacity_reservation_id,
                     "escrow_uid": "escrow-2x",
                     "provider_id": "provider-a",
                     "provider_lease_id": "lease-2x",
@@ -473,13 +473,13 @@ class TestFulfillmentEvents:
                 extra_headers=c._admin_headers(),
             )
 
-        assert response["allocation_id"] == allocation_id
+        assert response["capacity_reservation_id"] == capacity_reservation_id
         assert response["state"] == "leased"
         assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
-        # Progress events carry no capacity effect: a held allocation is
+        # Progress events carry no capacity effect: a held reservation is
         # held in every progress state, and the ledger row is the
         # provisioning service's to advance.
-        assert fake.allocations[allocation_id]["state"] == "reserved"
+        assert fake.reservations[capacity_reservation_id]["state"] == "reserved"
 
     async def test_capacity_released_releases_and_reopens(self, client):
         from tests.fake_site import site_capacity
@@ -489,10 +489,10 @@ class TestFulfillmentEvents:
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
-            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
             closed = await c._post(
                 "/api/v1/admin/fulfillment/events/usage-started",
-                {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+                {"capacity_reservation_id": capacity_reservation_id, "escrow_uid": "escrow-2x"},
                 extra_headers=c._admin_headers(),
             )
             assert sorted(closed["closed_listing_ids"]) == [
@@ -501,11 +501,11 @@ class TestFulfillmentEvents:
 
             response = await c._post(
                 "/api/v1/admin/fulfillment/events/capacity-released",
-                {"allocation_id": allocation_id},
+                {"capacity_reservation_id": capacity_reservation_id},
                 extra_headers=c._admin_headers(),
             )
 
-        assert response["allocation_id"] == allocation_id
+        assert response["capacity_reservation_id"] == capacity_reservation_id
         assert response["state"] == "released"
         assert sorted(response["reopened_listing_ids"]) == ["listing-3x", "listing-4x"]
         statuses = {
@@ -520,7 +520,7 @@ class TestFulfillmentEvents:
             3: "open",
             4: "open",
         }
-        assert fake.allocations[allocation_id]["state"] == "released"
+        assert fake.reservations[capacity_reservation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
 
     async def test_manual_compute_listings_reopen_after_release(self, client):
@@ -531,10 +531,10 @@ class TestFulfillmentEvents:
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
-            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
             closed = await c._post(
                 "/api/v1/admin/fulfillment/events/usage-started",
-                {"allocation_id": allocation_id, "escrow_uid": "escrow-2x"},
+                {"capacity_reservation_id": capacity_reservation_id, "escrow_uid": "escrow-2x"},
                 extra_headers=c._admin_headers(),
             )
             assert sorted(closed["closed_listing_ids"]) == [
@@ -543,7 +543,7 @@ class TestFulfillmentEvents:
 
             response = await c._post(
                 "/api/v1/admin/fulfillment/events/capacity-released",
-                {"allocation_id": allocation_id},
+                {"capacity_reservation_id": capacity_reservation_id},
                 extra_headers=c._admin_headers(),
             )
 
@@ -571,11 +571,11 @@ class TestFulfillmentEvents:
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
-            allocation_id = await _ledger_hold(capacity, gpu_count=2)
+            capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
             response = await c._post(
                 "/api/v1/admin/fulfillment/events/failed",
                 {
-                    "allocation_id": allocation_id,
+                    "capacity_reservation_id": capacity_reservation_id,
                     "provider_id": "provider-a",
                     "provider_job_id": "job-create-1",
                     "resource_id": "provider-resource-2x",
@@ -586,17 +586,17 @@ class TestFulfillmentEvents:
                 extra_headers=c._admin_headers(),
             )
 
-        assert response["allocation_id"] == allocation_id
+        assert response["capacity_reservation_id"] == capacity_reservation_id
         assert response["state"] == "released"
-        allocation = fake.allocations[allocation_id]
-        assert allocation["state"] == "released"
-        assert allocation["failure_reason"] == "provisioning_error"
-        assert allocation["failure_message"] == "host rejected request"
+        reservation = fake.reservations[capacity_reservation_id]
+        assert reservation["state"] == "released"
+        assert reservation["failure_reason"] == "provisioning_error"
+        assert reservation["failure_message"] == "host rejected request"
         assert fake._available("pool-h200-1") == 4
 
-    async def test_release_of_unknown_allocation_is_idempotent(self, client):
+    async def test_release_of_unknown_reservation_is_idempotent(self, client):
         """The watchdog usually released first; a second capacity-released
-        for the same (or an unknown) allocation must land cleanly."""
+        for the same (or an unknown) reservation must land cleanly."""
         from tests.fake_site import FakeSite, site_capacity
 
         c, _ = client
@@ -606,7 +606,7 @@ class TestFulfillmentEvents:
                 resource_id="compute-kvm1-001",
                 released_at="2026-06-10T00:00:00Z",
             )
-        assert response["allocation_id"] == "ledger-only-alloc"
+        assert response["capacity_reservation_id"] == "ledger-only-alloc"
         assert response["state"] == "released"
 
 

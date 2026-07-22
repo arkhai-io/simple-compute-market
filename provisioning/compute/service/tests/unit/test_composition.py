@@ -48,18 +48,18 @@ class FakeAdapter:
 
 
 class FakeReleaseExecutor:
-    async def submit_release(self, allocation):
-        return f"release-{allocation['allocation_id']}"
+    async def submit_release(self, reservation):
+        return f"release-{reservation['capacity_reservation_id']}"
 
 
 class FakeProvider(FulfillmentProvider):
     async def create(self, request, resource):
         return FulfillmentResult(provider_metadata={})
 
-    async def teardown(self, allocation_id, resource, provider_metadata):
+    async def teardown(self, capacity_reservation_id, resource, provider_metadata):
         return FulfillmentResult(provider_metadata={})
 
-    async def get_status(self, allocation_id, resource, provider_metadata):
+    async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         return ProviderStatus(state=ProviderOperationState.succeeded)
 
 

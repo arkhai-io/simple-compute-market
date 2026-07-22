@@ -17,7 +17,7 @@ from market_fulfillment import (
 )
 
 
-def test_request_carries_capacity_reservation_id_not_allocation_or_agreement():
+def test_request_carries_capacity_reservation_id_not_legacy_allocation_or_agreement_fields():
     request = PhysicalSettlementRequest(
         capacity_reservation_id="reservation-1",
         market="vms",

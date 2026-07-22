@@ -20,13 +20,13 @@ Router registration::
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable, Iterable, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .http_models import (
-    AllocationListResponse,
-    AllocationResponse,
+    ReservationListResponse,
+    ReservationResponse,
     CapacityEventsResponse,
     CommitRequest,
     MatchResponse,
@@ -37,14 +37,20 @@ from .http_models import (
     ResourceRegisterRequest,
     SnapshotResponse,
     TruncateLeaseRequest,
+    ProjectionIdentityResponse,
+    ResourcePoolProjectionResponse,
+    CapacityBucketProjectionResponse,
 )
 from .ledger import CapacityConflictError, CapacityLedgerService
+from .projections import SiteProjectionService
 
 logger = logging.getLogger(__name__)
 
 
 def make_capacity_router(
     get_ledger: Callable[[], CapacityLedgerService],
+    *,
+    get_resource_inventory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
 ) -> APIRouter:
     """Build the ``/capacity`` router over a ledger provider.
 
@@ -52,6 +58,13 @@ def make_capacity_router(
     mounting service may resolve the ledger from its own container.
     """
     router = APIRouter(prefix="/capacity", tags=["capacity"])
+    projection_services: dict[int, SiteProjectionService] = {}
+
+    def projections(ledger: CapacityLedgerService) -> SiteProjectionService:
+        return projection_services.setdefault(
+            id(ledger),
+            SiteProjectionService(ledger, resource_inventory=get_resource_inventory),
+        )
 
     # ------------------------------------------------------------------
     # Resource registry
@@ -68,14 +81,16 @@ def make_capacity_router(
     ) -> dict:
         """Upsert a resource row in the site ledger.
 
-        Called by the storefront when inventory is registered (remote
-        capacity mode) or by operators/seeding directly.
+        Compatibility endpoint for domains that register logical capacity
+        directly. Physical inventory projections are derived from the
+        mounting provisioning service's authoritative inventory provider.
         """
         resource = ledger.register_resource(
             resource_id=resource_id,
             total_units=body.total_units,
             resource_type=body.resource_type,
             resource_subtype=body.resource_subtype,
+            pool_id=body.pool_id,
             attributes=body.attributes,
             capacity=body.capacity,
             enabled=body.enabled,
@@ -96,6 +111,38 @@ def make_capacity_router(
     ) -> ResourceListResponse:
         resources = ledger.list_resources()
         return ResourceListResponse(resources=resources, total=len(resources))
+
+    @router.get("/site-resource-pools/version", response_model=ProjectionIdentityResponse)
+    def resource_pool_projection_version(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> ProjectionIdentityResponse:
+        identity, _ = projections(ledger).resource_pools()
+        return ProjectionIdentityResponse(revision=identity.revision, digest=identity.digest)
+
+    @router.get("/site-resource-pools", response_model=ResourcePoolProjectionResponse)
+    def resource_pool_projection(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> ResourcePoolProjectionResponse:
+        identity, rows = projections(ledger).resource_pools()
+        return ResourcePoolProjectionResponse(
+            revision=identity.revision, digest=identity.digest, resource_pools=rows
+        )
+
+    @router.get("/site-capacity-buckets/version", response_model=ProjectionIdentityResponse)
+    def capacity_bucket_projection_version(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> ProjectionIdentityResponse:
+        identity, _ = projections(ledger).capacity_buckets()
+        return ProjectionIdentityResponse(revision=identity.revision, digest=identity.digest)
+
+    @router.get("/site-capacity-buckets", response_model=CapacityBucketProjectionResponse)
+    def capacity_bucket_projection(
+        ledger: CapacityLedgerService = Depends(get_ledger),
+    ) -> CapacityBucketProjectionResponse:
+        identity, rows = projections(ledger).capacity_buckets()
+        return CapacityBucketProjectionResponse(
+            revision=identity.revision, digest=identity.digest, capacity_buckets=rows
+        )
 
     # ------------------------------------------------------------------
     # CapacityClient verbs
@@ -132,21 +179,21 @@ def make_capacity_router(
 
     @router.post(
         "/reservations",
-        response_model=AllocationResponse,
+        response_model=ReservationResponse,
         summary="Atomically check-and-reserve capacity",
     )
     def reserve(
         body: ReserveRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationResponse:
+    ) -> ReservationResponse:
         """Reserve capacity matching the claim.
 
-        Returns ``allocation: null`` (not an error status) when nothing
+        Returns ``reservation: null`` (not an error status) when nothing
         matches — "no capacity" is a routine answer the aggregator routes
         around, not an exceptional condition.
         """
         try:
-            allocation = ledger.reserve(
+            reservation = ledger.reserve(
                 claim=body.claim,
                 deal_ref=body.deal_ref,
                 ttl_seconds=body.ttl_seconds,
@@ -155,116 +202,121 @@ def make_capacity_router(
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
-        return AllocationResponse(allocation=allocation)
+        if reservation is not None:
+            reservation = {
+                key: value for key, value in reservation.items()
+                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id"}
+            }
+        return ReservationResponse(reservation=reservation)
 
     @router.post(
-        "/allocations/{allocation_id}/commit",
-        response_model=AllocationResponse,
+        "/reservations/{capacity_reservation_id}/commit",
+        response_model=ReservationResponse,
         summary="Confirm a reservation into an active lease",
     )
     def commit(
-        allocation_id: str,
+        capacity_reservation_id: str,
         body: CommitRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationResponse:
+    ) -> ReservationResponse:
         try:
-            allocation = ledger.commit(
+            reservation = ledger.commit(
                 resource_id=body.resource_id,
-                allocation_id=allocation_id,
+                capacity_reservation_id=capacity_reservation_id,
                 lease_start_utc=body.lease_start_utc,
                 lease_end_utc=body.lease_end_utc,
                 idempotency_ref=body.idempotency_ref,
             )
         except CapacityConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
-        if allocation is None:
+        if reservation is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"allocation {allocation_id!r} not found",
+                detail=f"reservation {capacity_reservation_id!r} not found",
             )
-        return AllocationResponse(allocation=allocation)
+        return ReservationResponse(reservation=reservation)
 
     @router.post(
         "/releases",
-        response_model=AllocationResponse,
+        response_model=ReservationResponse,
         summary="Return held capacity to the pool",
     )
     def release(
         body: ReleaseRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationResponse:
-        """Release by allocation_id or by deal ref (escrow_uid).
+    ) -> ReservationResponse:
+        """Release by capacity_reservation_id or by deal ref (escrow_uid).
 
-        Idempotent: releasing an already-released or unknown allocation
-        returns ``allocation: null``.
+        Idempotent: releasing an already-released or unknown reservation
+        returns ``reservation: null``.
         """
-        return AllocationResponse(allocation=ledger.release(
-            allocation_id=body.allocation_id,
+        return ReservationResponse(reservation=ledger.release(
+            capacity_reservation_id=body.capacity_reservation_id,
             deal_ref=body.deal_ref,
             failure_reason=body.failure_reason,
             failure_message=body.failure_message,
         ))
 
     @router.post(
-        "/allocations/{allocation_id}/truncate-lease",
-        response_model=AllocationResponse,
+        "/reservations/{capacity_reservation_id}/truncate-lease",
+        response_model=ReservationResponse,
         summary="End a lease early",
     )
     def truncate_lease(
-        allocation_id: str,
+        capacity_reservation_id: str,
         body: TruncateLeaseRequest,
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationResponse:
+    ) -> ReservationResponse:
         """Shorten an active lease (settlement decided the deal is over).
 
         The injected compute lease watchdog observes the new expiry through the
-        normal lease-end path. Returns ``allocation: null`` when the allocation
+        normal lease-end path. Returns ``reservation: null`` when the reservation
         is unknown or no longer held.
         """
-        return AllocationResponse(allocation=ledger.truncate_lease(
-            allocation_id=allocation_id,
+        return ReservationResponse(reservation=ledger.truncate_lease(
+            capacity_reservation_id=capacity_reservation_id,
             lease_end_utc=body.lease_end_utc,
         ))
 
     # ------------------------------------------------------------------
-    # Allocation reads (deal-side bookkeeping and operators)
+    # Reservation reads (deal-side bookkeeping and operators)
     # ------------------------------------------------------------------
 
     @router.get(
-        "/allocations",
-        response_model=AllocationListResponse,
-        summary="List ledger allocations",
+        "/reservations",
+        response_model=ReservationListResponse,
+        summary="List ledger reservations",
     )
-    def list_allocations(
+    def list_reservations(
         state: str | None = Query(default=None),
         escrow_uid: str | None = Query(default=None),
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationListResponse:
-        allocations = ledger.list_allocations(state=state)
+    ) -> ReservationListResponse:
+        reservations = ledger.list_reservations(state=state)
         if escrow_uid is not None:
-            allocations = [
-                a for a in allocations if a.get("escrow_uid") == escrow_uid
+            reservations = [
+                a for a in reservations if a.get("escrow_uid") == escrow_uid
             ]
-        return AllocationListResponse(
-            allocations=allocations, total=len(allocations),
+        return ReservationListResponse(
+            reservations=reservations, total=len(reservations),
         )
 
     @router.get(
-        "/allocations/{allocation_id}",
-        response_model=AllocationResponse,
-        summary="Get a ledger allocation",
+        "/reservations/{capacity_reservation_id}",
+        response_model=ReservationResponse,
+        summary="Get a ledger reservation",
     )
-    def get_allocation(
-        allocation_id: str,
+    def get_reservation(
+        capacity_reservation_id: str,
         ledger: CapacityLedgerService = Depends(get_ledger),
-    ) -> AllocationResponse:
-        allocation = ledger.get_allocation(allocation_id)
-        if allocation is None:
+    ) -> ReservationResponse:
+        reservation = ledger.get_reservation(capacity_reservation_id)
+        if reservation is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"allocation {allocation_id!r} not found",
+                detail=f"reservation {capacity_reservation_id!r} not found",
             )
-        return AllocationResponse(allocation=allocation)
+        return ReservationResponse(reservation=reservation)
 
     # ------------------------------------------------------------------
     # Event feed

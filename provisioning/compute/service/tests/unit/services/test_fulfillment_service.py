@@ -32,11 +32,11 @@ class _FakeProvider(FulfillmentProvider):
         self.create_calls += 1
         return FulfillmentResult(provider_metadata={"job_id": f"create-{self.create_calls}"})
 
-    async def teardown(self, allocation_id, resource, provider_metadata):
+    async def teardown(self, capacity_reservation_id, resource, provider_metadata):
         self.teardown_calls += 1
         return FulfillmentResult(provider_metadata={"job_id": f"teardown-{self.teardown_calls}"})
 
-    async def get_status(self, allocation_id, resource, provider_metadata):
+    async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         self.status_calls += 1
         return ProviderStatus(state=ProviderOperationState.succeeded)
 

@@ -12,17 +12,17 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
 Base = declarative_base()
 
 
-class AllocationState(str, enum.Enum):
-    """Lifecycle states for a site-ledger allocation.
+class ReservationState(str, enum.Enum):
+    """Lifecycle states for a capacity reservation.
 
-    The allocation row is the merged ledger entry the capacity design doc
+    The reservation row is the merged ledger entry the capacity design doc
     calls for: the storefront's hold (``reserved → provisioning → leased``)
     and the lease's temporal tail (``releasing → released``) are one row,
     so release happens in a local transaction with no cross-service sync.
@@ -52,35 +52,40 @@ class AllocationState(str, enum.Enum):
 
 # States that consume capacity. ``releasing`` still holds the units — the
 # workload may not be torn down yet.
-HELD_ALLOCATION_STATES = (
-    AllocationState.reserved.value,
-    AllocationState.provisioning.value,
-    AllocationState.leased.value,
-    AllocationState.releasing.value,
-    AllocationState.release_failed.value,
-    AllocationState.unmanaged.value,
+HELD_RESERVATION_STATES = (
+    ReservationState.reserved.value,
+    ReservationState.provisioning.value,
+    ReservationState.leased.value,
+    ReservationState.releasing.value,
+    ReservationState.release_failed.value,
+    ReservationState.unmanaged.value,
 )
 
 
-class SiteResource(Base):
-    """A unit-counted resource in the site authority's ledger.
 
-    Resource-domain only: the attributes JSON speaks the site's vocabulary
-    (vm_host, gpu_model, region, …) and never market schema (pricing,
-    accepted escrows stay on the storefront side of the boundary).
+class CapacityBucket(Base):
+    """Provisioning-private host-level capacity accounting boundary.
+
+    A bucket carries the currently reservable multidimensional balance for one
+    backing domain resource.  Its opaque identity and debit mappings never
+    cross the storefront reservation contract.
     """
 
-    __tablename__ = "site_resources"
+    __tablename__ = "capacity_buckets"
+    __table_args__ = (
+        UniqueConstraint("backing_resource_id", name="uq_capacity_buckets_backing_resource"),
+    )
 
-    resource_id = Column(String, primary_key=True)
+    capacity_bucket_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    backing_resource_id = Column(
+        String, nullable=False, index=True,
+    )
+    pool_id = Column(String, nullable=True, index=True)
     resource_type = Column(String, nullable=False, default="compute.gpu")
-    resource_subtype = Column(String, nullable=True)  # e.g. "h200"
+    resource_subtype = Column(String, nullable=True)
     total_units = Column(Integer, nullable=False, default=0)
-    # total_units is a service-maintained mirror of capacity["gpu_count"]
-    # kept for payload/caller compatibility. May be null for pre-migration
-    # rows, in which case total_units is the only known dimension (gpu_count).
-    capacity = Column(JSON, nullable=True)
-    attributes = Column(JSON, nullable=True)
+    capacity = Column(JSON, nullable=False, default=dict)
+    attributes = Column(JSON, nullable=False, default=dict)
     enabled = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -88,7 +93,7 @@ class SiteResource(Base):
     )
 
 
-class SiteAllocation(Base):
+class CapacityReservation(Base):
     """A capacity hold and its lease tail, as one ledger row.
 
     Merges the storefront's ``compute_allocations`` shape with the lease
@@ -100,20 +105,22 @@ class SiteAllocation(Base):
     (listing_id, escrow_uid, owner callback) — the ledger never interprets
     it beyond routing deal-scoped events back to the owning storefront.
     Timestamps are ISO-8601 TEXT, matching the storefront ledger they
-    replace; the allocation count per site is small enough to compare in
+    replace; the reservation count per site is small enough to compare in
     Python.
     """
 
-    __tablename__ = "site_allocations"
+    __tablename__ = "capacity_reservations"
 
-    allocation_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    resource_id = Column(String, nullable=False, index=True)
+    capacity_reservation_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    # Null until scheduling persists a concrete assignment. The initial
+    # capacity-accounting choice is private to CapacityReservationDebit.
+    settlement_resource_id = Column(String, nullable=True, index=True)
     units = Column(Integer, nullable=False, default=1)
     # units mirrors dimensions["gpu_count"] for payload/caller compatibility.
-    # May be null for pre-migration rows, in which case dimensions is {"gpu_count": units}.
+    # May be null when the multidimensional map is absent, in which case dimensions is {"gpu_count": units}.
     dimensions = Column(JSON, nullable=True)
     state = Column(
-        String, nullable=False, default=AllocationState.reserved.value, index=True
+        String, nullable=False, default=ReservationState.reserved.value, index=True
     )
     deal_ref = Column(JSON, nullable=True)
     escrow_uid = Column(String, nullable=True, index=True)  # lifted from deal_ref
@@ -137,6 +144,32 @@ class SiteAllocation(Base):
     )
 
 
+class CapacityReservationDebit(Base):
+    """Current provisioning-private debit backing one capacity reservation."""
+
+    __tablename__ = "capacity_reservation_debits"
+    __table_args__ = (
+        UniqueConstraint(
+            "capacity_reservation_id", name="uq_capacity_reservation_debits_reservation"
+        ),
+    )
+
+    capacity_reservation_id = Column(
+        String,
+        ForeignKey("capacity_reservations.capacity_reservation_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    capacity_bucket_id = Column(
+        String, ForeignKey("capacity_buckets.capacity_bucket_id", ondelete="RESTRICT"),
+        nullable=False, index=True,
+    )
+    dimensions = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class CapacityEvent(Base):
     """Anonymous, versioned capacity-change feed (pull model).
 
@@ -153,8 +186,8 @@ class CapacityEvent(Base):
     kind = Column(String, nullable=False)  # "reserved"|"committed"|"released"|"lease_truncated"|"capacity_changed"
     resource_id = Column(String, nullable=True, index=True)
     # Signed per-dimension delta, e.g. {"gpu_count": -1, "vcpu": -4} for a
-    # reserve, {"gpu_count": 1, "vcpu": 4} for a release (POOLS-6 pass 1).
+    # reserve, {"gpu_count": 1, "vcpu": 4} for a release.
     # Null for events that don't change held capacity (e.g. "committed",
-    # "lease_truncated") or for pre-migration rows.
+    # "lease_truncated") or when no dimensional delta is recorded.
     dimensions = Column(JSON, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

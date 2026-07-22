@@ -23,5 +23,6 @@ testpaths = ["tests/unit"]
 
 [dependency-groups]
 dev = [
+    "httpx2",
     "pytest>=8.3.4,<9.0.0",
 ]

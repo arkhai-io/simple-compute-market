@@ -88,21 +88,21 @@ class BareMetalOperationsService:
             contract=contract,
         )
 
-    async def reclaim_access_for_allocation(
-        self, allocation: dict[str, Any],
+    async def reclaim_access_for_reservation(
+        self, reservation: dict[str, Any],
     ) -> str | None:
-        if not allocation.get("executor_target"):
+        if not reservation.get("executor_target"):
             return None
         try:
-            submit = await self.reclaim_access(allocation)
+            submit = await self.reclaim_access(reservation)
         except BareMetalHostValidationError:
             return None
         return submit.job_id
 
-    async def reclaim_access(self, allocation: dict[str, Any]) -> JobSubmitResponse:
-        machine_id = str(allocation.get("executor_target") or "")
+    async def reclaim_access(self, reservation: dict[str, Any]) -> JobSubmitResponse:
+        machine_id = str(reservation.get("executor_target") or "")
         self._validate_machine(machine_id)
-        access_ref = bare_metal_access_ref(allocation)
+        access_ref = bare_metal_access_ref(reservation)
         return await self._job_service.submit(
             AnsibleJobParams(
                 vm_host=machine_id,
@@ -111,9 +111,9 @@ class BareMetalOperationsService:
                 executor_kind=BARE_METAL_EXECUTOR_KIND,
                 executor_action=NODE_RECLAIM_ACCESS_ACTION,
                 executor_target=machine_id,
-                executor_ref=allocation.get("executor_ref"),
-                escrow_uid=allocation.get("escrow_uid"),
-                physical_host_id=get_physical_host_id(allocation),
+                executor_ref=reservation.get("executor_ref"),
+                escrow_uid=reservation.get("escrow_uid"),
+                physical_host_id=get_physical_host_id(reservation),
                 ssh_user=_access_value(access_ref, "ssh_user", "user"),
                 ssh_public_key=_access_value(
                     access_ref, "ssh_public_key", "ssh_pubkey", "public_key",

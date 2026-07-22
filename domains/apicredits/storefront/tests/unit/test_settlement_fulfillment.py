@@ -45,7 +45,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         return {
             "key_id": "ak_new", "secret": "ak_new.s3cret",
             "quantity": kwargs["quantity"], "balance": 3,
-            "allocation_id": kwargs.get("allocation_id"),
+            "capacity_reservation_id": kwargs.get("capacity_reservation_id"),
             "already_issued": False,
         }
 
@@ -62,7 +62,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         service_url="http://tokens:8082",
         admin_key="k",
         stage_event=stage_event,
-        held_allocation={"allocation_id": "alloc-7", "resource_id": "svc-quota"},
+        held_reservation={"capacity_reservation_id": "alloc-7", "resource_id": "svc-quota"},
     )
 
     assert result["status"] == "fulfilled"
@@ -75,7 +75,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     assert "secret" not in payload
 
     # The negotiation-time hold rode the issuance call.
-    assert issued["allocation_id"] == "alloc-7"
+    assert issued["capacity_reservation_id"] == "alloc-7"
     assert issued["escrow_uid"] == "0xescrow1"
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
 
@@ -100,12 +100,12 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
         admin_key="k",
         stage_event=stage_event,
         apply_failure_policy=fake_policy,
-        held_allocation={"allocation_id": "alloc-8"},
+        held_reservation={"capacity_reservation_id": "alloc-8"},
     )
     assert result["status"] == "error"
     assert "quota_exhausted" in result["message"]
     assert policy_calls and policy_calls[0]["reason"] == "quota_exhausted"
-    assert policy_calls[0]["allocation_id"] == "alloc-8"
+    assert policy_calls[0]["capacity_reservation_id"] == "alloc-8"
     assert [e[1] for e in events] == ["failed"]
 
 

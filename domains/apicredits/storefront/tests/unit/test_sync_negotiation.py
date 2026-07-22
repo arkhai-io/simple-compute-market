@@ -46,7 +46,7 @@ class FakeCapacity:
             "claim": claim, "deal_ref": deal_ref, "ttl_seconds": ttl_seconds,
         })
         return {
-            "allocation_id": f"alloc-{len(self.reserved)}",
+            "capacity_reservation_id": f"alloc-{len(self.reserved)}",
             "resource_id": "svc-quota",
             "allocated_units": (claim or {}).get("units"),
             "hold_expires_at": "2099-01-01 00:00",
@@ -215,7 +215,7 @@ async def test_listed_price_accept_persists_terms_and_hold(db, fake_capacity, ke
     assert hold_req["claim"] == {"units": 3, "resource_id": "svc-quota"}
     assert hold_req["ttl_seconds"] > 0
     hold = await db.load_capacity_hold(negotiation_id=neg_id)
-    assert hold["allocation_id"] == "alloc-1"
+    assert hold["capacity_reservation_id"] == "alloc-1"
 
 
 async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):

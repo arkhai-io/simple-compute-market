@@ -47,7 +47,7 @@ ACCEPTED_ESCROWS = [{
 class DynamicListingState:
     resources_seeded: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     reserve_closed_listing_ids: list[str] = field(default_factory=list)
     usage_started: bool = False
 
@@ -56,8 +56,8 @@ class DynamicListingState:
 class FungiblePoolState:
     resources_seeded: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
-    allocation_2x_id: str | None = None
-    allocation_4x_id: str | None = None
+    reservation_2x_id: str | None = None
+    reservation_4x_id: str | None = None
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +159,7 @@ class TestComputeDynamicListings:
             escrow_uid="e2e-dynamic-reserve-2x",
         )
 
-        assert result.allocation_id
+        assert result.capacity_reservation_id
         assert result.resource_id == DYNAMIC_RESOURCE_ID
         assert result.gpu_count == 2
         expected_closed = {
@@ -178,21 +178,21 @@ class TestComputeDynamicListings:
             3: "closed",
             4: "closed",
         }
-        dynamic_state.allocation_id = result.allocation_id
+        dynamic_state.capacity_reservation_id = result.capacity_reservation_id
         dynamic_state.reserve_closed_listing_ids = list(
             expected_closed.intersection(result.closed_listing_ids)
         )
-        log.info("[dynamic] reserved allocation %s; statuses=%s", result.allocation_id, statuses)
+        log.info("[dynamic] reserved reservation %s; statuses=%s", result.capacity_reservation_id, statuses)
 
     def test_03_usage_started_keeps_oversized_listings_closed(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
-        require_state(dynamic_state, "allocation_id")
+        require_state(dynamic_state, "capacity_reservation_id")
 
         result = storefront_admin_client._post(
             "/api/v1/admin/fulfillment/events/usage-started",
             {
-                "allocation_id": dynamic_state.allocation_id,
+                "capacity_reservation_id": dynamic_state.capacity_reservation_id,
                 "escrow_uid": "e2e-dynamic-reserve-2x",
             },
             extra_headers=storefront_admin_client._admin_headers(),
@@ -214,12 +214,12 @@ class TestComputeDynamicListings:
     def test_04_capacity_release_reopens_oversized_listings(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
-        require_state(dynamic_state, "allocation_id", "usage_started")
+        require_state(dynamic_state, "capacity_reservation_id", "usage_started")
 
         result = storefront_admin_client._post(
             "/api/v1/admin/fulfillment/events/capacity-released",
             {
-                "allocation_id": dynamic_state.allocation_id,
+                "capacity_reservation_id": dynamic_state.capacity_reservation_id,
                 "released_at": "2026-01-01T00:00:00Z",
             },
             extra_headers=storefront_admin_client._admin_headers(),
@@ -239,7 +239,7 @@ class TestComputeDynamicListings:
             3: "open",
             4: "open",
         }
-        log.info("[dynamic] released allocation %s; statuses=%s", dynamic_state.allocation_id, statuses)
+        log.info("[dynamic] released reservation %s; statuses=%s", dynamic_state.capacity_reservation_id, statuses)
 
 
 class TestFungibleComputeDynamicListings:
@@ -293,7 +293,7 @@ class TestFungibleComputeDynamicListings:
             escrow_uid="e2e-fungible-reserve-2x",
         )
 
-        assert result.allocation_id
+        assert result.capacity_reservation_id
         assert result.extra.get("pool_id") == FUNGIBLE_POOL_ID or result.pool_id == FUNGIBLE_POOL_ID
         assert result.gpu_count == 2
         assert result.closed_listing_ids == []
@@ -302,12 +302,12 @@ class TestFungibleComputeDynamicListings:
             fungible_state.listing_ids_by_gpu_count,
         )
         assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}
-        fungible_state.allocation_2x_id = result.allocation_id
+        fungible_state.reservation_2x_id = result.capacity_reservation_id
 
     def test_03_reserve_4x_closes_oversized_pool_slices(
         self, storefront_admin_client, fungible_state: FungiblePoolState
     ):
-        require_state(fungible_state, "allocation_2x_id")
+        require_state(fungible_state, "reservation_2x_id")
 
         result = storefront_admin_client.admin_reserve_capacity(
             required_attributes={
@@ -318,7 +318,7 @@ class TestFungibleComputeDynamicListings:
             escrow_uid="e2e-fungible-reserve-4x",
         )
 
-        assert result.allocation_id
+        assert result.capacity_reservation_id
         assert result.gpu_count == 4
         expected_closed = {
             fungible_state.listing_ids_by_gpu_count[3],
@@ -335,4 +335,4 @@ class TestFungibleComputeDynamicListings:
             3: "closed",
             4: "closed",
         }
-        fungible_state.allocation_4x_id = result.allocation_id
+        fungible_state.reservation_4x_id = result.capacity_reservation_id

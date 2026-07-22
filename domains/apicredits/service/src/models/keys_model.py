@@ -44,7 +44,7 @@ class IssuanceRequest(BaseModel):
         default=None,
         description="Explicit ownership claim for a new key (overrides buyer).",
     )
-    allocation_id: Optional[str] = Field(
+    capacity_reservation_id: Optional[str] = Field(
         default=None, description="The negotiation-time quota hold, if one was taken.",
     )
     resource_id: Optional[str] = Field(
@@ -64,7 +64,7 @@ class IssuanceResponse(BaseModel):
     )
     quantity: int
     balance: int
-    allocation_id: Optional[str] = None
+    capacity_reservation_id: Optional[str] = None
     already_issued: bool = False
 
 

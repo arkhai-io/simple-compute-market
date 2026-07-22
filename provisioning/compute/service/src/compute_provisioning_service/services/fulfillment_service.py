@@ -3,9 +3,9 @@
 FulfillmentService sits above ProviderRegistry and is the entry point
 future storefront-facing code calls. It owns:
 
-- validation that the allocation and already-selected resource may be
+- validation that the reservation and already-selected resource may be
   fulfilled;
-- the allocation-to-fulfillment identity;
+- the reservation-to-fulfillment identity;
 - equivalent-retry detection and conflicting-request rejection, for both
   create and teardown;
 - provider resolution and dispatch;
@@ -134,7 +134,7 @@ class FulfillmentService:
             # bind the same admitted capacity to a different physical resource.
             # See openspec/specs/fulfillment/spec.md#scheduling-and-assignment.
             assignment = self._capacity_ledger.assign_settlement_resource(
-                allocation_id=request.capacity_reservation_id,
+                capacity_reservation_id=request.capacity_reservation_id,
                 settlement_resource_id=resource.settlement_resource_id,
             )
             if assignment is None:

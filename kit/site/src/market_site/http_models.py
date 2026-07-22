@@ -4,7 +4,7 @@ The ``/api/v1/capacity`` surface mirrors the
 ``core_storefront.capacity.CapacityClient`` contract: claims and deal
 refs are opaque mappings (the claim speaks this site's resource-domain
 vocabulary, the deal ref carries the storefront's bookkeeping keys), and
-match/allocation payloads are returned verbatim as dicts so the remote
+match/reservation payloads are returned verbatim as dicts so the remote
 client can hand them to callers exactly like the embedded adapter does.
 """
 
@@ -23,6 +23,7 @@ class ResourceRegisterRequest(BaseModel):
         description="Unit count this resource contributes (e.g. GPUs).",
     )
     resource_type: str = Field(default="compute.gpu")
+    pool_id: Optional[str] = Field(default=None)
     resource_subtype: Optional[str] = Field(
         default=None, description="e.g. the GPU model slug ('h200')."
     )
@@ -76,7 +77,7 @@ class ReserveRequest(BaseModel):
         default_factory=dict,
         description=(
             "Opaque storefront bookkeeping keys (listing_id, escrow_uid, "
-            "owner callback), recorded on the allocation so deal-scoped "
+            "owner callback), recorded on the reservation so deal-scoped "
             "events route back to the owning storefront."
         ),
     )
@@ -99,8 +100,8 @@ class ReserveRequest(BaseModel):
     )
 
 
-class AllocationResponse(BaseModel):
-    allocation: Optional[dict[str, Any]] = None
+class ReservationResponse(BaseModel):
+    reservation: Optional[dict[str, Any]] = None
 
 
 class CommitRequest(BaseModel):
@@ -121,15 +122,15 @@ class CommitRequest(BaseModel):
 class ReleaseRequest(BaseModel):
     """Body accepted by ``POST /api/v1/capacity/releases``.
 
-    Identify the allocation either directly or by the deal ref it was
+    Identify the reservation either directly or by the deal ref it was
     reserved under (escrow_uid).
     """
 
-    allocation_id: Optional[str] = None
+    capacity_reservation_id: Optional[str] = None
     deal_ref: dict[str, Any] = Field(default_factory=dict)
     failure_reason: Optional[str] = Field(
         default=None,
-        description="Recorded on the allocation when releasing after a failure.",
+        description="Recorded on the reservation when releasing after a failure.",
     )
     failure_message: Optional[str] = None
 
@@ -138,8 +139,8 @@ class TruncateLeaseRequest(BaseModel):
     lease_end_utc: str
 
 
-class AllocationListResponse(BaseModel):
-    allocations: list[dict[str, Any]]
+class ReservationListResponse(BaseModel):
+    reservations: list[dict[str, Any]]
     total: int
 
 
@@ -153,3 +154,16 @@ class CapacityEventsResponse(BaseModel):
 
     events: list[dict[str, Any]]
     latest_version: int
+
+
+class ProjectionIdentityResponse(BaseModel):
+    revision: int
+    digest: str
+
+
+class ResourcePoolProjectionResponse(ProjectionIdentityResponse):
+    resource_pools: list[dict[str, Any]]
+
+
+class CapacityBucketProjectionResponse(ProjectionIdentityResponse):
+    capacity_buckets: list[dict[str, Any]]

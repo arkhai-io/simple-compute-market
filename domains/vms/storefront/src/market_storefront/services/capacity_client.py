@@ -13,7 +13,7 @@ storefront's reservation triggers exactly the same listing
 reconciliation ours does.
 
 The storefront's own SQLite holds market state only (listings, pricing,
-pools, negotiations, deals); physical truth — allocations and their
+pools, negotiations, deals); physical truth — reservations and their
 lease tails — is the ledger's.
 """
 
@@ -174,7 +174,7 @@ def _make_listing_reconcile_subscriber(
 
 # One aggregator per configuration: deltas come from the per-site
 # pollers (not from whichever client instance happened to mutate), and
-# the allocation→site routing cache must survive across build calls
+# the reservation→site routing cache must survive across build calls
 # within the process.
 _aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
@@ -226,7 +226,7 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     """The per-site remote clients behind a capacity client, by site name.
 
     Used by callers that need the beyond-the-protocol surface
-    (allocation lists, event feeds) — those are per-site conversations,
+    (reservation lists, event feeds) — those are per-site conversations,
     not aggregate ones.
     """
     if isinstance(client, AggregateCapacityClient):

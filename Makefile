@@ -485,18 +485,37 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse: vendor-wheels ## Package vendored dependency wheels for offline review/test runs.
+review-wheelhouse: ## Resolve locked third-party wheels for offline review/test runs.
 	@mkdir -p .snapshot
-	@OUTFILE="$(REPO_ROOT)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.zip"; \
+	@set -eu; \
+	OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.zip"; \
 	TMPDIR="$$(mktemp -d)"; \
-	trap 'rm -rf "$$TMPDIR"' EXIT; \
+	trap 'rm -rf "$$TMPDIR"' EXIT HUP INT TERM; \
 	echo "Creating $$OUTFILE ..."; \
-	mkdir -p "$$TMPDIR/wheelhouse"; \
-	cp -R vendor/. "$$TMPDIR/wheelhouse/"; \
-	cp pyproject.toml "$$TMPDIR/pyproject.toml"; \
-	if [[ -f uv.lock ]]; then cp uv.lock "$$TMPDIR/uv.lock"; fi; \
-	ZIP_INPUTS="wheelhouse pyproject.toml README_WHEELHOUSE.md"; \
-	if [[ -f "$$TMPDIR/uv.lock" ]]; then ZIP_INPUTS="$$ZIP_INPUTS uv.lock"; fi; \
-	( cd "$$TMPDIR" && zip -qr "$$OUTFILE" $$ZIP_INPUTS ); \
+	mkdir -p "$$TMPDIR/wheelhouse" "$$TMPDIR/manifests"; \
+	find . -name uv.lock -not -path './.venv/*' -not -path './.snapshot/*' -print | sort > "$$TMPDIR/locks.txt"; \
+	INDEX=0; \
+	while IFS= read -r LOCKFILE; do \
+		[ -n "$$LOCKFILE" ] || continue; \
+		INDEX=$$((INDEX + 1)); \
+		PROJECT_DIR="$$(dirname "$$LOCKFILE")"; \
+		MANIFEST="$$TMPDIR/manifests/requirements-$$INDEX.txt"; \
+		uv export --project "$$PROJECT_DIR" --frozen --all-groups --no-hashes \
+			--no-emit-project --no-emit-workspace --no-emit-local > "$$MANIFEST"; \
+		PYTHON_SPEC="$$(sed -n 's/^requires-python = "//; s/"$$//; p' "$$LOCKFILE" | head -1)"; \
+		PYTHON_VERSION="$$(printf '%s\n' "$$PYTHON_SPEC" | sed -n 's/.*>= *\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; \
+		[ -n "$$PYTHON_VERSION" ] || PYTHON_VERSION="$$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"; \
+		python3 -m pip download --disable-pip-version-check --no-deps --ignore-requires-python \
+			--python-version "$$PYTHON_VERSION" --find-links "$(CURDIR)/.dist" \
+			--dest "$$TMPDIR/wheelhouse" -r "$$MANIFEST"; \
+	done < "$$TMPDIR/locks.txt"; \
+	cp "$$TMPDIR/locks.txt" "$$TMPDIR/manifests/locks.txt"; \
+	printf '%s\n' \
+		'This wheelhouse contains third-party dependencies exported independently from every repository uv.lock.' \
+		'Independent exports permit different projects to pin different versions of the same package.' \
+		'Build repository-owned wheels with make dist, then use both .dist and this wheelhouse as find-links sources.' \
+		> "$$TMPDIR/README_WHEELHOUSE.md"; \
+	rm -f "$$OUTFILE"; \
+	( cd "$$TMPDIR" && zip -qr "$$OUTFILE" wheelhouse manifests README_WHEELHOUSE.md ); \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"

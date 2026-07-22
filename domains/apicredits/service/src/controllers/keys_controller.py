@@ -75,7 +75,7 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
                 buyer_id=body.buyer.id if body.buyer else None,
                 owner_scheme=body.owner.scheme if body.owner else None,
                 owner_id=body.owner.id if body.owner else None,
-                allocation_id=body.allocation_id,
+                capacity_reservation_id=body.capacity_reservation_id,
                 resource_id=body.resource_id,
             )
         except IssuanceError as exc:

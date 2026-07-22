@@ -35,9 +35,9 @@ class StorefrontLifecycleEventSink:
         )
         if not storefront_url:
             logger.warning(
-                "[LEASE_LIFECYCLE] no owning storefront URL for allocation %s; "
+                "[LEASE_LIFECYCLE] no owning storefront URL for reservation %s; "
                 "skipping %s event",
-                event.allocation_id,
+                event.capacity_reservation_id,
                 event.event_kind,
             )
             return False
@@ -48,8 +48,7 @@ class StorefrontLifecycleEventSink:
             ) as storefront:
                 if event.event_kind == "capacity_released":
                     await storefront.notify_capacity_released(
-                        event.allocation_id,
-                        resource_id=event.payload.get("resource_id"),
+                        event.capacity_reservation_id,
                         released_at=event.payload.get("released_at"),
                     )
                 else:
@@ -60,17 +59,17 @@ class StorefrontLifecycleEventSink:
             return True
         except StorefrontClientError as exc:
             logger.warning(
-                "[LEASE_LIFECYCLE] %s event rejected for allocation %s: %s",
+                "[LEASE_LIFECYCLE] %s event rejected for reservation %s: %s",
                 event.event_kind,
-                event.allocation_id,
+                event.capacity_reservation_id,
                 exc,
             )
             return False
         except Exception as exc:
             logger.warning(
-                "[LEASE_LIFECYCLE] could not deliver %s event for allocation %s: %s",
+                "[LEASE_LIFECYCLE] could not deliver %s event for reservation %s: %s",
                 event.event_kind,
-                event.allocation_id,
+                event.capacity_reservation_id,
                 exc,
             )
             return False
@@ -78,25 +77,22 @@ class StorefrontLifecycleEventSink:
 
 async def notify_storefront_capacity_released(
     settings: Any,
-    allocation: dict[str, Any],
+    reservation: dict[str, Any],
     *,
     sink: StorefrontLifecycleEventSink | None = None,
 ) -> bool:
     """Translate a release fact into the versioned narrow event-sink contract."""
-    released_at = allocation.get("released_at")
+    released_at = reservation.get("released_at")
     event = LifecycleEvent(
         event_id=(
-            f"capacity_released:{allocation['allocation_id']}:"
-            f"{released_at or allocation.get('updated_at') or 'terminal'}"
+            f"capacity_released:{reservation['capacity_reservation_id']}:"
+            f"{released_at or reservation.get('updated_at') or 'terminal'}"
         ),
-        allocation_id=str(allocation["allocation_id"]),
-        deal_ref=dict(allocation.get("deal_ref") or {}),
-        executor_kind=str(allocation.get("executor_kind") or "vm"),
+        capacity_reservation_id=str(reservation["capacity_reservation_id"]),
+        deal_ref=dict(reservation.get("deal_ref") or {}),
+        executor_kind=str(reservation.get("executor_kind") or "vm"),
         event_kind="capacity_released",
-        payload={
-            "resource_id": allocation.get("resource_id"),
-            "released_at": released_at,
-        },
+        payload={"released_at": released_at},
         occurred_at=datetime.now(timezone.utc),
     )
     return await (sink or StorefrontLifecycleEventSink(settings)).deliver(event)

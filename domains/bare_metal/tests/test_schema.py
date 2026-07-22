@@ -137,11 +137,11 @@ def test_materialization_to_lease_create_adapts_current_api_request():
 
     request = materialization_to_lease_create(
         materialization,
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         create_job_id="job-1",
     )
 
-    assert request.allocation_id == "alloc-1"
+    assert request.capacity_reservation_id == "alloc-1"
     assert request.escrow_uid == "0xbm"
     assert request.machine_id == "bm-node-1"
     assert request.physical_host_id == "host-physical-1"
@@ -173,7 +173,7 @@ def test_bare_metal_receipt_is_domain_view_not_executor_result():
 
 def test_receipt_from_lease_view_adapts_current_api_view():
     lease = BareMetalLeaseView(
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
@@ -186,7 +186,7 @@ def test_receipt_from_lease_view_adapts_current_api_view():
 
     receipt = receipt_from_lease_view(
         lease,
-        result_ref={"allocation_id": "alloc-1"},
+        result_ref={"capacity_reservation_id": "alloc-1"},
     )
 
     assert receipt.escrow_uid == "0xbm"
@@ -195,12 +195,12 @@ def test_receipt_from_lease_view_adapts_current_api_view():
     assert receipt.lease_start_utc == datetime(
         2099, 1, 1, tzinfo=timezone.utc,
     )
-    assert receipt.result_ref == {"allocation_id": "alloc-1"}
+    assert receipt.result_ref == {"capacity_reservation_id": "alloc-1"}
 
 
 def test_bare_metal_lease_create_keeps_machine_and_physical_ids_separate():
     body = BareMetalLeaseCreate(
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",

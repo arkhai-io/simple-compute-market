@@ -192,6 +192,8 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `provisioned_resource_id` | One provider-created output; one fulfillment may create several |
 | `result_id` | One durable settlement/fulfillment result |
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
+
+`site_id` is owned at the storefront aggregation boundary and bound to a configured provisioning connection. Provisioning-local capacity persistence is already scoped by its database authority and does not duplicate that storefront-owned identity on every pool, resource, or reservation row. Counterparties cannot self-assert the routing identity used by the storefront.
 | `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
 Commercial agreement identity does not cross the generic provisioning boundary merely for correlation. Storefronts retain commercial context and translate it into fulfillment requirements. The capacity reservation is the generic physical-lifecycle identity.
@@ -341,3 +343,12 @@ See the [testing and compatibility specification](../../openspec/specs/test-comp
 | Deployment, persistence, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |
 | Test hierarchy and compatibility | [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md) |
 | Specification/change workflow | [Planning governance](../../openspec/specs/planning-governance/spec.md) and [`openspec/README.md`](../../openspec/README.md) |
+
+### Site inventory, capacity accounting, and projections
+
+Provisioning separates physical inventory, private capacity accounting, and storefront projection concerns. Physical hosts and their resource-pool membership remain authoritative provisioning inventory. A host-level `CapacityBucket` carries the multidimensional balance used for admission; a current `CapacityReservationDebit` links a reservation to that private bucket. Storefront reservation contracts do not expose bucket or backing-resource identity. Scheduling may atomically rebind the debit before persisting `settlement_resource_id`.
+
+The storefront pulls two independently versioned projections. `site_resource_pools` retains allowlisted per-resource facts for individual-resource listings. `site_capacity_buckets` groups identical currently available shapes for capacity listings, using deterministic grouping keys and counts rather than physical-resource identifier lists. Each projection has an independent revision and canonical digest so a storefront can compare in constant time, fetch only when drift is detected, and atomically replace the corresponding cached generation.
+
+### Site inventory and capacity projections
+Provisioning services expose two independent pull projections. `site_resource_pools` is the allowlisted physical inventory grouped by authoritative resource-pool membership and supports individual-resource listings. `site_capacity_buckets` vertically groups identical current capacity shapes and supports capacity-oriented listings. Each projection has its own revision and canonical digest. Storefronts compare those identities, fetch only changed snapshots, and atomically replace complete cached generations. Projection rows are advisory publication inputs; authoritative admission always debits a provisioning-private host-level `CapacityBucket` through a current `CapacityReservationDebit`.

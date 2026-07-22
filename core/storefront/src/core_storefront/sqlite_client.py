@@ -480,7 +480,7 @@ class SQLiteClient:
                 CREATE TABLE IF NOT EXISTS capacity_holds (
                   negotiation_id TEXT PRIMARY KEY,
                   listing_id TEXT,
-                  allocation_id TEXT NOT NULL,
+                  capacity_reservation_id TEXT NOT NULL,
                   payload TEXT,
                   expires_at TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -777,7 +777,7 @@ class SQLiteClient:
         *,
         negotiation_id: str,
         listing_id: str | None,
-        allocation_id: str,
+        capacity_reservation_id: str,
         payload: dict[str, Any] | None = None,
         expires_at: str | None = None,
     ) -> None:
@@ -787,19 +787,19 @@ class SQLiteClient:
                 conn.execute(
                     """
                     INSERT INTO capacity_holds(
-                      negotiation_id, listing_id, allocation_id, payload, expires_at
+                      negotiation_id, listing_id, capacity_reservation_id, payload, expires_at
                     )
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id) DO UPDATE SET
                       listing_id=excluded.listing_id,
-                      allocation_id=excluded.allocation_id,
+                      capacity_reservation_id=excluded.capacity_reservation_id,
                       payload=excluded.payload,
                       expires_at=excluded.expires_at
                     """,
                     (
                         negotiation_id,
                         listing_id,
-                        allocation_id,
+                        capacity_reservation_id,
                         json.dumps(payload) if payload is not None else None,
                         expires_at,
                     ),
@@ -818,7 +818,7 @@ class SQLiteClient:
             try:
                 row = conn.execute(
                     """
-                    SELECT negotiation_id, listing_id, allocation_id, payload, expires_at
+                    SELECT negotiation_id, listing_id, capacity_reservation_id, payload, expires_at
                     FROM capacity_holds
                     WHERE negotiation_id = ?
                     """,
@@ -835,7 +835,7 @@ class SQLiteClient:
             return {
                 "negotiation_id": row[0],
                 "listing_id": row[1],
-                "allocation_id": row[2],
+                "capacity_reservation_id": row[2],
                 "payload": payload,
                 "expires_at": row[4],
             }

@@ -12,6 +12,7 @@ import threading
 from typing import Any
 
 from market_resource_pools import ResourcePoolService
+from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 
 from .settlement_types import (
@@ -108,7 +109,7 @@ class PhysicalSettlementScheduler:
             return self.record_settlement_assignment(request.capacity_reservation_id, resource)
 
     def _require_valid_reservation(self, request: PhysicalSettlementRequest) -> dict[str, Any]:
-        reservation = self._capacity_ledger.get_allocation(request.capacity_reservation_id)
+        reservation = self._capacity_ledger.get_reservation(request.capacity_reservation_id)
         if reservation is None:
             raise SettlementEntityNotFoundError(
                 f"capacity reservation '{request.capacity_reservation_id}' does not exist"
@@ -152,16 +153,37 @@ class PhysicalSettlementScheduler:
         attributes = dict(request.requirements.get("attributes") or {})
         # dimensions is authoritative when the reservation carries one.
         # Otherwise fall back to the reservation's own dimensions, which
-        # ledger.get_allocation() always populates -- even for a
+        # ledger.get_reservation() always populates -- even for a
         # pre-migration reservation that only ever had "units"
-        # (CapacityLedgerService._allocation_dimensions applies that
+        # (CapacityLedgerService._reservation_dimensions applies that
         # fallback once, centrally, before this dict ever reaches the
         # scheduler). Do not re-derive a "units" fallback here: it would be
         # dead code today and, worse, a second copy of a rule that must
         # only live in one place.
-        dimensions = dict(
-            request.requirements.get("dimensions") or reservation["dimensions"]
-        )
+        reservation_dimensions = dict(reservation["dimensions"])
+        requested_dimensions = request.requirements.get("dimensions")
+        if requested_dimensions:
+            dimensions = dict(requested_dimensions)
+            # A request may narrow what it actually needs relative to what
+            # was reserved (e.g. scheduling 2 GPUs against a 4-GPU
+            # reservation), but it must never widen a dimension the
+            # reservation itself governs -- that would let scheduling admit
+            # a shape reservation-time admission never verified fits
+            # anywhere. Dimensions the reservation does not mention are not
+            # governed by it and are not checked here.
+            exceeded = {
+                dimension: (dimensions[dimension], reservation_dimensions[dimension])
+                for dimension in dimensions
+                if dimension in reservation_dimensions
+                and dimensions[dimension] > reservation_dimensions[dimension]
+            }
+            if exceeded:
+                raise SettlementRequestMismatchError(
+                    "requested dimensions exceed the capacity reservation: "
+                    f"{exceeded} (requested, reserved)"
+                )
+        else:
+            dimensions = reservation_dimensions
         return SettlementRequirement(
             resource_kind=resource_kind,
             dimensions=dimensions,
@@ -174,17 +196,28 @@ class PhysicalSettlementScheduler:
         reservation: dict[str, Any],
     ) -> list[SettlementCandidate]:
         pools = {pool.id: pool for pool in self._pool_service.list_pools(enabled_only=True)}
-        # Guaranteed non-empty by CapacityLedgerService.get_allocation() --
+        # Guaranteed non-empty by CapacityLedgerService.get_reservation() --
         # see the comment in _requirement().
         reservation_dimensions = dict(reservation["dimensions"])
+        backing_resource_id = self._capacity_ledger.get_reservation_backing_resource_id(
+            reservation["capacity_reservation_id"]
+        )
         candidates: list[SettlementCandidate] = []
         for payload in self._capacity_ledger.list_resources():
             attributes = dict(payload.get("attributes") or {})
-            pool_id = attributes.get("pool_id")
+            # Prefer the real pool_id column; the attributes JSON fallback
+            # covers rows registered before a caller started passing the
+            # real column explicitly (design.md, "SiteResource is
+            # retired" -- retiring the storefront's attributes-JSON-only
+            # push is a separate, later step from this column existing).
+            pool_id = payload.get("pool_id") or attributes.get("pool_id")
             if not isinstance(pool_id, str) or pool_id not in pools:
                 continue
             if not payload.get("enabled"):
                 continue
+            # Cheap early exit before the credit-back computation below;
+            # resource_satisfies_requirement is still the sole source of
+            # truth for the eligibility decision itself.
             if payload.get("resource_type") != requirement.resource_kind:
                 continue
             available = dict(payload.get("available") or {})
@@ -194,16 +227,17 @@ class PhysicalSettlementScheduler:
             # resource it already holds capacity against can still be
             # selected; durable assignment persistence will move this
             # bookkeeping into the assignment transaction instead.
-            if payload.get("resource_id") == reservation.get("resource_id"):
+            if payload.get("resource_id") == backing_resource_id:
                 for key, amount in reservation_dimensions.items():
                     available[key] = available.get(key, 0) + amount
-            fits = all(
-                available.get(dim, 0) >= amount
-                for dim, amount in requirement.dimensions.items()
-            )
-            if not fits:
-                continue
-            if any(attributes.get(key) != value for key, value in requirement.attributes.items()):
+            if not resource_satisfies_requirement(
+                resource_kind=payload["resource_type"],
+                available=available,
+                attributes=attributes,
+                required_resource_kind=requirement.resource_kind,
+                required_dimensions=requirement.dimensions,
+                required_attributes=requirement.attributes,
+            ):
                 continue
             pool = pools[pool_id]
             candidates.append(

@@ -23,6 +23,11 @@ class ResourcePool(Base):
     id:
         Operator-chosen slug (e.g. "hetzner-eu-central"). Not a UUID — pool
         ids appear in YAML definitions and are meant to be human-legible.
+        Site identity is deliberately not a column here: this table lives
+        in one provisioning service's own database, and one deployment is
+        one site, so every row already implicitly belongs to the same
+        site. Tracking which site owns which pool across multiple
+        provisioning services is a storefront-side concern.
     enabled:
         False pools are excluded from scheduling eligibility. Delete is
         soft — disable — by default; pools are never hard-deleted by the
