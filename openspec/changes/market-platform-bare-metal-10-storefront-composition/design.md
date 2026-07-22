@@ -114,6 +114,8 @@ The VM controllers, middleware wrappers, container, startup, CLI, and `server.py
 
 No VM module moves into core merely to establish the new package. A behavior may be extracted only after a focused VM regression test and a bare-metal consumer prove it is schema-opaque. The first package/composition increment therefore uses existing core seams, bare-metal-owned policy/adapters, and injected fake lifecycle ports. Alkahest helpers may be imported from `core_storefront` if the selected bare-metal settlement mechanism uses them; VM wrappers are never imported.
 
+The initial application shell injects and validates the current publication-only bare-metal contract. It does not install placeholder seller capabilities: negotiation, settlement, and fulfillment are added atomically only with their real hooks in the following tasks. The shell's injectable domain, lifespan, and router seams allow those increments without replacing the application boundary.
+
 ## Open Questions
 
 - Does the initial deployment use a dedicated bare-metal storefront image or one shared storefront image with separate composition entry points? Packaging evidence should decide before implementation tasks for deployment begin.

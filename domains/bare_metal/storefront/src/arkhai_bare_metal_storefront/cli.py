@@ -34,5 +34,17 @@ def main(
     """Operate the seller-side bare-metal storefront."""
 
 
+@app.command("serve")
+def serve_cmd(
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind interface."),
+    port: int = typer.Option(8000, "--port", help="Bind port."),
+    root_path: str = typer.Option("", "--root-path", help="ASGI root path."),
+) -> None:
+    """Run the storefront HTTP process."""
+    from .server import run_serve
+
+    run_serve(host=host, port=port, root_path=root_path)
+
+
 if __name__ == "__main__":
     app()
