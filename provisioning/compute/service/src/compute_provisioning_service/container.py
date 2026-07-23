@@ -59,8 +59,8 @@ def _vm_bundle(runtime, site_authority, resource_pool_service):
     return runtime.adapter_bundle(site_authority, resource_pool_service)
 
 
-def _bare_metal_bundle(runtime, site_authority):
-    return runtime.adapter_bundle(site_authority)
+def _bare_metal_bundle(runtime, site_authority, resource_pool_service):
+    return runtime.adapter_bundle(site_authority, resource_pool_service)
 
 
 def _system_service(runtime, lease_lifecycle_service):
@@ -275,6 +275,7 @@ class Container(containers.DeclarativeContainer):
         _bare_metal_bundle,
         runtime=bare_metal_runtime,
         site_authority=site_authority,
+        resource_pool_service=resource_pool_service,
     )
 
     composed_adapters = providers.Singleton(

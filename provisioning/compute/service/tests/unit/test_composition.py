@@ -17,6 +17,9 @@ from compute_provisioning_service import (
     ExecutorAdapterContribution,
     compose_adapter_bundles,
 )
+from bare_metal_provisioning_adapter.bundle import (
+    build_bare_metal_adapter_bundle,
+)
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 
 
@@ -89,6 +92,43 @@ def test_vm_bundle_scopes_ansible_provider_to_compute_gpu():
     assert bundle.fulfillment_providers == {
         ("ansible", "compute.gpu"): provider,
     }
+
+
+def test_bare_metal_bundle_scopes_ansible_provider_to_bare_metal():
+    provider = FakeProvider()
+    bundle = build_bare_metal_adapter_bundle(
+        compute_adapter=FakeAdapter("bare_metal"),
+        release_executor=FakeReleaseExecutor(),
+        fulfillment_provider=provider,
+    )
+
+    assert bundle.fulfillment_providers == {
+        ("ansible", "bare_metal"): provider,
+    }
+
+
+def test_vm_and_bare_metal_ansible_routes_coexist_without_fallback():
+    vm_provider = FakeProvider()
+    bare_metal_provider = FakeProvider()
+    composed = compose_adapter_bundles(
+        [
+            build_vm_adapter_bundle(
+                compute_adapter=FakeAdapter("vm"),
+                release_executor=FakeReleaseExecutor(),
+                fulfillment_provider=vm_provider,
+            ),
+            build_bare_metal_adapter_bundle(
+                compute_adapter=FakeAdapter("bare_metal"),
+                release_executor=FakeReleaseExecutor(),
+                fulfillment_provider=bare_metal_provider,
+            ),
+        ]
+    )
+
+    assert composed.provider_registry.require("ansible", "compute.gpu") is vm_provider
+    assert composed.provider_registry.require("ansible", "bare_metal") is bare_metal_provider
+    with pytest.raises(ProviderNotFoundError):
+        composed.provider_registry.require("ansible", "other")
 
 
 def test_composes_executor_and_provider_namespaces_independently():

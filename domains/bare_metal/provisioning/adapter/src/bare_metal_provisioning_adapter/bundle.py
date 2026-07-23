@@ -11,12 +11,16 @@ from compute_provisioning_service import (
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
 from bare_metal_provisioning_adapter.release import BareMetalReleaseExecutor
 from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts
+from bare_metal_provisioning_adapter.services.ansible_fulfillment_provider import (
+    BareMetalAnsibleFulfillmentProvider,
+)
 
 
 def build_bare_metal_adapter_bundle(
     *,
     compute_adapter: BareMetalComputeAdapter,
     release_executor: BareMetalReleaseExecutor,
+    fulfillment_provider: BareMetalAnsibleFulfillmentProvider,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
     checks = (
@@ -33,6 +37,9 @@ def build_bare_metal_adapter_bundle(
                 release_executor=release_executor,
             ),
         ),
+        fulfillment_providers={
+            ("ansible", "bare_metal"): fulfillment_provider,
+        },
         router_mounts=bare_metal_router_mounts(),
         readiness_checks=checks,
     )

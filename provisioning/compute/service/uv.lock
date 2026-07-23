@@ -186,6 +186,8 @@ dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-service" },
+    { name = "arkhai-kit-fulfillment" },
+    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "pydantic" },
 ]
@@ -195,6 +197,8 @@ requires-dist = [
     { name = "arkhai-bare-metal", editable = "../../../domains/bare_metal" },
     { name = "arkhai-compute-provisioning", editable = "../" },
     { name = "arkhai-compute-provisioning-service", editable = "." },
+    { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
     { name = "arkhai-vms-provisioning-operator-client", editable = "../../../domains/vms/provisioning/client" },
     { name = "pydantic", specifier = ">=2.7" },
 ]

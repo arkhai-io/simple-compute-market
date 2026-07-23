@@ -229,10 +229,10 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 - [x] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
 - [x] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
   - [x] 6.2.1 Route provider resolution by exact `(provider, resource_kind)` in `kit/fulfillment`, compute-service composition, and every `FulfillmentService` call site. Retain provider-only registrations only as explicit compatibility fallback; add registry/composition/service tests; register the VM provider for `("ansible", "compute.gpu")`; promote the contract to `openspec/specs/fulfillment/spec.md`.
-  - [ ] 6.2.2 Standardize the bare-metal fulfillment `resource_kind` as `"bare_metal"`; register a domain-owned provider for `("ansible", "bare_metal")`; prove coexistence with VM Ansible routing and no cross-kind fallback; promote the canonical mapping to permanent fulfillment and physical-provisioning documentation.
+  - [x] 6.2.2 Standardize the bare-metal fulfillment `resource_kind` as `"bare_metal"`; register a domain-owned provider for `("ansible", "bare_metal")`; prove coexistence with VM Ansible routing and no cross-kind fallback; promote the canonical mapping to permanent fulfillment and physical-provisioning documentation.
 - [x] 6.3 Split provider behavior into synchronous `prepare_create`/`prepare_teardown` and post-commit `dispatch_create`/`dispatch_teardown` operations.
 - [x] 6.4 Validate and persist versioned prepared input in the same transaction that accepts a pending provider command.
-- [ ] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.
+- [x] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.
 - [x] 6.6 Persist provider job identity and normalized provider metadata without exposing VM-specific job state as the cross-domain lifecycle contract.
 - [ ] 6.7 Add tests for equivalent/conflicting retries, pool-config mutation after acceptance, duplicate submission races, and create/teardown command deduplication.
 - [x] 6.8 Expose provider preparation through a public side-effect-free dry-run endpoint that uses the same validation path as `begin_fulfillment` without persisting or dispatching work.
