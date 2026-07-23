@@ -4,6 +4,10 @@ from .publication import (
     available_bare_metal_listings,
     bare_metal_listing_key,
 )
+from .projections import (
+    BareMetalResourceProjection,
+    TrustedBareMetalProjection,
+)
 from .provision_terms import (
     BARE_METAL_PROVISION_KIND,
     BARE_METAL_PROVISION_VERSION,
@@ -65,7 +69,9 @@ __all__ = [
     "BareMetalProvisionPayload",
     "BareMetalProvisionTerms",
     "BareMetalReceipt",
+    "BareMetalResourceProjection",
     "BareMetalTerms",
+    "TrustedBareMetalProjection",
     "available_bare_metal_listings",
     "bare_metal_listing_key",
     "bare_metal_listing_candidates",
