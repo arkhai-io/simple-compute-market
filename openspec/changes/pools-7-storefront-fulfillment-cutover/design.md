@@ -2083,6 +2083,45 @@ Per direction received in this session, Section 5 follows the same narrow-persis
 
 Today's in-memory orchestrator (`compute_provisioning_service/services/fulfillment_service.py`'s `FulfillmentService`, with its process-local `FulfillmentEntry` dict) is retired, not adapted in place. Its replacement — the durable `begin_fulfillment` orchestrator driving `FulfillmentUnitOfWork` and `ProviderRegistry` — is implemented in `kit/fulfillment`, not `provisioning/compute/service`. Rationale: it composes only `SettlementRepository` and `ProviderRegistry`, both already owned by `kit/fulfillment`, exactly the same domain-neutral shape as `PhysicalSettlementScheduler`, which already lives there. There is no principled reason for this orchestrator to be the one kit-shaped piece of logic living outside kit.
 
+### Acceptance result and post-commit dispatch failure
+
+Once the acceptance transaction commits, `begin_fulfillment` has durably accepted the request even if provider dispatch subsequently fails or its acknowledgement cannot be persisted. The call therefore returns the accepted fulfillment aggregate for recoverable post-commit dispatch failures, leaving it in `dispatch_pending` with sanitized diagnostics and recovery timing as applicable. Errors are raised only before durable acceptance, including invalid input, missing assignment, conflicting reuse, missing provider registration, or invalid provider configuration.
+
+The returned contract identifies the durable fulfillment and its current aggregate state; it does not pretend that provider submission succeeded merely because acceptance succeeded.
+
+### Equivalent retry dispatch decision
+
+Equivalent retries are state-sensitive rather than unconditional redispatches. The unit-of-work result distinguishes a newly accepted aggregate from an existing equivalent aggregate and tells the orchestrator whether dispatch is required.
+
+- A newly accepted aggregate is prepared, committed in `dispatch_pending`, and dispatched after commit.
+- An equivalent aggregate still in `dispatch_pending` without recorded provider submission metadata may redispatch the persisted prepared operation.
+- An equivalent aggregate with recorded submission metadata, or in any later lifecycle state, returns the existing fulfillment without dispatch.
+- Conflicting reuse fails before dispatch.
+
+Executor-level deterministic command identity remains a recovery defense, not the primary business-idempotency authority.
+
+### Provider-submission acknowledgement transaction
+
+Successful provider submission is followed by a second short fulfillment transaction that records normalized provider metadata and advances the aggregate from `dispatch_pending` to `submitted`. This write is idempotent: identical normalized metadata returns the existing row, while conflicting provider operation identity raises a lifecycle conflict without overwriting durable metadata.
+
+A crash after provider submission but before this acknowledgement transaction commits is an intentional recovery window. Recovery redispatches the persisted prepared operation using deterministic executor command identity and converges on the same provider operation.
+
+### Side-effect-free dry run mirrors `begin_fulfillment`
+
+The public dry-run endpoint accepts the same request signature as `begin_fulfillment`. It performs every calculation and validation the real path can perform without side effects, including reservation/assignment lookup, equivalent-or-conflicting request evaluation, provider resolution, in-session pool configuration loading, and `prepare_create` through the same provider path. It does not persist, transition lifecycle state, enqueue work, or dispatch a provider operation.
+
+The dry run returns structured validation and preparation results suitable for callers, while provider-specific prepared operation envelopes remain provisioning-internal. Because no acceptance transaction freezes inputs, a successful dry run is advisory and does not guarantee that pool configuration or assignment state will remain unchanged before the real call.
+
+### Teardown input is the durable settlement result, not an Ansible-shaped generic contract
+
+The current pre-cutover caller is `compute_provisioning_service.services.fulfillment_service.FulfillmentService.teardown`. It loads its process-local `FulfillmentEntry` and passes the stored `SettlementResource` model plus create-result provider metadata to `FulfillmentProvider.teardown`. `resource` is therefore not an ID today: it is the provider-neutral `SettlementResource` model containing `settlement_resource_id`, `pool_id`, `resource_kind`, `provider`, and attributes. No production caller currently invokes the proposed `prepare_teardown`; the durable caller will be `begin_fulfillment_teardown` in Section 10.
+
+The prepare/dispatch protocol must avoid leaking Ansible-specific teardown identity outside the Ansible provider. `prepare_teardown` receives the persisted settlement result (or a provider-neutral result view containing the selected `SettlementResource`, provisioned-resource outputs, and versioned provider metadata) as its teardown subject. The provider validates its own versioned metadata and derives the exact provider operation required to remove the resources produced by that fulfillment. Shared orchestration does not inspect fields such as `vm_host`, `vm_target`, executor target, playbook path, or Ansible job IDs.
+
+For newly accepted VM fulfillments, the Ansible provider's normalized create result must persist sufficient exact teardown identity to prepare teardown after restart without querying live storefront state or guessing from mutable pool data. The selected resource and accepted pool configuration snapshot remain available as provider-neutral and versioned inputs. Missing or contradictory provider-owned teardown identity fails preparation rather than selecting a target heuristically.
+
+`settlement_resource_id` remains the explicit name whenever only the selected-resource identifier is passed or stored. The generic term `resource` is reserved for a `SettlementResource` object, not a bare string.
+
 ### Cleanup carried into Section 5
 
 `SettlementRepository.select_pending_for_single_worker`'s docstring currently reads "...Section 7's recovery workflow owns duplicate-dispatch prevention..." — this is production code, and per `AGENTS.md` production comments must not reference OpenSpec section/task numbering at all (independent of the fact the number is also now stale post-reorder). This gets corrected as part of Section 5 to describe the concept in stable terms with no section reference, rather than merely renumbered.
@@ -2098,4 +2137,10 @@ Today's in-memory orchestrator (`compute_provisioning_service/services/fulfillme
 | `ResourcePoolService.get_pool_in_session` closes the same live-re-read gap `list_pools_in_session` closed for scheduling | `openspec/specs/resource-pool-management/spec.md` |
 | Fulfillment acceptance uses a narrow `FulfillmentUnitOfWork`, mirroring `SchedulingUnitOfWork` | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | The durable fulfillment orchestrator lives in `kit/fulfillment`, alongside `PhysicalSettlementScheduler` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Post-commit dispatch failure preserves durable acceptance and returns aggregate state for recoverable failures | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Equivalent retries dispatch only when durable state shows submission is still required | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Provider submission metadata is recorded in a second idempotent transaction; the acknowledgement gap is recovery-owned | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Fulfillment dry run mirrors the real acceptance signature and calculation path without persistence or dispatch | `openspec/specs/fulfillment/spec.md` |
+| Teardown consumes a provider-neutral durable settlement result; provider-specific target identity stays inside the concrete provider | `openspec/specs/fulfillment/spec.md#provider-boundary` |
+| Bare selected-resource identifiers are named `settlement_resource_id`; `resource` denotes a `SettlementResource` model | `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities` |
 | `deal_ref` remains on legacy contract classes until Section 9/11 retire their callers | `openspec/changes/pools-7-storefront-fulfillment-cutover/tasks.md` (Section 11 scope; not a permanent-doc statement until removed) |
