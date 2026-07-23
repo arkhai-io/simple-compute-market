@@ -38,7 +38,7 @@ worker: ## Start the background-only worker role
 migrate: ## Apply ordered service-owned database migrations
 	uv run compute-provisioning-migrate
 
-test: test-unit test-integration ## Run destination service tests
+test: reinit test-unit test-integration ## Run destination service tests
 
 test-unit: ## Run unit tests
 	ACTIVE_PROFILES=mock uv run --find-links $(DIST_DIR) pytest tests/unit -q
