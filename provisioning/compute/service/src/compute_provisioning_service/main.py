@@ -185,7 +185,14 @@ app = build_compute_provisioning_app(
         ),
         ComputeProvisioningMiddlewareMount(
             StorefrontAuthMiddleware,
-            {"admin_key": str(settings.storefront_admin_key or "")},
+            {
+                "admin_key": str(settings.storefront_admin_key or ""),
+                "principal_keys": getattr(
+                    settings,
+                    "storefront_api_keys",
+                    None,
+                ),
+            },
         ),
         ComputeProvisioningMiddlewareMount(
             CORSMiddleware,
