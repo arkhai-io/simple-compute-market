@@ -121,6 +121,16 @@ async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
 
     def handler(request: httpx.Request) -> httpx.Response:
         paths.append(request.url.path)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                    "fulfillment_id": "fulfillment-1",
+                    "capacity_reservation_id": "reservation-1",
+                    "state": "dispatching",
+                },
+            )
         payload = __import__("json").loads(request.content)
         if request.url.path.endswith("/dry-run"):
             return httpx.Response(
@@ -155,12 +165,15 @@ async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
     ) as client:
         accepted = await client.begin_fulfillment(request)
         dry_run = await client.dry_run_fulfillment(request)
+        status = await client.get_fulfillment_status(accepted.fulfillment_id)
 
     assert accepted.fulfillment_id == "fulfillment-1"
     assert dry_run.valid
+    assert status.state == "dispatching"
     assert paths == [
         "/api/v1/fulfillments",
         "/api/v1/fulfillments/dry-run",
+        "/api/v1/fulfillments/fulfillment-1/status",
     ]
 
 

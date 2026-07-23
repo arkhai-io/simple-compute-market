@@ -84,6 +84,14 @@ class FulfillmentDryRunView(VersionedContractModel):
     issues: list[FulfillmentValidationIssueView] = Field(default_factory=list)
 
 
+class FulfillmentStatusView(VersionedContractModel):
+    fulfillment_id: str = Field(min_length=1)
+    capacity_reservation_id: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    failure_reason: str | None = None
+    failure_message: str | None = None
+
+
 class ExecutorKind(str, Enum):
     VM = "vm"
     BARE_METAL = "bare_metal"

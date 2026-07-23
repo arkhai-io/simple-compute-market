@@ -242,6 +242,34 @@ async def test_equivalent_retry_survives_service_reconstruction(
     assert provider.dispatch_calls == 1
 
 
+@pytest.mark.asyncio
+async def test_status_reads_durable_state_and_hides_other_owner(
+    service, provider, session_factory
+):
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    reconstructed = FulfillmentService(
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+    )
+
+    status = reconstructed.get_status(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+    assert status.state == SettlementRecordState.dispatching.value
+    with pytest.raises(SettlementEntityNotFoundError):
+        reconstructed.get_status(
+            fulfillment_id=accepted.fulfillment_id,
+            owner_principal="seller-b",
+        )
+
+
 def test_dry_run_uses_preparation_without_persisting(service, provider, session_factory):
     validation = service.validate_create(
         capacity_reservation_id="reservation-1",

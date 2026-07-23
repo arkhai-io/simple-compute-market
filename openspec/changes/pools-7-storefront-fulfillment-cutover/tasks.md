@@ -261,7 +261,7 @@ storefront→provisioning auth direction — durable persistence (section 3)
 is unaffected; only the delivery transport differs from the original
 design.
 
-- [ ] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
+- [x] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
 - [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
 - [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called through the domain provider's live credential accessor, transmit them only in that response over the authenticated encrypted channel, delete transient provider-job credential material, and do not persist raw credentials in fulfillment state or prepared operations.
 - [ ] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.

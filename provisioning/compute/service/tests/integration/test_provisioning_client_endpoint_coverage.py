@@ -127,10 +127,13 @@ class TestFulfillmentClientEndpointCoverage:
             dry_run = await client.dry_run_fulfillment(request)
             accepted = await client.begin_fulfillment(request)
             repeated = await client.begin_fulfillment(request)
+            status = await client.get_fulfillment_status(accepted.fulfillment_id)
 
         assert dry_run.valid
         assert accepted.fulfillment_id == repeated.fulfillment_id
         assert accepted.state == "dispatching"
+        assert status.fulfillment_id == accepted.fulfillment_id
+        assert status.capacity_reservation_id == capacity_reservation_id
 
 
 class TestVmClientEndpointCoverage:

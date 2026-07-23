@@ -39,6 +39,15 @@ class FulfillmentAcceptance:
     state: str
 
 
+@dataclass(frozen=True)
+class FulfillmentStatus:
+    capacity_reservation_id: str
+    fulfillment_id: str
+    state: str
+    failure_reason: str | None
+    failure_message: str | None
+
+
 def _resource_from_record(record: SettlementRecord) -> SettlementResource:
     requirement = SettlementRequirement.model_validate(record.scheduling_requirements)
     return SettlementResource(
@@ -85,6 +94,34 @@ class FulfillmentService:
                 f"{capacity_reservation_id!r}"
             )
         return record
+
+    def get_status(
+        self,
+        *,
+        fulfillment_id: str,
+        owner_principal: str,
+    ) -> FulfillmentStatus:
+        with self._session_factory() as db:
+            record = self._repository.get_by_fulfillment_id(db, fulfillment_id)
+            if record is None or record.owner_principal != owner_principal:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment exists for fulfillment_id={fulfillment_id!r}"
+                )
+            return FulfillmentStatus(
+                capacity_reservation_id=str(record.capacity_reservation_id),
+                fulfillment_id=str(record.fulfillment_id),
+                state=str(record.state),
+                failure_reason=(
+                    str(record.failure_reason)
+                    if record.failure_reason is not None
+                    else None
+                ),
+                failure_message=(
+                    str(record.failure_message)
+                    if record.failure_message is not None
+                    else None
+                ),
+            )
 
     def validate_create(
         self,

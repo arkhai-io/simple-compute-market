@@ -9,6 +9,7 @@ from compute_provisioning.contracts import (
     FulfillmentBeginRequest,
     FulfillmentDryRunView,
     FulfillmentScheduleRequest,
+    FulfillmentStatusView,
     FulfillmentValidationIssueView,
     SettlementResourceView,
 )
@@ -33,6 +34,13 @@ from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 router = APIRouter(tags=["fulfillment"])
+
+
+def _fulfillment_not_found(fulfillment_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=f"fulfillment {fulfillment_id!r} not found",
+    )
 
 
 def _not_found(reservation_id: str) -> HTTPException:
@@ -134,6 +142,30 @@ class FulfillmentController:
             capacity_reservation_id=accepted.capacity_reservation_id,
             fulfillment_id=accepted.fulfillment_id,
             state=accepted.state,
+        )
+
+    @router.get(
+        "/fulfillments/{fulfillment_id}/status",
+        response_model=FulfillmentStatusView,
+    )
+    def get_fulfillment_status(
+        self,
+        fulfillment_id: str,
+        request: Request,
+    ) -> FulfillmentStatusView:
+        try:
+            status = self._fulfillment_service.get_status(
+                fulfillment_id=fulfillment_id,
+                owner_principal=str(request.state.storefront_principal),
+            )
+        except SettlementEntityNotFoundError as exc:
+            raise _fulfillment_not_found(fulfillment_id) from exc
+        return FulfillmentStatusView(
+            fulfillment_id=status.fulfillment_id,
+            capacity_reservation_id=status.capacity_reservation_id,
+            state=status.state,
+            failure_reason=status.failure_reason,
+            failure_message=status.failure_message,
         )
 
     @router.post("/fulfillments/dry-run", response_model=FulfillmentDryRunView)
