@@ -380,11 +380,16 @@ async def client_and_queue(
         unit_claim_keys=("units", "gpu_count"),
     )
 
-    from market_fulfillment import PhysicalSettlementScheduler
+    from market_fulfillment import (
+        PhysicalSettlementScheduler,
+        SqlAlchemySchedulingUnitOfWork,
+    )
     physical_settlement_scheduler = PhysicalSettlementScheduler(
-        pool_service=resource_pool_service,
-        capacity_ledger=capacity_ledger_service,
-        session_factory=session_factory,
+        unit_of_work=SqlAlchemySchedulingUnitOfWork(
+            session_factory,
+            resource_pool_service,
+            capacity_ledger_service,
+        ),
         default_resource_kind="compute.gpu",
     )
 

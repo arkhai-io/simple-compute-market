@@ -12,10 +12,9 @@ assignment in one transaction. See
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from typing import Sequence, cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, SettlementRecordState
@@ -34,7 +33,6 @@ from .transitions import validate_transition
 
 _LIFECYCLE_UPDATE_FIELDS = frozenset(
     {
-        "prepared_create_operation",
         "prepared_teardown_operation",
         "provider_metadata",
         "teardown_provider_metadata",
@@ -57,7 +55,10 @@ def begin_sqlite_write_transaction(db: Session) -> None:
 
     connection = db.connection()
     if connection.dialect.name == "sqlite":
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        dbapi_connection = connection.connection.dbapi_connection
+        assert dbapi_connection is not None
+        if not dbapi_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 # Retained as a private alias so this module's own call sites below don't
@@ -72,7 +73,7 @@ def _scheduling_matches(
     serialized_requirements: dict,
     resource_id_constraint: str | None,
 ) -> bool:
-    return (
+    return bool(
         record.market == market
         and record.scheduling_requirements == serialized_requirements
         and (
@@ -159,6 +160,15 @@ class SettlementRepository:
                 "resource constraint"
             )
 
+        if (
+            resource_id_constraint is not None
+            and resource.settlement_resource_id != resource_id_constraint
+        ):
+            raise SettlementRequestMismatchError(
+                f"selected resource {resource.settlement_resource_id!r} does not match "
+                f"resource constraint {resource_id_constraint!r}"
+            )
+
         record = SettlementRecord(
             capacity_reservation_id=capacity_reservation_id,
             market=market,
@@ -170,26 +180,9 @@ class SettlementRepository:
             resource_attributes=dict(resource.attributes),
             state=SettlementRecordState.assigned.value,
         )
-        try:
-            with db.begin_nested():
-                db.add(record)
-                db.flush()
-            return record
-        except IntegrityError:
-            # A concurrent creator may have won the primary-key race. Re-read
-            # the durable row and apply the ordinary equivalence rule.
-            existing = self.get(db, capacity_reservation_id)
-            if existing is not None and _scheduling_matches(
-                existing,
-                market=market,
-                serialized_requirements=serialized_requirements,
-                resource_id_constraint=resource_id_constraint,
-            ):
-                return existing
-            raise SettlementRequestMismatchError(
-                f"capacity_reservation_id={capacity_reservation_id!r} was concurrently "
-                "scheduled with a different market, requirements, or resource constraint"
-            ) from None
+        db.add(record)
+        db.flush()
+        return record
 
     # ------------------------------------------------------------------
     # Fulfillment acceptance: begin_fulfillment's idempotency boundary
@@ -202,6 +195,7 @@ class SettlementRepository:
         capacity_reservation_id: str,
         market: str,
         fulfillment_request: VersionedEnvelope,
+        prepared_create_operation: VersionedEnvelope,
     ) -> SettlementRecord:
         """Accept a fulfillment request against an already-scheduled row.
 
@@ -224,22 +218,43 @@ class SettlementRepository:
                 f"{capacity_reservation_id!r}; schedule_resource must run first"
             )
         serialized_request = _serialize_envelope(fulfillment_request)
+        serialized_prepared_create = _serialize_envelope(
+            prepared_create_operation,
+        )
         if record.market != market:
             raise FulfillmentConflictError(
                 f"capacity_reservation_id={capacity_reservation_id!r} was scheduled for "
                 f"market={record.market!r}, not {market!r}"
             )
         if record.fulfillment_id is not None:
-            if record.market == market and record.fulfillment_request == serialized_request:
+            if (
+                record.market == market
+                and record.fulfillment_request == serialized_request
+                and record.prepared_create_operation == serialized_prepared_create
+            ):
                 return record
             raise FulfillmentConflictError(
                 f"capacity_reservation_id={capacity_reservation_id!r} already has a "
                 "fulfillment with a different market or fulfillment request"
             )
 
-        validate_transition(record.state, SettlementRecordState.dispatch_pending.value)
+        if not all(
+            (
+                record.settlement_resource_id,
+                record.pool_id,
+                record.provider,
+            )
+        ):
+            raise FulfillmentConflictError(
+                "scheduled settlement is missing resource, pool, or provider identity"
+            )
+        validate_transition(
+            cast(str, record.state),
+            SettlementRecordState.dispatch_pending.value,
+        )
         record.fulfillment_id = new_fulfillment_id()
         record.fulfillment_request = serialized_request
+        record.prepared_create_operation = serialized_prepared_create
         record.state = SettlementRecordState.dispatch_pending.value
         db.flush()
         return record
@@ -270,16 +285,43 @@ class SettlementRepository:
                 + ", ".join(sorted(unsupported))
             )
 
-        record = self.get(db, capacity_reservation_id)
+        begin_sqlite_write_transaction(db)
+        record = db.execute(
+            select(SettlementRecord)
+            .where(
+                SettlementRecord.capacity_reservation_id
+                == capacity_reservation_id
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
         if record is None:
             raise SettlementEntityNotFoundError(
                 f"no settlement assignment exists for capacity_reservation_id="
                 f"{capacity_reservation_id!r}"
             )
+        normalized_updates = dict(lifecycle_updates)
+        if "prepared_teardown_operation" in normalized_updates:
+            if target_state != SettlementRecordState.teardown_dispatch_pending.value:
+                raise FulfillmentConflictError(
+                    "prepared teardown input may only be frozen when teardown becomes pending"
+                )
+            serialized_value = _serialize_envelope(
+                VersionedEnvelope.model_validate(
+                    normalized_updates["prepared_teardown_operation"],
+                ),
+            )
+            if (
+                record.prepared_teardown_operation is not None
+                and record.prepared_teardown_operation != serialized_value
+            ):
+                raise FulfillmentConflictError(
+                    "prepared teardown input is immutable once accepted"
+                )
+            normalized_updates["prepared_teardown_operation"] = serialized_value
         if record.state != target_state:
-            validate_transition(record.state, target_state)
+            validate_transition(cast(str, record.state), target_state)
             record.state = target_state
-        for field, value in lifecycle_updates.items():
+        for field, value in normalized_updates.items():
             setattr(record, field, value)
         db.flush()
         return record
@@ -302,6 +344,23 @@ class SettlementRepository:
                 f"capacity_reservation_id={capacity_reservation_id!r} has no accepted "
                 "fulfillment to attach a provisioned resource to"
             )
+        if domain_resource_ref is not None:
+            existing = (
+                db.query(ProvisionedResource)
+                .filter(
+                    ProvisionedResource.capacity_reservation_id
+                    == capacity_reservation_id,
+                    ProvisionedResource.domain_resource_ref
+                    == domain_resource_ref,
+                )
+                .one_or_none()
+            )
+            if existing is not None:
+                if existing.status != status:
+                    raise FulfillmentConflictError(
+                        "provisioned resource retry changed its status"
+                    )
+                return existing
         provisioned = ProvisionedResource(
             capacity_reservation_id=capacity_reservation_id,
             fulfillment_id=record.fulfillment_id,
@@ -358,7 +417,7 @@ class SettlementRepository:
     # Abandonment hook
     # ------------------------------------------------------------------
 
-    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> None:
+    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> bool:
         """Transition an ``assigned`` aggregate to ``abandoned``, or no-op.
 
         This is the concrete implementation ``market_site.CapacityLedgerService``
@@ -372,11 +431,17 @@ class SettlementRepository:
         """
 
         record = self.get(db, capacity_reservation_id)
-        if record is None or record.state != SettlementRecordState.assigned.value:
-            return
-        validate_transition(record.state, SettlementRecordState.abandoned.value)
+        if record is None:
+            return True
+        if record.state != SettlementRecordState.assigned.value:
+            return bool(record.state == SettlementRecordState.abandoned.value)
+        validate_transition(
+            cast(str, record.state),
+            SettlementRecordState.abandoned.value,
+        )
         record.state = SettlementRecordState.abandoned.value
         db.flush()
+        return True
 
     # ------------------------------------------------------------------
     # Recovery claims

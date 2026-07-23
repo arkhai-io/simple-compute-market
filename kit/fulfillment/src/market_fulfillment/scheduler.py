@@ -19,12 +19,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from market_resource_pools import ResourcePoolService
 from market_site import resource_satisfies_requirement
-from market_site.ledger import CapacityLedgerService
 
-from .repository import SettlementRepository
-from .scheduling_persistence import SchedulingUnitOfWork, SqlAlchemySchedulingUnitOfWork
+from .scheduling_persistence import SchedulingUnitOfWork
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduling import SchedulingCursorState, SettlementSchedulingPolicy
 from .settlement_types import (
@@ -61,22 +58,13 @@ class PhysicalSettlementScheduler:
 
     def __init__(
         self,
-        pool_service: ResourcePoolService,
-        capacity_ledger: CapacityLedgerService,
-        session_factory: Any,
+        unit_of_work: SchedulingUnitOfWork,
         policy: SettlementSchedulingPolicy | None = None,
         default_resource_kind: str | None = None,
-        repository: SettlementRepository | None = None,
-        unit_of_work: SchedulingUnitOfWork | None = None,
     ) -> None:
-        self._pool_service = pool_service
-        self._capacity_ledger = capacity_ledger
         self._policy = policy or DeterministicRoundRobinPolicy()
         self._default_resource_kind = default_resource_kind
-        self._repository = repository or SettlementRepository()
-        self._unit_of_work = unit_of_work or SqlAlchemySchedulingUnitOfWork(
-            session_factory, pool_service, capacity_ledger, self._repository
-        )
+        self._unit_of_work = unit_of_work
 
     def schedule_resource(self, request: PhysicalSettlementRequest) -> SettlementResource:
         """Schedule ``request`` through the narrow atomic persistence boundary."""
@@ -101,7 +89,10 @@ class PhysicalSettlementScheduler:
                 return _resource_from_record(record)
 
             candidates = self._eligible_candidates_in_transaction(
-                tx, requirement, request.capacity_reservation_id
+                tx,
+                requirement,
+                reservation_dimensions=dict(reservation["dimensions"]),
+                capacity_reservation_id=request.capacity_reservation_id,
             )
             if request.resource_id is not None:
                 selected = next((c for c in candidates if c.resource_id == request.resource_id), None)
@@ -122,11 +113,14 @@ class PhysicalSettlementScheduler:
                     requirement.resource_kind, last_pool_id=updated_cursor.last_pool_id,
                     last_resource_by_pool=dict(updated_cursor.last_resource_by_pool),
                 )
-            if selected.resource_id != tx.backing_resource_id(request.capacity_reservation_id):
-                tx.rebind_capacity(
-                    capacity_reservation_id=request.capacity_reservation_id,
-                    settlement_resource_id=selected.resource_id,
-                )
+            # Assignment records the scheduling decision even when fairness
+            # keeps the reservation on its existing backing resource. The
+            # site ledger treats that same-resource call as an idempotent
+            # marker update and performs accounting only for a real rebind.
+            tx.rebind_capacity(
+                capacity_reservation_id=request.capacity_reservation_id,
+                settlement_resource_id=selected.resource_id,
+            )
             resource = SettlementResource(
                 settlement_resource_id=selected.resource_id, pool_id=selected.pool_id,
                 resource_kind=selected.resource_kind, provider=selected.provider,
@@ -219,7 +213,11 @@ class PhysicalSettlementScheduler:
         )
 
     def _eligible_candidates_in_transaction(
-        self, tx: Any, requirement: SettlementRequirement,
+        self,
+        tx: Any,
+        requirement: SettlementRequirement,
+        *,
+        reservation_dimensions: dict[str, Any],
         capacity_reservation_id: str,
     ) -> list[SettlementCandidate]:
         pools = {pool.id: pool for pool in tx.list_enabled_pools()}
@@ -235,7 +233,10 @@ class PhysicalSettlementScheduler:
             if not resource_satisfies_requirement(
                 resource=payload,
                 required_resource_kind=requirement.resource_kind,
-                required_dimensions=requirement.dimensions,
+                # Rebinding moves the reservation's full debit. A caller may
+                # request a smaller fulfillment shape, but placement cannot
+                # select a destination that only fits that narrower shape.
+                required_dimensions=reservation_dimensions,
                 required_attributes=requirement.attributes,
             ):
                 continue

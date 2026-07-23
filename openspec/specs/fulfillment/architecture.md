@@ -22,7 +22,7 @@ Scheduling starts from an admitted Capacity Reservation. It enumerates enabled p
 
 An explicit-resource request is an additional constraint, not an authorization bypass. The named resource must still exist, belong to an eligible enabled pool, and satisfy every requested dimension. Deterministic candidate ordering and policy state make the current two-level round-robin policy reproducible.
 
-Selection creates a binding. Retrying an equivalent request returns the existing assignment where the process-local lifecycle can prove equivalence; a conflicting request is rejected rather than silently moving the reservation.
+Selection, any capacity rebind, and the fairness cursor advance share one database transaction. Retrying an equivalent request returns the durable assignment; a conflicting request is rejected rather than silently moving the reservation.
 
 ## Provider boundary
 
@@ -36,11 +36,11 @@ Opaque identifiers keep routing and commercial meaning out of shared carriers. `
 
 Provider-specific payloads cross persistence or package boundaries in versioned envelopes. A non-empty kind and positive schema version select an explicit validator. Unknown versions fail rather than inheriting today's provider assumptions.
 
-## Current persistence limit
+## Durable aggregate and current lifecycle limit
 
-Scheduler assignments, policy cursors, and generic fulfillment registry entries are process-local. The architecture does not claim restart-safe or distributed assignment idempotency, cross-replica fairness, or a durable generic Settlement Record aggregate. Those guarantees require explicit persistence and concurrency design.
+The provisioning database owns one Settlement Record aggregate per Capacity Reservation, its provisioned-resource children, immutable versioned prepared operations, and durable fairness cursors. SQLite scheduling reserves the single writer slot before reading mutable scheduling state; databases with row-lock support lock the reservation. This makes capacity reassignment, assignment persistence, and cursor advancement one rollback-safe unit.
 
-The implemented baseline is deterministic two-level round-robin with multidimensional eligibility. More advanced fairness policy is not implied by the request or carrier abstractions.
+Persistence does not yet imply a complete public fulfillment lifecycle. Provider dispatch recovery workers, status/result query APIs, credential refresh, teardown convergence, and storefront cutover remain separate composition work. The implemented scheduling baseline is deterministic two-level round-robin with multidimensional eligibility; more advanced fairness is not implied.
 
 ## Related contracts
 

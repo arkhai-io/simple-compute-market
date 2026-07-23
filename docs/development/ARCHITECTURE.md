@@ -327,8 +327,6 @@ Boundary changes require more than moved unit tests. Validation should cover:
 
 The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
 
-Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, downloads Linux x86-64 CPython 3.13 third-party wheels, and proves each project independently from a fresh environment with network access disabled before packaging the artifact.
-
 See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
 
 ## Capability documentation index

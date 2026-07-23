@@ -412,7 +412,7 @@ class SettlementAbandonmentHook(Protocol):
     whether there is anything to do; the ledger calls it unconditionally.
     """
 
-    def __call__(self, db: Session, capacity_reservation_id: str) -> None: ...
+    def __call__(self, db: Session, capacity_reservation_id: str) -> bool | None: ...
 
 
 class CapacityLedgerService:
@@ -711,7 +711,24 @@ class CapacityLedgerService:
                 f"settlement resource {settlement_resource_id!r} is unavailable"
             )
         reservation_dims = _reservation_dimensions(reservation)
-        held = self._held_dimensions(db, settlement_resource_id)
+        window_start = parse_utc(reservation.lease_start_utc)
+        window_end = parse_utc(reservation.lease_end_utc)
+        if self._has_physical_host_conflict(
+            db,
+            destination,
+            window_start,
+            window_end,
+            exclude_reservation_id=capacity_reservation_id,
+        ):
+            raise CapacityConflictError(
+                f"settlement resource {settlement_resource_id!r} conflicts with a held physical host"
+            )
+        held = self._held_dimensions(
+            db,
+            settlement_resource_id,
+            window_start,
+            window_end,
+        )
         capacity = _resource_capacity(destination)
         insufficient = any(
             capacity.get(dim, Decimal(0)) - held.get(dim, Decimal(0)) < amount
@@ -787,8 +804,8 @@ class CapacityLedgerService:
         which is right for ``reserve()`` but not for round-robin selection,
         which must choose among every eligible candidate. Availability is
         computed the same way ``_resource_payload``/``_find_candidate``
-        already do (instantaneous held-dimension snapshot, blocked by an
-        exclusive physical-host conflict), so scheduling-time eligibility
+        already do (using the reservation's lease window and excluding its
+        own hold, while respecting exclusive physical-host conflicts), so scheduling-time eligibility
         cannot silently diverge from admission-time or listing-time
         availability.
 
@@ -801,10 +818,19 @@ class CapacityLedgerService:
         the time scheduling runs, since ``reserve()`` always creates it)
         would simply credit back nothing.
         """
-        now = datetime.now(timezone.utc)
-        instant_end = now + timedelta(microseconds=1)
+        self._expire_stale_holds(db)
         own_backing_resource_id = self._backing_resource_id(db, exclude_reservation_id)
         own_reservation = db.get(CapacityReservation, exclude_reservation_id)
+        window_start = (
+            parse_utc(own_reservation.lease_start_utc)
+            if own_reservation is not None
+            else None
+        )
+        window_end = (
+            parse_utc(own_reservation.lease_end_utc)
+            if own_reservation is not None
+            else None
+        )
         own_dimensions = (
             _reservation_dimensions(own_reservation) if own_reservation is not None else {}
         )
@@ -819,10 +845,21 @@ class CapacityLedgerService:
         )
         views: list[ResourceFeasibilityView] = []
         for resource in rows:
-            if self._has_physical_host_conflict(db, resource, now, instant_end):
+            if self._has_physical_host_conflict(
+                db,
+                resource,
+                window_start,
+                window_end,
+                exclude_reservation_id=exclude_reservation_id,
+            ):
                 continue
             capacity = _resource_capacity(resource)
-            held = self._held_dimensions(db, resource.backing_resource_id, now, instant_end)
+            held = self._held_dimensions(
+                db,
+                resource.backing_resource_id,
+                window_start,
+                window_end,
+            )
             available = {
                 key: capacity.get(key, Decimal(0)) - held.get(key, Decimal(0))
                 for key in capacity
@@ -969,6 +1006,8 @@ class CapacityLedgerService:
             )
             if old_reservation is None or old_reservation.state not in HELD_RESERVATION_STATES:
                 return None
+            if old_reservation.state != ReservationState.reserved.value:
+                return None
             old_backing_resource_id = self._backing_resource_id(db, old_capacity_reservation_id)
             old_dimensions = _reservation_dimensions(old_reservation)
             old_reservation.state = ReservationState.released.value
@@ -986,6 +1025,18 @@ class CapacityLedgerService:
                 db.rollback()
                 return None
             resource, available = match
+            if (
+                self._settlement_abandonment_hook is not None
+                and self._settlement_abandonment_hook(
+                    db,
+                    old_capacity_reservation_id,
+                )
+                is False
+            ):
+                # Once provider dispatch has begun, superseding the capacity
+                # hold could make a still-running workload schedulable again.
+                db.rollback()
+                return None
 
             hold_expires_at = None
             if ttl_seconds is not None:
@@ -1022,13 +1073,6 @@ class CapacityLedgerService:
                 resource_id=resource.backing_resource_id,
                 dimensions=_serialize_dimensions({k: -v for k, v in requested.items()}),
             ))
-            if self._settlement_abandonment_hook is not None:
-                # Same transaction as the release/reserve above: an old
-                # settlement assignment is marked abandoned synchronously
-                # here rather than waiting for the lease-lifecycle
-                # watchdog's next sweep to notice the old reservation is
-                # gone.
-                self._settlement_abandonment_hook(db, old_capacity_reservation_id)
             db.commit()
             available_after = {
                 key: available.get(key, Decimal(0)) - requested.get(key, Decimal(0))
@@ -1617,6 +1661,8 @@ class CapacityLedgerService:
         resource: CapacityBucket,
         lease_start: datetime | None = None,
         lease_end: datetime | None = None,
+        *,
+        exclude_reservation_id: str | None = None,
     ) -> bool:
         physical_host_id = self._physical_host_id(resource)
         mode = self._allocation_mode(resource)
@@ -1629,6 +1675,8 @@ class CapacityLedgerService:
             .all()
         )
         for reservation in rows:
+            if reservation.capacity_reservation_id == exclude_reservation_id:
+                continue
             held_resource = self._bucket_for_reservation(db, reservation.capacity_reservation_id)
             if held_resource is None:
                 continue

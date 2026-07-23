@@ -81,9 +81,28 @@ def check_schema_version(engine: Engine) -> None:
         raise SchemaDriftError(_drift_message(current="<no migrations table>", expected=expected))
 
     applied = _applied_migration_ids(engine)
-    if expected not in applied:
+    required_migrations = {migration.id for migration in _MIGRATIONS}
+    missing_migrations = required_migrations - applied
+    if missing_migrations:
         current = sorted(applied)[-1] if applied else "<none>"
-        raise SchemaDriftError(_drift_message(current=current, expected=expected))
+        raise SchemaDriftError(
+            _drift_message(current=current, expected=expected)
+            + "\nMissing migration records: "
+            + ", ".join(sorted(missing_migrations))
+        )
+
+    required_fulfillment_tables = {
+        "settlement_records",
+        "provisioned_resources",
+        "scheduling_cursors",
+    }
+    missing = required_fulfillment_tables - set(inspect(engine).get_table_names())
+    if missing:
+        raise SchemaDriftError(
+            "Database schema records the current migration but is missing required "
+            f"fulfillment tables: {', '.join(sorted(missing))}. Reconcile schema "
+            "drift before starting the service."
+        )
 
 
 def _drift_message(*, current: str, expected: str) -> str:
@@ -560,6 +579,13 @@ def _migrate_capacity_model_cutover(engine: Engine) -> None:
     _migrate_retire_site_resources(engine)
 
 
+def _migrate_fulfillment_aggregate(engine: Engine) -> None:
+    """Create the provisioning-owned fulfillment aggregate and fairness state."""
+    from market_fulfillment.db import Base as FulfillmentBase
+
+    FulfillmentBase.metadata.create_all(bind=engine)
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -588,5 +614,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260722_001_pools7_capacity_model_cutover",
         _migrate_capacity_model_cutover,
+    ),
+    Migration(
+        "20260723_001_fulfillment_aggregate",
+        _migrate_fulfillment_aggregate,
     ),
 )

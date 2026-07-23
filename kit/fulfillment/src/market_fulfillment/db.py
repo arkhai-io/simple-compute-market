@@ -9,17 +9,25 @@ reservation have a settlement, and what state is it in" with one lookup and
 keeps both callers' idempotency checks on the same primary key. See
 ``openspec/specs/fulfillment/spec.md``.
 
-The mounting service (the compute provisioning service) is responsible for
-``Base.metadata.create_all`` (or migrations) on its own engine, the same
-composition pattern ``market_site.db`` and ``market_resource_pools`` already
-use for their own tables.
+The mounting service owns the ordered migration that creates these tables on
+its engine. Shared mappings define the schema, but application startup does not
+create it implicitly.
 """
 
 from __future__ import annotations
 
 import enum
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -89,9 +97,9 @@ class SettlementRecord(Base):
     scheduling_requirements = Column(JSON, nullable=False)
     resource_id_constraint = Column(String, nullable=True)
 
-    settlement_resource_id = Column(String, nullable=True, index=True)
-    pool_id = Column(String, nullable=True)
-    provider = Column(String, nullable=True)
+    settlement_resource_id = Column(String, nullable=False, index=True)
+    pool_id = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
     resource_attributes = Column(JSON, nullable=True)
 
     fulfillment_request = Column(JSON, nullable=True)
@@ -115,6 +123,14 @@ class SettlementRecord(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "capacity_reservation_id",
+            "fulfillment_id",
+            name="uq_settlement_reservation_fulfillment",
+        ),
     )
 
 
@@ -158,16 +174,28 @@ class ProvisionedResource(Base):
     __tablename__ = "provisioned_resources"
 
     provisioned_resource_id = Column(String, primary_key=True, default=new_provisioned_resource_id)
-    capacity_reservation_id = Column(
-        String,
-        ForeignKey("settlement_records.capacity_reservation_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
+    capacity_reservation_id = Column(String, nullable=False, index=True)
     fulfillment_id = Column(String, nullable=False, index=True)
     domain_resource_ref = Column(String, nullable=True)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["capacity_reservation_id", "fulfillment_id"],
+            [
+                "settlement_records.capacity_reservation_id",
+                "settlement_records.fulfillment_id",
+            ],
+            ondelete="CASCADE",
+            name="fk_provisioned_resource_settlement_identity",
+        ),
+        UniqueConstraint(
+            "capacity_reservation_id",
+            "domain_resource_ref",
+            name="uq_provisioned_resource_domain_ref",
+        ),
     )

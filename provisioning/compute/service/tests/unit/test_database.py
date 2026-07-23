@@ -17,6 +17,16 @@ def _sqlite_memory_engine():
     )
 
 
+def test_schema_check_rejects_missing_fulfillment_table_after_current_marker():
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE scheduling_cursors"))
+
+    with pytest.raises(SchemaDriftError, match="scheduling_cursors"):
+        check_schema_version(engine)
+
+
 def _create_pre_migration_tables(engine):
     with engine.begin() as connection:
         connection.execute(text(
@@ -313,6 +323,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260718_001_drop_vm_leases_table",
         "20260720_001_multidimensional_capacity",
         "20260722_001_pools7_capacity_model_cutover",
+        "20260723_001_fulfillment_aggregate",
     }
 
 
@@ -365,7 +376,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 10
+    assert migration_count == 11
 
 
 # ---------------------------------------------------------------------------

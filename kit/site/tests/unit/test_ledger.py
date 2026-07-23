@@ -1045,6 +1045,35 @@ def test_resize_reservation_rolls_back_fully_when_new_shape_is_unavailable():
     assert old_after["failure_reason"] is None
 
 
+def test_resize_reservation_rejects_active_lease_without_releasing_capacity():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+    ledger.commit(capacity_reservation_id=old["capacity_reservation_id"])
+
+    assert ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    ) is None
+    assert ledger.get_reservation(old["capacity_reservation_id"])["state"] == "leased"
+
+
+def test_resize_reservation_rejects_post_dispatch_settlement():
+    ledger = _make_ledger(settlement_abandonment_hook=lambda _db, _rid: False)
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+
+    assert ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    ) is None
+    assert ledger.get_reservation(old["capacity_reservation_id"])["state"] == "reserved"
+
+
 def test_resize_reservation_of_unknown_or_unheld_reservation_is_a_no_op():
     ledger = _make_ledger()
     assert ledger.resize_reservation(

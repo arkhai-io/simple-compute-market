@@ -208,15 +208,11 @@ class Container(containers.DeclarativeContainer):
 
     physical_settlement_scheduler = providers.Singleton(
         PhysicalSettlementScheduler,
-        pool_service=resource_pool_service,
-        capacity_ledger=capacity_ledger_service,
-        session_factory=session_factory,
         # PhysicalSettlementScheduler does not silently default
         # resource_kind to "compute.gpu" -- the VM composition root
         # supplies it explicitly here to keep existing scheduling behavior
         # unchanged.
         default_resource_kind="compute.gpu",
-        repository=settlement_repository,
         unit_of_work=scheduling_unit_of_work,
     )
 
