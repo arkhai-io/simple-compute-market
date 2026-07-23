@@ -8,7 +8,10 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
 
-MIGRATION_ID = "bare-metal-storefront-0001-agreement-payloads"
+MIGRATION_IDS = (
+    "bare-metal-storefront-0001-agreement-payloads",
+    "bare-metal-storefront-0002-derived-publications",
+)
 
 
 @pytest.mark.asyncio
@@ -37,9 +40,15 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
             "AND name='bare_metal_agreement_payloads'",
         ).fetchone()
         applied = conn.execute(
-            "SELECT COUNT(*) FROM schema_migrations WHERE id = ?",
-            (MIGRATION_ID,),
-        ).fetchone()[0]
+            "SELECT id FROM schema_migrations WHERE id IN (?, ?) ORDER BY id",
+            MIGRATION_IDS,
+        ).fetchall()
+        derived_columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(derived_bare_metal_listings)",
+            )
+        }
         listing = conn.execute(
             "SELECT listing_id FROM listings WHERE listing_id = ?",
             ("listing-existing",),
@@ -48,5 +57,53 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         conn.close()
 
     assert table == ("bare_metal_agreement_payloads",)
-    assert applied == 1
+    assert applied == [(migration_id,) for migration_id in MIGRATION_IDS]
+    assert {
+        "site_id",
+        "physical_resource_id",
+        "machine_id",
+        "physical_host_id",
+        "derivation_key",
+    } <= derived_columns
     assert listing == ("listing-existing",)
+
+
+def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:
+    path = tmp_path / "storefront.db"
+    CoreSQLiteClient(str(path))
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE derived_bare_metal_listings (
+              listing_id TEXT PRIMARY KEY,
+              machine_id TEXT NOT NULL,
+              physical_host_id TEXT NOT NULL,
+              status TEXT NOT NULL,
+              derivation_key TEXT NOT NULL UNIQUE,
+              last_reconciled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO derived_bare_metal_listings(
+              listing_id, machine_id, physical_host_id, status, derivation_key
+            ) VALUES (
+              'listing-old', 'machine-old', 'host-old', 'open',
+              'bare-metal:machine-old'
+            );
+            """,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT site_id, physical_resource_id, status "
+            "FROM derived_bare_metal_listings WHERE listing_id = 'listing-old'",
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (None, None, "closed")
