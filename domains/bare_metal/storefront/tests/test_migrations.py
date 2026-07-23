@@ -12,6 +12,7 @@ MIGRATION_IDS = (
     "bare-metal-storefront-0001-agreement-payloads",
     "bare-metal-storefront-0002-derived-publications",
     "bare-metal-storefront-0003-operator-state",
+    "bare-metal-storefront-0004-agreement-site-routing",
 )
 
 
@@ -41,7 +42,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
             "AND name='bare_metal_agreement_payloads'",
         ).fetchone()
         applied = conn.execute(
-            "SELECT id FROM schema_migrations WHERE id IN (?, ?, ?) ORDER BY id",
+            "SELECT id FROM schema_migrations WHERE id IN (?, ?, ?, ?) ORDER BY id",
             MIGRATION_IDS,
         ).fetchall()
         derived_columns = {
@@ -57,6 +58,12 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         operator_state = conn.execute(
             "SELECT singleton_id, paused FROM bare_metal_operator_state",
         ).fetchone()
+        routing_columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(bare_metal_agreement_site_routing)",
+            )
+        }
     finally:
         conn.close()
 
@@ -71,6 +78,12 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
     } <= derived_columns
     assert listing == ("listing-existing",)
     assert operator_state == (1, 0)
+    assert {
+        "negotiation_id",
+        "site_id",
+        "capacity_reservation_id",
+        "reserved_resource_id",
+    } <= routing_columns
 
 
 def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:

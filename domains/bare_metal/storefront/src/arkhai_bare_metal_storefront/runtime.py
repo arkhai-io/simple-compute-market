@@ -19,6 +19,7 @@ from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
 from .site_capacity import BareMetalSiteCapacity
 from .site_config import TrustedSiteBindings, parse_trusted_site_bindings
+from .site_routing import AgreementSiteRouter
 from .sqlite_client import SQLiteClient
 
 
@@ -45,6 +46,15 @@ class BareMetalStorefrontRuntime:
     async def close(self) -> None:
         if self.site_capacity is not None:
             await self.site_capacity.close()
+
+    def site_router(self) -> AgreementSiteRouter:
+        if self.site_capacity is None:
+            raise RuntimeError("trusted site capacity is not configured")
+        return AgreementSiteRouter(
+            db=self.db,
+            sites=self.sites,
+            capacity=self.site_capacity,
+        )
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""

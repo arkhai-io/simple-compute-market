@@ -79,4 +79,14 @@ A bare-metal storefront MUST bind each configured `site_id` to an operator-trust
 #### Scenario: Agreement payload contains routing material
 
 - **WHEN** buyer-controlled or opaque agreement data contains a provisioning URL, credential, or conflicting site assertion
-- **THEN** the storefront ignores it for authority selection and uses its configured site binding
+- **THEN** the storefront rejects that routing material and uses only its configured site bindings for authority selection
+
+#### Scenario: Storefront restarts after reservation
+
+- **WHEN** a capacity reservation has been correlated with an agreement and the storefront restarts
+- **THEN** subsequent reservation commit and lifecycle calls resolve the persisted site ID through current trusted configuration without probing another site
+
+#### Scenario: Persisted site is no longer configured
+
+- **WHEN** an agreement's persisted site ID has no current trusted binding
+- **THEN** lifecycle routing fails closed rather than using a default or another configured site
