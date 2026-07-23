@@ -393,6 +393,54 @@ def test_cursor_persists_across_a_fresh_scheduler_instance(services):
     assert second.pool_id == "pool-b"
 
 
+def test_stale_persisted_cursor_recovers_deterministically(services):
+    """A cursor may outlive pools or resources that previously participated.
+
+    Scheduling must treat those identifiers as stale history, resume from the
+    first sorted eligible pool/resource, and durably replace the active cursor
+    position without requiring eager pruning of unrelated historical entries.
+    """
+    from market_fulfillment import SettlementRepository
+
+    pools, ledger, _ = services
+    _pool(pools, "pool-a", enabled=False)
+    _pool(pools, "pool-b")
+    _pool(pools, "pool-c")
+    _resource(ledger, "b1", "pool-b", units=10)
+    _resource(ledger, "c1", "pool-c", units=10)
+
+    repository = SettlementRepository()
+    with ledger._session_factory() as db:
+        repository.save_cursor_in_session(
+            db,
+            "compute.gpu",
+            last_pool_id="deleted-pool",
+            last_resource_by_pool={
+                "pool-b": "deleted-resource",
+                "deleted-pool": "other-deleted-resource",
+            },
+        )
+        db.commit()
+
+    fresh_scheduler = PhysicalSettlementScheduler(
+        pools,
+        ledger,
+        session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+    )
+    reservation_id = _reserve(ledger, agreement="stale-cursor")
+    selected = fresh_scheduler.schedule_resource(_request(reservation_id))
+
+    assert selected.pool_id == "pool-b"
+    assert selected.settlement_resource_id == "b1"
+
+    with ledger._session_factory() as db:
+        cursor = repository.get_cursor_in_session(db, "compute.gpu")
+        assert cursor is not None
+        assert cursor.last_pool_id == "pool-b"
+        assert cursor.last_resource_by_pool["pool-b"] == "b1"
+
+
 def test_cursor_is_isolated_per_resource_kind(services):
     """Two resource kinds scheduling concurrently must not perturb each
     other's round-robin position -- a buyer negotiates for one

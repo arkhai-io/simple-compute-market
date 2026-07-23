@@ -242,6 +242,7 @@ class PhysicalSettlementScheduler:
             candidates.append(SettlementCandidate(
                 resource_id=payload.resource_id, pool_id=pool_id,
                 resource_kind=payload.resource_kind, provider=pool.provider,
+                available=dict(payload.available),
                 attributes=dict(payload.attributes or {}),
             ))
         if not candidates:
