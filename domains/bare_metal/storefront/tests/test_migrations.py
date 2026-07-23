@@ -11,6 +11,7 @@ from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 MIGRATION_IDS = (
     "bare-metal-storefront-0001-agreement-payloads",
     "bare-metal-storefront-0002-derived-publications",
+    "bare-metal-storefront-0003-operator-state",
 )
 
 
@@ -40,7 +41,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
             "AND name='bare_metal_agreement_payloads'",
         ).fetchone()
         applied = conn.execute(
-            "SELECT id FROM schema_migrations WHERE id IN (?, ?) ORDER BY id",
+            "SELECT id FROM schema_migrations WHERE id IN (?, ?, ?) ORDER BY id",
             MIGRATION_IDS,
         ).fetchall()
         derived_columns = {
@@ -52,6 +53,9 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         listing = conn.execute(
             "SELECT listing_id FROM listings WHERE listing_id = ?",
             ("listing-existing",),
+        ).fetchone()
+        operator_state = conn.execute(
+            "SELECT singleton_id, paused FROM bare_metal_operator_state",
         ).fetchone()
     finally:
         conn.close()
@@ -66,6 +70,7 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         "derivation_key",
     } <= derived_columns
     assert listing == ("listing-existing",)
+    assert operator_state == (1, 0)
 
 
 def test_publication_migration_closes_unscoped_tracking_rows(tmp_path) -> None:

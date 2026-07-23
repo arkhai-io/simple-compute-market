@@ -77,6 +77,23 @@ def _add_derived_publication_tracking(conn: sqlite3.Connection) -> None:
     )
 
 
+def _add_operator_state(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE bare_metal_operator_state (
+          singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+          paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
+          updated_at TEXT NOT NULL
+            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        )
+        """,
+    )
+    conn.execute(
+        "INSERT INTO bare_metal_operator_state(singleton_id, paused) "
+        "VALUES (1, 0)",
+    )
+
+
 BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0001-agreement-payloads",
@@ -85,5 +102,9 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0002-derived-publications",
         apply=_add_derived_publication_tracking,
+    ),
+    Migration(
+        id="bare-metal-storefront-0003-operator-state",
+        apply=_add_operator_state,
     ),
 )

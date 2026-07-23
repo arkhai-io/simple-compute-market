@@ -52,6 +52,63 @@ class SQLiteClient(CoreSQLiteClient):
     def _domain_migrations(self) -> tuple[Migration, ...]:
         return BARE_METAL_STOREFRONT_MIGRATIONS
 
+    async def is_global_paused(self) -> bool:
+        """Return the durable storefront-wide negotiation pause state."""
+
+        def _load() -> bool:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT paused FROM bare_metal_operator_state "
+                    "WHERE singleton_id = 1",
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError("bare-metal operator state is missing")
+                return bool(row[0])
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def set_global_paused(self, *, paused: bool) -> None:
+        """Persist storefront-wide negotiation pause state."""
+
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cursor = conn.execute(
+                    "UPDATE bare_metal_operator_state "
+                    "SET paused = ?, "
+                    "updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') "
+                    "WHERE singleton_id = 1",
+                    (1 if paused else 0,),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("bare-metal operator state is missing")
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def count_open_bare_metal_resources(self) -> int:
+        """Count open specific-resource publications for operator status."""
+
+        def _count() -> int:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM derived_bare_metal_listings d "
+                    "JOIN listings l ON l.listing_id = d.listing_id "
+                    "WHERE d.status = 'open' AND l.status = 'open' "
+                    "AND COALESCE(l.paused, 0) = 0",
+                ).fetchone()
+                return int(row[0])
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_count)
+
     async def upsert_bare_metal_listing(
         self,
         *,
