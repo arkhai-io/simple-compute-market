@@ -1937,7 +1937,9 @@ Concretely, section numbers and their task-ID prefixes are reassigned:
 Sections 1–4 and 8–12 keep their numbers; only the internal ordering of the
 three sections above changes. `tasks.md` has been updated to this numbering,
 including its own internal cross-references (task 3.5's "task 6.1" →
-"task 5.1"; task 3.11's "Section 7" → "Section 6"; the design-promotion
+initially "task 5.1", corrected again during Section 5 planning to "task 5.5"
+once that section's detailed task list assigned `begin_fulfillment` to 5.5
+rather than 5.1; task 3.11's "Section 7" → "Section 6"; the design-promotion
 record row and the "Recovery selection remains provisional" heading above,
 both updated the same way).
 
@@ -2026,3 +2028,74 @@ These three open items (the `unmanaged` mapping, and questions 2–3 above)
 remain unresolved and are recorded here per `AGENTS.md`'s discuss-phase rule,
 so Section 7 planning does not proceed from an assumed answer until they are
 revisited.
+
+## Section 5 (fulfillment acceptance and provider preparation) — resolved design decisions (discuss phase, resolved 2026-07-23)
+
+Discuss phase for the new Section 5 ("Implement fulfillment acceptance and provider preparation," renumbered from 6 per the resequencing decision above) is complete. The decisions below are accepted and bind Section 5 planning.
+
+### Scope boundary: Section 5 is provisioning-service-internal only
+
+Section 5 implements `begin_fulfillment` and provider prepare/dispatch entirely on the provisioning-service side. It does not implement or assume any storefront-side call sequencing. Specifically:
+
+- Capacity reservation itself (`CapacityLedgerService.reserve()`) already exists and needs no new work here.
+- The full storefront-side lifecycle — calling `reserve`, then `schedule_resource`, then `begin_fulfillment`, polling status/result, and driving teardown — is **Section 9**'s scope ("Cut over storefront orchestration," task 9.2 explicitly), not Section 5's.
+- Canceling a reservation on failed negotiation is already handled by existing `release()` plus the Section 4 `SettlementAbandonmentHook` wiring; no new provisioning-service work is needed. Section 9 only needs to call `release()` at the right point in storefront workflow.
+- Teardown dispatch (`begin_fulfillment_teardown`) is **Section 10**'s caller. Section 5 nonetheless builds `prepare_teardown`/`dispatch_teardown` on the provider interface alongside `prepare_create`/`dispatch_create`, ahead of that caller — consistent with the precedent already established by `pools-2`/`pools-3` shipping scheduler/provider capability ahead of a real caller.
+
+### `deal_ref`: excluded from the new fulfillment path now; full removal deferred to Section 11
+
+Investigation found `deal_ref` on five contract classes in `provisioning/compute/src/compute_provisioning/contracts.py`: `ExecutorActionEnvelope`, `JobAccepted`, `ProvisioningJob`, `LeaseRegistration`/`LeaseView`, and `LifecycleEvent`. Only `LifecycleEvent.deal_ref` has a real functional consumer today (`StorefrontLifecycleEventSink.deliver`, wired only for the capacity-released lifecycle push — a `market_site`-owned, reservation-level concern, not a fulfillment concern). The other four are load-bearing for the **currently-active legacy direct-dispatch path** (`ComputeContractService.submit_action`, `BareMetalComputeAdapter.submit`, `register_lease`), which Section 9 has not yet retired and Section 11 has not yet removed.
+
+**Resolved:**
+
+- The new fulfillment-dispatch code (`AnsibleFulfillmentProvider.dispatch_create`/`dispatch_teardown`, Section 5) constructs its own `ExecutorActionEnvelope` with `deal_ref={}`. No commercial or deal identity is read, forwarded, or newly threaded through the fulfillment-acceptance path, satisfying the boundary rule for the code this section actually writes.
+- The `deal_ref` field itself is **not** removed from `ExecutorActionEnvelope`, `JobAccepted`, `ProvisioningJob`, `LeaseRegistration`/`LeaseView`, or the `AnsibleJob.deal_ref` column in Section 5. Removing it now would break the still-active legacy path before its callers (`ComputeContractService.submit_action`, `BareMetalComputeAdapter.submit`, `register_lease`'s `body.deal_ref.get("escrow_uid")` read) are retired — the same class of premature-removal mistake this document already caught and reversed once for the `pool_id` attributes fallback (Section 4, item 5).
+- **Tracked explicitly for Section 11** ("Remove obsolete schema and compatibility paths," which already scopes "obsolete executor/provider fields"): once Section 9 retires the legacy callers, remove `deal_ref` from all five contract classes and drop `AnsibleJob.deal_ref`. `escrow_uid` already has an independent, non-`deal_ref` source everywhere checked (the reservation's own `escrow_uid` column; bare-metal's adapter already falls back to it), so this removal is mechanically safe once the legacy callers are gone.
+- `CapacityReservation.deal_ref` (`kit/site`) and `StorefrontLifecycleEventSink`/`notify_storefront_capacity_released` remain out of scope for POOLS-7 entirely — a pre-existing, separately-flagged transport seam this document already identifies as `provisioning-result-push-delivery`'s territory to properly redesign, not something to touch incidentally here.
+
+### Envelope naming and payload ownership
+
+- Concrete versioned-envelope kinds: `"vm.ansible.create.v1"` / `"vm.ansible.teardown.v1"`. The provider axis is embedded in the kind name (not left implicit) because payload shape is genuinely provider-specific — a hypothetical future GCP provider would mint its own `"vm.gcp.create.v1"` with an unrelated payload (gcloud arguments, not Ansible playbook/inventory), and readers must reject a kind they don't recognize rather than guess. This mirrors `resource.provider` already being a first-class field on `SettlementResource`/`SettlementRecord`.
+- `fulfillment_request` (the storefront-supplied payload to `begin_fulfillment`) remains the existing domain-neutral `VmFulfillmentRequirements` shape, unchanged by this section. The storefront never sees, sends, or needs to know about Ansible after this section lands.
+- `prepared_create_operation`/`prepared_teardown_operation` are purely provisioning-service-internal artifacts, built by `prepare_create`/`prepare_teardown` by combining the already-known selected resource (from scheduling), `fulfillment_request`, and the pool's Ansible provider configuration (playbook path, extra vars).
+- The envelope payload must be a dedicated, validated Pydantic model — not a raw `dataclasses.asdict(AnsibleJobParams)` dump — so it satisfies the existing versioned-envelope requirement ("typed or explicitly validated payload... readers reject unknown `(kind, schema_version)` pairs rather than guessing," task 1.6) on both write and read.
+
+### Provider protocol: prepare/dispatch split, provider stays pure
+
+`FulfillmentProvider` (`kit/fulfillment/src/market_fulfillment/provider.py`) currently declares only `create`/`teardown`/`get_status` — there is no existing prepare/dispatch split to refine; this is a new abstract-base change with one implementer today (`AnsibleFulfillmentProvider`).
+
+- New protocol methods: `prepare_create(request, resource, pool_config) -> VersionedEnvelope`, `dispatch_create(prepared: VersionedEnvelope) -> FulfillmentResult`, and the teardown equivalents. `get_status` is unchanged.
+- `prepare_create`/`prepare_teardown` are **pure functions of already-fetched data** — no database access inside the provider. `pool_config` is passed in as an explicit argument by the orchestrator, rather than the provider fetching it itself via a held `ResourcePoolService` reference (today's `AnsibleFulfillmentProvider._pool_config`/`_validate_resource` do the latter, and this is corrected as part of the split). This mirrors `DeterministicRoundRobinPolicy.select` being pure with all DB access owned by the orchestrator/persistence layer, per the Section 4 precedent.
+
+### Closing the session-scoped read gap this split would otherwise reopen
+
+`ResourcePoolService.get_pool()` is self-committing (opens and closes its own session). If `prepare_create`'s pool-config read happened outside the same transaction as `accept_fulfillment`'s row lock and the prepared-operation write, it would reopen the exact "prepared work must be frozen against live pool edits, read within one atomic scope" gap Section 4 closed for scheduling via `list_pools_in_session`/`iter_scheduling_candidates_in_session`.
+
+**Resolved:** add `ResourcePoolService.get_pool_in_session(db, pool_id) -> ResourcePool | None` in `kit/resource-pools`, exposing the class's existing private `_require_pool` session-scoped helper (already used internally by other self-managed-session methods) as a public entry point — the same pattern task 4.2.2 already established for `list_pools_in_session`.
+
+### Transaction shape: follow the Section 4 precedent (`SchedulingUnitOfWork` → `FulfillmentUnitOfWork`)
+
+Per direction received in this session, Section 5 follows the same narrow-persistence-interface pattern Section 4's correction pass established (task 4.10), rather than the orchestrator directly coordinating a raw session plus multiple self-committing services. The surface is smaller than scheduling's: fulfillment acceptance touches one table (`SettlementRecord`), not a transaction spanning `market_site` and `market_fulfillment`.
+
+**Resolved shape:** a `FulfillmentUnitOfWork` protocol in `kit/fulfillment`, exposing exactly: (1) lock/lookup and equivalence-check against the existing aggregate (wrapping `SettlementRepository.accept_fulfillment`), (2) the new session-scoped pool-config read (`get_pool_in_session`), and (3) writing `prepared_create_operation`/`prepared_teardown_operation` alongside the `dispatch_pending`/`teardown_dispatch_pending` transition (wrapping `SettlementRepository.transition`, confirmed to already apply lifecycle updates even when the target state matches the row's current state — no repository signature change needed). The orchestrator opens one `BEGIN IMMEDIATE` transaction through this interface, calls the now-pure `provider.prepare_create(request, resource, pool_config)` before commit, commits, then calls `provider.dispatch_create(prepared)` after commit — matching the "Provider input snapshot: prepare/dispatch split" design already accepted earlier in this file.
+
+### Orchestrator placement: moves into `kit/fulfillment`
+
+Today's in-memory orchestrator (`compute_provisioning_service/services/fulfillment_service.py`'s `FulfillmentService`, with its process-local `FulfillmentEntry` dict) is retired, not adapted in place. Its replacement — the durable `begin_fulfillment` orchestrator driving `FulfillmentUnitOfWork` and `ProviderRegistry` — is implemented in `kit/fulfillment`, not `provisioning/compute/service`. Rationale: it composes only `SettlementRepository` and `ProviderRegistry`, both already owned by `kit/fulfillment`, exactly the same domain-neutral shape as `PhysicalSettlementScheduler`, which already lives there. There is no principled reason for this orchestrator to be the one kit-shaped piece of logic living outside kit.
+
+### Cleanup carried into Section 5
+
+`SettlementRepository.select_pending_for_single_worker`'s docstring currently reads "...Section 7's recovery workflow owns duplicate-dispatch prevention..." — this is production code, and per `AGENTS.md` production comments must not reference OpenSpec section/task numbering at all (independent of the fact the number is also now stale post-reorder). This gets corrected as part of Section 5 to describe the concept in stable terms with no section reference, rather than merely renumbered.
+
+## Section 5 design-promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| `begin_fulfillment`, provider prepare/dispatch, and reservation/scheduling remain provisioning-service-internal; storefront sequencing is a separate concern | `openspec/specs/fulfillment/spec.md` |
+| The fulfillment-acceptance path carries no commercial/deal identity; `deal_ref` is excluded from new dispatch code | `openspec/specs/fulfillment/spec.md#physical-settlement-request` |
+| Versioned envelope kind naming embeds the provider axis (`vm.ansible.create.v1`/`vm.ansible.teardown.v1`) | `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
+| `FulfillmentProvider.prepare_*` is pure; pool configuration is read in-session by the orchestrator and passed in, not fetched by the provider | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| `ResourcePoolService.get_pool_in_session` closes the same live-re-read gap `list_pools_in_session` closed for scheduling | `openspec/specs/resource-pool-management/spec.md` |
+| Fulfillment acceptance uses a narrow `FulfillmentUnitOfWork`, mirroring `SchedulingUnitOfWork` | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| The durable fulfillment orchestrator lives in `kit/fulfillment`, alongside `PhysicalSettlementScheduler` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| `deal_ref` remains on legacy contract classes until Section 9/11 retire their callers | `openspec/changes/pools-7-storefront-fulfillment-cutover/tasks.md` (Section 11 scope; not a permanent-doc statement until removed) |
