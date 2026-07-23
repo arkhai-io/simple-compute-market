@@ -221,6 +221,11 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 ## 6. Implement fulfillment acceptance and provider preparation
 
+- [ ] 6.0 Implement the versioned authenticated public fulfillment boundary recorded in `design.md`, “Public fulfillment transport and caller ownership.”
+  - [ ] 6.0.1 Add compute-contract request/response carriers and client methods for scheduling, dry-run, fulfillment acceptance, status, result, and teardown using the accepted `/api/v1` routes and error taxonomy.
+  - [ ] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
+  - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
+  - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
 - [ ] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
 - [ ] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
 - [ ] 6.3 Split provider behavior into synchronous `prepare_create`/`prepare_teardown` and post-commit `dispatch_create`/`dispatch_teardown` operations.
@@ -257,7 +262,7 @@ design.
 
 - [ ] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
 - [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
-- [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called, transmit them only in that response over the authenticated encrypted channel, and do not persist them afterward.
+- [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called through the domain provider's live credential accessor, transmit them only in that response over the authenticated encrypted channel, delete transient provider-job credential material, and do not persist raw credentials in fulfillment state or prepared operations.
 - [ ] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.
 - [ ] 8.5 Add authorization checks rejecting a query for a `fulfillment_id`/`capacity_reservation_id` the calling storefront does not own.
 - [ ] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches a terminal state, repeated queries returning consistent state, credential rotation between two queries, and querying a fulfillment owned by a different storefront.

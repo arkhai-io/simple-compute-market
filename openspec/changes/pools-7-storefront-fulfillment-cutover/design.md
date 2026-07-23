@@ -886,6 +886,25 @@ acceptance, fulfillment status and whole-fulfillment teardown are addressed by
 `provisioned_resource_id` values rather than exposing VM-specific identity as
 the generic contract.
 
+## Public fulfillment transport and caller ownership (2026-07-23 amendment)
+
+The generic compute contract owns one versioned HTTP/client boundary; storefronts do not import service implementations or `market_fulfillment` persistence models. The v1 routes are:
+
+- `POST /api/v1/fulfillment/schedules` for `schedule_resource`;
+- `POST /api/v1/fulfillments` for `begin_fulfillment`;
+- `POST /api/v1/fulfillments/dry-run` for side-effect-free provider preparation validation;
+- `GET /api/v1/fulfillments/{fulfillment_id}/status`;
+- `GET /api/v1/fulfillments/{fulfillment_id}/result`; and
+- `POST /api/v1/fulfillments/{fulfillment_id}/teardown`.
+
+Wire carriers live in `compute_provisioning.contracts` and carry the compute-contract version. Scheduling requires `capacity_reservation_id`, immutable `market`, normalized requirements, and an optional exact resource constraint. Fulfillment acceptance requires `capacity_reservation_id`, the same market, and a versioned domain fulfillment-request envelope; it never accepts a selected physical resource. Responses expose only neutral settlement, fulfillment, provisioned-resource, failure, and credential carriers. Typed not-found failures map to 404, identity/idempotency conflicts to 409, invalid requirements or prepared input to 422, and temporarily unavailable lifecycle operations to 503.
+
+Authorization is bound to credentials, not to the caller-controlled `X-Agent-ID` header. Production configuration maps opaque storefront principal IDs to distinct admin secrets; constant-time key lookup places the authenticated principal on request state. The legacy single `admin_api_key` is represented as one configured principal for compatible single-seller deployments. Local development may retain the existing open mode, but ownership checks remain structurally present using a local-development principal.
+
+Capacity reservation creation records that authenticated principal as an opaque `owner_principal`; the site authority does not interpret it as commercial or buyer identity. Scheduling verifies the reservation owner before assignment and copies the same immutable principal onto the fulfillment aggregate. Status, result, and teardown require that persisted principal. A different valid storefront credential receives 404, rather than an ownership-revealing 403, and cannot claim an existing reservation merely by knowing its opaque ID. Operator-only pool/resource administration remains governed by the existing administrative role and is not made storefront-owned by this change.
+
+Raw credentials are not accepted into the generic fulfillment aggregate or prepared-operation payloads. Domain providers expose a live credential accessor. For VM password access, completion discards provider-job credential rows after extracting non-secret output; a result read obtains a fresh credential by the adapter's reset/rotation path, returns it once, deletes the transient provider-job credential material, and advances a persisted non-secret generation counter. Bare-metal SSH-key fulfillment returns connectivity/access references without persisting buyer private material. This design makes restart recovery independent of stored raw credentials while retaining on-demand access recovery.
+
 ## Transaction boundary and shared package ownership
 
 `assign_settlement_resource` (capacity rebind) and settlement-record

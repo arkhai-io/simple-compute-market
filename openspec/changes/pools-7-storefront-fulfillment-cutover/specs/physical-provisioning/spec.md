@@ -157,6 +157,18 @@ state these queries read, regardless of whether or when it is polled.
   deduplication bookkeeping is required because reads have no delivery
   side effect to duplicate
 
+### Requirement: Fulfillment APIs authenticate durable storefront ownership
+
+The provisioning service MUST authenticate fulfillment callers from operator-configured credentials rather than caller-asserted identity headers. Capacity reservation creation MUST bind an opaque authenticated storefront principal, scheduling and fulfillment acceptance MUST preserve that owner, and status, result, and teardown MUST fail without revealing existence when called by another valid principal.
+
+#### Scenario: Another storefront knows a fulfillment identifier
+- **WHEN** a valid but non-owning storefront principal requests status, result, or teardown for the fulfillment
+- **THEN** the provisioning service returns not found and exposes no fulfillment state or credential material
+
+#### Scenario: Caller asserts another agent identity
+- **WHEN** a caller changes an unauthenticated identity header while retaining the same credential
+- **THEN** authority remains bound to the credential's configured principal and the header grants no additional ownership
+
 ### Requirement: Credentials are fetched on read, never persisted at rest
 
 Raw credentials MUST NOT be persisted in settlement records, generic JSON

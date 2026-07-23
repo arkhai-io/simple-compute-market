@@ -17,6 +17,10 @@ required for routing or integrity.
 - **THEN** it sends the request only to the provisioning authority that owns
   that reservation
 
+#### Scenario: Another authenticated storefront presents the reservation ID
+- **WHEN** a valid non-owning storefront credential attempts to schedule or mutate the reservation
+- **THEN** the provisioning authority rejects the call without revealing reservation state
+
 ### Requirement: Scheduling requirements remain within reserved capacity
 
 Scheduling requirements MAY be smaller than the admitted reservation but MUST
