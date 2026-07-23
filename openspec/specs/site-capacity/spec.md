@@ -142,6 +142,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
+- Reservation supersede (`resize_reservation`) and unconditional settlement-abandonment hook invocation across TTL lapse, release, and resize: `kit/site/tests/unit/test_ledger.py`.
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
@@ -162,7 +163,28 @@ A reservation is scoped to the one provisioning authority (database) that admitt
 
 `market_site` exports `resource_satisfies_requirement(resource_kind, available, attributes, required_resource_kind, required_dimensions, required_attributes) -> bool`, the one feasibility check both reservation-time admission and fulfillment's scheduling-time eligibility evaluate against. `required_resource_kind=None` accepts any resource kind, matching reservation admission's claim, where a resource-kind constraint is optional; scheduling always supplies a concrete one.
 
-`CapacityLedgerService` exposes session-accepting entry points (`lock_reservation`, `assign_settlement_resource_in_session`, `backing_resource_id_in_session`) alongside its self-managed-transaction public methods (`get_reservation`, `assign_settlement_resource`, `get_reservation_backing_resource_id`), so a higher-layer caller composing one transaction across reservation state and another authority's write — for example, fulfillment scheduling's settlement assignment — can open one session, drive both, and commit once. `market_site` remains unaware of what that other write is; the composition happens at the caller, which is why these are the only surface fulfillment scheduling needs from this package to keep the rebind and the settlement assignment atomic.
+`CapacityLedgerService` exposes session-accepting entry points (`lock_reservation`, `assign_settlement_resource_in_session`, `backing_resource_id_in_session`, `iter_scheduling_candidates_in_session`) alongside its self-managed-transaction public methods (`get_reservation`, `assign_settlement_resource`, `get_reservation_backing_resource_id`, `reservation_payload_in_session`), so a higher-layer caller composing one transaction across reservation state and another authority's write — for example, fulfillment scheduling's settlement assignment — can open one session, drive both, and commit once. `market_site` remains unaware of what that other write is; the composition happens at the caller, which is why these are the only surface fulfillment scheduling needs from this package to keep the rebind and the settlement assignment atomic.
+
+### Requirement: Reservation supersede and settlement abandonment
+
+A negotiated shape change to an already-reserved capacity hold MUST NOT mutate the existing `CapacityReservation` or any settlement assignment already bound to it in place. `CapacityLedgerService.resize_reservation` supersedes it instead: one atomic transaction releases the old reservation, evaluates the new shape's candidacy as if the old hold had already cleared, reserves the new shape under a new `capacity_reservation_id`, and commits or rolls back all of it together. A new shape with no eligible candidate leaves the old reservation exactly as it was — still held, never released — rather than losing it. `resize_reservation` is a single self-managed-session method; it is not composed into a larger caller transaction.
+
+The site authority reclaims capacity from a reservation in exactly three internal paths: a lapsed TTL hold, a terminal release, and a resize's supersede step. Each of these unconditionally invokes an optional `SettlementAbandonmentHook`, a `Protocol` this package defines without referencing fulfillment types, in the same transaction as the reclaim. `market_site` MUST NOT import `market_fulfillment` to implement this hook, including under `TYPE_CHECKING`; the concrete implementation is supplied by the fulfillment capability at composition time and alone decides whether there is a not-yet-dispatched settlement assignment to mark abandoned. The site authority calls the hook regardless of whether one exists for the reservation in question.
+
+#### Scenario: Resize evaluates the new shape as if the old hold already cleared
+
+- **WHEN** a reservation is resized to a new shape that only fits once the old reservation's own held capacity is released
+- **THEN** the resize succeeds, because release and re-evaluation happen inside the same transaction rather than as two independently committed steps
+
+#### Scenario: Resize rolls back when the new shape is unavailable
+
+- **WHEN** no candidate satisfies the new shape
+- **THEN** the whole transaction rolls back and the old reservation remains held, unmodified, with no abandonment hook invoked
+
+#### Scenario: Capacity reclaim always offers the abandonment hook a chance to react
+
+- **WHEN** a TTL hold lapses, a reservation is released, or a resize supersedes a reservation
+- **THEN** the configured `SettlementAbandonmentHook`, if any, is called for the affected `capacity_reservation_id` regardless of whether a settlement assignment exists for it
 
 ### Requirement: Site identity ownership boundary
 Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection. A remote counterparty MUST NOT self-assert that identity in capacity payloads.

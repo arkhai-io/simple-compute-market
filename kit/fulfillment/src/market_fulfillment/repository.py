@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .db import ProvisionedResource, SettlementRecord, SettlementRecordState
+from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, SettlementRecordState
 from .envelopes import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
@@ -44,17 +44,25 @@ _LIFECYCLE_UPDATE_FIELDS = frozenset(
 )
 
 
-def _begin_sqlite_write_transaction(db: Session) -> None:
+def begin_sqlite_write_transaction(db: Session) -> None:
     """Reserve SQLite's single writer slot before reading mutable state.
 
     ``BEGIN IMMEDIATE`` is SQLite's database-level write reservation. It is
     intentionally used instead of claiming row-lock semantics that SQLite
-    does not provide. The caller still owns commit or rollback.
+    does not provide. The caller still owns commit or rollback. Shared by
+    every caller that needs this repository's SQLite concurrency contract
+    (fulfillment acceptance here; ``PhysicalSettlementScheduler.schedule_resource``
+    for scheduling and its round-robin cursor).
     """
 
     connection = db.connection()
     if connection.dialect.name == "sqlite":
         connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+# Retained as a private alias so this module's own call sites below don't
+# need to change; new external callers should use the public name.
+_begin_sqlite_write_transaction = begin_sqlite_write_transaction
 
 
 def _scheduling_matches(
@@ -303,6 +311,72 @@ class SettlementRepository:
         db.add(provisioned)
         db.flush()
         return provisioned
+
+    # ------------------------------------------------------------------
+    # Scheduling fairness cursor
+    # ------------------------------------------------------------------
+
+    def get_cursor_in_session(self, db: Session, resource_kind: str) -> SchedulingCursor:
+        """Return the durable round-robin cursor for ``resource_kind``.
+
+        Creates a zero-value row on first use so callers never need a
+        separate "no cursor yet" branch -- an absent cursor and a cursor
+        that has never advanced are the same starting state.
+        """
+
+        cursor = db.get(SchedulingCursor, resource_kind)
+        if cursor is None:
+            cursor = SchedulingCursor(
+                resource_kind=resource_kind, last_pool_id=None, last_resource_by_pool={}
+            )
+            db.add(cursor)
+            db.flush()
+        return cursor
+
+    def save_cursor_in_session(
+        self,
+        db: Session,
+        resource_kind: str,
+        *,
+        last_pool_id: str | None,
+        last_resource_by_pool: dict,
+    ) -> SchedulingCursor:
+        """Persist an updated cursor value in the caller's open transaction.
+
+        Callers write this alongside the settlement-record change it
+        accompanies so a cursor advance is never observed independently of
+        the assignment it produced.
+        """
+
+        cursor = self.get_cursor_in_session(db, resource_kind)
+        cursor.last_pool_id = last_pool_id
+        cursor.last_resource_by_pool = dict(last_resource_by_pool)
+        db.flush()
+        return cursor
+
+    # ------------------------------------------------------------------
+    # Abandonment hook
+    # ------------------------------------------------------------------
+
+    def abandon_if_assigned(self, db: Session, capacity_reservation_id: str) -> None:
+        """Transition an ``assigned`` aggregate to ``abandoned``, or no-op.
+
+        This is the concrete implementation ``market_site.CapacityLedgerService``
+        invokes (through a ``Protocol`` it defines, referencing no
+        fulfillment types) whenever it reclaims capacity that might belong
+        to a reservation with a not-yet-dispatched settlement assignment --
+        a lapsed TTL hold, a terminal release, or a negotiation-driven
+        resize's supersede step. It is called unconditionally by those
+        callers; whether there is anything to abandon is entirely this
+        method's decision, not theirs.
+        """
+
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.state != SettlementRecordState.assigned.value:
+            return
+        validate_transition(record.state, SettlementRecordState.abandoned.value)
+        record.state = SettlementRecordState.abandoned.value
+        db.flush()
 
     # ------------------------------------------------------------------
     # Recovery claims

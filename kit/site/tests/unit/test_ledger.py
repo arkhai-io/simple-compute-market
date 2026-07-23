@@ -979,3 +979,156 @@ def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
     assert match is not None
 
 
+# ----------------------------------------------------------------------
+# resize_reservation
+# ----------------------------------------------------------------------
+
+def test_resize_reservation_supersedes_with_a_new_id():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id,
+        new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert resized["capacity_reservation_id"] != old_id
+    assert resized["superseded_capacity_reservation_id"] == old_id
+
+    old_after = ledger.get_reservation(old_id)
+    assert old_after["state"] == "released"
+    assert old_after["failure_reason"] == "superseded"
+
+
+def test_resize_reservation_sees_capacity_the_old_hold_was_consuming():
+    """The new shape's availability is evaluated as if the old hold had
+    already cleared: a single 4-unit resource can resize a 4-unit
+    reservation up to a claim that still only needs 4 units total, even
+    though the old hold is nominally still "using" all 4 until this call."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 4},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert resized["settlement_resource_id"] is None  # not yet scheduled
+    assert ledger.get_reservation(resized["capacity_reservation_id"])["units"] == 4
+
+
+def test_resize_reservation_rolls_back_fully_when_new_shape_is_unavailable():
+    """If the new shape has no eligible candidate, the whole transaction
+    rolls back: the old reservation is left exactly as it was, still held,
+    never actually released -- not two independently-reversible steps."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id,
+        new_claim={"gpu_count": 5},  # exceeds the only resource's total capacity
+        deal_ref={"market": "vms"},
+    )
+    assert resized is None
+
+    old_after = ledger.get_reservation(old_id)
+    assert old_after["state"] == "reserved"
+    assert old_after["failure_reason"] is None
+
+
+def test_resize_reservation_of_unknown_or_unheld_reservation_is_a_no_op():
+    ledger = _make_ledger()
+    assert ledger.resize_reservation(
+        old_capacity_reservation_id="missing", new_claim={"gpu_count": 1},
+    ) is None
+
+
+# ----------------------------------------------------------------------
+# settlement-abandonment hook
+# ----------------------------------------------------------------------
+
+def test_release_invokes_the_abandonment_hook_unconditionally():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref={"market": "vms"})
+    assert result is not None
+    reservation_id = result["capacity_reservation_id"]
+
+    ledger.release(capacity_reservation_id=reservation_id)
+    assert calls == [reservation_id]
+
+    # Idempotent re-release does not duplicate capacity mutations, but it
+    # still gives fulfillment a chance to reconcile stranded assigned state.
+    ledger.release(capacity_reservation_id=reservation_id)
+    assert calls == [reservation_id, reservation_id]
+
+
+def test_expired_hold_lapse_invokes_the_abandonment_hook():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(
+        claim={"gpu_count": 1}, deal_ref={"market": "vms"}, ttl_seconds=-1,
+    )
+    assert result is not None
+    reservation_id = result["capacity_reservation_id"]
+
+    ledger.expire_due_holds()
+    assert calls == [reservation_id]
+
+
+def test_resize_reservation_invokes_the_abandonment_hook_for_the_old_reservation():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id, new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert calls == [old_id]
+
+
+def test_resize_reservation_rollback_does_not_invoke_the_abandonment_hook():
+    """The hook only fires on the transaction that actually commits: a
+    resize that rolls back because the new shape is unavailable must not
+    report the old reservation as abandoned."""
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 5},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is None
+    assert calls == []
+
+
+def test_no_hook_configured_is_a_silent_no_op():
+    """The default (no hook wired) must not raise -- most tests in this
+    file construct a ledger with no hook at all."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref={"market": "vms"})
+    assert result is not None
+    ledger.release(capacity_reservation_id=result["capacity_reservation_id"])
+
+

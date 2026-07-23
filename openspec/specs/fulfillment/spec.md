@@ -118,21 +118,27 @@ A scheduling request MAY narrow the dimensions it asks for relative to what the 
 
 ### Requirement: Scheduling and assignment
 
-`PhysicalSettlementScheduler` owns placement. It enumerates eligible candidates through the site and pool authorities, delegates ordering/selection to a `SettlementSchedulingPolicy`, and returns a `SettlementResource`.
+`PhysicalSettlementScheduler.schedule_resource` owns placement. It enumerates eligible candidates through the site and pool authorities, delegates ordering/selection to a `SettlementSchedulingPolicy`, and returns a `SettlementResource`.
+
+`schedule_resource` is one atomic database transaction: it locks and validates the reservation, enumerates eligible candidates, applies scheduling policy, performs any fair capacity rebind, and creates or returns the settlement assignment, committing or rolling back all of it together. A caller never needs its own compensating error handling for a partially-completed schedule.
 
 The current policy is deterministic two-level round-robin. It sorts eligible pool IDs and chooses the pool after the last automatic selection, then sorts eligible resource IDs in that pool and chooses the resource after that pool's last automatic selection. If a previous cursor no longer names an eligible candidate, selection resumes at the first sorted eligible value. For an unchanged candidate set and policy state, selection is reproducible. Policy remains replaceable; static pool priority is not part of the resource-pool schema.
 
-An explicit resource constraint bypasses policy choice but not reservation, pool, resource, shape, attribute, or capacity eligibility, and it does not advance automatic-selection cursors.
+Round-robin fairness state is durable and scoped per `resource_kind`: one cursor row exists per `resource_kind`, read and rewritten inside the same transaction as the settlement-record write it accompanies. A buyer negotiates for one `resource_kind` per reservation, so scheduling activity for one kind never perturbs another kind's fairness position. The policy itself remains a pure function of its explicit inputs (`requirement`, `candidates`, and the current cursor value) with no database access of its own; the scheduler owns reading and persisting the cursor.
+
+An explicit resource constraint bypasses policy choice but not reservation, pool, resource, shape, attribute, or capacity eligibility. It also does not read or advance the durable fairness cursor.
 
 Scheduling and fulfillment execution are separate calls. A provider receives the already-selected `SettlementResource` and MUST NOT substitute another resource. If a selected resource becomes unusable, execution reports a typed failure and orchestration returns to the scheduler boundary according to lifecycle policy.
 
-The same `capacity_reservation_id` and equivalent request MUST return the existing assignment when assignment state is available. A conflicting retry MUST fail rather than creating a second binding. Current assignment and cursor storage is process-local: idempotency is guaranteed only within one running scheduler instance, not across restart or replica boundaries, until the compute lifecycle supplies durable assignment persistence.
+The same `capacity_reservation_id` and equivalent request MUST return the existing assignment. A conflicting retry MUST fail rather than creating a second binding. Assignment and cursor state are durable: idempotency holds across process restart and across scheduler instances sharing the same database, not only within one running process.
+
+The compute provisioning service uses SQLite. `schedule_resource` reserves SQLite's single writer slot with an immediate write transaction before reading the reservation, candidates, or cursor, so concurrent scheduling attempts serialize and observe one durable outcome. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking, matching the concurrency contract already documented for fulfillment acceptance (see "Durable settlement persistence"). The scheduler receives a narrow scheduling unit of work rather than raw persistence services: one transaction-scoped interface exposes only reservation locking, candidate and pool reads, cursor access, capacity rebinding, and settlement assignment. This makes the shared commit boundary structural and provides a stable semantic seam for deterministic independent-session concurrency tests.
 
 Scheduling errors distinguish a missing or expired reservation, a request that conflicts with reservation or existing-assignment state, and a valid request for which no candidate is eligible.
 
 #### Scenario: Equivalent scheduling retry
 
-- **WHEN** the same reservation and normalized requirements are scheduled again in the scheduler instance that holds the assignment
+- **WHEN** the same reservation and normalized requirements are scheduled again, whether against the same scheduler instance or a different one sharing the same database
 - **THEN** the existing settlement-resource assignment is returned without advancing policy cursors
 
 #### Scenario: Previous cursor is no longer eligible
@@ -147,8 +153,13 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 
 #### Scenario: Scheduler process restarts
 
-- **WHEN** an assignment exists only in process-local state and the scheduler restarts
-- **THEN** the process does not claim distributed idempotency and a retry may be evaluated as a new assignment
+- **WHEN** a fresh scheduler instance is constructed against the same database after a restart
+- **THEN** it reads the same durable assignment and cursor state and an equivalent retry still returns the existing assignment rather than being evaluated as new
+
+#### Scenario: Scheduling fails after the cursor is written but before commit
+
+- **WHEN** an error occurs after the fairness cursor is updated in-transaction but before the settlement record commits
+- **THEN** the whole transaction rolls back, leaving neither a partial cursor advance, a partial capacity rebind, nor an orphaned settlement row
 
 #### Scenario: Provider attempts independent placement
 
@@ -294,3 +305,4 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
 - Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_repository.py`.
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
+- Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`.

@@ -28,5 +28,6 @@ from .ledger import (  # noqa: F401
     ResourceFeasibilityView,
     resource_feasibility_view,
     resource_satisfies_requirement,
+    SettlementAbandonmentHook,
 )
 from .router import make_capacity_router  # noqa: F401

@@ -8,6 +8,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from bare_metal_provisioning_adapter.runtime import project_bare_metal_resource
+
 from compute_provisioning_service.db.models import Host
 
 
@@ -105,13 +107,8 @@ def _bare_metal_publication_view(
     if not isinstance(raw_config, Mapping) or not raw_config.get("enabled", False):
         return None
 
-    # Loaded lazily so VM-only installations do not acquire the bare-metal
-    # domain dependency. Enabling this view requires the corresponding adapter
-    # bundle, which installs the domain contract.
-    from arkhai_bare_metal import BareMetalResourceProjection
-
     available = dict(resource.get("available") or {})
-    view = BareMetalResourceProjection.model_validate({
+    return project_bare_metal_resource({
         "physical_resource_id": str(resource.get("resource_id") or ""),
         "physical_host_id": str(raw_config.get("physical_host_id") or ""),
         "machine_id": str(raw_config.get("machine_id") or ""),
@@ -124,7 +121,6 @@ def _bare_metal_publication_view(
         "capacity": dict(capacity),
         "capabilities": dict(raw_config.get("capabilities") or {}),
     })
-    return view.model_dump(mode="json")
 
 
 def _whole_resource_available(

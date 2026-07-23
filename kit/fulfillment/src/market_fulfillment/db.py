@@ -118,6 +118,31 @@ class SettlementRecord(Base):
     )
 
 
+class SchedulingCursor(Base):
+    """Durable round-robin fairness state for one ``resource_kind``.
+
+    A buyer negotiates for one ``resource_kind`` per reservation (a VM, a
+    bare-metal instance, a pod), never across kinds within one reservation,
+    so fairness is isolated per ``resource_kind`` rather than tracked
+    globally or at a finer grain. ``schedule_resource``'s single-writer
+    transaction (see ``openspec/specs/fulfillment/spec.md``) reads and
+    rewrites this row in the same commit as the settlement-record write it
+    accompanies, so cursor advancement and assignment are never observed
+    out of sync with each other.
+    """
+
+    __tablename__ = "scheduling_cursors"
+
+    resource_kind = Column(String, primary_key=True)
+    last_pool_id = Column(String, nullable=True)
+    last_resource_by_pool = Column(JSON, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class ProvisionedResource(Base):
     """One provider-created output of an accepted fulfillment.
 

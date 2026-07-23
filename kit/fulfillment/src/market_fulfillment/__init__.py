@@ -10,6 +10,7 @@ See ``openspec/specs/fulfillment/spec.md``.
 from .db import (
     Base as FulfillmentBase,
     ProvisionedResource,
+    SchedulingCursor,
     SettlementRecord,
     SettlementRecordState,
 )
@@ -39,10 +40,16 @@ from .provider import (
     ProviderStatus,
     ProviderUnavailableError,
 )
-from .repository import SettlementRepository
+from .repository import SettlementRepository, begin_sqlite_write_transaction
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduler import MissingResourceKindError, PhysicalSettlementScheduler
-from .scheduling import SettlementSchedulingPolicy
+from .scheduling_persistence import (
+    SchedulingTransaction,
+    SchedulingUnitOfWork,
+    SqlAlchemySchedulingTransaction,
+    SqlAlchemySchedulingUnitOfWork,
+)
+from .scheduling import SchedulingCursorState, SettlementSchedulingPolicy
 from .settlement_types import (
     CapacityReservationExpiredError,
     NoEligibleSettlementResourceError,
@@ -58,6 +65,7 @@ from .transitions import InvalidSettlementTransitionError, validate_transition
 
 __all__ = [
     "CapacityReservationExpiredError",
+    "begin_sqlite_write_transaction",
     "FulfillmentBase",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
@@ -83,6 +91,12 @@ __all__ = [
     "PhysicalSettlementError",
     "PhysicalSettlementRequest",
     "PhysicalSettlementScheduler",
+    "SchedulingCursor",
+    "SchedulingCursorState",
+    "SchedulingTransaction",
+    "SchedulingUnitOfWork",
+    "SqlAlchemySchedulingTransaction",
+    "SqlAlchemySchedulingUnitOfWork",
     "SettlementCandidate",
     "SettlementEntityNotFoundError",
     "SettlementRecord",

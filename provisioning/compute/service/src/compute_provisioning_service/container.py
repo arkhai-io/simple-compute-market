@@ -20,7 +20,11 @@ from compute_provisioning_service.services.compute_contract_service import Compu
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
-from market_fulfillment import PhysicalSettlementScheduler
+from market_fulfillment import (
+    PhysicalSettlementScheduler,
+    SettlementRepository,
+    SqlAlchemySchedulingUnitOfWork,
+)
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
@@ -173,6 +177,14 @@ class Container(containers.DeclarativeContainer):
         handlers=providers.Dict(ansible=ansible_pool_config_handler),
     )
 
+    # Shared settlement/fulfillment aggregate repository. Also supplies the
+    # concrete SettlementAbandonmentHook implementation the ledger calls
+    # when it reclaims capacity that might belong to a not-yet-dispatched
+    # settlement assignment (a lapsed hold, a terminal release, or a
+    # negotiation-driven resize) -- market_site defines the hook protocol
+    # but cannot import market_fulfillment to implement it.
+    settlement_repository = providers.Singleton(SettlementRepository)
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
@@ -180,6 +192,18 @@ class Container(containers.DeclarativeContainer):
         # key — kept explicit here rather than hardcoded in kit/site so the
         # ledger stays domain-neutral.
         unit_claim_keys=("units", "gpu_count"),
+        settlement_abandonment_hook=providers.Callable(
+            lambda repository: repository.abandon_if_assigned,
+            repository=settlement_repository,
+        ),
+    )
+
+    scheduling_unit_of_work = providers.Singleton(
+        SqlAlchemySchedulingUnitOfWork,
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        repository=settlement_repository,
     )
 
     physical_settlement_scheduler = providers.Singleton(
@@ -192,6 +216,8 @@ class Container(containers.DeclarativeContainer):
         # supplies it explicitly here to keep existing scheduling behavior
         # unchanged.
         default_resource_kind="compute.gpu",
+        repository=settlement_repository,
+        unit_of_work=scheduling_unit_of_work,
     )
 
     # ------------------------------------------------------------------

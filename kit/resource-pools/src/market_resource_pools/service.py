@@ -127,6 +127,22 @@ class ResourcePoolService:
                 db.expunge(pool)
             return pools
 
+    def list_pools_in_session(
+        self, db: Session, *, enabled_only: bool = True
+    ) -> list[ResourcePool]:
+        """Session-scoped pool enumeration for a caller composing one transaction.
+
+        Unlike ``list_pools``, this does not attach ``provider_config``
+        (which requires a per-pool handler round trip) and does not expunge
+        rows from the session: a caller such as scheduling only needs
+        ``id``/``provider``/``enabled`` and is already inside its own
+        transaction boundary, so the rows stay attached to that session.
+        """
+        query = db.query(ResourcePool)
+        if enabled_only:
+            query = query.filter(ResourcePool.enabled.is_(True))
+        return query.order_by(ResourcePool.id).all()
+
     def get_pool(self, pool_id: str) -> Optional[ResourcePool]:
         with self._session_factory() as db:
             pool = (

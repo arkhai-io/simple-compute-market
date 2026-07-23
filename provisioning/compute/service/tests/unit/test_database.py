@@ -235,7 +235,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     reservation = ledger.get_reservation("pre-existing-alloc")
     assert reservation["dimensions"] == {"gpu_count": 3}
 
-    assert {"settlement_records", "provisioned_resources"}.issubset(
+    assert {"settlement_records", "provisioned_resources", "scheduling_cursors"}.issubset(
         inspector.get_table_names()
     )
     settlement_indexes = {
@@ -252,6 +252,8 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     assert {fk["referred_table"] for fk in provisioned_foreign_keys} == {
         "settlement_records"
     }
+    cursor_pk = inspector.get_pk_constraint("scheduling_cursors")
+    assert cursor_pk["constrained_columns"] == ["resource_kind"]
 
     # New fulfillment tables are mounted by current metadata and initialization
     # remains safe to run repeatedly.

@@ -43,7 +43,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -400,6 +400,21 @@ def _split_claim_requirement(
     return claim.get("resource_type"), attributes
 
 
+class SettlementAbandonmentHook(Protocol):
+    """React to a reservation losing its capacity hold, within the caller's transaction.
+
+    ``market_site`` must not import ``market_fulfillment`` (see
+    ``openspec/specs/fulfillment/spec.md#dependency-boundary``), so this
+    protocol lets ``CapacityLedgerService`` offer every capacity-reclaiming
+    site a chance to react without knowing what "settlement" or
+    "fulfillment" mean. The concrete implementation is supplied by
+    ``market_fulfillment`` at composition time and decides on its own
+    whether there is anything to do; the ledger calls it unconditionally.
+    """
+
+    def __call__(self, db: Session, capacity_reservation_id: str) -> None: ...
+
+
 class CapacityLedgerService:
     """Authoritative capacity operations over the site ledger tables."""
 
@@ -409,6 +424,7 @@ class CapacityLedgerService:
         *,
         required_attributes: Sequence[str] = (),
         unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+        settlement_abandonment_hook: SettlementAbandonmentHook | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
@@ -421,10 +437,20 @@ class CapacityLedgerService:
         root passes ``("units", "gpu_count")`` explicitly to keep its
         existing claim shape working. Kept out of the ledger's own default
         so this module carries no VM-specific knowledge.
+
+        ``settlement_abandonment_hook``, if supplied, is called
+        unconditionally, in the same open transaction, from every internal
+        path that can strand a reservation's fulfillment-scheduling state
+        while reclaiming its capacity: a lapsed TTL hold
+        (``_expire_stale_holds``), a terminal release (``release``), and a
+        negotiation-driven resize's supersede step (``resize_reservation``).
+        Whether there is anything to react to is entirely the hook's
+        decision, not this service's.
         """
         self._session_factory = session_factory
         self._required_attributes = tuple(required_attributes)
         self._unit_claim_keys = tuple(unit_claim_keys)
+        self._settlement_abandonment_hook = settlement_abandonment_hook
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -740,6 +766,73 @@ class CapacityLedgerService:
         """
         return self._backing_resource_id(db, capacity_reservation_id)
 
+    def reservation_payload_in_session(self, reservation: CapacityReservation) -> dict[str, Any]:
+        """Public exposure of the private reservation-payload builder.
+
+        Lets a caller holding a row obtained through ``lock_reservation``
+        (for example, while validating a reservation inside an atomic
+        scheduling transaction) build the same dict shape
+        ``get_reservation``/``reserve`` already return, without needing to
+        know the payload's internal field construction.
+        """
+        return self._reservation_payload(reservation)
+
+    def iter_scheduling_candidates_in_session(
+        self, db: Session, *, resource_kind: str, exclude_reservation_id: str
+    ) -> list[ResourceFeasibilityView]:
+        """Every enabled, ``resource_kind``-matching bucket as a canonical view.
+
+        Session-scoped generalization of ``_find_candidate`` for scheduling:
+        ``_find_candidate`` returns the first bucket that satisfies a claim,
+        which is right for ``reserve()`` but not for round-robin selection,
+        which must choose among every eligible candidate. Availability is
+        computed the same way ``_resource_payload``/``_find_candidate``
+        already do (instantaneous held-dimension snapshot, blocked by an
+        exclusive physical-host conflict), so scheduling-time eligibility
+        cannot silently diverge from admission-time or listing-time
+        availability.
+
+        ``exclude_reservation_id``'s own currently-debited dimensions are
+        credited back into its backing resource's ``available`` map: that
+        resource is still eligible for this reservation to be (re)assigned
+        to, even though it is the reservation's own hold that would
+        otherwise make it look full. Callers computing eligibility for a
+        reservation that does not yet have a debit (there is always one by
+        the time scheduling runs, since ``reserve()`` always creates it)
+        would simply credit back nothing.
+        """
+        now = datetime.now(timezone.utc)
+        instant_end = now + timedelta(microseconds=1)
+        own_backing_resource_id = self._backing_resource_id(db, exclude_reservation_id)
+        own_reservation = db.get(CapacityReservation, exclude_reservation_id)
+        own_dimensions = (
+            _reservation_dimensions(own_reservation) if own_reservation is not None else {}
+        )
+        rows = (
+            db.query(CapacityBucket)
+            .filter(
+                CapacityBucket.enabled.is_(True),
+                CapacityBucket.resource_type == resource_kind,
+            )
+            .order_by(CapacityBucket.backing_resource_id.asc())
+            .all()
+        )
+        views: list[ResourceFeasibilityView] = []
+        for resource in rows:
+            if self._has_physical_host_conflict(db, resource, now, instant_end):
+                continue
+            capacity = _resource_capacity(resource)
+            held = self._held_dimensions(db, resource.backing_resource_id, now, instant_end)
+            available = {
+                key: capacity.get(key, Decimal(0)) - held.get(key, Decimal(0))
+                for key in capacity
+            }
+            if resource.backing_resource_id == own_backing_resource_id:
+                for key, amount in own_dimensions.items():
+                    available[key] = available.get(key, Decimal(0)) + amount
+            views.append(_resource_feasibility_view(resource, available))
+        return views
+
     def commit(
         self,
         *,
@@ -801,10 +894,17 @@ class CapacityLedgerService:
             )
             if reservation is None:
                 return None
+            # Capacity reclamation always offers fulfillment a chance to
+            # reconcile an assigned settlement, including idempotent retries
+            # after the reservation is already terminal. The hook owns the
+            # fulfillment-state decision and never commits this session.
+            if self._settlement_abandonment_hook is not None:
+                self._settlement_abandonment_hook(db, reservation.capacity_reservation_id)
             if reservation.state in {
                 ReservationState.released.value,
                 ReservationState.force_released.value,
             }:
+                db.commit()
                 return self._reservation_payload(reservation)
             if reservation.state not in HELD_RESERVATION_STATES:
                 return None
@@ -819,6 +919,127 @@ class CapacityLedgerService:
             ))
             db.commit()
             return self._reservation_payload(reservation)
+
+    def resize_reservation(
+        self,
+        *,
+        old_capacity_reservation_id: str,
+        new_claim: Mapping[str, Any] | None = None,
+        deal_ref: Mapping[str, Any] | None = None,
+        ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically supersede a held reservation with a changed claim shape.
+
+        A negotiated shape change never mutates
+        ``old_capacity_reservation_id``'s reservation, or any settlement
+        assignment already bound to it, in place: it always produces a new
+        ``capacity_reservation_id``. This method releases the old
+        reservation and reserves the new shape inside one transaction that
+        commits or rolls back together, never as two independently
+        committed ``release()``/``reserve()`` calls in either order.
+
+        Releasing first, inside the same open transaction, before checking
+        the new shape's candidacy is what makes the new shape's
+        availability evaluated as if the old hold had already cleared --
+        a resource the old hold was consuming becomes visible to
+        ``_find_candidate`` immediately, without a separate, already
+        -committed release step. If the new shape then has no eligible
+        candidate, the whole transaction rolls back and
+        ``old_capacity_reservation_id`` is left exactly as it was: still
+        held, never actually released. This is a single-database-
+        transaction guarantee, not two independently-reversible steps.
+
+        Returns ``None`` without changing anything if
+        ``old_capacity_reservation_id`` does not name a currently
+        held/leased reservation, or if the new shape has no eligible
+        candidate.
+        """
+        requested = _requested_dimensions(new_claim, unit_claim_keys=self._unit_claim_keys)
+        deal = dict(deal_ref or {})
+        window_start, window_end = _lease_window(
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+        with self._lock, self._session_factory() as db:
+            self._expire_stale_holds(db)
+            old_reservation = db.get(
+                CapacityReservation, old_capacity_reservation_id, with_for_update=True
+            )
+            if old_reservation is None or old_reservation.state not in HELD_RESERVATION_STATES:
+                return None
+            old_backing_resource_id = self._backing_resource_id(db, old_capacity_reservation_id)
+            old_dimensions = _reservation_dimensions(old_reservation)
+            old_reservation.state = ReservationState.released.value
+            old_reservation.released_at = datetime.now(timezone.utc).isoformat()
+            old_reservation.failure_reason = "superseded"
+            db.add(CapacityEvent(
+                kind="released",
+                resource_id=old_backing_resource_id,
+                dimensions=_serialize_dimensions(old_dimensions),
+            ))
+            db.flush()
+
+            match = self._find_candidate(db, new_claim, requested, window_start, window_end)
+            if match is None:
+                db.rollback()
+                return None
+            resource, available = match
+
+            hold_expires_at = None
+            if ttl_seconds is not None:
+                hold_expires_at = (
+                    datetime.now(timezone.utc) + timedelta(seconds=float(ttl_seconds))
+                ).isoformat()
+            mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
+            new_reservation = CapacityReservation(
+                capacity_reservation_id=str(uuid.uuid4()),
+                units=mirrored_units,
+                dimensions=_serialize_dimensions(requested),
+                state=ReservationState.reserved.value,
+                deal_ref=deal,
+                escrow_uid=deal.get("escrow_uid"),
+                hold_expires_at=hold_expires_at,
+                vm_host=(resource.attributes or {}).get("vm_host"),
+                executor_kind=(
+                    VM_EXECUTOR_KIND
+                    if (resource.attributes or {}).get("vm_host")
+                    else None
+                ),
+                lease_start_utc=window_start.isoformat() if window_start else None,
+                lease_end_utc=window_end.isoformat() if window_end else None,
+            )
+            db.add(new_reservation)
+            db.flush()
+            db.add(CapacityReservationDebit(
+                capacity_reservation_id=new_reservation.capacity_reservation_id,
+                capacity_bucket_id=resource.capacity_bucket_id,
+                dimensions=_serialize_dimensions(requested),
+            ))
+            db.add(CapacityEvent(
+                kind="reserved",
+                resource_id=resource.backing_resource_id,
+                dimensions=_serialize_dimensions({k: -v for k, v in requested.items()}),
+            ))
+            if self._settlement_abandonment_hook is not None:
+                # Same transaction as the release/reserve above: an old
+                # settlement assignment is marked abandoned synchronously
+                # here rather than waiting for the lease-lifecycle
+                # watchdog's next sweep to notice the old reservation is
+                # gone.
+                self._settlement_abandonment_hook(db, old_capacity_reservation_id)
+            db.commit()
+            available_after = {
+                key: available.get(key, Decimal(0)) - requested.get(key, Decimal(0))
+                for key in set(available) | set(requested)
+            }
+            payload = self._match_payload(resource, available_after, requested)
+            payload["capacity_reservation_id"] = new_reservation.capacity_reservation_id
+            payload["settlement_resource_id"] = new_reservation.settlement_resource_id
+            payload["hold_expires_at"] = hold_expires_at
+            payload["superseded_capacity_reservation_id"] = old_capacity_reservation_id
+            return payload
 
     def truncate_lease(
         self,
@@ -1198,6 +1419,8 @@ class CapacityLedgerService:
             db.add(CapacityEvent(
                 kind="released", resource_id=self._backing_resource_id(db, reservation.capacity_reservation_id),
             ))
+            if self._settlement_abandonment_hook is not None:
+                self._settlement_abandonment_hook(db, reservation.capacity_reservation_id)
             lapsed = True
             logger.info(
                 "[CAPACITY] TTL hold expired for reservation %s (resource=%s)",

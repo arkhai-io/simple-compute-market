@@ -668,3 +668,47 @@ def test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity(tmp_path,
     assert len(set(identities)) == 1
     with factory() as db:
         assert repo.get(db, "cr-race").fulfillment_id == identities[0]
+
+
+# ----------------------------------------------------------------------
+# capacity-reclamation abandonment hook
+# ----------------------------------------------------------------------
+
+def test_abandon_if_assigned_transitions_only_assigned_rows(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(db, capacity_reservation_id="cr-abandon", market="vms",
+                      scheduling_requirements=_requirement(), resource=_resource())
+        db.commit()
+    with session_factory() as db:
+        repo.abandon_if_assigned(db, "missing")
+        repo.abandon_if_assigned(db, "cr-abandon")
+        assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
+        repo.abandon_if_assigned(db, "cr-abandon")
+        db.commit()
+    with session_factory() as db:
+        assert repo.get(db, "cr-abandon").state == SettlementRecordState.abandoned.value
+
+
+def test_abandon_if_assigned_obeys_caller_rollback(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(db, capacity_reservation_id="cr-rollback", market="vms",
+                      scheduling_requirements=_requirement(), resource=_resource())
+        db.commit()
+    with session_factory() as db:
+        repo.abandon_if_assigned(db, "cr-rollback")
+        assert repo.get(db, "cr-rollback").state == SettlementRecordState.abandoned.value
+        db.rollback()
+    with session_factory() as db:
+        assert repo.get(db, "cr-rollback").state == SettlementRecordState.assigned.value
+
+
+def test_abandon_if_assigned_preserves_post_assignment_state(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(db, capacity_reservation_id="cr-dispatch", market="vms",
+                      scheduling_requirements=_requirement(), resource=_resource())
+        record = repo.get(db, "cr-dispatch")
+        record.state = SettlementRecordState.dispatch_pending.value
+        db.commit()
+    with session_factory() as db:
+        repo.abandon_if_assigned(db, "cr-dispatch")
+        assert repo.get(db, "cr-dispatch").state == SettlementRecordState.dispatch_pending.value
