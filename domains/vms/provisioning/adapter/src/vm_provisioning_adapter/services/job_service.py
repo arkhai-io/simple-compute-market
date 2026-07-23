@@ -89,6 +89,7 @@ class AnsibleJobService:
         job_queue,
         *,
         contract: ExecutorActionEnvelope | None = None,
+        credentials_private: bool = False,
     ) -> JobSubmitResponse:
         """Persist and enqueue a job, deduplicating versioned contract commands."""
         max_retries = (
@@ -129,6 +130,7 @@ class AnsibleJobService:
                 executor_kind=contract.executor_kind if contract else params.executor_kind,
                 action_kind=contract.action_kind if contract else params.executor_action,
                 idempotency_key=contract.idempotency_key if contract else None,
+                credentials_private=credentials_private,
             )
             db.add(job)
             try:
@@ -260,6 +262,25 @@ class AnsibleJobService:
                 raise LookupError(f"Job {job_id} not found")
             return self._to_status_response(job)
 
+    async def wait_for_terminal_job(
+        self,
+        job_id: str,
+        *,
+        timeout_seconds: float = 120,
+        poll_interval_seconds: float = 0.1,
+    ) -> JobStatusResponse:
+        """Wait for a persisted job to reach a terminal state."""
+        async with asyncio.timeout(timeout_seconds):
+            while True:
+                job = self.get_job(job_id)
+                if job.status in {
+                    JobStatus.succeeded.value,
+                    JobStatus.failed.value,
+                    JobStatus.cancelled.value,
+                }:
+                    return job
+                await asyncio.sleep(poll_interval_seconds)
+
     def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
         """Built-in variable keys that would be emitted for these params.
 
@@ -279,7 +300,9 @@ class AnsibleJobService:
             if not job.contract_version:
                 raise LookupError(f"Job {job_id} is not a contract job")
             credentials = (
-                db.query(Credential)
+                []
+                if job.credentials_private
+                else db.query(Credential)
                 .filter(Credential.job_id == job_id)
                 .all()
             )
@@ -323,7 +346,7 @@ class AnsibleJobService:
                 .filter(AnsibleJob.id == job_id)
                 .one_or_none()
             )
-            if not job:
+            if not job or job.credentials_private:
                 raise LookupError(f"Job {job_id} not found")
 
             creds = (
@@ -333,17 +356,34 @@ class AnsibleJobService:
             )
             return CredentialListResponse(
                 job_id=job_id,
-                credentials=[
-                    CredentialResponse(
-                        role=c.role,
-                        password=c.password,
-                        ssh_commands=c.ssh_commands,
-                        ssh_key_path_host=c.ssh_key_path_host,
-                        key_type=c.key_type,
-                    )
-                    for c in creds
-                ],
+                credentials=[self._credential_response(c) for c in creds],
             )
+
+    def consume_private_credentials(self, job_id: str) -> CredentialListResponse:
+        """Atomically read and delete credentials for one private job."""
+        with self._session_factory() as db:
+            job = db.query(AnsibleJob).filter(AnsibleJob.id == job_id).one_or_none()
+            if job is None or not job.credentials_private:
+                raise LookupError(f"Private job {job_id} not found")
+            creds = db.query(Credential).filter(Credential.job_id == job_id).all()
+            response = CredentialListResponse(
+                job_id=job_id,
+                credentials=[self._credential_response(c) for c in creds],
+            )
+            for credential in creds:
+                db.delete(credential)
+            db.commit()
+            return response
+
+    @staticmethod
+    def _credential_response(credential: Credential) -> CredentialResponse:
+        return CredentialResponse(
+            role=credential.role,
+            password=credential.password,
+            ssh_commands=credential.ssh_commands,
+            ssh_key_path_host=credential.ssh_key_path_host,
+            key_type=credential.key_type,
+        )
 
     def get_logs(self, job_id: str) -> JobLogsResponse:
         """Return raw Ansible logs for a job."""

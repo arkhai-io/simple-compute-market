@@ -110,6 +110,16 @@ def check_schema_version(engine: Engine) -> None:
                 f"{table_name}.owner_principal. Reconcile schema drift before "
                 "starting the service."
             )
+    for table_name, column_name in (
+        ("settlement_records", "credential_generation"),
+        ("ansible_jobs", "credentials_private"),
+    ):
+        if not _column_exists(engine, table_name, column_name):
+            raise SchemaDriftError(
+                "Database schema records the current migration but is missing "
+                f"{table_name}.{column_name}. Reconcile schema drift before "
+                "starting the service."
+            )
 
 
 def _drift_message(*, current: str, expected: str) -> str:
@@ -604,6 +614,26 @@ def _migrate_storefront_ownership(engine: Engine) -> None:
             )
 
 
+def _migrate_fulfillment_credential_generation(engine: Engine) -> None:
+    """Add the non-secret monotonic result credential generation."""
+    _add_column_if_missing(
+        engine,
+        "settlement_records",
+        "credential_generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+
+
+def _migrate_private_job_credentials(engine: Engine) -> None:
+    """Prevent transient fulfillment credentials from legacy job reads."""
+    _add_column_if_missing(
+        engine,
+        "ansible_jobs",
+        "credentials_private",
+        "BOOLEAN NOT NULL DEFAULT 0",
+    )
+
+
 def _migrate_fulfillment_aggregate(engine: Engine) -> None:
     """Create the provisioning-owned fulfillment aggregate and fairness state."""
     from market_fulfillment.db import Base as FulfillmentBase
@@ -647,5 +677,13 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260723_002_storefront_ownership",
         _migrate_storefront_ownership,
+    ),
+    Migration(
+        "20260723_003_fulfillment_credential_generation",
+        _migrate_fulfillment_credential_generation,
+    ),
+    Migration(
+        "20260723_004_private_job_credentials",
+        _migrate_private_job_credentials,
     ),
 )

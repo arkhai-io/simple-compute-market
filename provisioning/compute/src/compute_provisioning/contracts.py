@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 COMPUTE_PROVISIONING_CONTRACT_VERSION = "1.0"
 SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({1})
@@ -90,6 +90,33 @@ class FulfillmentStatusView(VersionedContractModel):
     state: str = Field(min_length=1)
     failure_reason: str | None = None
     failure_message: str | None = None
+
+
+class ProvisionedResourceView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provisioned_resource_id: str = Field(min_length=1)
+    domain_resource_ref: str | None = None
+    status: str = Field(min_length=1)
+
+
+class FulfillmentCredentialView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(min_length=1)
+    schema_version: int = Field(ge=1)
+    payload: dict[str, Any]
+
+
+class FulfillmentResultView(VersionedContractModel):
+    fulfillment_id: str = Field(min_length=1)
+    capacity_reservation_id: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+    provisioned_resources: list[ProvisionedResourceView] = Field(default_factory=list)
+    failure_reason: str | None = None
+    failure_message: str | None = None
+    credential_generation: int = Field(ge=0)
+    credentials: list[FulfillmentCredentialView] = Field(default_factory=list)
 
 
 class ExecutorKind(str, Enum):

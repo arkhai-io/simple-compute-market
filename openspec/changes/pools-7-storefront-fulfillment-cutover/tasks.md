@@ -263,12 +263,12 @@ is unaffected; only the delivery transport differs from the original
 design.
 
 - [x] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
-- [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
-- [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called through the domain provider's live credential accessor, transmit them only in that response over the authenticated encrypted channel, delete transient provider-job credential material, and do not persist raw credentials in fulfillment state or prepared operations.
-- [ ] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.
-- [ ] 8.5 Add authorization checks rejecting a query for a `fulfillment_id`/`capacity_reservation_id` the calling storefront does not own.
-- [ ] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches a terminal state, repeated queries returning consistent state, credential rotation between two queries, and querying a fulfillment owned by a different storefront.
-- [ ] 8.7 Record `provisioning-result-push-delivery` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer (not needing to be redesigned) is visible to whoever picks it up.
+- [x] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
+- [x] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called through the domain provider's live credential accessor, transmit them only in that response over the authenticated encrypted channel, delete transient provider-job credential material, and do not persist raw credentials in fulfillment state or prepared operations.
+- [x] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.
+- [x] 8.5 Add authorization checks rejecting a query for a `fulfillment_id`/`capacity_reservation_id` the calling storefront does not own.
+- [x] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches a terminal state, repeated queries returning consistent state, credential rotation between two queries, and querying a fulfillment owned by a different storefront.
+- [x] 8.7 Record `provisioning-result-push-delivery` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer (not needing to be redesigned) is visible to whoever picks it up.
 
 ## 9. Cut over storefront orchestration
 

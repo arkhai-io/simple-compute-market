@@ -189,6 +189,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     }
 
     assert "escrow_uid" in ansible_columns
+    assert "credentials_private" in ansible_columns
     assert {
         "contract_version",
         "capacity_reservation_id",
@@ -250,6 +251,10 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     assert {"settlement_records", "provisioned_resources", "scheduling_cursors"}.issubset(
         inspector.get_table_names()
     )
+    settlement_columns = {
+        column["name"] for column in inspector.get_columns("settlement_records")
+    }
+    assert "credential_generation" in settlement_columns
     settlement_indexes = {
         index["name"] for index in inspector.get_indexes("settlement_records")
     }
@@ -327,6 +332,8 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260722_001_pools7_capacity_model_cutover",
         "20260723_001_fulfillment_aggregate",
         "20260723_002_storefront_ownership",
+        "20260723_003_fulfillment_credential_generation",
+        "20260723_004_private_job_credentials",
     }
 
 
@@ -353,6 +360,7 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("executor_kind") == 1
     assert ansible_columns.count("action_kind") == 1
     assert ansible_columns.count("idempotency_key") == 1
+    assert ansible_columns.count("credentials_private") == 1
     assert host_columns.count("public_host") == 1
     assert host_columns.count("pool_id") == 1
     assert "vm_leases" not in inspector.get_table_names()
@@ -380,7 +388,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 12
+    assert migration_count == 14
 
 
 # ---------------------------------------------------------------------------

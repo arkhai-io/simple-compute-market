@@ -13,6 +13,7 @@ from .contracts import (
     FulfillmentAcceptanceView,
     FulfillmentBeginRequest,
     FulfillmentDryRunView,
+    FulfillmentResultView,
     FulfillmentScheduleRequest,
     FulfillmentStatusView,
     JobAccepted,
@@ -57,6 +58,10 @@ class ComputeProvisioningClientProtocol(Protocol):
         self,
         fulfillment_id: str,
     ) -> FulfillmentStatusView: ...
+    async def get_fulfillment_result(
+        self,
+        fulfillment_id: str,
+    ) -> FulfillmentResultView: ...
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted: ...
     async def get_job(self, job_id: str) -> ProvisioningJob: ...
     async def cancel_job(self, job_id: str) -> ProvisioningJob: ...
@@ -150,6 +155,16 @@ class ComputeProvisioningClient:
             f"/api/v1/fulfillments/{fulfillment_id}/status",
         )
         return FulfillmentStatusView.model_validate(payload)
+
+    async def get_fulfillment_result(
+        self,
+        fulfillment_id: str,
+    ) -> FulfillmentResultView:
+        payload = await self._request(
+            "GET",
+            f"/api/v1/fulfillments/{fulfillment_id}/result",
+        )
+        return FulfillmentResultView.model_validate(payload)
 
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted:
         return JobAccepted.model_validate(await self._request("POST", "/api/v1/actions", envelope))

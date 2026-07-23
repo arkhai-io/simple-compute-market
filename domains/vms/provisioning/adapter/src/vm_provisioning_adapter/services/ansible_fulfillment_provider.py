@@ -19,6 +19,8 @@ from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,
     FulfillmentStatusFailedError,
+    LiveCredential,
+    LiveCredentialResult,
     FulfillmentTeardownFailedError,
     ProviderConfigInvalidError,
     ProviderOperationState,
@@ -257,6 +259,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 params,
                 self._job_queue_provider(),
                 contract=contract,
+                credentials_private=True,
             )
         except ProviderConfigInvalidError:
             raise
@@ -398,3 +401,68 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             job.status, ProviderOperationState.unknown
         )
         return ProviderStatus(state=state, detail=job.error)
+
+    async def get_live_credentials(
+        self,
+        capacity_reservation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+        *,
+        credential_generation: int,
+    ) -> LiveCredentialResult:
+        """Rotate and consume VM credentials without storing them in fulfillment."""
+        del resource
+        metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        # Create-job credentials are private compatibility material. A result
+        # read always rotates, so the original values must never be delivered.
+        try:
+            self._job_service.consume_private_credentials(metadata.create_job_id)
+        except LookupError:
+            pass
+        params = AnsibleJobParams(
+            vm_host=metadata.vm_host,
+            vm_action="reset_password",
+            vm_target=metadata.vm_target,
+            escrow_uid=capacity_reservation_id,
+        )
+        contract = ExecutorActionEnvelope(
+            capacity_reservation_id=capacity_reservation_id,
+            deal_ref={},
+            executor_kind="vm",
+            action_kind="credential_rotation",
+            idempotency_key=(
+                f"{capacity_reservation_id}:credential_rotation:"
+                f"g{credential_generation}:v1"
+            ),
+            parameters=dataclasses.asdict(params),
+        )
+        try:
+            response = await self._job_service.submit(
+                params,
+                self._job_queue_provider(),
+                contract=contract,
+                credentials_private=True,
+            )
+            job = await self._job_service.wait_for_terminal_job(response.job_id)
+            if job.status != "succeeded":
+                raise FulfillmentStatusFailedError(
+                    job.error or "credential rotation failed"
+                )
+            consumed = self._job_service.consume_private_credentials(response.job_id)
+        except FulfillmentStatusFailedError:
+            raise
+        except Exception as exc:
+            raise FulfillmentStatusFailedError(str(exc)) from exc
+        credentials = tuple(
+            LiveCredential(
+                kind="vm.access.v1",
+                schema_version=1,
+                payload=credential.model_dump(mode="json", exclude_none=True),
+            )
+            for credential in consumed.credentials
+        )
+        if not credentials:
+            raise FulfillmentStatusFailedError(
+                "credential rotation completed without credentials"
+            )
+        return LiveCredentialResult(credentials=credentials, rotated=True)

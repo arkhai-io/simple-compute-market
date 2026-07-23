@@ -14,6 +14,8 @@ from market_fulfillment import (
     FulfillmentConflictError,
     FulfillmentProvider,
     FulfillmentResult,
+    LiveCredential,
+    LiveCredentialResult,
     ProviderOperationState,
     ProviderRegistry,
     ProviderStatus,
@@ -32,6 +34,8 @@ class _FakeProvider(FulfillmentProvider):
         self.dispatch_calls = 0
         self.fail_dispatch = False
         self.on_dispatch: Callable[[], None] | None = None
+        self.credential_reads = 0
+        self.fail_credentials = False
 
     def prepare_create(self, capacity_reservation_id, fulfillment_request, resource):
         self.prepare_calls += 1
@@ -61,6 +65,28 @@ class _FakeProvider(FulfillmentProvider):
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         return ProviderStatus(state=ProviderOperationState.succeeded)
+
+    async def get_live_credentials(
+        self,
+        capacity_reservation_id,
+        resource,
+        provider_metadata,
+        *,
+        credential_generation,
+    ):
+        self.credential_reads += 1
+        if self.fail_credentials:
+            raise RuntimeError("rotation failed")
+        return LiveCredentialResult(
+            credentials=(
+                LiveCredential(
+                    kind="vm.password.v1",
+                    schema_version=1,
+                    payload={"password": f"password-{credential_generation}"},
+                ),
+            ),
+            rotated=True,
+        )
 
 
 @pytest.fixture
@@ -285,3 +311,107 @@ def test_dry_run_uses_preparation_without_persisting(service, provider, session_
         record = db.get(SettlementRecord, "reservation-1")
         assert record.fulfillment_id is None
         assert record.prepared_create_operation is None
+
+
+@pytest.mark.asyncio
+async def test_result_rotates_live_credentials_and_persists_only_generation(
+    service, provider, session_factory
+):
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    with session_factory() as db:
+        SettlementRepository().transition(
+            db,
+            "reservation-1",
+            SettlementRecordState.active.value,
+        )
+        SettlementRepository().add_provisioned_resource(
+            db,
+            capacity_reservation_id="reservation-1",
+            domain_resource_ref="vm-1",
+        )
+        db.commit()
+
+    restarted = FulfillmentService(
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+    )
+    first = await restarted.get_result(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+    second = await restarted.get_result(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+
+    assert first.credential_generation == 1
+    assert second.credential_generation == 2
+    assert first.credentials[0].payload["password"] == "password-1"
+    assert second.credentials[0].payload["password"] == "password-2"
+    assert first.provisioned_resources[0].domain_resource_ref == "vm-1"
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.credential_generation == 2
+        assert "password" not in str(record.provider_metadata)
+        assert record.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_nonterminal_and_foreign_result_reads_do_not_fetch_credentials(
+    service, provider
+):
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+
+    pending = await service.get_result(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+    assert pending.credentials == ()
+    assert pending.credential_generation == 0
+    assert provider.credential_reads == 0
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        await service.get_result(
+            fulfillment_id=accepted.fulfillment_id,
+            owner_principal="seller-b",
+        )
+    assert provider.credential_reads == 0
+
+@pytest.mark.asyncio
+async def test_failed_credential_rotation_does_not_advance_generation(
+    service, provider, session_factory
+):
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    with session_factory() as db:
+        SettlementRepository().transition(
+            db, "reservation-1", SettlementRecordState.active.value
+        )
+        db.commit()
+    provider.fail_credentials = True
+
+    with pytest.raises(RuntimeError, match="rotation failed"):
+        await service.get_result(
+            fulfillment_id=accepted.fulfillment_id,
+            owner_principal="seller-a",
+        )
+
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.credential_generation == 0
+        assert record.claimed_by is None

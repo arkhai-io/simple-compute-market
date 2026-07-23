@@ -8,6 +8,7 @@ prepared synchronously and persisted before any external dispatch occurs.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,8 +18,10 @@ from market_fulfillment import (
     FulfillmentRequestInvalidError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
+    LiveCredential,
     ProviderNotFoundError,
     ProviderRegistry,
+    ProviderUnavailableError,
     SettlementEntityNotFoundError,
     SettlementRecord,
     SettlementRecordState,
@@ -46,6 +49,25 @@ class FulfillmentStatus:
     state: str
     failure_reason: str | None
     failure_message: str | None
+
+
+@dataclass(frozen=True)
+class FulfillmentResourceResult:
+    provisioned_resource_id: str
+    domain_resource_ref: str | None
+    status: str
+
+
+@dataclass(frozen=True)
+class FulfillmentResultProjection:
+    capacity_reservation_id: str
+    fulfillment_id: str
+    state: str
+    provisioned_resources: tuple[FulfillmentResourceResult, ...]
+    failure_reason: str | None
+    failure_message: str | None
+    credential_generation: int
+    credentials: tuple[LiveCredential, ...]
 
 
 def _resource_from_record(record: SettlementRecord) -> SettlementResource:
@@ -122,6 +144,121 @@ class FulfillmentService:
                     else None
                 ),
             )
+
+    async def get_result(
+        self,
+        *,
+        fulfillment_id: str,
+        owner_principal: str,
+    ) -> FulfillmentResultProjection:
+        claim_id = f"credential:{uuid.uuid4()}"
+        with self._session_factory() as db:
+            record = self._repository.get_by_fulfillment_id(db, fulfillment_id)
+            if record is None or record.owner_principal != owner_principal:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment exists for fulfillment_id={fulfillment_id!r}"
+                )
+            resources = tuple(
+                FulfillmentResourceResult(
+                    provisioned_resource_id=str(item.provisioned_resource_id),
+                    domain_resource_ref=(
+                        str(item.domain_resource_ref)
+                        if item.domain_resource_ref is not None
+                        else None
+                    ),
+                    status=str(item.status),
+                )
+                for item in self._repository.list_provisioned_resources(
+                    db, str(record.capacity_reservation_id)
+                )
+            )
+            generation = int(record.credential_generation or 0)
+            capacity_reservation_id = str(record.capacity_reservation_id)
+            durable_result = FulfillmentResultProjection(
+                capacity_reservation_id=capacity_reservation_id,
+                fulfillment_id=str(record.fulfillment_id),
+                state=str(record.state),
+                provisioned_resources=resources,
+                failure_reason=(
+                    str(record.failure_reason)
+                    if record.failure_reason is not None
+                    else None
+                ),
+                failure_message=(
+                    str(record.failure_message)
+                    if record.failure_message is not None
+                    else None
+                ),
+                credential_generation=generation,
+                credentials=(),
+            )
+            if record.state != SettlementRecordState.active.value:
+                return durable_result
+            try:
+                claimed = self._repository.claim_credential_rotation(
+                    db,
+                    fulfillment_id=fulfillment_id,
+                    owner_principal=owner_principal,
+                    claim_id=claim_id,
+                    lease_seconds=300,
+                )
+            except FulfillmentConflictError as exc:
+                db.rollback()
+                raise ProviderUnavailableError(
+                    "credential rotation is already in progress"
+                ) from exc
+            if claimed is None:
+                raise SettlementEntityNotFoundError(
+                    f"no active fulfillment exists for fulfillment_id={fulfillment_id!r}"
+                )
+            resource = _resource_from_record(claimed)
+            provider = self._provider_registry.require(
+                resource.provider, resource.resource_kind
+            )
+            provider_metadata = dict(claimed.provider_metadata or {})
+            db.commit()
+
+        try:
+            live = await provider.get_live_credentials(
+                capacity_reservation_id,
+                resource,
+                provider_metadata,
+                credential_generation=generation + 1,
+            )
+        except Exception:
+            with self._session_factory() as db:
+                self._repository.clear_claim(
+                    db,
+                    capacity_reservation_id,
+                    worker_id=claim_id,
+                )
+                db.commit()
+            raise
+
+        with self._session_factory() as db:
+            if live.rotated:
+                generation = self._repository.complete_credential_rotation(
+                    db,
+                    capacity_reservation_id=capacity_reservation_id,
+                    claim_id=claim_id,
+                )
+            else:
+                self._repository.clear_claim(
+                    db,
+                    capacity_reservation_id,
+                    worker_id=claim_id,
+                )
+            db.commit()
+        return FulfillmentResultProjection(
+            capacity_reservation_id=durable_result.capacity_reservation_id,
+            fulfillment_id=durable_result.fulfillment_id,
+            state=durable_result.state,
+            provisioned_resources=durable_result.provisioned_resources,
+            failure_reason=durable_result.failure_reason,
+            failure_message=durable_result.failure_message,
+            credential_generation=generation,
+            credentials=live.credentials,
+        )
 
     def validate_create(
         self,

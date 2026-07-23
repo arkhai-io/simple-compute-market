@@ -40,7 +40,7 @@ POOLS-7 durable fulfillment cutover
 | [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | active; 72 prerequisite tasks completed | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
 | [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | active; may overlap after identity decisions | Persists already-produced projections, maps them into commercial publication/claims, and adds advisory domain-owned hints |
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | blocked/design-gated | Simulation/decisions may proceed; production policy waits for POOLS-7 transactional assignment state and a selected fairness subject |
-| [`provisioning-result-push-delivery`](provisioning-result-push-delivery/) | deferred follow-on | Hardens the existing reverse callback with trusted authentication, durable outbox, and receiver deduplication after POOLS-7 results exist |
+| [`provisioning-result-push-delivery`](provisioning-result-push-delivery/) | deferred follow-on | Adds authenticated push delivery, a durable outbox, and receiver deduplication over POOLS-7's existing durable fulfillment/result persistence; it does not redesign result ownership or lifecycle state |
 
 `add-host-capacity-filters` was archived as superseded by site admission and fulfillment scheduling.
 

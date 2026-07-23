@@ -118,6 +118,9 @@ class SettlementRecord(Base):
     state = Column(String, nullable=False, default=SettlementRecordState.assigned.value)
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
+    credential_generation = Column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     # Multi-replica recovery-claim boundary. One aggregate has at most one
     # pending provider operation at a time, so these live on the row itself

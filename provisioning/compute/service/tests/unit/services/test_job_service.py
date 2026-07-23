@@ -488,3 +488,55 @@ class TestBuildResultPayload:
         ar = {"action": "create", "vm_name": "test-vm"}
         payload = svc._build_result_payload(_base_run_result(ansible_result=ar))
         assert payload["ansible_result"] is ar
+
+
+def test_private_credentials_are_hidden_and_consumed_atomically():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from compute_provisioning_service.db.models import (
+        AnsibleJob,
+        Base,
+        Credential,
+    )
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    service = _make_service()
+    service._session_factory = sessions
+    with sessions() as db:
+        db.add(
+            AnsibleJob(
+                id="private-job",
+                status="succeeded",
+                params={},
+                credentials_private=True,
+                contract_version="1.0",
+                capacity_reservation_id="reservation-1",
+                executor_kind="vm",
+                action_kind="credential_rotation",
+                idempotency_key="rotation-1",
+            )
+        )
+        db.add(
+            Credential(
+                job_id="private-job",
+                role="tenant",
+                password="transient-password",
+            )
+        )
+        db.commit()
+
+    with pytest.raises(LookupError):
+        service.get_credentials("private-job")
+    assert service.get_contract_job_record("private-job")["credentials"] == []
+    consumed = service.consume_private_credentials("private-job")
+    assert consumed.credentials[0].password == "transient-password"
+    with sessions() as db:
+        assert db.query(Credential).filter_by(job_id="private-job").count() == 0

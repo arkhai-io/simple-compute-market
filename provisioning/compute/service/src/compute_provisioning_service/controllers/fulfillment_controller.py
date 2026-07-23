@@ -7,10 +7,13 @@ from typing import cast
 from compute_provisioning.contracts import (
     FulfillmentAcceptanceView,
     FulfillmentBeginRequest,
+    FulfillmentCredentialView,
     FulfillmentDryRunView,
+    FulfillmentResultView,
     FulfillmentScheduleRequest,
     FulfillmentStatusView,
     FulfillmentValidationIssueView,
+    ProvisionedResourceView,
     SettlementResourceView,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -19,11 +22,13 @@ from market_fulfillment import (
     CapacityReservationExpiredError,
     FulfillmentConflictError,
     FulfillmentRequestInvalidError,
+    FulfillmentStatusFailedError,
     NoEligibleSettlementResourceError,
     PhysicalSettlementRequest,
     PhysicalSettlementScheduler,
     ProviderConfigInvalidError,
     ProviderNotFoundError,
+    ProviderUnavailableError,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
     VersionedEnvelope,
@@ -166,6 +171,53 @@ class FulfillmentController:
             state=status.state,
             failure_reason=status.failure_reason,
             failure_message=status.failure_message,
+        )
+
+    @router.get(
+        "/fulfillments/{fulfillment_id}/result",
+        response_model=FulfillmentResultView,
+    )
+    async def get_fulfillment_result(
+        self,
+        fulfillment_id: str,
+        request: Request,
+    ) -> FulfillmentResultView:
+        try:
+            result = await self._fulfillment_service.get_result(
+                fulfillment_id=fulfillment_id,
+                owner_principal=str(request.state.storefront_principal),
+            )
+        except SettlementEntityNotFoundError as exc:
+            raise _fulfillment_not_found(fulfillment_id) from exc
+        except (
+            FulfillmentStatusFailedError,
+            ProviderNotFoundError,
+            ProviderUnavailableError,
+        ) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return FulfillmentResultView(
+            fulfillment_id=result.fulfillment_id,
+            capacity_reservation_id=result.capacity_reservation_id,
+            state=result.state,
+            provisioned_resources=[
+                ProvisionedResourceView(
+                    provisioned_resource_id=item.provisioned_resource_id,
+                    domain_resource_ref=item.domain_resource_ref,
+                    status=item.status,
+                )
+                for item in result.provisioned_resources
+            ],
+            failure_reason=result.failure_reason,
+            failure_message=result.failure_message,
+            credential_generation=result.credential_generation,
+            credentials=[
+                FulfillmentCredentialView(
+                    kind=item.kind,
+                    schema_version=item.schema_version,
+                    payload=item.payload,
+                )
+                for item in result.credentials
+            ],
         )
 
     @router.post("/fulfillments/dry-run", response_model=FulfillmentDryRunView)

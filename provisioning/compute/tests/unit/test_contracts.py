@@ -122,15 +122,19 @@ async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
     def handler(request: httpx.Request) -> httpx.Response:
         paths.append(request.url.path)
         if request.method == "GET":
-            return httpx.Response(
-                200,
-                json={
-                    "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                    "fulfillment_id": "fulfillment-1",
-                    "capacity_reservation_id": "reservation-1",
-                    "state": "dispatching",
-                },
-            )
+            payload = {
+                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                "fulfillment_id": "fulfillment-1",
+                "capacity_reservation_id": "reservation-1",
+                "state": "dispatching",
+            }
+            if request.url.path.endswith("/result"):
+                payload.update({
+                    "provisioned_resources": [],
+                    "credential_generation": 0,
+                    "credentials": [],
+                })
+            return httpx.Response(200, json=payload)
         payload = __import__("json").loads(request.content)
         if request.url.path.endswith("/dry-run"):
             return httpx.Response(
@@ -166,14 +170,17 @@ async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
         accepted = await client.begin_fulfillment(request)
         dry_run = await client.dry_run_fulfillment(request)
         status = await client.get_fulfillment_status(accepted.fulfillment_id)
+        result = await client.get_fulfillment_result(accepted.fulfillment_id)
 
     assert accepted.fulfillment_id == "fulfillment-1"
     assert dry_run.valid
     assert status.state == "dispatching"
+    assert result.credential_generation == 0
     assert paths == [
         "/api/v1/fulfillments",
         "/api/v1/fulfillments/dry-run",
         "/api/v1/fulfillments/fulfillment-1/status",
+        "/api/v1/fulfillments/fulfillment-1/result",
     ]
 
 

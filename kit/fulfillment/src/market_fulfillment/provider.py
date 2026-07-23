@@ -21,6 +21,19 @@ class ProviderStatus:
     state: ProviderOperationState
     detail: str | None = None
 
+
+@dataclass(frozen=True)
+class LiveCredential:
+    kind: str
+    schema_version: int
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LiveCredentialResult:
+    credentials: tuple[LiveCredential, ...] = ()
+    rotated: bool = False
+
 @dataclass(frozen=True)
 class FulfillmentValidationIssue:
     code: str
@@ -72,6 +85,18 @@ class FulfillmentProvider(ABC):
         resource: "SettlementResource",
         provider_metadata: dict[str, Any],
     ) -> ProviderStatus: ...
+
+    async def get_live_credentials(
+        self,
+        capacity_reservation_id: str,
+        resource: "SettlementResource",
+        provider_metadata: dict[str, Any],
+        *,
+        credential_generation: int,
+    ) -> LiveCredentialResult:
+        """Return ephemeral credentials; providers without issued secrets opt out."""
+        del capacity_reservation_id, resource, provider_metadata, credential_generation
+        return LiveCredentialResult()
 
 class FulfillmentError(Exception): pass
 class ProviderNotFoundError(FulfillmentError): pass

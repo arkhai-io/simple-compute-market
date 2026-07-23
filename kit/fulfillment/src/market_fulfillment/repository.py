@@ -116,7 +116,10 @@ class SettlementRepository:
         return (
             db.query(ProvisionedResource)
             .filter(ProvisionedResource.capacity_reservation_id == capacity_reservation_id)
-            .order_by(ProvisionedResource.created_at.asc())
+            .order_by(
+                ProvisionedResource.created_at.asc(),
+                ProvisionedResource.provisioned_resource_id.asc(),
+            )
             .all()
         )
 
@@ -512,6 +515,63 @@ class SettlementRepository:
         record.claimed_by = None
         record.claim_expires_at = retry_at
         db.flush()
+
+    def claim_credential_rotation(
+        self,
+        db: Session,
+        *,
+        fulfillment_id: str,
+        owner_principal: str,
+        claim_id: str,
+        lease_seconds: int,
+        now: datetime | None = None,
+    ) -> SettlementRecord | None:
+        """Claim one active owned fulfillment for a credential rotation."""
+
+        begin_sqlite_write_transaction(db)
+        now = now or datetime.now(timezone.utc)
+        record = (
+            db.query(SettlementRecord)
+            .filter(
+                SettlementRecord.fulfillment_id == fulfillment_id,
+                SettlementRecord.owner_principal == owner_principal,
+                SettlementRecord.state == SettlementRecordState.active.value,
+            )
+            .one_or_none()
+        )
+        if record is None:
+            return None
+        if record.claimed_by is not None and (
+            record.claim_expires_at is None or record.claim_expires_at > now
+        ):
+            raise FulfillmentConflictError(
+                "fulfillment credential rotation is already in progress"
+            )
+        record.claimed_by = claim_id
+        record.claim_expires_at = now + timedelta(seconds=lease_seconds)
+        db.flush()
+        return record
+
+    def complete_credential_rotation(
+        self,
+        db: Session,
+        *,
+        capacity_reservation_id: str,
+        claim_id: str,
+    ) -> int:
+        begin_sqlite_write_transaction(db)
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.claimed_by != claim_id:
+            raise FulfillmentConflictError(
+                "fulfillment credential rotation claim is no longer owned"
+            )
+        if record.state != SettlementRecordState.active.value:
+            raise FulfillmentConflictError("fulfillment is no longer active")
+        record.credential_generation = int(record.credential_generation or 0) + 1
+        record.claimed_by = None
+        record.claim_expires_at = None
+        db.flush()
+        return int(record.credential_generation)
 
     def select_pending_for_single_worker(
         self,

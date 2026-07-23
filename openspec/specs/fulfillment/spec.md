@@ -205,6 +205,23 @@ A fulfillment produces zero or more `ProvisionedResource` rows, each with a glob
 
 There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.
 
+### Requirement: Pull-based fulfillment result and live credentials
+
+The authenticated result query MUST return the durable fulfillment identity, aggregate state, ordered provisioned-resource outputs, failure details, and a monotonic non-secret `credential_generation`. A non-owner receives not found. Non-active results contain no credentials and do not invoke a provider credential operation.
+
+For an active fulfillment, the service MUST claim credential rotation durably before releasing the database lock and calling the exact domain provider. A concurrent caller MUST NOT rotate the same generation. A provider that issues credentials rotates them for the claimed generation, stores any provider-job material only as private transient data, atomically consumes and deletes that data, and returns credentials only in memory. The service advances `credential_generation` only after successful rotation and never persists returned credentials in the fulfillment aggregate, provisioned-resource rows, provider metadata, prepared commands, logs, or errors. A provider whose access model issues no server credential returns no credential payload and does not advance the generation.
+
+#### Scenario: Active result is read twice
+
+- **WHEN** an owning storefront reads an active credential-issuing fulfillment result twice
+- **THEN** each successful read returns newly rotated credentials with a strictly greater `credential_generation`
+- **AND** neither credential payload remains in fulfillment or provider-job persistence
+
+#### Scenario: Credential rotation fails
+
+- **WHEN** live credential rotation fails before delivery
+- **THEN** the result query fails as temporarily unavailable, the durable claim is released or expires, and `credential_generation` remains unchanged
+
 Prepared provider create/teardown input is captured as a `VersionedEnvelope`-typed payload on the aggregate, frozen before the transaction that marks the corresponding dispatch-pending state commits, so a recovery retry dispatches from what was accepted rather than a live re-read of pool or provider configuration.
 
 Repository callers provide validated canonical `SettlementRequirement` and `VersionedEnvelope` models. Persistence serializes their JSON-compatible model form and uses structural equality; it does not accept arbitrary dictionaries as an equivalence boundary or infer equivalence among unvalidated representations.

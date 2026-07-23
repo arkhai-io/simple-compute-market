@@ -296,3 +296,53 @@ class TestExtraVarsCollision:
             ansible_service._build_vm_vars(
                 dataclasses.replace(params, provider_extra_vars={"executor_kind": "x"})
             )
+
+@pytest.mark.asyncio
+async def test_live_credentials_rotate_with_generation_and_consume_private_rows(
+    provider, job_service
+):
+    from vm_provisioning_operator.models import (
+        CredentialListResponse,
+        CredentialResponse,
+    )
+
+    job_service.wait_for_terminal_job = AsyncMock(
+        return_value=SimpleNamespace(status="succeeded", error=None)
+    )
+    job_service.consume_private_credentials.side_effect = [
+        CredentialListResponse(job_id="job-1", credentials=[]),
+        CredentialListResponse(
+            job_id="rotation-job",
+            credentials=[
+                CredentialResponse(role="tenant", password="fresh-password")
+            ],
+        ),
+    ]
+    job_service.submit.return_value = SimpleNamespace(
+        job_id="rotation-job", status="queued"
+    )
+    metadata = {
+        "create_job_id": "job-1",
+        "current_job_id": "job-1",
+        "vm_host": "kvm1",
+        "vm_target": "vm-alloc-1",
+        "operation": "create",
+    }
+
+    result = await provider.get_live_credentials(
+        "reservation-1",
+        _resource(),
+        metadata,
+        credential_generation=3,
+    )
+
+    assert result.rotated
+    assert result.credentials[0].payload["password"] == "fresh-password"
+    submitted_contract = job_service.submit.await_args.kwargs["contract"]
+    assert submitted_contract.idempotency_key == (
+        "reservation-1:credential_rotation:g3:v1"
+    )
+    assert job_service.submit.await_args.kwargs["credentials_private"] is True
+    assert job_service.consume_private_credentials.call_args_list[-1].args == (
+        "rotation-job",
+    )
