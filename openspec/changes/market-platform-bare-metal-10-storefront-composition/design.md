@@ -57,7 +57,13 @@ The shared storefront remains opaque to machine IDs, SSH access details, and bar
 
 Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. Capacity placement selects one site before reservation; the resulting reservation/fulfillment state retains that trusted site binding. Fulfillment, polling, and teardown route through that binding rather than a process-global provisioning URL.
 
-The exact durable repository and public scheduling calls are supplied by POOLS-7. Before that dependency lands, composition tests may use injected fake ports, but production cutover cannot claim completion.
+For bare-metal publication, the trusted site producer exposes an opt-in complete per-resource projection. `physical_resource_id` is the Site authority's Physical Resource identity; `physical_host_id` is the stable cross-mode accounting identity; `machine_id` is executor-local. None may be inferred from another. The same projection generation carries authoritative per-resource availability, allocation mode, supported access methods, capacity dimensions, and explicitly allowlisted capabilities. Anonymous aggregate capacity buckets remain the fungible publication path and are not joined heuristically to resource identities.
+
+Specific-resource exposure is operator-controlled. A producer emits only resources explicitly eligible for public bare-metal listing, and excludes authority URLs, credentials, provider configuration, private inventory attributes, and routing metadata. The storefront injects its configured `site_id` for provenance rather than trusting a remotely asserted site identity. Site-scoped derivation keys prevent identical executor-local machine names at different sites from colliding.
+
+A missing or incomplete generation closes nothing. A retained complete generation may continue to drive publication while marked stale under normal projection policy. An authoritative complete empty generation closes prior derived listings for that site. Capacity and allowlisted capability maps must not contain conflicting values.
+
+This change owns this bare-metal-specific producer/interpreter contract so composition can proceed before POOLS-7. POOLS-8 remains responsible for generic durable projection consumption, commercial mapping, and advisory hints. The exact durable scheduling repository and lifecycle calls are supplied by POOLS-7; before that dependency lands, composition tests use injected lifecycle ports, but production cutover cannot claim completion.
 
 A URL or admin key embedded in buyer-controlled terms or copied through opaque deal metadata is not an ownership authority. Reverse delivery and credential lookup remain separately owned by the result-delivery change.
 
@@ -81,7 +87,9 @@ The composition will use POOLS-7 scheduling, fulfillment status, result, and tea
 - **[Refactoring VM storefront code expands scope]** → Move only behavior proven schema-opaque by both compositions and preserve VM behavior with focused regression tests.
 - **[Bare-metal access data leaks through generic state or logs]** → Treat SSH keys and access grants as domain-sensitive values, redact diagnostics, and persist only the minimum durable input/result references required for recovery.
 - **[Two storefront processes increase operational surface]** → Reuse shared image/chart conventions and permit one gateway/operator profile without coupling writable state.
-- **[Site identity can be confused with remote assertions]** → Resolve site only from configured bindings and persist the selected binding with lifecycle state.
+- **[Site identity can be confused with remote assertions]** → Inject site provenance from configured bindings and persist the selected binding with lifecycle state.
+- **[Specific-resource projection leaks private inventory]** → Require operator opt-in and an allowlist; contract tests reject secrets, URLs, provider configuration, and unknown private attributes.
+- **[Availability and identity come from different generations]** → Publish only a complete per-resource generation carrying both; never join anonymous capacity buckets to resources heuristically.
 - **[A publication-only implementation is mistaken for completion]** → Acceptance includes negotiation, settlement, fulfillment, result, teardown, packaging, and deployment evidence.
 
 ## Migration Plan

@@ -6,6 +6,7 @@ Bare metal already has deterministic domain codecs, publication semantics, and a
 
 - Add a deployable bare-metal storefront composition that injects the bare-metal market-domain contract into the shared storefront role.
 - Complete bare-metal seller hooks for negotiation policy, settlement verification and plan construction, fulfillment, receipt/result normalization, and teardown without importing VM semantics.
+- Extend the trusted site projection producer with an opt-in, complete per-resource bare-metal view containing distinct site, Physical Resource, physical-host, and executor-machine identities plus authoritative availability, allocation mode, access methods, capacity, and allowlisted capabilities.
 - Configure the storefront to consume one or more trusted provisioning-site bindings and route fulfillment through the site selected by the Capacity Reservation.
 - Package and deploy the composition independently from the VM storefront while allowing one seller or gateway to operate both roles.
 - Add focused contract, integration, packaging, and deployment-render evidence for a complete bare-metal seller lifecycle.
@@ -35,12 +36,13 @@ None.
 
 - Archived Market Platform domain and compute extraction changes provide the common contracts and deployable compute service.
 - `pools-7-storefront-fulfillment-cutover` owns the durable selected-site fulfillment path. Composition and protocol work may begin earlier, but production cutover and final lifecycle evidence depend on its public scheduling, fulfillment, result, and teardown contracts.
+- This change owns the bare-metal-specific per-resource projection producer/consumer contract needed for publication. POOLS-8 continues to own generic durable projection consumption, commercial mapping, and advisory listing hints.
 - `market-platform-compute-40-multi-domain-proof` follows this change and POOLS-7 to prove VM and bare-metal storefronts across shared provisioning authorities.
 - `provisioning-result-push-delivery` owns authenticated reverse delivery and is not required for the pull-based lifecycle baseline.
 
 ## Impact
 
-- Affected packages: `domains/bare_metal`, `core/storefront`, the concrete bare-metal storefront package/composition root, shared storefront clients, and compute-provisioning clients.
+- Affected packages: `domains/bare_metal`, `core/storefront`, the concrete bare-metal storefront package/composition root, site projection carriers, compute-provisioning projection producers, shared storefront clients, and compute-provisioning clients.
 - Affected deployment: seller image/build targets, configuration profiles, Helm or equivalent role composition, health checks, and trusted site credentials.
 - Affected tests: bare-metal domain conformance, storefront protocol/integration suites, selected-site fulfillment, packaging, deployment rendering, and later Compute-40 topology scenarios.
 - Persistence and wire compatibility must reuse shared storefront schemas and versioned domain envelopes; any unavoidable domain-specific persistence requires an explicit migration and compatibility plan.
