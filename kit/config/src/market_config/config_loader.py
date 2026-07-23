@@ -573,22 +573,24 @@ class EscrowTemplate:
 
 # Maps the ``auto:<obligation-kind>`` suffix to ``(category_attr, field)``
 # on the alkahest address config tree. Keep in sync with
-# ``market_alkahest.alkahest._ADDRESS_CATEGORIES``. Tierable/nontierable
-# split mirrors the contract names; attestation v2 lives in the same
-# ``attestation_addresses`` category as v1.
+# ``market_alkahest.alkahest._ADDRESS_CATEGORIES``. The default /
+# unconditional split mirrors Alkahest escrow semantics; attestation
+# reference escrows live in the same ``attestation_addresses`` category.
 _AUTO_ESCROW_LOOKUP: dict[str, tuple[str, str]] = {
-    "erc20_nontierable":         ("erc20_addresses", "escrow_obligation_nontierable"),
-    "erc20_tierable":            ("erc20_addresses", "escrow_obligation_tierable"),
-    "erc721_nontierable":        ("erc721_addresses", "escrow_obligation_nontierable"),
-    "erc721_tierable":           ("erc721_addresses", "escrow_obligation_tierable"),
-    "erc1155_nontierable":       ("erc1155_addresses", "escrow_obligation_nontierable"),
-    "erc1155_tierable":          ("erc1155_addresses", "escrow_obligation_tierable"),
-    "native_token_nontierable":  ("native_token_addresses", "escrow_obligation_nontierable"),
-    "native_token_tierable":     ("native_token_addresses", "escrow_obligation_tierable"),
-    "token_bundle_nontierable":  ("token_bundle_addresses", "escrow_obligation_nontierable"),
-    "token_bundle_tierable":     ("token_bundle_addresses", "escrow_obligation_tierable"),
-    "attestation_nontierable":   ("attestation_addresses", "escrow_obligation"),
-    "attestation2_nontierable":  ("attestation_addresses", "escrow_obligation2"),
+    "erc20_default":                 ("erc20_addresses", "escrow_obligation_default"),
+    "erc20_unconditional":           ("erc20_addresses", "escrow_obligation_unconditional"),
+    "erc721_default":                ("erc721_addresses", "escrow_obligation_default"),
+    "erc721_unconditional":          ("erc721_addresses", "escrow_obligation_unconditional"),
+    "erc1155_default":               ("erc1155_addresses", "escrow_obligation_default"),
+    "erc1155_unconditional":         ("erc1155_addresses", "escrow_obligation_unconditional"),
+    "native_token_default":          ("native_token_addresses", "escrow_obligation_default"),
+    "native_token_unconditional":    ("native_token_addresses", "escrow_obligation_unconditional"),
+    "token_bundle_default":          ("token_bundle_addresses", "escrow_obligation_default"),
+    "token_bundle_unconditional":    ("token_bundle_addresses", "escrow_obligation_unconditional"),
+    "attestation_default":           ("attestation_addresses", "escrow_obligation_default"),
+    "attestation_unconditional":     ("attestation_addresses", "escrow_obligation_unconditional"),
+    "attestation_reference_default":          ("attestation_addresses", "attestation_reference_escrow_obligation_default"),
+    "attestation_reference_unconditional":    ("attestation_addresses", "attestation_reference_escrow_obligation_unconditional"),
 }
 
 

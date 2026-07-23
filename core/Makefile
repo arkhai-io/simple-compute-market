@@ -1,20 +1,25 @@
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= ../.dist
 
-.PHONY: test test-core test-core-buyer test-core-site test-core-storefront test-core-storefront-client
+.PHONY: test test-core test-core-buyer test-core-storefront test-core-storefront-client typecheck typecheck-core typecheck-core-registry-client
 
-test: test-core test-core-buyer test-core-site test-core-storefront test-core-storefront-client
+test: test-core test-core-buyer test-core-storefront test-core-storefront-client
+
+typecheck: typecheck-core typecheck-core-registry-client
 
 test-core:
 	uv run --find-links $(DIST_DIR) pytest tests/unit -q
 
-test-core-buyer:
-	cd buyer && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+typecheck-core:
+	uv run mypy src
 
-test-core-site:
-	cd site && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+typecheck-core-registry-client:
+	cd registry-client && make typecheck
+
+test-core-buyer:
+	cd buyer && make test
 
 test-core-storefront:
-	cd storefront && uv run --find-links $(DIST_DIR) pytest tests/unit -q
+	cd storefront && make test
 
 test-core-storefront-client:
-	cd storefront-client && uv run --find-links $(DIST_DIR) pytest tests -q
+	cd storefront-client && make test

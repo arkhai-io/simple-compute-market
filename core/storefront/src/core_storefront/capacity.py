@@ -3,13 +3,13 @@
 In the target topology
 (docs/development/ARCHITECTURE.md, "Capacity and the Site Authority")
 the storefront does not own capacity: a per-site *site authority* keeps
-the authoritative resource ledger (hosts, allocations, lease timing) and
+the authoritative resource ledger (hosts, reservations, lease timing) and
 the storefront reaches it only through this client interface —
 
 - an advisory availability ``snapshot`` at negotiation-round start,
 - an authoritative check-and-``reserve`` at fulfillment time (with an
   optional TTL for two-phase reserve),
-- ``commit``/``release``/``truncate_lease`` for the allocation
+- ``commit``/``release``/``truncate_lease`` for the reservation
   lifecycle, and
 - anonymous, versioned capacity-change events that drive each
   storefront's derived-listing reconciliation (a *different*
@@ -48,7 +48,7 @@ class CapacityDelta:
     versions from different sites are unrelated sequences.
     """
 
-    kind: str  # "reserved" | "committed" | "released" | "lease_truncated"
+    kind: str  # "reserved" | "committed" | "released" | "lease_truncated" | "capacity_changed"
     version: int
     resource_id: str | None = None
     pool_id: str | None = None
@@ -107,7 +107,7 @@ class CapacityClient(Protocol):
     ``claim`` and ``deal_ref`` are opaque mappings: the claim speaks the
     site's resource-domain vocabulary (e.g. required attributes), the
     deal ref carries the storefront's bookkeeping keys, recorded on the
-    allocation at reserve time so deal-scoped events can be routed back
+    reservation at reserve time so deal-scoped events can be routed back
     to the owning storefront.
     """
 
@@ -116,7 +116,11 @@ class CapacityClient(Protocol):
         ...
 
     async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Dry-run match for ``claim`` — consumes nothing."""
         ...
@@ -127,12 +131,16 @@ class CapacityClient(Protocol):
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``.
 
-        Returns the allocation payload, or None when nothing matches.
+        Returns the reservation payload, or None when nothing matches.
         ``ttl_seconds`` requests a soft hold that auto-expires unless
-        committed (two-phase reserve).
+        committed (two-phase reserve). ``lease_start_utc`` omitted means
+        "now"; when ``lease_duration_seconds`` is supplied, matching is
+        against that requested lease window instead of current availability.
         """
         ...
 
@@ -140,8 +148,9 @@ class CapacityClient(Protocol):
         self,
         *,
         resource_id: str,
-        allocation_id: str | None = None,
-        lease_end_utc: str,
+        capacity_reservation_id: str | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
         """Confirm a reservation into an active lease."""
@@ -150,16 +159,16 @@ class CapacityClient(Protocol):
     async def release(
         self,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Return a held/leased allocation's capacity to the pool."""
+        """Return a held/leased reservation's capacity to the pool."""
         ...
 
     async def truncate_lease(
         self,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
         """End a lease early (settlement lifecycle decided the deal is over)."""

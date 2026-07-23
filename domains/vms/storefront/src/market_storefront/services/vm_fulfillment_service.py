@@ -32,13 +32,35 @@ def _hold_lapsed(hold_expires_at: Any) -> bool:
     return expires <= datetime.now(timezone.utc)
 
 
+def _parse_start_utc(start_utc: str | None) -> datetime:
+    if not start_utc:
+        return datetime.now(timezone.utc)
+    text = str(start_utc).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = datetime.strptime(str(start_utc).strip(), "%Y-%m-%d %H:%M")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _lease_window_strings(
+    *, start_utc: str | None, duration_seconds: int,
+) -> tuple[str, str]:
+    start = _parse_start_utc(start_utc)
+    end = start + timedelta(seconds=int(duration_seconds))
+    return start.isoformat(), end.strftime("%Y-%m-%d %H:%M")
+
+
 async def _commit_capacity_hold(
     *,
     capacity: Any,
-    held_allocation: dict[str, Any] | None,
+    held_reservation: dict[str, Any] | None,
     escrow_uid: str,
     duration_seconds: int,
     stage_event: StageEventFn,
+    start_utc: str | None = None,
 ) -> dict[str, Any] | None:
     """Secure an acceptance-time hold for this deal, or None to reserve fresh.
 
@@ -47,21 +69,23 @@ async def _commit_capacity_hold(
     here starts at settlement and is refreshed to provision-complete +
     duration by the normal post-provision commit.
     """
-    if not held_allocation or not held_allocation.get("allocation_id"):
+    if not held_reservation or not held_reservation.get("capacity_reservation_id"):
         return None
-    if _hold_lapsed(held_allocation.get("hold_expires_at")):
+    if _hold_lapsed(held_reservation.get("hold_expires_at")):
         logger.info(
             "[CAPACITY] Hold %s lapsed before settlement — reserving fresh",
-            held_allocation.get("allocation_id"),
+            held_reservation.get("capacity_reservation_id"),
         )
         return None
-    lease_end_utc = (
-        datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ).strftime("%Y-%m-%d %H:%M")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
     try:
         await capacity.commit(
-            resource_id=str(held_allocation.get("resource_id")),
-            allocation_id=str(held_allocation["allocation_id"]),
+            resource_id=str(held_reservation.get("resource_id")),
+            capacity_reservation_id=str(held_reservation["capacity_reservation_id"]),
+            lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
             idempotency_ref=escrow_uid,
         )
@@ -69,17 +93,53 @@ async def _commit_capacity_hold(
         logger.warning(
             "[CAPACITY] Could not commit hold %s (lapsed at the ledger?): "
             "%s — reserving fresh",
-            held_allocation.get("allocation_id"), exc,
+            held_reservation.get("capacity_reservation_id"), exc,
         )
         return None
     stage_event(
         "provision", "capacity_hold_committed",
         escrow_uid=escrow_uid,
-        allocation_id=held_allocation.get("allocation_id"),
-        resource_id=held_allocation.get("resource_id"),
-        site=held_allocation.get("site"),
+        capacity_reservation_id=held_reservation.get("capacity_reservation_id"),
+        resource_id=held_reservation.get("resource_id"),
+        site=held_reservation.get("site"),
     )
-    return dict(held_allocation)
+    return dict(held_reservation)
+
+
+async def _commit_fresh_reservation(
+    *,
+    capacity: Any,
+    reserved: dict[str, Any],
+    escrow_uid: str,
+    duration_seconds: int,
+    stage_event: StageEventFn,
+    start_utc: str | None = None,
+) -> None:
+    """Promote a settlement-time fallback reservation before provisioning."""
+    capacity_reservation_id = reserved.get("capacity_reservation_id")
+    resource_id = reserved.get("resource_id")
+    if not capacity_reservation_id or not resource_id:
+        raise RuntimeError("Reserved capacity is missing reservation identity")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
+    await capacity.commit(
+        resource_id=str(resource_id),
+        capacity_reservation_id=str(capacity_reservation_id),
+        lease_start_utc=lease_start_utc,
+        lease_end_utc=lease_end_utc,
+        idempotency_ref=escrow_uid,
+    )
+    stage_event(
+        "provision", "capacity_reservation_committed",
+        escrow_uid=escrow_uid,
+        capacity_reservation_id=capacity_reservation_id,
+        resource_id=resource_id,
+        site=reserved.get("site"),
+    )
+
+
 # Site-authority capacity client (core_storefront.capacity.CapacityClient
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
@@ -96,6 +156,7 @@ async def fulfill_vm_obligation(
     ssh_public_key: str,
     order: str | dict[str, Any] | None = None,
     duration_seconds: int = 3600,
+    start_utc: str | None = None,
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     chain_configs: dict[str, Any] | None = None,
@@ -107,11 +168,11 @@ async def fulfill_vm_obligation(
     schedule_shutdown: ScheduleShutdownFn,
     register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
-    held_allocation: dict[str, Any] | None = None,
+    held_reservation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Provision VM capacity and submit settlement fulfillment.
 
-    ``held_allocation`` is the TTL soft hold the negotiation's
+    ``held_reservation`` is the TTL soft hold the negotiation's
     acceptance placed (two-phase reserve). It is committed into a lease
     *before* provisioning starts — that removes the
     hold-expires-during-provisioning race entirely, and the post-provision
@@ -120,26 +181,29 @@ async def fulfill_vm_obligation(
     """
     fulfillment_uid = None
     connection_details: str | None = None
-    reserved_allocation_id: str | None = None
+    reserved_capacity_reservation_id: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
+    order_id: str | None = None
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info("[ALKAHEST] Order for fulfillment: %s", order)
-    plan = build_vm_fulfillment_plan(
-        order=order,
-        duration_seconds=duration_seconds,
-        chain_configs=chain_configs,
-    )
-    order_id = plan.order_id
-    required_attributes = plan.required_attributes
 
     try:
+        plan = build_vm_fulfillment_plan(
+            order=order,
+            duration_seconds=duration_seconds,
+            chain_configs=chain_configs,
+        )
+        order_id = plan.order_id
+        required_attributes = plan.required_attributes
+
         reserved = await _commit_capacity_hold(
             capacity=capacity,
-            held_allocation=held_allocation,
+            held_reservation=held_reservation,
             escrow_uid=escrow_uid,
             duration_seconds=duration_seconds,
+            start_utc=start_utc,
             stage_event=stage_event,
         )
         if reserved is None:
@@ -149,11 +213,22 @@ async def fulfill_vm_obligation(
                     "listing_id": listing_id or order_id,
                     "escrow_uid": escrow_uid,
                 },
+                lease_start_utc=start_utc,
+                lease_duration_seconds=duration_seconds,
             )
+            if reserved:
+                await _commit_fresh_reservation(
+                    capacity=capacity,
+                    reserved=reserved,
+                    escrow_uid=escrow_uid,
+                    duration_seconds=duration_seconds,
+                    start_utc=start_utc,
+                    stage_event=stage_event,
+                )
         if not reserved:
             raise RuntimeError("No available compute VM matched required attributes")
-        reserved_allocation_id = (
-            str(reserved.get("allocation_id")) if reserved.get("allocation_id") else None
+        reserved_capacity_reservation_id = (
+            str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None
         )
         reserved_resource_id = str(reserved.get("resource_id"))
         reserved_vm_host = reserved.get("vm_host")
@@ -168,13 +243,28 @@ async def fulfill_vm_obligation(
             resource_id=reserved_resource_id,
             vm_host=reserved_vm_host,
             required_attributes=required_attributes,
-            allocation_id=reserved_allocation_id,
+            capacity_reservation_id=reserved_capacity_reservation_id,
             allocated_gpu_count=reserved.get("allocated_gpu_count"),
         )
         # Stale derived listings are closed by the storefront's
         # capacity-delta subscriber (reacting to the reserve above), not
         # inline here — another storefront's reservation must trigger
         # the same reconciliation, so it can't live in this deal flow.
+
+        start_dt = _parse_start_utc(start_utc)
+        delay_seconds = (start_dt - datetime.now(timezone.utc)).total_seconds()
+        if delay_seconds > 0:
+            stage_event(
+                "provision", "scheduled",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                capacity_reservation_id=reserved_capacity_reservation_id,
+                vm_host=reserved_vm_host,
+                lease_start_utc=start_dt.isoformat(),
+                delay_seconds=delay_seconds,
+            )
+            await asyncio.sleep(delay_seconds)
 
         async def _record_job_id(job_id: str) -> None:
             await get_sqlite_client().update_escrow(
@@ -194,6 +284,8 @@ async def fulfill_vm_obligation(
             ssh_public_key,
             vm_host=reserved_vm_host,
             vm_target=vm_target,
+            capacity_reservation_id=reserved_capacity_reservation_id,
+            deal_ref={"escrow_uid": escrow_uid, "listing_id": listing_id or order_id},
             on_job_submitted=_record_job_id,
         )
         authentication: dict[str, Any] | None = None
@@ -206,7 +298,7 @@ async def fulfill_vm_obligation(
         if apply_failure_policy is not None:
             try:
                 await apply_failure_policy(
-                    allocation_id=reserved_allocation_id,
+                    capacity_reservation_id=reserved_capacity_reservation_id,
                     escrow_uid=escrow_uid,
                     listing_id=listing_id or order_id,
                     resource_id=reserved_resource_id,
@@ -239,15 +331,17 @@ async def fulfill_vm_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    lease_end_utc = (
-        datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
-    ).strftime("%Y-%m-%d %H:%M")
+    lease_start_utc, lease_end_utc = _lease_window_strings(
+        start_utc=start_utc,
+        duration_seconds=duration_seconds,
+    )
 
     if reserved_resource_id:
         try:
             await capacity.commit(
                 resource_id=reserved_resource_id,
-                allocation_id=reserved_allocation_id,
+                capacity_reservation_id=reserved_capacity_reservation_id,
+                lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
                 idempotency_ref=escrow_uid,
             )
@@ -299,10 +393,11 @@ async def fulfill_vm_obligation(
         try:
             await register_lease(
                 resource_id=reserved_resource_id,
-                allocation_id=reserved_allocation_id,
+                capacity_reservation_id=reserved_capacity_reservation_id,
                 escrow_uid=escrow_uid,
                 vm_host=reserved_vm_host,
                 vm_target=vm_target,
+                lease_start_utc=lease_start_utc,
                 lease_end_utc=lease_end_utc,
             )
             logger.info(
@@ -349,12 +444,12 @@ async def fulfill_vm_obligation(
     except Exception as error:
         logger.error(
             "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
-            "escrow_uid=%s listing_id=%s resource_id=%s allocation_id=%s "
+            "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
             "vm_host=%s error=%s",
             escrow_uid,
             order_id,
             reserved_resource_id,
-            reserved_allocation_id,
+            reserved_capacity_reservation_id,
             reserved_vm_host,
             error,
         )
@@ -363,7 +458,7 @@ async def fulfill_vm_obligation(
             listing_id=order_id,
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
-            allocation_id=reserved_allocation_id,
+            capacity_reservation_id=reserved_capacity_reservation_id,
             vm_host=reserved_vm_host,
             error=str(error),
         )
@@ -408,7 +503,7 @@ async def fulfill_vm_obligation(
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
-        allocation_id=reserved_allocation_id,
+        capacity_reservation_id=reserved_capacity_reservation_id,
         vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,

@@ -74,7 +74,7 @@ chain = ["accept_exact_listing"]
 ```
 
 Keys may be exact Alkahest kinds such as
-`erc20_escrow_obligation_nontierable`, family keys such as `erc20`,
+`erc20_escrow_obligation_default`, family keys such as `erc20`,
 `native_token`, or `erc1155`, or `default`. A string value is a single
 terminal policy. A nested table with `chain = [...]`, `policies = [...]`,
 or `policy = "..."` is used when one escrow kind needs its own sequence.
@@ -313,14 +313,14 @@ single `market buy` invocation.
 
 | Name | Iteration | Winner |
 |---|---|---|
-| `best_price` *(default)* | Parallel across all candidates | Lowest `agreed_amount` |
+| `best_price` | Parallel across all candidates | Lowest `agreed_amount` |
 | `cheapest_first` | Sequential, ascending advertised price | First candidate that agrees |
-| `registry_order` | Sequential, registry's response order | First candidate that agrees |
+| `registry_order` *(core default)* | Sequential, registry's response order | First candidate that agrees |
 | `random_shuffle` | Sequential, uniform shuffle | First candidate that agrees |
 | `priceless_last` | Sequential — priced (cheapest first) then priceless | First candidate that agrees |
 | `fastest_agreed` | Parallel race | First candidate that agrees (others cancelled) |
 
-`best_price` is the headline comparison-shopping policy. Bound the
+`best_price` is the Alkahest comparison-shopping policy. Bound the
 candidate list upstream with `max_matches_to_try` to control fan-out,
 and set `best_price_timeout` so one slow seller can't hold up the buy.
 

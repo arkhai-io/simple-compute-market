@@ -47,7 +47,7 @@ agents:
       # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
       # Leave empty to start with no inventory (seed via the import API later).
       resourcesCsvInline: ""
-      # Write-scoped API key for the indexer registry, rendered into the
+      # Write-scoped API key for the listing registry, rendered into the
       # secrets TOML as [registry.auth] keyed by the composed registry URL.
       # Required when the registry sets requireWriteApiKey. Never commit a
       # real token; inject via --set at render/deploy time.

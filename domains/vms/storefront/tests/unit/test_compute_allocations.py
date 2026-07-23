@@ -74,6 +74,28 @@ def test_sqlite_schema_includes_derived_compute_listings(client):
     } <= cols
 
 
+def test_sqlite_schema_includes_derived_bare_metal_listings(client):
+    conn = sqlite3.connect(client.db_path)
+    try:
+        cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(derived_bare_metal_listings)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "listing_id",
+        "machine_id",
+        "physical_host_id",
+        "status",
+        "derivation_key",
+        "last_reconciled_at",
+    } <= cols
+
+
 def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
     conn = sqlite3.connect(client.db_path)
     try:
@@ -335,12 +357,12 @@ async def test_capacity_hold_bookkeeping_round_trip(client):
     await client.save_capacity_hold(
         negotiation_id="neg-1",
         listing_id="lst-1",
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         payload={"resource_id": "r1", "vm_host": "kvm1"},
         expires_at="2099-01-01T00:00:00+00:00",
     )
     hold = await client.load_capacity_hold(negotiation_id="neg-1")
-    assert hold["allocation_id"] == "alloc-1"
+    assert hold["capacity_reservation_id"] == "alloc-1"
     assert hold["payload"]["vm_host"] == "kvm1"
 
     await client.delete_capacity_hold(negotiation_id="neg-1")

@@ -2,7 +2,7 @@
 
 Verifies:
 - The policy receives a curried `negotiate` callback.
-- `best_price` (the default) picks the lowest *agreed* price, not the lowest advertised.
+- `best_price` picks the lowest *agreed* price, not the lowest advertised.
 - Opting into `cheapest_first` preserves the historical first-agreed loop semantics.
 - A custom registered policy can short-circuit / re-order arbitrarily.
 
@@ -20,7 +20,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 from market_core.schemas import EscrowProposal, EscrowTerms
-from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 

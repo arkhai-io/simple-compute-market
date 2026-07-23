@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-buyer"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
@@ -23,19 +23,13 @@ dependencies = [
   # domain buyer wheels that actually create escrows depend on it.
   "arkhai-kit-alkahest",
   # ProvisionTerms/SettlementPlan carriers.
-  "arkhai-core",
+  "arkhai-core>=0.2.0",
   # EIP-191 request signing for negotiate/settle calls.
   "eth-account>=0.13.0",
 ]
 
 [project.scripts]
 market = "core_buyer.cli:main"
-
-[tool.uv.sources]
-arkhai-kit-config = { path = "../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../kit/policy", editable = true }
-arkhai-kit-alkahest = { path = "../../kit/alkahest", editable = true }
-arkhai-core = { path = "../", editable = true }
 
 [build-system]
 requires = ["hatchling"]

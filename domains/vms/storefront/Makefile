@@ -4,11 +4,11 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
 # Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
-# (arkhai-kit-policy, arkhai-vms-provisioning) that are
+# (arkhai-kit-policy, arkhai-compute-provisioning) that are
 # distributed as wheels rather than editable source installs. The
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../../../.dist)
+DIST_DIR ?= ../../../.dist
 
 .PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
 
@@ -17,14 +17,17 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-vms-common \
-	--upgrade-package arkhai-vms-provisioning \
-	--upgrade-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-core-registry-client \
-	--reinstall-package arkhai-vms-common \
-	--reinstall-package arkhai-vms-provisioning \
-	--reinstall-package arkhai-core-storefront-client \
-	--reinstall-package arkhai-core-registry-client
+	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
+	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-bare-metal             --reinstall-package arkhai-bare-metal \
+	--upgrade-package arkhai-kit-identity            --reinstall-package arkhai-kit-identity \
+	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
+	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
+	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
+	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
+	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side
 # `uv sync` that resolves the [rl] extra (incl. torch) across whatever

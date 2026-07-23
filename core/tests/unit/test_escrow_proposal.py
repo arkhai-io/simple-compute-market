@@ -8,7 +8,7 @@ proposal.
 import pytest
 from pydantic import ValidationError
 
-from market_core.schemas import AcceptedEscrow, EscrowProposal
+from market_core.schemas import AcceptedEscrow, EscrowProposal, accepted_demands
 
 
 _ESCROW = "0x" + "11" * 20
@@ -115,3 +115,41 @@ def test_proposal_literal_fields_and_rates_roundtrip():
     assert restored.rates is not None
     assert restored.rates[0].value == 1_500_000
     assert restored.rates[0].field == "amount"
+
+
+def test_proposal_uses_singular_selected_demand():
+    demand = {"arbiter": _ARBITER, "demand_data": {"recipient": _TOKEN}}
+    p = EscrowProposal(
+        chain_name="anvil",
+        escrow_address=_ESCROW,
+        fields={"token": _TOKEN},
+        demand=demand,
+        expiration_unix=1_800_000_000,
+    )
+    assert p.demand is not None
+    assert accepted_demands(p) == [demand]
+
+
+def test_deprecated_proposal_demands_one_item_alias():
+    demand = {"arbiter": _ARBITER, "demand_data": {"recipient": _TOKEN}}
+    p = EscrowProposal(
+        chain_name="anvil",
+        escrow_address=_ESCROW,
+        fields={"token": _TOKEN},
+        demands=[demand],
+        expiration_unix=1_800_000_000,
+    )
+    assert p.demand is not None
+    assert accepted_demands(p) == [demand]
+
+
+def test_deprecated_proposal_demands_rejects_multiple_items():
+    demand = {"arbiter": _ARBITER, "demand_data": {"recipient": _TOKEN}}
+    with pytest.raises(ValidationError, match="at most one selected demand"):
+        EscrowProposal(
+            chain_name="anvil",
+            escrow_address=_ESCROW,
+            fields={"token": _TOKEN},
+            demands=[demand, demand],
+            expiration_unix=1_800_000_000,
+        )

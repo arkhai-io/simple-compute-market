@@ -113,7 +113,7 @@ class Resource(BaseModel):
         if isinstance(data, Resource):
             return data
         if not isinstance(data, dict):
-            return data
+            raise ValueError("Unsupported resource payload for core Resource parser")
         if "token" in data:
             return TokenResource(**data)
         raise ValueError("Unsupported resource payload for core Resource parser")
@@ -157,62 +157,28 @@ class TokenResource(Resource):
 
 
 class ProvisionTerms(BaseModel):
-    """Opaque off-chain delivery terms negotiated alongside escrow terms.
+    """Versioned, schema-opaque delivery terms negotiated with escrow terms.
 
-    The core protocol treats provision terms as a schema-tagged payload:
-    ``kind`` identifies the market/schema-specific interpreter and
-    ``payload`` carries that interpreter's data. Core code treats
-    ``payload`` as opaque; interpreting it (and constructing it) is the
-    job of domain adapters — e.g. ``arkhai_vms_common.provision_terms`` for
-    the ``compute.v1`` payload shape.
+    ``kind`` selects the domain interpreter, ``version`` selects that
+    domain-owned provision payload schema, and ``payload`` is opaque to core.
+    Legacy flat compute fields and transitional key names are intentionally
+    rejected.
     """
 
+    model_config = {"extra": "forbid"}
+
     kind: str = Field(
-        description="Schema/interpreter for this provision payload.",
+        min_length=1,
+        description="Stable domain interpreter for this provision payload.",
+    )
+    version: int = Field(
+        ge=1,
+        description="Domain-owned provision payload schema version.",
     )
     payload: dict[str, Any] = Field(
         default_factory=dict,
-        description="Schema-specific provision terms. Opaque to market core.",
+        description="Domain-specific provision terms. Opaque to market core.",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_wire_shapes(cls, value: Any) -> Any:
-        """LEGACY wire compatibility — not part of the carrier contract.
-
-        Early compute clients (including the current ``storefront-client``
-        wheel) send a flat ``{duration_seconds, ssh_public_key,
-        compute_resource}`` dict with no ``kind``/``payload`` envelope,
-        and some transitional payloads used ``schema``/``terms`` key
-        names. Normalize all of those into the envelope here so old wire
-        data and run logs keep parsing. The ``compute.v1`` literal below
-        is a legacy wire tag, not a core interpretation of the payload.
-        Remove once no deployed client sends the flat shape.
-        """
-        if not isinstance(value, dict):
-            return value
-
-        data = dict(value)
-        if "schema" in data and "kind" not in data:
-            data["kind"] = data.pop("schema")
-        if "terms" in data and "payload" not in data:
-            data["payload"] = data.pop("terms")
-
-        legacy_keys = {"duration_seconds", "ssh_public_key", "compute_resource"}
-        if "payload" not in data and legacy_keys.intersection(data):
-            payload: dict[str, Any] = {}
-            for key in legacy_keys:
-                if key in data:
-                    raw = data.pop(key)
-                    if key == "duration_seconds" and raw is not None:
-                        try:
-                            raw = int(raw)
-                        except (TypeError, ValueError):
-                            pass
-                    payload[key] = raw
-            data["kind"] = data.get("kind") or "compute.v1"
-            data["payload"] = payload
-        return data
 
 
 class EscrowTerms(BaseModel):
@@ -620,8 +586,19 @@ def accepted_recipient_address(accepted_or_proposal: Any) -> str | None:
 def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
     """Return arbiter demands advertised/negotiated for this escrow shape."""
     if isinstance(accepted_or_proposal, dict):
+        selected = accepted_or_proposal.get("demand")
+        if isinstance(selected, dict):
+            return [dict(selected)]
         raw = accepted_or_proposal.get("demands")
     else:
+        selected = getattr(accepted_or_proposal, "demand", None)
+        dumped = (
+            selected.model_dump(exclude_none=True)
+            if selected is not None and hasattr(selected, "model_dump")
+            else None
+        )
+        if isinstance(dumped, dict):
+            return [dumped]
         raw = getattr(accepted_or_proposal, "demands", None)
     if not isinstance(raw, list):
         return []
@@ -630,7 +607,11 @@ def accepted_demands(accepted_or_proposal: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             out.append(dict(item))
         else:
-            dumped = item.model_dump() if hasattr(item, "model_dump") else None
+            dumped = (
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else None
+            )
             if isinstance(dumped, dict):
                 out.append(dumped)
     return out
@@ -685,8 +666,8 @@ class AcceptedEscrow(BaseModel):
     ``literal_fields`` is escrow-data-only: keys present advertise a seller-
     preferred value; keys absent are open. Never includes a rate-bearing
     field directly — those live in ``rates`` so duration scaling stays
-    explicit. Arbiter release criteria live in the listing/proposal-level
-    ``demands`` list.
+    explicit. Arbiter release criteria live in listing-level ``demands``
+    as allowed options; proposals carry the singular selected ``demand``.
 
     ``rates`` carries every rate-bearing field on the obligation. For
     ERC20 escrows that's a single ``{"field": "amount", "per": "hour",
@@ -782,11 +763,22 @@ class EscrowProposal(BaseModel):
             "proposals carry one ``RateValue`` per rate-bearing field."
         ),
     )
+    demand: EscrowDemand | None = Field(
+        default=None,
+        description=(
+            "Buyer-selected concrete arbiter demand. Listing-level "
+            "``demands`` advertises seller-allowed options; a proposal "
+            "selects exactly one. Multiple subconditions are represented "
+            "inside one logical arbiter demand, such as AllArbiter."
+        ),
+    )
     demands: list[EscrowDemand] | None = Field(
         default=None,
         description=(
-            "Arbiter demand criteria inherited from the accepted escrow "
-            "entry and committed during negotiation."
+            "Deprecated proposal-level alias for a one-item selected "
+            "``demand``. Kept temporarily for older clients; remove after "
+            "the next wire compatibility window. Listing-level ``demands`` "
+            "remains the allowed-options list."
         ),
     )
     expiration_unix: int = Field(
@@ -797,3 +789,25 @@ class EscrowProposal(BaseModel):
             "clock-drift tolerance window."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_demands(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get("demand") is not None:
+            return data
+        legacy = data.get("demands")
+        if legacy is None:
+            return data
+        if not isinstance(legacy, list):
+            raise ValueError("deprecated proposal demands must be a list")
+        if len(legacy) > 1:
+            raise ValueError(
+                "proposal demands[] is deprecated and may contain at most one "
+                "selected demand; listing demands[] remains the allowed-options list"
+            )
+        if legacy:
+            data["demand"] = legacy[0]
+        return data

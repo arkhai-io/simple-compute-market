@@ -25,11 +25,15 @@ from market_storefront.cli_publish import (
     _open_listing_ids,
     _open_listing_resource_keys,
     _open_order_resource_ids,
+    _publication_adapters,
+    _bare_metal_publication_source_selection,
+    _publication_source_selection,
     _publish_round,
     _stale_open_listing_ids,
 )
 from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
+from tests.fixtures.publish import validate_published_entry, validate_failed_resource
 
 
 _MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
@@ -72,7 +76,7 @@ def _stub_resolve_token(monkeypatch):
     )
     from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        alkahest_mod, "get_erc20_escrow_obligation_default",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
     )
     monkeypatch.setattr(
@@ -338,6 +342,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert published[0]["resource"]["resource_id"] == "compute-002"
     assert not failed
     assert calls[0]["offer"]["resource_id"] == "compute-002"
+    validate_published_entry(published[0])
     entry = calls[0]["accepted_escrows"][0]
     assert entry["literal_fields"] == {"token": _MOCK_ADDRESS}
     assert calls[0]["demands"][0]["demand_data"] == {"recipient": _WALLET_ADDRESS}
@@ -363,6 +368,7 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     assert len(published) == 1
     assert not failed
     assert not skipped
+    validate_published_entry(published[0])
 
 
 def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
@@ -432,6 +438,8 @@ def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monke
     assert len(published) == 4
     assert not failed
     assert not skipped
+    for entry in published:
+        validate_published_entry(entry)
 
     conn = sqlite3.connect(db)
     try:
@@ -561,6 +569,7 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
     assert [p["response"]["listing_id"] for p in published] == ["listing-3x-old"]
     assert created == []
     assert len(skipped) == 3
+    validate_published_entry(published[0])
     conn = sqlite3.connect(db)
     try:
         status = conn.execute(
@@ -573,6 +582,41 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
         conn.close()
     assert status == "open"
     assert derived_status == "open"
+
+
+def test_vm_publish_adapters_do_not_include_bare_metal() -> None:
+    assert [adapter.name for adapter in _publication_adapters()] == ["vms"]
+
+
+def test_publication_selection_can_compose_bare_metal(monkeypatch) -> None:
+    def fake_build_source(name, **_kwargs):
+        from core_storefront.publication_sources import PublicationSource
+
+        return PublicationSource(
+            name=name,
+            open_keys=lambda _db: set(),
+            close_stale=lambda _db, _url, _key: [],
+            available_candidates=lambda _db: [],
+            skip_keys=lambda _candidate: set(),
+            offer_resource=lambda candidate: candidate,
+            record_published=lambda *_args: None,
+            reopen_existing=lambda *_args: None,
+            reopen_error_label="reopen fake",
+        )
+
+    monkeypatch.setattr(
+        "core_storefront.publication_runner.build_publication_source",
+        fake_build_source,
+    )
+
+    assert [
+        source.name
+        for source in _bare_metal_publication_source_selection().build_sources()
+    ] == ["bare_metal"]
+    assert [
+        source.name
+        for source in _publication_source_selection(("vms", "bare_metal")).build_sources()
+    ] == ["vms", "bare_metal"]
 
 
 def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypatch):
@@ -604,6 +648,7 @@ def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypat
     assert not failed
     assert not skipped
     assert calls == [None]
+    validate_published_entry(published[0])
 
 
 def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
@@ -633,6 +678,7 @@ def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
     assert not failed
     assert not skipped
     assert calls == [3600]
+    validate_published_entry(published[0])
 
 
 def test_open_order_ids_returns_only_open(tmp_path):
@@ -678,6 +724,8 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     assert by_rid["compute-default"]["rates"][0]["value"] == "100"
     assert len(published) == 2
     assert not failed
+    for entry in published:
+        validate_published_entry(entry)
 
 
 def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
@@ -713,6 +761,8 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     assert len(failed) == 1
     assert failed[0][0]["resource_id"] == "compute-noprice"
     assert "min_price" in failed[0][1]
+    validate_published_entry(published[0])
+    validate_failed_resource(failed[0])
 
 
 def test_publish_round_priceless_publishes_with_empty_rates(tmp_path, monkeypatch):
@@ -746,6 +796,7 @@ def test_publish_round_priceless_publishes_with_empty_rates(tmp_path, monkeypatc
     entry = calls[0]["accepted_escrows"][0]
     assert entry["rates"] == []
     assert entry["literal_fields"]["token"] == _MOCK_ADDRESS
+    validate_published_entry(published[0])
 
 
 def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
@@ -776,6 +827,7 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
     assert len(published) == 1
     assert len(failed) == 0
     assert calls[0]["accepted_escrows"][0]["rates"][0]["value"] == "0"
+    validate_published_entry(published[0])
 
 
 def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):
@@ -795,6 +847,7 @@ def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):
     assert len(published) == 0
     assert len(failed) == 1
     assert "publish_priceless" in failed[0][1]
+    validate_failed_resource(failed[0])
 
 
 def test_publish_round_priceless_message_mentions_opt_in(tmp_path, monkeypatch):
@@ -812,6 +865,7 @@ def test_publish_round_priceless_message_mentions_opt_in(tmp_path, monkeypatch):
         db_path=db, **_round_kwargs(default_min_price=None),
     )
     assert "publish_priceless" in failed[0][1]
+    validate_failed_resource(failed[0])
 
 
 def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
@@ -848,6 +902,7 @@ def test_publish_round_rejects_non_address_token(tmp_path, monkeypatch):
     _, failed, _ = _publish_round(db_path=db, **_round_kwargs())
     assert len(failed) == 1
     assert "0x" in failed[0][1]
+    validate_failed_resource(failed[0])
 
 
 def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
@@ -869,3 +924,4 @@ def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
     )
     assert len(failed) == 1
     assert "token" in failed[0][1]
+    validate_failed_resource(failed[0])

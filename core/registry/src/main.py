@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     publish via ``api/utils.py::ensure_publisher_for_identity``; there is
     no background indexer or chain probe.
     """
-    logger.info("Starting registry indexer service...")
+    logger.info("Starting listing registry service...")
 
     init_db()
     logger.info("Database initialized")
@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
 
-    logger.info(f"🚀 Registry indexer server ready on {settings.host}:{settings.port}")
+    logger.info(f"Listing registry server ready on {settings.host}:{settings.port}")
 
     yield
 
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="Registry Indexer",
+    title="Listing Registry",
     version="0.1.0",
     lifespan=lifespan,
     root_path=settings.root_path,
@@ -108,4 +108,3 @@ if __name__ == "__main__":
         port=settings.port,
         reload=True,
     )
-

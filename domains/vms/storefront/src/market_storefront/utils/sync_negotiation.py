@@ -60,7 +60,7 @@ from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
-from arkhai_vms_common import provision_duration_seconds
+from arkhai_vms import provision_duration_seconds, provision_start_utc
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
@@ -127,8 +127,11 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
     from market_storefront.services.capacity_client import build_capacity_client
+    from market_storefront.domain_runtime import get_market_domain_contract
 
-    return vm_storefront_round.default_seller_round_hook(
+    policy = get_market_domain_contract().storefront
+    assert policy is not None
+    return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
@@ -144,6 +147,20 @@ def _chain_config_paths() -> dict[str, str | None]:
         name: chain.alkahest_address_config_path
         for name, chain in CHAINS.items()
     }
+
+
+def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
+    """Validate the VM envelope before any negotiation policy runs."""
+    if provision_terms is None:
+        return None
+    raw = (
+        provision_terms.model_dump()
+        if hasattr(provision_terms, "model_dump")
+        else provision_terms
+    )
+    from market_storefront.domain_runtime import get_market_domain_contract
+
+    return get_market_domain_contract().codecs.message(raw)
 
 
 def _accepted_escrow_artifacts(
@@ -178,6 +195,8 @@ async def _place_capacity_hold(
     negotiation_id: str,
     listing_id: str | None,
     order_dict: dict[str, Any] | None,
+    requested_start_utc: str | None = None,
+    requested_duration_seconds: int | None = None,
 ) -> None:
     """Two-phase reserve: a TTL'd soft hold at terms acceptance.
 
@@ -212,6 +231,8 @@ async def _place_capacity_hold(
                 "negotiation_id": negotiation_id,
             },
             ttl_seconds=ttl,
+            lease_start_utc=requested_start_utc,
+            lease_duration_seconds=requested_duration_seconds,
         )
     except Exception as exc:
         logger.warning(
@@ -229,7 +250,7 @@ async def _place_capacity_hold(
     await sqlite_client.save_capacity_hold(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=str(held["allocation_id"]),
+        capacity_reservation_id=str(held["capacity_reservation_id"]),
         payload=held,
         expires_at=held.get("hold_expires_at"),
     )
@@ -237,7 +258,7 @@ async def _place_capacity_hold(
         "negotiation", "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=held.get("allocation_id"),
+        capacity_reservation_id=held.get("capacity_reservation_id"),
         resource_id=held.get("resource_id"),
         site=held.get("site"),
         hold_expires_at=held.get("hold_expires_at"),
@@ -329,8 +350,16 @@ async def start_sync_negotiation(
     listing) or if the buyer's duration / proposal doesn't match what
     the listing accepts.
     """
+    vm_message_terms = _normalize_vm_message_terms(provision_terms)
     requested_duration_seconds = (
-        provision_duration_seconds(provision_terms) if provision_terms is not None else None
+        vm_message_terms.duration_seconds
+        if vm_message_terms is not None
+        else None
+    )
+    requested_start_utc = (
+        vm_message_terms.start_utc
+        if vm_message_terms is not None
+        else None
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
@@ -418,6 +447,7 @@ async def start_sync_negotiation(
         our_initial_amount=our_amount,
         our_strategy=strategy,
         requested_duration_seconds=requested_duration_seconds,
+        requested_start_utc=requested_start_utc,
         buyer_escrow_proposal=(
             accepted_proposal.model_dump()
             if accepted_proposal is not None
@@ -445,12 +475,15 @@ async def start_sync_negotiation(
             negotiation_id=neg_id,
             agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
+            agreed_start_utc=requested_start_utc,
         )
         await _place_capacity_hold(
             sqlite_client,
             negotiation_id=neg_id,
             listing_id=our_listing_id,
             order_dict=our_order_dict,
+            requested_start_utc=requested_start_utc,
+            requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
         "negotiation", "round_decided",
@@ -530,6 +563,7 @@ async def continue_sync_negotiation(
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     requested_duration_seconds = thread.get("requested_duration_seconds")
+    requested_start_utc = thread.get("requested_start_utc")
     buyer_pinned_proposal = _coerce_pinned_proposal(thread.get("buyer_escrow_proposal"))
     pinned_fields = (
         buyer_pinned_proposal.get("fields")
@@ -572,12 +606,15 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             agreed_price=int(last_seller_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
+            agreed_start_utc=requested_start_utc,
         )
         await _place_capacity_hold(
             sqlite_client,
             negotiation_id=neg_id,
             listing_id=our_listing_id,
             order_dict=our_order_dict,
+            requested_start_utc=requested_start_utc,
+            requested_duration_seconds=int(agreed_duration_seconds),
         )
         stage_event(
             "negotiation", "accepted",
@@ -680,12 +717,15 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             agreed_price=int(agreed_amount),
             agreed_duration_seconds=int(agreed_duration_seconds),
+            agreed_start_utc=requested_start_utc,
         )
         await _place_capacity_hold(
             sqlite_client,
             negotiation_id=neg_id,
             listing_id=our_listing_id,
             order_dict=our_order_dict,
+            requested_start_utc=requested_start_utc,
+            requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
         "negotiation", "round_decided",

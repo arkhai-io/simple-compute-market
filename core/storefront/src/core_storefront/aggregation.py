@@ -139,10 +139,10 @@ class AggregateCapacityClient:
         self._sites = dict(sites)
         self._placement = placement or fill_first
         self._bus = bus or CapacityEventBus()
-        # allocation_id → site name, learned at reserve time. A cache,
+        # capacity_reservation_id → site name, learned at reserve time. A cache,
         # not a ledger: misses (process restart) fall back to asking
         # every site, and the answer is re-learned.
-        self._allocation_sites: dict[str, str] = {}
+        self._reservation_sites: dict[str, str] = {}
 
     @property
     def site_names(self) -> list[str]:
@@ -161,12 +161,20 @@ class AggregateCapacityClient:
         return rows
 
     async def probe(
-        self, *, claim: Mapping[str, Any] | None = None,
+        self,
+        *,
+        claim: Mapping[str, Any] | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         snapshots = await self._snapshots()
         for name in self._placement(self.site_names, snapshots, claim=claim):
             try:
-                match = await self._sites[name].probe(claim=claim)
+                match = await self._sites[name].probe(
+                    claim=claim,
+                    lease_start_utc=lease_start_utc,
+                    lease_duration_seconds=lease_duration_seconds,
+                )
             except Exception as exc:
                 logger.warning("[AGGREGATOR] probe at site %r failed: %s", name, exc)
                 continue
@@ -182,6 +190,8 @@ class AggregateCapacityClient:
         claim: Mapping[str, Any] | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         ttl_seconds: float | None = None,
+        lease_start_utc: str | None = None,
+        lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
         """Route to one site in placement order; fall back on refusal.
 
@@ -193,7 +203,11 @@ class AggregateCapacityClient:
         for name in self._placement(self.site_names, snapshots, claim=claim):
             try:
                 reserved = await self._sites[name].reserve(
-                    claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+                    claim=claim,
+                    deal_ref=deal_ref,
+                    ttl_seconds=ttl_seconds,
+                    lease_start_utc=lease_start_utc,
+                    lease_duration_seconds=lease_duration_seconds,
                 )
             except Exception as exc:
                 logger.warning(
@@ -203,9 +217,9 @@ class AggregateCapacityClient:
                 continue
             if reserved is None:
                 continue
-            allocation_id = reserved.get("allocation_id")
-            if allocation_id:
-                self._allocation_sites[str(allocation_id)] = name
+            capacity_reservation_id = reserved.get("capacity_reservation_id")
+            if capacity_reservation_id:
+                self._reservation_sites[str(capacity_reservation_id)] = name
             return _tagged(name, reserved)
         return None
 
@@ -213,22 +227,24 @@ class AggregateCapacityClient:
         self,
         *,
         resource_id: str,
-        allocation_id: str | None = None,
-        lease_end_utc: str,
+        capacity_reservation_id: str | None = None,
+        lease_start_utc: str | None = None,
+        lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
         """Commit at the owning site (cache-first, then the rest).
 
-        A site that doesn't know the allocation raises/refuses and the
+        A site that doesn't know the reservation raises/refuses and the
         next is tried; if every site refuses, the last error propagates
         — a commit that lands nowhere must not look like success.
         """
         last_error: Exception | None = None
-        for name in self._route_order(allocation_id):
+        for name in self._route_order(capacity_reservation_id):
             try:
                 await self._sites[name].commit(
                     resource_id=resource_id,
-                    allocation_id=allocation_id,
+                    capacity_reservation_id=capacity_reservation_id,
+                    lease_start_utc=lease_start_utc,
                     lease_end_utc=lease_end_utc,
                     idempotency_ref=idempotency_ref,
                 )
@@ -244,19 +260,19 @@ class AggregateCapacityClient:
     async def release(
         self,
         *,
-        allocation_id: str | None = None,
+        capacity_reservation_id: str | None = None,
         deal_ref: Mapping[str, Any] | None = None,
         **extra: Any,
     ) -> dict[str, Any] | None:
-        """Release wherever the allocation lives; None if no site holds it.
+        """Release wherever the reservation lives; None if no site holds it.
 
         ``extra`` passes through implementation-specific keywords (e.g.
         failure metadata) to sites that accept them.
         """
-        for name in self._route_order(allocation_id):
+        for name in self._route_order(capacity_reservation_id):
             try:
                 released = await self._sites[name].release(
-                    allocation_id=allocation_id, deal_ref=deal_ref, **extra,
+                    capacity_reservation_id=capacity_reservation_id, deal_ref=deal_ref, **extra,
                 )
             except Exception as exc:
                 logger.warning(
@@ -264,21 +280,21 @@ class AggregateCapacityClient:
                 )
                 continue
             if released is not None:
-                if allocation_id:
-                    self._allocation_sites.pop(str(allocation_id), None)
+                if capacity_reservation_id:
+                    self._reservation_sites.pop(str(capacity_reservation_id), None)
                 return _tagged(name, released)
         return None
 
     async def truncate_lease(
         self,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         lease_end_utc: str,
     ) -> dict[str, Any] | None:
-        for name in self._route_order(allocation_id):
+        for name in self._route_order(capacity_reservation_id):
             try:
                 truncated = await self._sites[name].truncate_lease(
-                    allocation_id=allocation_id, lease_end_utc=lease_end_utc,
+                    capacity_reservation_id=capacity_reservation_id, lease_end_utc=lease_end_utc,
                 )
             except Exception as exc:
                 logger.warning(
@@ -318,16 +334,16 @@ class AggregateCapacityClient:
                 )
         return snapshots
 
-    def _route_order(self, allocation_id: str | None) -> Iterable[str]:
+    def _route_order(self, capacity_reservation_id: str | None) -> Iterable[str]:
         """Owning site first when known, then everyone else.
 
         The cache is populated at reserve time; after a restart the
         cache is cold and the write fans out — sites that don't hold
-        the allocation refuse, the one that does answers.
+        the reservation refuse, the one that does answers.
         """
         cached = (
-            self._allocation_sites.get(str(allocation_id))
-            if allocation_id else None
+            self._reservation_sites.get(str(capacity_reservation_id))
+            if capacity_reservation_id else None
         )
         if cached and cached in self._sites:
             yield cached

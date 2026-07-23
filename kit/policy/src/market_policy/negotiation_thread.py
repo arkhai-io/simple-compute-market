@@ -196,6 +196,7 @@ class NegotiationThreadTransaction:
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict | None = None,
     ) -> None:
         """Get or create negotiation thread
@@ -209,6 +210,7 @@ class NegotiationThreadTransaction:
             our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
             our_strategy: Our strategy ('minimize' or 'maximize')
             requested_duration_seconds: Buyer's lease ask, recorded on thread creation.
+            requested_start_utc: Buyer's requested lease start. None means now.
             buyer_escrow_proposal: Buyer's accepted escrow shape
                 proposal (opaque dict; persisted as JSON). Settlement
                 reads this back to reconstruct the expected on-chain
@@ -235,6 +237,7 @@ class NegotiationThreadTransaction:
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
                 requested_duration_seconds=requested_duration_seconds,
+                requested_start_utc=requested_start_utc,
                 buyer_escrow_proposal=buyer_escrow_proposal,
             )
             logger.debug(f"[{self.component}] Created thread {negotiation_id}")
@@ -312,6 +315,7 @@ class NegotiationThreadStore:
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
@@ -326,6 +330,7 @@ class NegotiationThreadStore:
             our_initial_price: Private initial price
             our_strategy: Private strategy
             requested_duration_seconds: Buyer's lease ask from /negotiate/new.
+            requested_start_utc: Buyer's requested lease start. None means now.
             buyer_escrow_proposal: Opaque dict; persisted as JSON
                 so settlement can read it back.
         """
@@ -339,6 +344,7 @@ class NegotiationThreadStore:
             our_initial_price=our_initial_price,
             our_strategy=our_strategy,
             requested_duration_seconds=requested_duration_seconds,
+            requested_start_utc=requested_start_utc,
             buyer_escrow_proposal=buyer_escrow_proposal,
         )
         logger.debug(

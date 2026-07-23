@@ -30,13 +30,13 @@ def patched_alkahest(monkeypatch):
     captured: dict = {}
 
     class _StubErc20Codec:
-        kind = "erc20_escrow_obligation_nontierable"
+        kind = "erc20_escrow_obligation_default"
 
         def resolve_address(self, chain_name, *, config_path):
             return _ERC20_ADDR
 
     class _StubNativeCodec:
-        kind = "native_token_escrow_obligation_nontierable"
+        kind = "native_token_escrow_obligation_default"
 
         def resolve_address(self, chain_name, *, config_path):
             return _NATIVE_ADDR

@@ -8,7 +8,7 @@ middleware are roles that operators, sellers, and buyers install and run
 independently. Each of those roles is published, along with the
 libraries and SDK clients they build on. Three packages are not roles
 and are not published: the end-to-end test harness (`arkhai-e2e-tests`),
-the demo API it drives (`arkhai-apitokens-sample-app`), and the
+the demo API it drives (`arkhai-apicredits-sample-app`), and the
 issue-discovery development tool (`scm-issue-discovery`).
 
 Distribution names are prefixed `arkhai-`. PyPI does not namespace
@@ -30,18 +30,21 @@ constrained with lower bounds (see Versioning policy).
 | `arkhai-core-storefront-client` | `core/storefront-client/` | 0.15.0 | none |
 | `arkhai-core-registry-client` | `core/registry-client/` | 0.10.0 | none |
 | `arkhai-core-registry` | `core/registry/` | 0.1.0 | `arkhai-kit-identity` |
-| `arkhai-core-site` | `core/site/` | 0.1.0 | none |
+| `arkhai-kit-site` | `kit/site/` | 0.1.0 | none |
 | `arkhai-kit-identity` | `kit/identity/` | 0.1.0 | none |
 | `arkhai-kit-policy` | `kit/policy/` | 0.1.0 | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | 0.1.0 | none |
 | `arkhai-kit-config` | `kit/config/` | 0.1.0 | `arkhai-kit-alkahest` |
+| `arkhai-bare-metal` | `domains/bare_metal/` | 0.1.0 | none (`storefront` extra: `arkhai-core-storefront`) |
 | `arkhai-vms-buyer` | `domains/vms/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-vms-provisioning` |
-| `arkhai-vms-provisioning` | `domains/vms/provisioning/service/` | 0.5.0 | `arkhai-core-site`, `arkhai-core-storefront-client` |
-| `arkhai-apitokens-buyer` | `domains/apitokens/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
-| `arkhai-apitokens-storefront` | `domains/apitokens/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
-| `arkhai-apitokens-service` | `domains/apitokens/service/` | 0.1.0 | `arkhai-core-site` |
-| `arkhai-apitokens-middleware` | `domains/apitokens/middleware/python/` | 0.1.0 | none |
+| `arkhai-vms-storefront` | `domains/vms/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-compute-provisioning-service` | `provisioning/compute/service/` | 0.1.0 | `arkhai-compute-provisioning`, `arkhai-kit-site`, `arkhai-kit-resource-pools`, `arkhai-core-storefront-client` (`adapters` extra installs both current adapters) |
+| `arkhai-vms-provisioning-adapter` | `domains/vms/provisioning/adapter/` | 0.1.0 | compute service, VM operator client, resource pools |
+| `arkhai-bare-metal-provisioning-adapter` | `domains/bare_metal/provisioning/adapter/` | 0.1.0 | compute service, bare-metal domain |
+| `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | 0.1.0 | `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-policy` |
+| `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | 0.1.0 | `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-kit-alkahest`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | 0.1.0 | `arkhai-kit-site` |
+| `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | 0.1.0 | none |
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a
@@ -60,7 +63,7 @@ below.
   trusted publishing.
 
 Most packages publish an sdist and a wheel. The two buyer plugins
-(`arkhai-vms-buyer`, `arkhai-apitokens-buyer`) publish a wheel only: they
+(`arkhai-vms-buyer`, `arkhai-apicredits-buyer`) publish a wheel only: they
 vendor sibling concept modules (`listings`, `negotiation`) through `../`
 force-includes that an sdist cannot carry. They are marked `wheel_only`
 in the table and built with `uv build --wheel`.

@@ -385,7 +385,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
         If this fails with storefront='unconfigured':
           - For deploy-docker: ensure storefront_url and storefront_admin_key
-            are set in domains/vms/provisioning/service/src/config/config-docker.yml.
+            are set in provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml.
             The compose service name resolved by docker DNS is 'bob-storefront'.
           - For Helm: provisioning.storefront.url defaults to the release's
             bob storefront Service; provisioning.storefront.adminKey defaults
@@ -409,7 +409,7 @@ class TestStage00h_ProvisioningStorefrontLink:
             f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
             "The lease watchdog will not be able to release resources when leases expire.\n"
             "For deploy-docker: verify storefront_url in "
-            "domains/vms/provisioning/service/src/config/config-docker.yml points to "
+            "provisioning/compute/service/src/compute_provisioning_service/config/config-docker.yml points to "
             "'http://bob-storefront:8001' and both containers share the compose "
             "project's default network.\n"
             f"Full health response: {health}"
@@ -678,7 +678,14 @@ class TestStage05b_NegotiationStartsAndVisible:
             listing_id=deal_state.seller_listing_id,
             buyer_address=buyer_config["wallet_address"],
             initial_amount=BUYER_INITIAL_PRICE,
-            duration_seconds=DURATION_HOURS * 3600,
+            provision_terms={
+                "kind": "compute.v1",
+                "version": 1,
+                "payload": {
+                    "duration_seconds": DURATION_HOURS * 3600,
+                    "ssh_public_key": "",
+                },
+            },
             token=DEMAND_RESOURCE["token"]["contract_address"],
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
@@ -1141,7 +1148,7 @@ class TestStage09c_LeaseRegistered:
         )
 
         # DealLease resolves where this deal's lease lives: a site-ledger
-        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        # reservation (remote-capacity mode) or a vm_leases row (embedded).
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
@@ -1337,7 +1344,7 @@ class TestStage11a_VerifyReleasingState:
         If the lease is already 'released' here, the vm_remove job completed before
         this assertion — ensure the REMOVE_RULE_ID mock gate is still armed.
         """
-        require_state(deal_state, "lease_status", "vm_remove_job_id", "reserved_resource_id")
+        require_state(deal_state, "lease_status", "remove_job_id", "reserved_resource_id")
         assert deal_state.lease_status == "releasing", (
             f"Stage 10b did not leave lease in 'releasing' state. "
             f"Current: {deal_state.lease_status!r}"
@@ -1387,7 +1394,7 @@ class TestStage11b_WatchdogReleasesResource:
         Teardown: resume_watchdog() so background timer cycles work normally
         after the test module completes.
         """
-        require_state(deal_state, "vm_remove_job_id", "lease_id",
+        require_state(deal_state, "remove_job_id", "lease_id",
                       "reserved_resource_id", "_lease_expiry_armed")
 
         # Step 1 — unblock the vm_remove job

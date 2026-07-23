@@ -223,7 +223,7 @@ class TestAcceptExactListing:
         listing["demands"] = [demand]
         history, ctx = _ctx(
             listing=listing,
-            escrow_proposal=self._proposal(demands=[demand]),
+            escrow_proposal=self._proposal(demand=demand),
         )
         decision, _ = accept_exact_listing_middleware(history, ctx)
         assert decision is not None

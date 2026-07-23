@@ -183,7 +183,7 @@ provisioning:
     image:
       repository: ""
       name: arkhai
-      tag: provisioning
+      tag: compute-provisioning
       pullPolicy: IfNotPresent
     replicaCount: 1
     port: 8081

@@ -1,9 +1,9 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "typer>=0.12.0",
   "rich>=13.7.0",
@@ -14,19 +14,21 @@ dependencies = [
   # on-chain escrow creation. Imported lazily from
   # core_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
-  "alkahest-py>=0.4.0",
-  "arkhai-core-buyer",
-  "arkhai-core",
+  "alkahest-py==1.1.2",
+  "arkhai-core-buyer>=0.2.0",
+  "arkhai-core>=0.2.0",
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
-  "arkhai-vms-common",
+  "arkhai-vms>=0.2.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
 ]
 
 [project.optional-dependencies]
-test = [
-  "pytest>=8.0.0",
-]
 
 # RL negotiation strategy — inference only. Mirrors the storefront's
 # [rl] extra: ``uv pip install -e ".[rl]"`` runs trained pufferlib
@@ -37,20 +39,22 @@ rl = [
   "torch>=2.7.0",
 ]
 
-# The `market` console script ships from arkhai-core-buyer; this package only
-# contributes the VM compute schema plugin the core CLI discovers.
-[project.entry-points."market.buyer_plugins"]
-vms = "domains.vms.buyer.cli:plugin"
+[tool.uv]
+# Restrict resolution to platforms we actually run/support for the VM buyer.
+# Without this, uv attempts future/platform marker splits and can fail before
+# reaching local path sources for internal packages.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
 
-# Workspace resolution for sibling packages.
-# arkhai-kit-policy: per-round negotiation decision logic, shared with the
-# storefront so both sides drive negotiation through one engine.
+# The `market` console script ships from arkhai-core-buyer; this package
+# contributes the validated VM market-domain contract.
+[project.entry-points."market.buyer_domains"]
+vms = "domains.vms.buyer.cli:domain"
+
 [tool.uv.sources]
-arkhai-core = { path = "../../../core", editable = true }
-arkhai-core-buyer = { path = "../../../core/buyer", editable = true }
-arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
-arkhai-kit-config = { path = "../../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
 torch = [
   { index = "pytorch-cpu" },
 ]
@@ -111,8 +115,6 @@ dev-mode-dirs = ["../../.."]
 "../negotiation/rl/torch_arkhai_strategy.py" = "domains/vms/negotiation/rl/torch_arkhai_strategy.py"
 "../negotiation/rl/models/arkhai_negotiator_buyer.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
 "../negotiation/rl/models/arkhai_negotiator_seller.pt" = "domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt"
-"../provisioning/__init__.py" = "domains/vms/provisioning/__init__.py"
-"../provisioning/client.py" = "domains/vms/provisioning/client.py"
 "../settlement/__init__.py" = "domains/vms/settlement/__init__.py"
 "../settlement/compute_lease.py" = "domains/vms/settlement/compute_lease.py"
 "../settlement/fulfillment.py" = "domains/vms/settlement/fulfillment.py"

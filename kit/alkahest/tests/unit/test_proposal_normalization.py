@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from market_alkahest.schemas import (
     EscrowProposal,
+    accepted_demands,
     match_accepted_escrow,
     normalize_proposal_against_accepted_escrows,
 )
@@ -89,3 +93,26 @@ def test_normalize_returns_original_proposal_when_no_match() -> None:
         proposal=proposal,
         accepted_escrows=[{"chain_name": "anvil", "escrow_address": _OTHER_ESCROW}],
     ) is proposal
+
+
+def test_proposal_uses_singular_selected_demand() -> None:
+    demand = {"arbiter": "0x" + "33" * 20, "demand_data": {"recipient": _TOKEN}}
+
+    proposal = _proposal(demand=demand)
+
+    assert accepted_demands(proposal) == [demand]
+
+
+def test_deprecated_proposal_demands_alias_allows_one_item() -> None:
+    demand = {"arbiter": "0x" + "33" * 20, "demand_data": {"recipient": _TOKEN}}
+
+    proposal = _proposal(demands=[demand])
+
+    assert accepted_demands(proposal) == [demand]
+
+
+def test_deprecated_proposal_demands_alias_rejects_multiple_items() -> None:
+    demand = {"arbiter": "0x" + "33" * 20, "demand_data": {"recipient": _TOKEN}}
+
+    with pytest.raises(ValidationError, match="at most one selected demand"):
+        _proposal(demands=[demand, demand])

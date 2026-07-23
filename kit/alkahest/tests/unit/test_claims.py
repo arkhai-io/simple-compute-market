@@ -6,6 +6,8 @@ import pytest
 
 from market_alkahest.claims import (
     AllArbiterCodec,
+    ERC20SplitterArbiterCodec,
+    NativeTokenSplitterArbiterCodec,
     TrustedOracleArbiterCodec,
 )
 from market_alkahest.alkahest import get_arbiter_codec, known_arbiter_kinds
@@ -19,10 +21,16 @@ def test_claims_codecs_are_registered() -> None:
     kinds = known_arbiter_kinds()
     assert "trusted_oracle_arbiter" in kinds
     assert "all_arbiter" in kinds
+    assert "erc20_splitter" in kinds
+    assert "native_token_splitter" in kinds
     assert isinstance(
         get_arbiter_codec("trusted_oracle_arbiter"), TrustedOracleArbiterCodec
     )
     assert isinstance(get_arbiter_codec("all_arbiter"), AllArbiterCodec)
+    assert isinstance(get_arbiter_codec("erc20_splitter"), ERC20SplitterArbiterCodec)
+    assert isinstance(
+        get_arbiter_codec("native_token_splitter"), NativeTokenSplitterArbiterCodec
+    )
 
 
 def test_trusted_oracle_demand_round_trip() -> None:
@@ -44,6 +52,22 @@ def test_trusted_oracle_demand_accepts_hex_data_and_empty() -> None:
 def test_trusted_oracle_demand_requires_oracle() -> None:
     with pytest.raises(ValueError, match="oracle"):
         TrustedOracleArbiterCodec().encode_demand_data({"data": b""})
+
+
+@pytest.mark.parametrize(
+    "codec",
+    [ERC20SplitterArbiterCodec(), NativeTokenSplitterArbiterCodec()],
+)
+def test_splitter_demand_round_trip(codec) -> None:
+    encoded = codec.encode_demand_data({"oracle": _ORACLE, "data": "0x0102"})
+    decoded = codec.decode_demand_data(encoded)
+    assert decoded["oracle"].lower() == _ORACLE
+    assert decoded["data"] == b"\x01\x02"
+
+
+def test_splitter_demand_requires_oracle() -> None:
+    with pytest.raises(ValueError, match="oracle"):
+        ERC20SplitterArbiterCodec().encode_demand_data({"data": b""})
 
 
 def test_all_arbiter_demand_round_trip() -> None:
@@ -76,3 +100,5 @@ def test_agreement_context_encoding_is_refused() -> None:
         TrustedOracleArbiterCodec().encode_demand(ctx)
     with pytest.raises(ValueError, match="demand_data"):
         AllArbiterCodec().encode_demand(ctx)
+    with pytest.raises(ValueError, match="demand_data"):
+        ERC20SplitterArbiterCodec().encode_demand(ctx)

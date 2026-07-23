@@ -5,7 +5,7 @@
 #                              Publishes offers, negotiates with buyers,
 #                              settles deals on chain.
 #   2. seller-provisioning   — runs ansible to create/destroy VMs on the
-#                              seller's KVM host (arkhai:provisioning).
+#                              seller's KVM host (arkhai:compute-provisioning).
 #
 # This base file works in mock mode (no SSH key needed). For real KVM
 # provisioning add `-f compose/seller.live.yml` which mounts the SSH key
@@ -22,7 +22,7 @@
 #
 # Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront
-#   arkhai:provisioning
+#   arkhai:compute-provisioning
 #
 # Registry: not included. Either run your own (see docs/indexer-quickstart.md)
 # or point [registry] urls in the seller TOML at an external indexer.
@@ -61,7 +61,7 @@ services:
     restart: "no"
 
   seller-provisioning-data-init:
-    image: arkhai:provisioning
+    image: arkhai:compute-provisioning
     user: "0:0"
     entrypoint: ["sh", "-c"]
     command: ["chown -R appuser:appuser /data"]
@@ -92,7 +92,8 @@ services:
     restart: unless-stopped
 
   seller-provisioning:
-    image: arkhai:provisioning
+    image: arkhai:compute-provisioning
+    command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     ports:
       - "8081:8081"
     depends_on:

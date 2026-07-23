@@ -13,7 +13,7 @@ storefront's reservation triggers exactly the same listing
 reconciliation ours does.
 
 The storefront's own SQLite holds market state only (listings, pricing,
-pools, negotiations, deals); physical truth — allocations and their
+pools, negotiations, deals); physical truth — reservations and their
 lease tails — is the ledger's.
 """
 
@@ -114,6 +114,12 @@ async def member_availability_view(
 # listings whose GPU slice no longer fits.
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 
+# A mixed-direction capacity registration (e.g. GPU count grew while RAM
+# shrank -- POOLS-6 pass 1) can simultaneously strand some listings and
+# free up others; neither "consuming" nor "released" alone is safe, so
+# both reconciliation passes run.
+_MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
+
 
 def _make_listing_reconcile_subscriber(
     sqlite_client_factory: SQLiteClientFactory,
@@ -124,7 +130,9 @@ def _make_listing_reconcile_subscriber(
     This is the storefront's *reaction* to a capacity delta, not part of
     the moving deal's flow — another seller's reservation invalidates
     our listings just the same. Consuming deltas close stranded
-    listings, "released" reopens ones that fit again.
+    listings, "released" reopens ones that fit again, and a mixed-
+    direction "capacity_changed" registration runs both passes since it
+    can do both at once.
     """
 
     async def _reconcile_listings(delta: CapacityDelta) -> None:
@@ -136,7 +144,7 @@ def _make_listing_reconcile_subscriber(
 
         db_path = sqlite_client_factory().db_path
         availability = await member_availability_view(client, db_path)
-        if delta.kind in _CONSUMING_DELTA_KINDS:
+        if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path, member_availability=availability,
             )
@@ -148,7 +156,7 @@ def _make_listing_reconcile_subscriber(
                     capacity_version=delta.version,
                     closed_listing_ids=closed,
                 )
-        elif delta.kind == "released":
+        if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db_path, member_availability=availability,
             )
@@ -166,7 +174,7 @@ def _make_listing_reconcile_subscriber(
 
 # One aggregator per configuration: deltas come from the per-site
 # pollers (not from whichever client instance happened to mutate), and
-# the allocation→site routing cache must survive across build calls
+# the reservation→site routing cache must survive across build calls
 # within the process.
 _aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
@@ -218,7 +226,7 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     """The per-site remote clients behind a capacity client, by site name.
 
     Used by callers that need the beyond-the-protocol surface
-    (allocation lists, event feeds) — those are per-site conversations,
+    (reservation lists, event feeds) — those are per-site conversations,
     not aggregate ones.
     """
     if isinstance(client, AggregateCapacityClient):
@@ -230,66 +238,6 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     if isinstance(client, RemoteCapacityClient):
         return {"default": client}
     return {}
-
-
-async def sync_site_resources(
-    sqlite_client_factory: SQLiteClientFactory | None = None,
-) -> int:
-    """Mirror local compute inventory into the home site's ledger.
-
-    Local rows keep the market view (pricing, escrows, pools); the
-    ledger gets the resource-domain core: unit totals and attributes.
-    The storefront's local CSV inventory belongs to its home site — the
-    first configured one; other sites register their own inventory and
-    the aggregator only ever *references* it. Deleted rows are mirrored
-    as disabled so the authority stops matching them. Returns the
-    number of rows synced.
-    """
-    sites, admin_key, _ = _capacity_settings()
-    if sqlite_client_factory is None:
-        from market_storefront.utils.sqlite_client import get_sqlite_client
-        sqlite_client_factory = get_sqlite_client
-
-    import json as _json
-
-    default_site, url = next(iter(sites.items()))
-    client = RemoteCapacityClient(url, admin_key)
-    rows = await sqlite_client_factory().list_resources() or []
-    synced = 0
-    for row in rows:
-        if str(row.get("resource_type") or "") != "compute.gpu":
-            continue
-        attrs_raw = row.get("attributes") or {}
-        if isinstance(attrs_raw, str):
-            try:
-                attrs_raw = _json.loads(attrs_raw)
-            except (ValueError, TypeError):
-                attrs_raw = {}
-        attrs = {
-            k: v for k, v in dict(attrs_raw or {}).items()
-            if k != "lease_end_utc"  # lease tail belongs to the ledger
-        }
-        total = row.get("value")
-        if total is None:
-            total = attrs.get("gpu_count", 1)
-        try:
-            total_units = max(int(total), 0)
-        except (TypeError, ValueError):
-            total_units = 0
-        await client.register_resource(
-            str(row["resource_id"]),
-            total_units=total_units,
-            resource_subtype=row.get("resource_subtype"),
-            attributes=attrs,
-            enabled=str(row.get("state") or "") != "deleted",
-        )
-        synced += 1
-    if synced:
-        logger.info(
-            "[CAPACITY] Synced %d compute resource(s) to site authority "
-            "%r (%s)", synced, default_site, url,
-        )
-    return synced
 
 
 async def capacity_events_poller_loop() -> None:

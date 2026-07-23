@@ -40,7 +40,7 @@ def tmp_db_path():
 
 @pytest.fixture
 def stub_alkahest_address(monkeypatch):
-    """Stub ``get_erc20_escrow_obligation_nontierable`` to return a known
+    """Stub ``get_erc20_escrow_obligation_default`` to return a known
     address regardless of which chain is configured — tests don't need a
     real alkahest network up. Also injects a synthetic ``[chains.anvil]``
     entry so the function's per-chain iteration produces at least one row.
@@ -50,7 +50,7 @@ def stub_alkahest_address(monkeypatch):
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        alkahest_mod, "get_erc20_escrow_obligation_default",
         lambda chain_name, *, config_path=None: _ESCROW_ADDR,
     )
     monkeypatch.setattr(
@@ -164,7 +164,7 @@ def test_synthesize_returns_none_when_alkahest_unavailable(monkeypatch):
         raise ValueError("no alkahest config for this chain")
 
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable", _raise,
+        alkahest_mod, "get_erc20_escrow_obligation_default", _raise,
     )
     result = synthesize_accepted_escrows_from_demand({
         "token": {"symbol": "USDC", "contract_address": _TOKEN_ADDR, "decimals": 6},

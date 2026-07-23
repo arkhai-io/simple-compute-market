@@ -94,8 +94,8 @@ def test_xdg_default_path_is_discovered(tmp_path, monkeypatch, restore_registry)
     assert "myxdg" in agg._REGISTRY
 
 
-def test_file_policy_overrides_builtin(tmp_path, restore_registry):
-    """A folder named ``cheapest_first`` overrides the built-in.
+def test_file_policy_overrides_entry_point_policy_name(tmp_path, restore_registry):
+    """A folder named ``cheapest_first`` overrides the entry-point policy name.
 
     This is the local-tuning override UX — same as the storefront's
     negotiation-policy discovery.
@@ -123,7 +123,7 @@ def test_file_policy_overrides_builtin(tmp_path, restore_registry):
 
     overridden = agg.load_aggregation_policy("cheapest_first")
     assert getattr(overridden, "marker", None) == "from-file", (
-        "file policy should win over the built-in cheapest_first"
+        "file policy should win over the entry-point cheapest_first"
     )
 
 

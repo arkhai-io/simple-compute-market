@@ -20,6 +20,15 @@ from src.api.filter_spec import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_filter_spec_cache():
+    from src.api import filter_spec as fs_mod
+
+    fs_mod.reset_cache()
+    yield
+    fs_mod.reset_cache()
+
+
 def _write(tmp_path: Path, body: str) -> Path:
     p = tmp_path / "spec.yaml"
     p.write_text(textwrap.dedent(body).strip() + "\n")

@@ -467,10 +467,10 @@ def create_cmd(
         )
     else:
         from market_alkahest.schemas import EscrowProposal
-        from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
+        from market_alkahest.alkahest import get_erc20_escrow_obligation_default
         import time as _time
 
-        escrow_address = get_erc20_escrow_obligation_nontierable(
+        escrow_address = get_erc20_escrow_obligation_default(
             chain.chain_name,
             config_path=chain.alkahest_addr_config or None,
         )

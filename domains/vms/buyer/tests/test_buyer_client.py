@@ -23,7 +23,7 @@ from market_policy.negotiation_middleware import load_negotiation_chain
 
 from market_core.schemas import EscrowProposal
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
-from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -152,6 +152,7 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
     assert proposal["literal_fields"] == {"token": token}
     assert seen_body["provision_terms"] == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
             "ssh_public_key": "ssh-rsa AAAA",

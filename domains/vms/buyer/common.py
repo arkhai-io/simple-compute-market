@@ -2,7 +2,7 @@
 
 The schema-invariant config resolution (wallet, chains, negotiation
 policy, storefront URL) moved to ``core_buyer.buyer_config`` when the
-API-tokens domain became the second schema plugin; it is re-exported
+API-credits domain became the second schema plugin; it is re-exported
 here because every CLI module resolves it through ``.common``. This
 module keeps what is VM vocabulary: the SSH-key resolver, repo paths
 for operator scripts, and the schema id.
@@ -38,9 +38,8 @@ from core_buyer.registry_config import (  # noqa: F401
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STOREFRONT_ROOT = REPO_ROOT / "domains" / "vms" / "storefront"
 
-#: The registry schema this plugin implements (mirrors the
-#: BuyerSchemaPlugin declaration in `.cli`). Discovery verbs resolve
-#: registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
+#: The registry schema understood by the VM buyer domain. Discovery verbs
+#: resolve registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
 #: so registries declaring a different schema are skipped.
 VMS_SCHEMA_ID = "vms.compute"
 

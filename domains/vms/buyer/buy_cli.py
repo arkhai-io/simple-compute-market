@@ -27,7 +27,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from domains.vms.listings import build_vm_filter_params
-from arkhai_vms_common import make_vm_provision_terms
+from arkhai_vms import make_vm_provision_terms
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import EscrowProposal
 
@@ -49,6 +49,15 @@ from .deal_helpers import (
 )
 from .settle_cli import run_settle_from_log
 from .run_log import RunLog
+
+
+def _normalize_start_utc(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == "now":
+        return None
+    return text
 
 
 def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -> bool:
@@ -318,6 +327,11 @@ def register(app: typer.Typer) -> None:
                  "/negotiate/new and validated against the listing's "
                  "max_duration_seconds. Resumed runs read it from the run-log.",
         ),
+        start_utc: Optional[str] = typer.Option(
+            None, "--start-utc",
+            help="Requested lease start time in UTC (ISO-8601 or YYYY-MM-DD HH:MM). "
+                 "Omit or pass 'now' for immediate start.",
+        ),
         # Spec filters — slice fields
         gpu_model: Optional[str] = typer.Option(None, "--gpu-model", help="Filter listings by GPU model (e.g., H200)."),
         gpu_count_min: Optional[float] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
@@ -483,6 +497,7 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
         duration_seconds = int(round(duration_hours * 3600))
+        requested_start_utc = _normalize_start_utc(start_utc)
 
         explicit_prices = initial_price is not None and max_price is not None
         if not explicit_prices and (initial_price is not None) != (max_price is not None):
@@ -653,10 +668,10 @@ def register(app: typer.Typer) -> None:
                 # No advertised price, or the user declined the picks.
                 raise typer.Exit(2)
 
-        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > default.
+        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > VM default.
         aggregation_policy = aggregate_by or resolve_config_value(
             toml_path="aggregation.policy",
-        ) or None
+        ) or "best_price"
 
         config = BuyConfig(
             registry_urls=reg_urls,
@@ -673,6 +688,7 @@ def register(app: typer.Typer) -> None:
         )
         provision = make_vm_provision_terms(
             duration_seconds=duration_seconds,
+            start_utc=requested_start_utc,
             ssh_public_key=ssh,
         )
         # Per-candidate escrow proposal: every matched listing carries
@@ -716,6 +732,7 @@ def register(app: typer.Typer) -> None:
             initial_price=initial_price,
             max_price=max_price,
             duration_seconds=duration_seconds,
+            start_utc=requested_start_utc,
             max_matches=max_matches,
             max_rounds=max_rounds,
             filters=active_filters or None,

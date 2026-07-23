@@ -4,7 +4,7 @@ publishing instead of CHAINS broadcast + min_price/token synthesis.
 These tests exercise the new branch in ``_publish_round``: when a row
 carries materialized ``accepted_escrows`` (written by the CSV importer's
 Phase-3 DSL parser), publishing reads it straight, scales rate values
-against the entry's chain, and skips the legacy ``get_erc20_escrow_obligation_nontierable``
+against the entry's chain, and skips the legacy ``get_erc20_escrow_obligation_default``
 call entirely. Multi-chain rows can now select chains row by row
 instead of every row broadcasting to every configured chain.
 """
@@ -271,12 +271,12 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
 
     def boom_alkahest(*a, **k):
         pytest.fail(
-            "Template path must not call get_erc20_escrow_obligation_nontierable"
+            "Template path must not call get_erc20_escrow_obligation_default"
         )
 
     from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable", boom_alkahest,
+        alkahest_mod, "get_erc20_escrow_obligation_default", boom_alkahest,
     )
 
     published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
@@ -421,7 +421,7 @@ def test_publish_round_no_template_falls_back_to_legacy(tmp_path, monkeypatch):
 
     from market_alkahest import alkahest as alkahest_mod
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_nontierable",
+        alkahest_mod, "get_erc20_escrow_obligation_default",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
     )
     captured: list[dict] = []

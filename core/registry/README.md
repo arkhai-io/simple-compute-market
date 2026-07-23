@@ -1,4 +1,4 @@
-# Registry Indexer
+# Listing Registry
 
 FastAPI service that stores published marketplace listings and serves
 them through a filter-spec-driven discovery API. Sellers publish via

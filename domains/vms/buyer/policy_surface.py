@@ -1,5 +1,5 @@
 """Compatibility shim — the scalar buyer-policy surface moved to
-``core_buyer.policy_surface`` when the API-tokens domain became the
+``core_buyer.policy_surface`` when the API-credits domain became the
 second schema plugin: the ``listed_price``/``bisection`` registrations
 are escrow vocabulary shared by every scalar domain (two plugins
 re-registering the same names would silently shadow each other), and

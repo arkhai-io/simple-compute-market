@@ -10,6 +10,7 @@ from market_policy.identity import Identity
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
     continue_sync_negotiation,
+    _normalize_vm_message_terms,
     start_sync_negotiation,
 )
 from market_core.schemas import EscrowProposal, ProvisionTerms
@@ -41,6 +42,7 @@ async def db(tmp_path):
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
+            "resource_id": "resource-hook",
         },
         accepted_escrows=[{
             "chain_name": "anvil",
@@ -64,6 +66,49 @@ def _proposal(amount: int) -> EscrowProposal:
         rates=[{"field": "amount", "per": "hour", "value": "100"}],
         expiration_unix=1_800_000_000,
     )
+
+
+def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
+    terms = ProvisionTerms.model_validate({
+        "kind": "compute.v1",
+        "version": 1,
+        "payload": {
+            "duration_seconds": "3600",
+            "start_utc": "2030-01-01T00:00:00Z",
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    })
+
+    normalized = _normalize_vm_message_terms(terms)
+
+    assert normalized is not None
+    assert normalized.duration_seconds == 3600
+    assert normalized.start_utc == "2030-01-01T00:00:00Z"
+
+
+def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
+    terms = ProvisionTerms(
+        kind="fiat.v1",
+        version=1,
+        payload={"invoice_id": "inv-1"},
+    )
+
+    with pytest.raises(ValueError, match="compute.v1"):
+        _normalize_vm_message_terms(terms)
+
+
+def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
+    terms = ProvisionTerms(
+        kind="compute.v1",
+        version=2,
+        payload={
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    )
+
+    with pytest.raises(ValueError, match="version"):
+        _normalize_vm_message_terms(terms)
 
 
 @pytest.mark.asyncio
@@ -90,7 +135,14 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
         our_listing_id="L-hook",
         buyer_address=_BUYER,
         proposal=_proposal(50),
-        provision_terms=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA"),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
         seller_round_hook=hook,
@@ -122,7 +174,14 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         our_listing_id="L-hook",
         buyer_address=_BUYER,
         proposal=_proposal(50),
-        provision_terms=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA"),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
         seller_round_hook=opening_hook,

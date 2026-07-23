@@ -189,7 +189,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "alembic", specifier = ">=1.12.0" },
-    { name = "arkhai-kit-identity", editable = "../../kit/identity" },
+    { name = "arkhai-kit-identity" },
     { name = "eth-account", specifier = ">=0.9.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "jsonpath-ng", specifier = ">=1.6" },
@@ -228,20 +228,14 @@ wheels = [
 [[package]]
 name = "arkhai-kit-identity"
 version = "0.1.0"
-source = { editable = "../../kit/identity" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "pydantic" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "eth-account", specifier = ">=0.13.0" },
-    { name = "pydantic", specifier = ">=2" },
+wheels = [
+    { path = "arkhai_kit_identity-0.1.0-py3-none-any.whl" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "attrs"

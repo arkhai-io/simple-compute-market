@@ -230,7 +230,7 @@ def run_settle_from_log(
         import time as _time
         from market_alkahest.schemas import EscrowProposal
         from market_alkahest.alkahest import (
-            get_erc20_escrow_obligation_nontierable,
+            get_erc20_escrow_obligation_default,
         )
         from core_buyer.escrow_client import (
             make_buyer_payment_escrow_terms_fn,
@@ -247,7 +247,7 @@ def run_settle_from_log(
         elif deal.accepted_escrow_proposal is not None:
             proposal = EscrowProposal(**deal.accepted_escrow_proposal)
         else:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
+            escrow_address = get_erc20_escrow_obligation_default(
                 chain.chain_name,
                 config_path=chain.alkahest_addr_config or None,
             )

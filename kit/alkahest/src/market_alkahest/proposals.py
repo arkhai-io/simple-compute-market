@@ -4,7 +4,7 @@ Turns negotiated ``EscrowProposal``s into the accepted-escrow response
 artifacts (settlement plan + legacy flat terms) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
 every scalar-escrow domain (moved here from ``domains.vms.settlement``
-when the API-tokens domain became the second consumer).
+when the API-credits domain became the second consumer).
 """
 
 from __future__ import annotations
@@ -28,17 +28,18 @@ def escrow_proposal_from_accepted_entry(
     if token:
         literal_fields["token"] = token
     selected_chain = entry.get("chain_name")
-    demands = [
+    matching_demands = [
         demand for demand in accepted_demands(listing)
         if not demand.get("chain_name") or demand.get("chain_name") == selected_chain
     ]
+    selected_demand = matching_demands[0] if matching_demands else None
     return EscrowProposal(
         chain_name=selected_chain,
         escrow_address=entry["escrow_address"],
         fields={"token": token},
         literal_fields=literal_fields,
         rates=entry.get("rates") or [],
-        demands=demands,
+        demand=selected_demand,
         expiration_unix=expiration_unix,
     )
 
@@ -82,6 +83,45 @@ def proposal_is_oracle_gated(
     return False
 
 
+def proposal_is_splitter_gated(
+    proposal: EscrowProposal | dict[str, Any],
+    *,
+    chain_config_paths: dict[str, str | None] | None = None,
+) -> bool:
+    """True when collection routes through a splitter arbiter."""
+    from market_alkahest.alkahest import address_to_slot
+    from market_alkahest.schemas import accepted_demands
+
+    chain = (
+        proposal.chain_name
+        if isinstance(proposal, EscrowProposal)
+        else proposal.get("chain_name")
+    )
+    config_path = (chain_config_paths or {}).get(chain)
+    splitter_slots = {"erc20_splitter", "native_token_splitter"}
+    for demand in accepted_demands(proposal):
+        arbiter = demand.get("arbiter")
+        if not arbiter:
+            continue
+        try:
+            slot = address_to_slot(chain, arbiter, config_path=config_path)
+        except Exception:
+            continue
+        if slot in splitter_slots:
+            return True
+        if slot == "all_arbiter":
+            children = (demand.get("demand_data") or {}).get("arbiters") or []
+            for child in children:
+                try:
+                    if address_to_slot(
+                        chain, child, config_path=config_path
+                    ) in splitter_slots:
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
 def accepted_escrow_artifacts_from_proposal(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -114,13 +154,16 @@ def accepted_escrow_artifacts_from_proposal(
         fields=fields,
         literal_fields=proposal_model.literal_fields,
         rates=proposal_model.rates,
-        demands=proposal_model.demands,
+        demand=proposal_model.demand,
         expiration_unix=proposal_model.expiration_unix,
     )
 
+    accepted_payload = accepted.model_dump()
+    if accepted_payload.get("demands") is None:
+        accepted_payload.pop("demands", None)
     out: dict[str, Any] = {
-        "proposal": accepted.model_dump(),
-        "accepted_escrow_proposal": accepted.model_dump(),
+        "proposal": dict(accepted_payload),
+        "accepted_escrow_proposal": dict(accepted_payload),
     }
     try:
         from market_alkahest.plans import (
@@ -137,6 +180,13 @@ def accepted_escrow_artifacts_from_proposal(
             service_terms["heartbeat"] = {
                 "schema": "vms.heartbeat.v1",
                 "interval_seconds": int(heartbeat_interval_seconds),
+            }
+        if proposal_is_splitter_gated(
+            accepted, chain_config_paths=chain_config_paths
+        ):
+            service_terms["interruptible"] = {
+                "schema": "vms.interruptible.v1",
+                "refund_authority": "seller_declared",
             }
         plan = materialize_settlement_plan_from_proposal(
             proposal=accepted,

@@ -25,7 +25,7 @@ class ReserveCapacityRequest(BaseModel):
 class ReserveCapacityResponse(BaseModel):
     """Response from POST /api/v1/admin/portfolio/reservations."""
 
-    allocation_id: str
+    capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
     resource_id: str
@@ -82,7 +82,7 @@ class ResourcePatchResponse(BaseModel):
 
 
 class FulfillmentStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -91,7 +91,7 @@ class FulfillmentStartedEventRequest(BaseModel):
 
 
 class FulfillmentFailedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -102,7 +102,7 @@ class FulfillmentFailedEventRequest(BaseModel):
 
 
 class UsageStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_lease_id: str | None = None
@@ -114,23 +114,67 @@ class UsageStartedEventRequest(BaseModel):
 
 
 class ReleaseStartedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     provider_lease_id: str | None = None
     vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     provider_lease_id: str | None = None
     resource_id: str | None = None
     released_at: str | None = None
 
 
 class FulfillmentEventResponse(BaseModel):
-    allocation_id: str
+    capacity_reservation_id: str
     state: str
     resource_id: str | None = None
     gpu_count: int | None = None
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)
     reopened_listing_ids: list[str] = Field(default_factory=list)
+
+
+class InterruptDealRequest(BaseModel):
+    """Request body for POST /api/v1/admin/deals/{escrow_uid}/interrupt."""
+
+    interrupted_at_utc: str | None = Field(
+        default=None,
+        description=(
+            "UTC interruption time. Defaults to the storefront's current UTC "
+            "time when omitted."
+        ),
+    )
+    reason: str | None = None
+    seller_amount: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Seller payout in base units. For now this is recorded for the "
+            "splitter transaction helper; the endpoint does not submit the "
+            "on-chain splitter call yet."
+        ),
+    )
+    refund_amount: int | None = Field(
+        default=None,
+        ge=0,
+        description="Buyer refund in base units, if precomputed by the caller.",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="Validate and compute the interruption plan without truncating capacity.",
+    )
+
+
+class InterruptDealResponse(BaseModel):
+    escrow_uid: str
+    status: str
+    capacity_reservation_id: str | None = None
+    listing_id: str | None = None
+    interrupted_at_utc: str
+    lease_truncated: bool = False
+    settlement_action: str = "pending"
+    seller_amount: int | None = None
+    refund_amount: int | None = None
+    reservation: dict[str, Any] | None = None

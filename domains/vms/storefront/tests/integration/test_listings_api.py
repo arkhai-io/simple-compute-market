@@ -49,13 +49,27 @@ async def db(tmp_path) -> SQLiteClient:
     return SQLiteClient(db_path=str(tmp_path / "listings_test.db"))
 
 
-async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open") -> None:
+async def _seed_listing(
+    db: SQLiteClient,
+    listing_id: str,
+    status: str = "open",
+    *,
+    valid_capacity_identity: bool = True,
+) -> None:
+    offer_resource = {
+        "gpu_model": "H200",
+        "gpu_count": 1,
+        "sla": 99.9,
+        "region": "California, US",
+    }
+    if valid_capacity_identity:
+        offer_resource["resource_id"] = f"res-{listing_id}"
     await db.upsert_listing(
         listing_id=listing_id,
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource=offer_resource,
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
@@ -248,6 +262,21 @@ class TestResumeListing:
             await c.resume_listing("ghost")
         assert "404" in str(exc_info.value)
 
+    async def test_legacy_invalid_listing_fails_without_clearing_pause(self, client):
+        c, db = client
+        await _seed_listing(
+            db, "legacy-invalid", valid_capacity_identity=False,
+        )
+        await db.set_listing_paused(listing_id="legacy-invalid", paused=True)
+
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.resume_listing("legacy-invalid")
+
+        error = str(exc_info.value)
+        assert "409" in error
+        assert "invalid_listing_capacity_identity" in error
+        assert await db.is_listing_paused(listing_id="legacy-invalid") is True
+
 
 # ---------------------------------------------------------------------------
 # Admin evaluate endpoints — evaluate-negotiate
@@ -257,7 +286,7 @@ class TestResumeListing:
 # is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest_asyncio.fixture
@@ -319,6 +348,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 
 
 _OFFER = {
+    "resource_id": "res-test-1",
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
@@ -501,6 +531,30 @@ async def seller_auth_full_client(db):
     _container.resolved_listing_service = None
 
 
+class TestLegacyInvalidListingRemoval:
+    async def test_seller_can_explicitly_close_invalid_legacy_listing(
+        self, seller_auth_full_client,
+    ):
+        c, db = seller_auth_full_client
+        await _seed_listing(
+            db, "legacy-invalid-close", valid_capacity_identity=False,
+        )
+        with patch(
+            "market_storefront.services.publication_service.close_order",
+            new_callable=AsyncMock,
+            return_value={
+                "status": "closed",
+                "listing_id": "legacy-invalid-close",
+            },
+        ) as close_order:
+            result = await c.close_listing("legacy-invalid-close")
+
+        assert result.status == "closed"
+        close_order.assert_awaited_once_with(
+            {"listing_id": "legacy-invalid-close"}
+        )
+
+
 class TestCreateListing:
     """Full round-trip tests for POST /api/v1/listings/create.
 
@@ -523,6 +577,39 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"No listing_id in response: {result}"
+        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        assert listing_id, "listing_id must be non-empty"
+
+    async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
+        self, seller_auth_full_client,
+    ):
+        """POOLS-4: a compute offer with no pool_id and no resource_id can't
+        be reliably matched to inventory at reservation time and must be
+        rejected at creation rather than published."""
+        c, _ = seller_auth_full_client
+        offer_without_identity = {
+            k: v for k, v in _OFFER.items() if k not in ("pool_id", "resource_id")
+        }
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.create_listing(
+                agent_wallet_address=_TEST_WALLET,
+                offer=offer_without_identity,
+                accepted_escrows=_ACCEPTED_ESCROWS,
+                paused=True,
+            )
+        assert "400" in str(exc_info.value)
+
+    async def test_resource_id_only_offer_succeeds(self, seller_auth_full_client):
+        """A resource_id-only offer (no pool_id) is a legitimate
+        specific-resource listing, not an error."""
+        c, _ = seller_auth_full_client
+        assert "pool_id" not in _OFFER  # confirms this case is what's exercised
+        result = await c.create_listing(
+            agent_wallet_address=_TEST_WALLET,
+            offer=_OFFER,
+            accepted_escrows=_ACCEPTED_ESCROWS,
+            paused=True,
+        )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
         assert listing_id, "listing_id must be non-empty"
 

@@ -1,0 +1,65 @@
+"""API-credits implementation of the core market-domain contract."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    MarketDomainContract,
+)
+
+from domains.apicredits.schema import (
+    API_CREDITS_SCHEMA_KIND,
+    ApiCreditsListing,
+    ApiCreditsMaterialization,
+    ApiCreditsMessage,
+    ApiCreditsReceipt,
+    ApiCreditsResult,
+    ApiCreditsTerms,
+)
+
+
+def _normalize_listing(value: Any) -> ApiCreditsListing:
+    return ApiCreditsListing.model_validate(value)
+
+
+def _normalize_message(value: Any) -> ApiCreditsMessage:
+    return ApiCreditsMessage.model_validate(value)
+
+
+def _normalize_terms(value: Any) -> ApiCreditsTerms:
+    return ApiCreditsTerms.model_validate(value)
+
+
+def _normalize_materialization(value: Any) -> ApiCreditsMaterialization:
+    return ApiCreditsMaterialization.model_validate(value)
+
+
+def _normalize_receipt(value: Any) -> ApiCreditsReceipt:
+    return ApiCreditsReceipt.model_validate(value)
+
+
+def _normalize_result(value: Any) -> ApiCreditsResult:
+    return ApiCreditsResult.model_validate(value)
+
+
+API_CREDITS_MARKET_DOMAIN = MarketDomainContract(
+    identity=DomainIdentity(API_CREDITS_SCHEMA_KIND),
+    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+    codecs=ImmutableCodecCapability(
+        normalize_listing=_normalize_listing,
+        normalize_message=_normalize_message,
+        normalize_terms=_normalize_terms,
+        normalize_materialization=_normalize_materialization,
+        normalize_receipt=_normalize_receipt,
+        normalize_result=_normalize_result,
+    ),
+)
+
+
+def market_domain() -> MarketDomainContract:
+    """Return the API-credit market-domain contract."""
+    return API_CREDITS_MARKET_DOMAIN

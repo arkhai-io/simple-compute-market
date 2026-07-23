@@ -1,18 +1,18 @@
 """VM-domain interpretation of the compute.v1 provision payload.
 
 The core carrier (``market_core.schemas.ProvisionTerms``) is an opaque
-``{kind, payload}`` envelope; these are the domain accessors that
-interpret it, used by the storefront on wire-received terms.
+``{kind, version, payload}`` envelope; these are the domain accessors.
 """
 
 from __future__ import annotations
 
-from arkhai_vms_common import (
+from arkhai_vms import (
     make_vm_provision_terms,
     provision_compute_resource,
     provision_duration_seconds,
     provision_payload,
     provision_ssh_public_key,
+    provision_start_utc,
 )
 from market_core.schemas import ProvisionTerms
 
@@ -20,14 +20,17 @@ from market_core.schemas import ProvisionTerms
 def test_accessors_read_a_core_envelope():
     terms = ProvisionTerms.model_validate({
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
+            "start_utc": "2030-01-01T00:00:00Z",
             "ssh_public_key": "ssh-ed25519 AAAA",
             "compute_resource": {"gpu_model": "H200"},
         },
     })
 
     assert provision_duration_seconds(terms) == 3600
+    assert provision_start_utc(terms) == "2030-01-01T00:00:00Z"
     assert provision_ssh_public_key(terms) == "ssh-ed25519 AAAA"
     assert provision_compute_resource(terms) == {"gpu_model": "H200"}
 
@@ -42,9 +45,10 @@ def test_accessors_read_a_plain_dict():
 
 
 def test_accessors_tolerate_missing_or_foreign_payloads():
-    foreign = ProvisionTerms(kind="fiat.v1", payload={"invoice_id": "inv-1"})
+    foreign = ProvisionTerms(kind="fiat.v1", version=1, payload={"invoice_id": "inv-1"})
 
     assert provision_duration_seconds(foreign) is None
+    assert provision_start_utc(foreign) is None
     assert provision_ssh_public_key(foreign) == ""
     assert provision_compute_resource(foreign) is None
     assert provision_payload(None) == {}
@@ -53,20 +57,24 @@ def test_accessors_tolerate_missing_or_foreign_payloads():
 def test_make_vm_provision_terms_matches_the_wire_shape():
     terms = make_vm_provision_terms(
         duration_seconds=3600,
+        start_utc="2030-01-01T00:00:00Z",
         ssh_public_key="ssh-ed25519 AAAA",
         compute_resource={"gpu_model": "H200"},
     )
 
     assert terms.model_dump() == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
+            "start_utc": "2030-01-01T00:00:00Z",
             "ssh_public_key": "ssh-ed25519 AAAA",
             "compute_resource": {"gpu_model": "H200"},
         },
     }
     # Properties mirror the module accessors for domain-constructed terms.
     assert terms.duration_seconds == 3600
+    assert terms.start_utc == "2030-01-01T00:00:00Z"
     assert terms.ssh_public_key == "ssh-ed25519 AAAA"
     assert terms.compute_resource == {"gpu_model": "H200"}
 
@@ -76,5 +84,6 @@ def test_make_vm_provision_terms_omits_absent_compute_resource():
 
     assert terms.model_dump() == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {"duration_seconds": 60, "ssh_public_key": "k"},
     }

@@ -8,7 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-from market_storefront.services.vm_fulfillment_service import _commit_capacity_hold
+from market_storefront.services.vm_fulfillment_service import (
+    _commit_capacity_hold,
+    _commit_fresh_reservation,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import _place_capacity_hold
 
@@ -45,7 +48,7 @@ def _future() -> str:
 
 def _hold(**overrides) -> dict:
     base = {
-        "allocation_id": "alloc-1",
+        "capacity_reservation_id": "alloc-1",
         "resource_id": "res-1",
         "vm_host": "kvm1",
         "hold_expires_at": _future(),
@@ -65,18 +68,53 @@ async def test_valid_hold_commits_before_provisioning():
 
     reserved = await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(),
+        held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
     )
 
-    assert reserved["allocation_id"] == "alloc-1"
+    assert reserved["capacity_reservation_id"] == "alloc-1"
     assert capacity.reserve_calls == []  # no fresh reserve raced
     commit = capacity.commit_calls[0]
-    assert commit["allocation_id"] == "alloc-1"
+    assert commit["capacity_reservation_id"] == "alloc-1"
     assert commit["idempotency_ref"] == "0xesc"
     assert captured[0][1] == "capacity_hold_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commits_before_provisioning():
+    capacity = FakeCapacity()
+    captured, stage_event = _events()
+
+    await _commit_fresh_reservation(
+        capacity=capacity,
+        reserved=_hold(),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    )
+
+    commit = capacity.commit_calls[0]
+    assert commit["capacity_reservation_id"] == "alloc-1"
+    assert commit["resource_id"] == "res-1"
+    assert commit["idempotency_ref"] == "0xesc"
+    assert captured[0][1] == "capacity_reservation_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commit_failure_is_not_ignored():
+    capacity = FakeCapacity(commit_error=RuntimeError("409 conflict"))
+    _, stage_event = _events()
+
+    with pytest.raises(RuntimeError, match="409 conflict"):
+        await _commit_fresh_reservation(
+            capacity=capacity,
+            reserved=_hold(),
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
 
 
 @pytest.mark.asyncio
@@ -87,7 +125,7 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(hold_expires_at=past),
+        held_reservation=_hold(hold_expires_at=past),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -104,7 +142,7 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
 
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=_hold(),
+        held_reservation=_hold(),
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -117,7 +155,7 @@ async def test_no_hold_means_no_commit():
     _, stage_event = _events()
     assert await _commit_capacity_hold(
         capacity=capacity,
-        held_allocation=None,
+        held_reservation=None,
         escrow_uid="0xesc",
         duration_seconds=3600,
         stage_event=stage_event,
@@ -169,6 +207,128 @@ def test_claim_survives_listing_model_validation():
     assert pinned["resource_id"] == "res-pin"
 
 
+def test_claim_prefers_resource_id_over_pool_id():
+    """A listing carrying both pool_id and resource_id is an intentionally
+    specific-resource listing: resource_id wins and pool_id is dropped from
+    the claim, rather than requiring both to match (POOLS-4 design review,
+    2026-07-16)."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-both",
+        "offer_resource": {
+            "pool_id": "pool-A", "resource_id": "res-pin", "gpu_model": "H200",
+            "gpu_count": 2, "sla": 99.0, "region": "California, US",
+        },
+    }
+    claim = compute_capacity_claim_from_order(row)
+    assert claim["resource_id"] == "res-pin"
+    assert "pool_id" not in claim
+
+
+# ----------------------------------------------------------------------
+# multidimensional claim building
+# ----------------------------------------------------------------------
+
+def test_claim_carries_dimensions_when_listing_declares_a_shape():
+    """gpu_count/vcpu_count/ram_gb/disk_gb move into a dimensions map,
+    checked with full held/available accounting -- not required_attributes
+    exact-match, which would incorrectly demand every future claim declare
+    the identical quantity rather than merely fit within it."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-shaped",
+        "offer_resource": {
+            "resource_id": "res-shaped", "gpu_model": "H200", "gpu_count": 2,
+            "sla": 99.0, "region": "California, US",
+            "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+        },
+    }
+    claim = compute_capacity_claim_from_order(row)
+    assert claim["dimensions"] == {
+        "gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+    }
+    # gpu_count moved off the top level entirely -- it's a dimensions-only
+    # key now, not also an exact-match attribute.
+    assert "gpu_count" not in claim
+    assert claim["resource_id"] == "res-shaped"
+
+
+def test_claim_omits_undeclared_dimensions_for_older_listings():
+    """A listing published before vcpu_count/ram_gb/disk_gb existed (or
+    that simply never set them) still produces a valid claim -- gpu_count
+    alone, exactly like every claim before this change."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-unshaped",
+        "offer_resource": {
+            "resource_id": "res-unshaped", "gpu_model": "H200", "gpu_count": 1,
+            "sla": 99.0, "region": "California, US",
+        },
+    }
+    claim = compute_capacity_claim_from_order(row)
+    assert claim["dimensions"] == {"gpu_count": 1}
+
+
+@pytest.mark.parametrize("order", [None, {}])
+def test_claim_raises_when_order_is_missing(order):
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    with pytest.raises(ValueError, match="without a settlement order"):
+        compute_capacity_claim_from_order(order)
+
+
+@pytest.mark.parametrize("identity", ["", "   ", "bad/id", "bad id"])
+def test_claim_rejects_invalid_legacy_identity(identity):
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-invalid",
+        "offer_resource": {
+            "resource_id": identity,
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.0,
+            "region": "California, US",
+        },
+    }
+    with pytest.raises(ValueError):
+        compute_capacity_claim_from_order(row)
+
+
+def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
+    """An under-specified claim (no pool_id, no resource_id) must fail
+    loudly rather than silently matching on shape attributes alone — the
+    listing-creation guard is expected to prevent this shape from being
+    published at all; this is the backstop for anything that reaches
+    claim-building anyway."""
+    from market_storefront.services.vm_job_spec_service import (
+        compute_capacity_claim_from_order,
+    )
+
+    row = {
+        "listing_id": "lst-under-specified",
+        "offer_resource": {
+            "gpu_model": "H200", "gpu_count": 2,
+            "sla": 99.0, "region": "California, US",
+        },
+    }
+    with pytest.raises(ValueError, match="lst-under-specified"):
+        compute_capacity_claim_from_order(row)
+
+
 @pytest.mark.asyncio
 async def test_acceptance_places_and_records_the_hold(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
@@ -190,7 +350,7 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
     assert reserve["deal_ref"]["negotiation_id"] == "neg-1"
 
     hold = await db.load_capacity_hold(negotiation_id="neg-1")
-    assert hold["allocation_id"] == "alloc-1"
+    assert hold["capacity_reservation_id"] == "alloc-1"
     assert hold["payload"]["resource_id"] == "res-1"
 
 

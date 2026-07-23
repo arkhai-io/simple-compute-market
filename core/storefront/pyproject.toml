@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-core-storefront"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-core",
+    "arkhai-core>=0.2.0",
     "arkhai-core-registry-client",
     "arkhai-kit-config",
     "arkhai-kit-identity",
@@ -25,13 +25,6 @@ packages = ["src/core_storefront"]
 pythonpath = ["src"]
 testpaths = ["tests/unit"]
 asyncio_mode = "auto"
-
-[tool.uv.sources]
-arkhai-core = { path = "..", editable = true }
-arkhai-core-registry-client = { path = "../registry-client", editable = true }
-arkhai-kit-config = { path = "../../kit/config", editable = true }
-arkhai-kit-identity = { path = "../../kit/identity", editable = true }
-arkhai-kit-policy = { path = "../../kit/policy", editable = true }
 
 [dependency-groups]
 dev = [

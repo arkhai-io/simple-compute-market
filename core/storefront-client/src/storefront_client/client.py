@@ -76,6 +76,37 @@ class StorefrontClientError(Exception):
         self.status_code = status_code
 
 
+
+def _validate_provision_terms_envelope(
+    provision_terms: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate the shared, schema-opaque negotiation envelope."""
+    if not isinstance(provision_terms, dict):
+        raise TypeError("provision_terms must be a mapping")
+    expected = {"kind", "version", "payload"}
+    actual = set(provision_terms)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise ValueError(
+            "provision_terms must contain exactly kind, version, and payload "
+            f"(missing={missing}, extra={extra})"
+        )
+    kind = provision_terms["kind"]
+    version = provision_terms["version"]
+    payload = provision_terms["payload"]
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("provision_terms.kind must be a non-empty string")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("provision_terms.version must be a positive integer")
+    if not isinstance(payload, dict):
+        raise ValueError("provision_terms.payload must be a mapping")
+    return {
+        "kind": kind,
+        "version": version,
+        "payload": dict(payload),
+    }
+
 # ---------------------------------------------------------------------------
 # EIP-191 signing helpers — shared by both clients
 # ---------------------------------------------------------------------------
@@ -555,7 +586,7 @@ class StorefrontClient(_StorefrontClientBase):
 
     async def notify_capacity_released(
         self,
-        allocation_id: str,
+        capacity_reservation_id: str,
         *,
         resource_id: "str | None" = None,
         provider_lease_id: "str | None" = None,
@@ -563,13 +594,13 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/admin/fulfillment/events/capacity-released  (admin key required).
 
-        Deal-scoped event from the capacity side: the allocation's lease
+        Deal-scoped event from the capacity side: the reservation's lease
         ended and its capacity returned to the pool. The site authority's
         watchdog delivers this point-to-point to the deal's owning
         storefront — it replaces the legacy resource PATCH for
-        ledger-held allocations.
+        ledger-held reservations.
         """
-        body: dict = {"allocation_id": allocation_id}
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
         if resource_id is not None:
             body["resource_id"] = resource_id
         if provider_lease_id is not None:
@@ -741,9 +772,8 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         buyer_address: str,
         initial_amount: int | None,
-        duration_seconds: int,
+        provision_terms: dict[str, Any],
         buyer_agent_url: str = "",
-        ssh_public_key: str = "",
         token: str = "",
         chain_name: str = "",
         escrow_address: str = "",
@@ -755,14 +785,11 @@ class StorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
-        ``provision_terms`` and ``proposal`` are required by the wire
-        protocol; this helper builds canonical defaults from scalar args
-        while allowing callers to pass generic proposal fields. For scalar
-        payment escrows, ``initial_amount`` is the absolute opening amount
-        in base units and is written to ``fields["amount"]``. Amountless
-        exact escrows can pass ``initial_amount=None`` with explicit
-        ``literal_fields`` / ``rates``. ``chain_name`` + ``escrow_address``
-        pick the listing's accepted_escrows entry to propose against.
+        ``provision_terms`` is the required versioned domain envelope. The
+        shared client validates only its generic shape and never constructs or
+        interprets a domain payload. ``initial_amount`` is the absolute opening
+        amount for scalar escrows; amountless exact escrows can pass
+        ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
         """
         headers = _signed_request_headers(
             self._private_key,
@@ -790,11 +817,9 @@ class StorefrontClient(_StorefrontClientBase):
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "provision_terms": {
-                "duration_seconds": duration_seconds,
-                "ssh_public_key": ssh_public_key,
-                "compute_resource": None,
-            },
+            "provision_terms": _validate_provision_terms_envelope(
+                provision_terms,
+            ),
             "proposal": proposal,
             "buyer_agent_url": buyer_agent_url,
         }
@@ -1517,9 +1542,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         buyer_address: str,
         initial_amount: int | None,
-        duration_seconds: int,
+        provision_terms: dict[str, Any],
         buyer_agent_url: str = "",
-        ssh_public_key: str = "",
         token: str = "",
         chain_name: str = "",
         escrow_address: str = "",
@@ -1531,9 +1555,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ) -> dict:
         """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
 
-        ``provision_terms`` and ``proposal`` are required by the wire
-        protocol; this helper builds canonical defaults from scalar args
-        while allowing callers to pass generic proposal fields.
+        ``provision_terms`` is the required versioned domain envelope. The
+        shared client validates its generic shape without interpreting payload.
         """
         headers = _signed_request_headers(
             self._private_key,
@@ -1561,11 +1584,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "provision_terms": {
-                "duration_seconds": duration_seconds,
-                "ssh_public_key": ssh_public_key,
-                "compute_resource": None,
-            },
+            "provision_terms": _validate_provision_terms_envelope(
+                provision_terms,
+            ),
             "proposal": proposal,
             "buyer_agent_url": buyer_agent_url,
         }

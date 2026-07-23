@@ -8,7 +8,7 @@ plugs into the same registry. These tests pin down:
   default; lookup by string key returns it; unknown kinds raise.
 - Extensibility: register_arbiter_codec adds new codecs without
   touching the existing flow.
-- RecipientArbiterCodec encoding: abi.encode("address", seller_wallet)
+- RecipientArbiterCodec encoding: SDK RecipientArbiterDemandData bytes
   round-trips through eth_abi.decode back to the same address.
 - build_payment_obligation_data dispatches through the codec: the
   produced demand bytes match what the codec returns directly.
@@ -131,8 +131,7 @@ def test_recipient_codec_encode_demand_is_abi_encoded_address():
 
 
 def test_recipient_codec_encode_matches_legacy_helper():
-    """The codec must produce identical bytes to the legacy free
-    function so existing on-chain escrows stay valid."""
+    """The codec and shared helper both delegate to the SDK demand codec."""
     codec = RecipientArbiterCodec()
     agreement = AgreementContext(
         seller_wallet=_SELLER_WALLET,

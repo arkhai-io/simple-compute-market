@@ -79,7 +79,7 @@ _ALKAHEST_CFG = resolve_alkahest_address_config(
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
     "escrow_address": str(
-        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_nontierable
+        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_default
     ).lower(),
     "literal_fields": {"token": DEMAND_TOKEN_ADDRESS},
     "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_AMOUNT)}],
@@ -373,7 +373,7 @@ class TestStageB5_SellerAndLease:
         )
 
         # DealLease resolves where the lease lives: a site-ledger
-        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        # reservation (remote-capacity mode) or a vm_leases row (embedded).
         from tests.e2e.roles.scenarios.vms.conftest import DealLease
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid

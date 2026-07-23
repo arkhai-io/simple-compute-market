@@ -1,30 +1,35 @@
 [project]
 name = "arkhai-vms-storefront"
-version = "0.1.0"
+version = "0.3.0"
 license = "MIT"
 description = "Provider-side storefront server: hosts /orders, /negotiate, /settle, /alerts/resource endpoints. The provider-side counterpart to arkhai-vms-buyer."
 authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
 	"arkhai-core-registry-client>=0.7.0",
-    "arkhai-core-storefront-client>=0.15.0",
-    "arkhai-core-storefront",
-    "arkhai-core",
+    "arkhai-core-storefront-client>=0.16.0",
+    "arkhai-core-storefront>=0.2.0",
+    "arkhai-core>=0.2.0",
     "arkhai-kit-identity",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-policy",
-    "arkhai-vms-common",
-    "arkhai-vms-provisioning>=0.5.0",
+    "arkhai-bare-metal>=0.2.0",
+    "arkhai-vms>=0.2.0",
+    "arkhai-compute-provisioning>=0.3.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
-    "fastapi-utils>=0.8.0",
+    # [all] carries typing-inspect, which fastapi_utils.cbv imports
+    # unconditionally under pydantic v2.
+    "fastapi-utils[all]>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-    "alkahest-py>=0.4.0",
+    # Required by FastAPI routes that accept UploadFile/File form data.
+    "python-multipart>=0.0.20",
+    "alkahest-py==1.1.2",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "httpx>=0.27",
@@ -70,14 +75,13 @@ lint = [
 ]
 
 [tool.uv]
-# Internal wheels (clients, arkhai-vms-provisioning) come from the repo's
-# .dist/ via the CLI flag — `make init`/`reinit`/`test` and the Dockerfile
-# all pass --find-links. No find-links entry here: a relative path can't
-# normalize inside the Docker build, where /app is the project root.
+# All internal wheels resolve from the repo's .dist/ via the CLI flag —
+# `make init`/`reinit`/`test` and the Dockerfile all pass --find-links.
+# No find-links entry here: a relative path can't normalize inside the
+# Docker build, where /app is the project root.
 # Restrict resolution to platforms that have alkahest_py wheels.
-# Without this, uv attempts to solve for all platforms and fails to
-# find arkhai-vms-provisioning wheels for platforms
-# where it has no local find-links path to check.
+# Restricting the supported environments also keeps internal wheel-only
+# dependencies from being resolved for platforms absent from local find-links.
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -85,12 +89,6 @@ environments = [
 ]
 
 [tool.uv.sources]
-arkhai-core-storefront = { path = "../../../core/storefront", editable = true }
-arkhai-core = { path = "../../../core", editable = true }
-arkhai-kit-identity = { path = "../../../kit/identity", editable = true }
-arkhai-kit-alkahest = { path = "../../../kit/alkahest", editable = true }
-arkhai-kit-config = { path = "../../../kit/config", editable = true }
-arkhai-kit-policy = { path = "../../../kit/policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -149,7 +147,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "../../..", "../../../kit/policy/src", "../../../kit/alkahest/src", "../../../kit/config/src", "../../../core/src"]
+pythonpath = ["src", "../../.."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

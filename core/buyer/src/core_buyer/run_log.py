@@ -1,6 +1,6 @@
 """Append-only logs for buyer runs.
 
-Moved verbatim from the VM buyer when the API-tokens domain became the
+Moved verbatim from the VM buyer when the API-credits domain became the
 second schema plugin — every domain's runs share one log dir and one
 event schema, so resume and `logs` tooling work across schemas.
 

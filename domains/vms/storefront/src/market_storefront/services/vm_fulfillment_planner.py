@@ -36,11 +36,8 @@ def build_vm_fulfillment_plan(
             order_dict = order
 
     if not order_dict:
-        return VmFulfillmentPlan(
-            order_dict=None,
-            order_id=None,
-            order_bytes=order_bytes,
-            required_attributes={},
+        raise ValueError(
+            "VM fulfillment requires a valid, non-empty settlement order object."
         )
 
     order_id = order_dict.get("listing_id") or order_dict.get("order_id")

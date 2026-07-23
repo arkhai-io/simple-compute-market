@@ -1,13 +1,17 @@
-# Seller quickstart
+# VM seller quickstart
 
 How to bring up a compute storefront: publish listings (signed with
 your wallet key), and (optionally) provision real KVM VMs to buyers.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
-To run your own indexer registry instead of pointing at an existing one,
+To run your own listing registry instead of pointing at an existing one,
 see [`indexer-quickstart.md`](./indexer-quickstart.md). To expose VMs
 via wildcard subdomains instead of direct port-forward NAT, see
-[`seller-frp-setup.md`](./seller-frp-setup.md).
+[`seller-frp-setup.md`](./seller-frp-setup.md). To sell whole-machine
+SSH access instead of VM slices, see
+[`bare-metal-seller-quickstart.md`](./bare-metal-seller-quickstart.md).
+To sell request quota for an OpenAI-compatible vLLM server instead, see the
+[`vLLM API-credits cookbook`](./cookbooks/vllm-apicredits-seller.md).
 
 ## Prerequisites
 
@@ -18,7 +22,7 @@ via wildcard subdomains instead of direct port-forward NAT, see
   (test funds from [faucet.circle.com](https://faucet.circle.com)), but
   any EVM chain with Alkahest contracts deployed works.
 - An RPC URL for that chain.
-- An indexer URL + (if private) bearer token to publish to.
+- A listing registry URL + (if private) bearer token to publish to.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
   passwordless sudo and is in the `libvirt` group.
@@ -32,7 +36,7 @@ make build-seller
 ```
 
 `build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:provisioning`) and the wheels they consume — ~3 minutes on a
+`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
 warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
@@ -62,15 +66,15 @@ chain_id = 84532
 rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
 
 [registry]
-# The Arkhai public indexer registry (preprod, Base Sepolia listings):
+# The Arkhai public listing registry (preprod, Base Sepolia listings):
 urls = ["http://34.41.205.175/registry"]
-# Or point at any other indexer, e.g. a self-hosted one:
-# urls = ["http://<INDEXER_HOST>:8080"]
+# Or point at any other listing registry, e.g. a self-hosted one:
+# urls = ["http://<REGISTRY_HOST>:8080"]
 
 [registry.auth]
-# Required when the indexer gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
-# the key must be write-scoped. The Arkhai public indexer gates writes —
-# request a write key from the operator, or run your own indexer.
+# Required when the listing registry gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
+# the key must be write-scoped. The Arkhai public listing registry gates writes —
+# request a write key from the operator, or run your own listing registry.
 # Keys must exactly match the URLs in [registry] urls (scheme, host,
 # port, trailing slash).
 "http://34.41.205.175/registry" = "<your-write-token>"
@@ -105,8 +109,8 @@ What you offer for sale. One row per slice. The compose mounts
 `/app/resources.csv`; the storefront auto-seeds from it on first start.
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",<vm_host_alias>
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode
+slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",<vm_host_alias>,<physical_host_id>,shareable
 ```
 
 - `min_price` — human / whole-token units, scaled by token decimals on
@@ -116,6 +120,12 @@ slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC23
   `[pricing].default_token_address`.
 - `attribute.vm_host` — must match a host alias in the provisioning
   service's ansible inventory (§6). For mock mode any string works.
+- `attribute.physical_host_id` — stable identity for the underlying physical
+  machine. Used by the site authority to avoid double-selling the same host
+  if you also run a bare-metal storefront for the same hardware. If omitted,
+  `attribute.vm_host` is used as the default.
+- `attribute.allocation_mode` — `shareable` for VM-slice listings. If omitted
+  for a VM resource with `attribute.vm_host`, it defaults to `shareable`.
 
 A larger sample is at
 [`domains/vms/storefront/src/market_storefront/data/resources.sample.csv`](../domains/vms/storefront/src/market_storefront/data/resources.sample.csv).
@@ -141,7 +151,7 @@ don't repeat it anywhere else. Likewise `[provisioning].mode` in
 the TOML drives mock-vs-live; no separate env knob.
 
 There is no registration step: your identity is the wallet. Every
-publish is EIP-191-signed, and the indexer creates your publisher
+publish is EIP-191-signed, and the listing registry creates your publisher
 record from the signature the first time you publish.
 
 ## 5. Publish
@@ -151,12 +161,12 @@ docker compose -f compose/seller.yml exec seller-storefront \
   market-storefront publish --inventory /app/resources.csv
 ```
 
-Verify directly against the storefront and the indexer:
+Verify directly against the storefront and the listing registry:
 
 ```bash
 curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings | jq '.listings[]'
 
-# Indexer: filter listings by your publishing wallet address:
+# Registry: filter listings by your publishing wallet address:
 curl -s "http://34.41.205.175/registry/listings?publisher=<YOUR_WALLET_ADDRESS>" \
   | jq '.items[]'
 ```
@@ -246,9 +256,22 @@ touching libvirt. To create real VMs:
   scheme, host, port, no trailing slash.
 - **`admin_api_key` empty or missing** — provisioning service can't
   call back on lease expiry, leases never release.
+- **A globally paused storefront rejects every new negotiation with
+  `503 {"reason":"global"}`.** Global pause is process-local and separate
+  from per-listing pause. Resume it through the authenticated
+  `POST /admin/resume` endpoint before accepting buyers.
+- **The resource importer and storefront must use the same SQLite path.**
+  A mismatch leaves the running storefront with no resources and causes
+  `409 no_matching_inventory`. Check `resource_count` in
+  `GET /api/v1/system/status`; zero usually means the importer wrote a
+  different database. Prefer an explicit importer `--db-path` or
+  `STOREFRONT_DB_PATH`.
 - **`resources.csv` prices are human / whole-token units.** Use
   fractional strings (`"0.50"`) for sub-token rates. `0` is a literal
   free offering.
 - **`attribute.vm_host` must match an inventory alias.** Wrong alias =
   settle fails with "host not found".
+- **When co-selling VM slices and bare metal from the same host, use one
+  stable `attribute.physical_host_id` in both domain storefront inventories.**
+  Otherwise the site ledger cannot prevent cross-mode double selling.
 - **`agent_id` must be a Python identifier** — no dashes.

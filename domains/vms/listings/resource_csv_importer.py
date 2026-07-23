@@ -41,6 +41,11 @@ CORE_COLUMNS = {
 }
 
 ATTRIBUTE_PREFIX = "attribute."
+COMPUTE_GPU_RESOURCE_TYPE = "compute.gpu"
+ALLOCATION_MODE_ATTR = "allocation_mode"
+PHYSICAL_HOST_ID_ATTR = "physical_host_id"
+SHAREABLE_ALLOCATION_MODE = "shareable"
+VM_HOST_ATTR = "vm_host"
 
 
 def parse_accepted_escrows_cell(
@@ -258,6 +263,20 @@ def _parse_attribute_value(raw: str) -> Any:
         return raw
 
 
+def _normalize_compute_resource_attributes(
+    *,
+    resource_type: str,
+    attributes: dict[str, Any],
+) -> None:
+    if resource_type != COMPUTE_GPU_RESOURCE_TYPE:
+        return
+    vm_host = attributes.get(VM_HOST_ATTR)
+    if not vm_host:
+        return
+    attributes.setdefault(PHYSICAL_HOST_ID_ATTR, vm_host)
+    attributes.setdefault(ALLOCATION_MODE_ATTR, SHAREABLE_ALLOCATION_MODE)
+
+
 def _build_db_resource_from_csv_row(
     row: dict[str, Any],
     templates: Mapping[str, EscrowTemplateLike] | None = None,
@@ -310,6 +329,10 @@ def _build_db_resource_from_csv_row(
         if not cell:
             continue
         attributes[attr_key] = _parse_attribute_value(cell)
+    _normalize_compute_resource_attributes(
+        resource_type=resource_type,
+        attributes=attributes,
+    )
 
     accepted_escrows_raw = _clean_cell(row.get("accepted_escrows"))
     accepted_escrows: list[dict[str, Any]] | None = None

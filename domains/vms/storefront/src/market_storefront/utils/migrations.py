@@ -68,12 +68,12 @@ def synthesize_accepted_escrows_from_demand(
     else:
         rate_value = None
 
-    from market_alkahest.alkahest import get_erc20_escrow_obligation_nontierable
+    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
     entries: list[dict[str, Any]] = []
     for name, chain in CHAINS.items():
         try:
-            escrow_address = get_erc20_escrow_obligation_nontierable(
+            escrow_address = get_erc20_escrow_obligation_default(
                 name,
                 config_path=chain.alkahest_address_config_path,
             )
@@ -127,9 +127,12 @@ def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> N
 
 
 def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
+    # Fresh databases use the current table name. The migration identifier is
+    # stable because existing databases may already have recorded it; the
+    # later rename migration handles databases created with the legacy name.
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS compute_inventory_pools (
+        CREATE TABLE IF NOT EXISTS compute_capacity_pools (
           pool_id TEXT PRIMARY KEY,
           seller_id TEXT,
           resource_type TEXT NOT NULL DEFAULT 'compute.gpu',
@@ -164,7 +167,7 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
           attributes TEXT,
           created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          FOREIGN KEY(pool_id) REFERENCES compute_inventory_pools(pool_id)
+          FOREIGN KEY(pool_id) REFERENCES compute_capacity_pools(pool_id)
         )
         """
     )
@@ -284,7 +287,7 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
             )
         conn.execute(
             """
-            INSERT INTO compute_inventory_pools(
+            INSERT INTO compute_capacity_pools(
               pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
               status, allocation_policy, min_price, token, max_duration_seconds,
               accepted_escrows, created_at, updated_at
@@ -363,6 +366,25 @@ def _migrate_allocation_hold_expiry(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "compute_allocations", "hold_expires_at", "TEXT")
 
 
+def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
+    """Rename the legacy pool table while preserving schema relationships.
+
+    This is a pure rename with the same columns, foreign-key relationship from
+    ``compute_pool_members``, and reconciler behavior. It is a no-op when the
+    database was created with the current table name or was already renamed.
+    """
+    old_exists = _table_exists(conn, "compute_inventory_pools")
+    new_exists = _table_exists(conn, "compute_capacity_pools")
+    if old_exists and new_exists:
+        raise RuntimeError(
+            "Both compute_inventory_pools and compute_capacity_pools exist; "
+            "manual reconciliation is required before migration can continue."
+        )
+    if not old_exists:
+        return
+    conn.execute("ALTER TABLE compute_inventory_pools RENAME TO compute_capacity_pools")
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -383,5 +405,9 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260611_007_allocation_hold_expiry",
         _migrate_allocation_hold_expiry,
+    ),
+    Migration(
+        "20260716_008_rename_compute_capacity_pools",
+        _migrate_rename_compute_capacity_pools,
     ),
 )

@@ -186,6 +186,7 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
               updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
               terminal_state TEXT,
               requested_duration_seconds INTEGER,
+              requested_start_utc TEXT,
               buyer_escrow_proposal TEXT,
               agreed_price TEXT,
               agreed_duration_seconds INTEGER,
@@ -201,12 +202,13 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                 negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status, created_at,
                 updated_at, terminal_state, requested_duration_seconds,
-                buyer_escrow_proposal, agreed_price,
+                requested_start_utc, buyer_escrow_proposal, agreed_price,
                 agreed_duration_seconds, agreed_at, buyer, matched_offer_id
             )
             SELECT negotiation_id, our_listing_id, their_listing_id,
                    our_agent_id, their_agent_id, status, created_at,
                    updated_at, terminal_state, requested_duration_seconds,
+                   NULL,
                    buyer_escrow_proposal,
                    CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
                    agreed_duration_seconds, agreed_at, buyer, matched_offer_id
@@ -445,6 +447,24 @@ def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_capacity_holds_reservation_id(conn: sqlite3.Connection) -> None:
+    """Rename ``capacity_holds.allocation_id`` to ``capacity_holds.
+    capacity_reservation_id``.
+
+    ``capacity_holds`` is created unconditionally via ``CREATE TABLE IF
+    NOT EXISTS`` (SQLiteClient.init_db), not through this versioned
+    migration system, so an existing on-disk database still has the old
+    column name and needs this rename step; a fresh database already has
+    the current column from that CREATE TABLE statement, and
+    ``_column_exists`` below is what makes this a no-op in that case.
+    """
+    if _column_exists(conn, "capacity_holds", "allocation_id"):
+        conn.execute(
+            "ALTER TABLE capacity_holds "
+            "RENAME COLUMN allocation_id TO capacity_reservation_id"
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -457,5 +477,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_005_escrows_and_listings",
         _migrate_escrows_and_listings,
+    ),
+    Migration(
+        "20260722_001_capacity_holds_reservation_id",
+        _migrate_capacity_holds_reservation_id,
     ),
 )

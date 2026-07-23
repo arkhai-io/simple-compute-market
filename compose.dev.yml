@@ -1,6 +1,6 @@
 # Local dev chain.
 #
-# The domain stacks (domains/vms/compose.yml, domains/apitokens/compose.yml)
+# The domain stacks (domains/vms/compose.yml, domains/apicredits/compose.yml)
 # gate their chain-touching services on a service named `anvil` but do not
 # define it — this file supplies it: an Anvil chain with the Alkahest
 # contracts + mock tokens pre-baked into its state snapshot. Every assembly

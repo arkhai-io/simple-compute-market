@@ -2,10 +2,10 @@
 
 The seller's storefront calls ``verify_escrow_for_settlement`` before any
 provisioning side-effect. It reads the EAS attestation by uid via
-alkahest-py's ``client.erc20.escrow.non_tierable.get_obligation(uid)`` and
-asserts the on-chain obligation_data dict-matches what the seller
-expects, computed via ``build_payment_obligation_data`` from the same
-negotiation inputs the buyer used.
+alkahest-py's ``client.erc20.escrow.default.get_obligation(uid)`` and asserts
+the on-chain obligation_data dict-matches what the seller expects, computed
+via ``build_payment_obligation_data`` from the same negotiation inputs the
+buyer used.
 
 Verification is two-phase:
 
@@ -220,14 +220,18 @@ def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
         "erc1155_token_ids": "erc1155TokenIds",
         "erc1155_amounts": "erc1155Amounts",
         "attestation_uid": "attestationUid",
+        "referenced_attestation_uid": "attestationUid",
     }
     for sdk_attr, canonical_key in field_aliases.items():
         value = getattr(obligation, sdk_attr, None)
         if value is not None:
             raw[canonical_key] = bytes(value) if sdk_attr == "demand" else value
-    attestation = _plain_attestation_request(getattr(obligation, "attestation", None))
+    attestation_value = getattr(obligation, "attestation", None)
+    attestation = _plain_attestation_request(attestation_value)
     if attestation is not None:
         raw["attestation"] = attestation
+    elif attestation_value is not None:
+        raw["attestationUid"] = attestation_value
     return _normalize_obligation_data(raw)
 
 
@@ -242,7 +246,7 @@ async def verify_escrow_for_settlement(
     chain_name: str,
     alkahest_address_config_path: str | None,
     escrow_proposal: Any = None,
-    escrow_kind: str = "erc20_escrow_obligation_nontierable",
+    escrow_kind: str = "erc20_escrow_obligation_default",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
     build_obligation_data_fn: Any = None,
@@ -281,7 +285,7 @@ async def verify_escrow_for_settlement(
         and the ``escrow_kind`` default.
     escrow_kind:
         Fallback escrow slot name when ``escrow_proposal`` is None.
-        Today only ``"erc20_escrow_obligation_nontierable"`` is
+        Today ``"erc20_escrow_obligation_default"`` is
         registered.
     now_unix:
         Override for ``time.time()`` (test seam).

@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Callable
 
 from domains.vms.listings import extract_compute_from_order
+from domains.vms.listings.models import Listing
 
 
 _REQUIRED_COMPUTE_KEYS = (
@@ -13,8 +14,12 @@ _REQUIRED_COMPUTE_KEYS = (
     "resource_id",
     "region",
     "gpu_model",
-    "gpu_count",
 )
+
+# checked against a resource's multidimensional capacity with full
+# held/available accounting, forwarded only when the listing declares
+# them so older listings without a shape keep working unchanged.
+_DIMENSION_COMPUTE_KEYS = ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
 
 
 def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict[str, Any]:
@@ -26,10 +31,29 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
     negotiation accept paths) run after such validation. Silently returning
     ``{}`` for the model shape un-pins the claim and makes capacity
     reservations grab the wrong resource.
+
+    A listing carrying both ``pool_id`` and ``resource_id`` is treated as an
+    intentionally specific-resource listing: ``pool_id`` is dropped from the
+    claim so matching pins to the named resource rather than requiring both
+    to match.
+
+    The returned claim also carries a ``dimensions`` map built from
+    ``gpu_count``/``vcpu_count``/``ram_gb``/``disk_gb``. These are the
+    listing's fixed, seller-declared shape, so admission checks that every
+    requested dimension fits rather than checking GPU count alone.
+
+    Raises ``ValueError`` if the order is missing or yields neither ``pool_id``
+    nor ``resource_id`` — an under-specified claim would otherwise silently
+    match on shape attributes (region/gpu_model/gpu_count) alone, which is
+    exactly the "grabs whatever resource is first in line" bug class this
+    function exists to prevent. Listing creation is expected to already
+    reject this shape (``ListingService._parse_offer_and_escrows``); this is
+    a backstop for any listing that reaches claim-building anyway.
     """
-    required_attributes: dict[str, Any] = {}
     if not order_dict:
-        return required_attributes
+        raise ValueError("Cannot build a capacity claim without a settlement order.")
+    required_attributes: dict[str, Any] = {}
+    dimensions: dict[str, Any] = {}
     compute_resource = extract_compute_from_order(order_dict)
     if hasattr(compute_resource, "model_dump"):
         compute_resource = compute_resource.model_dump()
@@ -37,12 +61,30 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
         for key in _REQUIRED_COMPUTE_KEYS:
             if compute_resource.get(key) is not None:
                 required_attributes[key] = compute_resource[key]
+        for key in _DIMENSION_COMPUTE_KEYS:
+            if compute_resource.get(key) is not None:
+                dimensions[key] = compute_resource[key]
+    for identity_key in ("pool_id", "resource_id"):
+        if identity_key in required_attributes:
+            required_attributes[identity_key] = Listing.normalize_capacity_identifier(
+                required_attributes[identity_key], field_name=identity_key
+            )
+    if required_attributes.get("resource_id") is not None:
+        required_attributes.pop("pool_id", None)
+    if not required_attributes.get("pool_id") and not required_attributes.get("resource_id"):
+        order_id = order_dict.get("listing_id") or order_dict.get("order_id")
+        raise ValueError(
+            f"Cannot build a capacity claim for order {order_id!r}: neither "
+            "pool_id nor resource_id is present on its offer_resource."
+        )
+    if dimensions:
+        required_attributes["dimensions"] = dimensions
     return required_attributes
 
 
 async def build_provisioning_job_spec(
     *,
-    order_dict: dict[str, Any] | None,
+    order_dict: dict[str, Any],
     ssh_public_key: str,
     duration_seconds: int,
     capacity: Any,
@@ -50,7 +92,7 @@ async def build_provisioning_job_spec(
 ) -> dict[str, Any] | None:
     """Probe the capacity ledger (read-only) and build a VM job spec."""
     required_attributes = compute_capacity_claim_from_order(order_dict)
-    selected = await capacity.probe(claim=required_attributes or None)
+    selected = await capacity.probe(claim=required_attributes)
     if not selected:
         return None
 

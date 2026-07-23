@@ -103,7 +103,7 @@ def available_compute_slices(
     conn.row_factory = sqlite3.Row
     try:
         has_pools = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_inventory_pools'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
         ).fetchone() is not None
         has_members = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
@@ -122,7 +122,7 @@ def available_compute_slices(
                        p.accepted_escrows, p.max_duration_seconds,
                        m.resource_id, m.gpu_count, m.status, m.attributes,
                        {site_select}
-                FROM compute_inventory_pools p
+                FROM compute_capacity_pools p
                 JOIN compute_pool_members m ON m.pool_id = p.pool_id
                 WHERE p.resource_type = 'compute.gpu'
                   AND p.status = 'active'

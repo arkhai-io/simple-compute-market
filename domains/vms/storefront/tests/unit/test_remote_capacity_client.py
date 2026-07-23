@@ -76,17 +76,18 @@ async def test_remote_client_speaks_the_capacity_wire_contract(
     reserved = await client.reserve(
         claim={"gpu_count": 3}, deal_ref={"escrow_uid": "0xesc"},
     )
-    assert reserved["allocation_id"]
+    assert reserved["capacity_reservation_id"]
     assert reserved["available_gpu_count"] == 8
 
     await client.commit(
         resource_id=reserved["resource_id"],
-        allocation_id=reserved["allocation_id"],
-        lease_end_utc="2099-01-01 00:00",
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01 01:00",
         idempotency_ref="0xesc",
     )
     truncated = await client.truncate_lease(
-        allocation_id=reserved["allocation_id"], lease_end_utc="2026-06-01 00:00",
+        capacity_reservation_id=reserved["capacity_reservation_id"], lease_end_utc="2026-06-01 00:00",
     )
     assert truncated["lease_end_utc"] == "2026-06-01 00:00"
 
@@ -106,12 +107,12 @@ async def test_remote_client_speaks_the_capacity_wire_contract(
 
 
 @pytest.mark.asyncio
-async def test_commit_without_allocation_id_is_an_error(
+async def test_commit_without_capacity_reservation_id_is_an_error(
     client: cc.RemoteCapacityClient,
 ):
-    with pytest.raises(ValueError, match="allocation_id"):
+    with pytest.raises(ValueError, match="capacity_reservation_id"):
         await client.commit(
-            resource_id="r", allocation_id=None, lease_end_utc="2099-01-01 00:00",
+            resource_id="r", capacity_reservation_id=None, lease_end_utc="2099-01-01 00:00",
         )
 
 
@@ -126,13 +127,13 @@ async def test_member_availability_view_reflects_consumption(
 
 
 @pytest.mark.asyncio
-async def test_list_allocations_filters(client: cc.RemoteCapacityClient):
+async def test_list_reservations_filters(client: cc.RemoteCapacityClient):
     reserved = await client.reserve(
         claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xq"},
     )
-    rows = await client.list_allocations(escrow_uid="0xq")
-    assert [a["allocation_id"] for a in rows] == [reserved["allocation_id"]]
-    assert await client.list_allocations(state="released") == []
+    rows = await client.list_reservations(escrow_uid="0xq")
+    assert [a["capacity_reservation_id"] for a in rows] == [reserved["capacity_reservation_id"]]
+    assert await client.list_reservations(state="released") == []
 
 
 def test_build_always_aggregates_site_authorities():
@@ -145,7 +146,7 @@ def test_build_always_aggregates_site_authorities():
 
 
 def test_build_is_a_config_keyed_singleton():
-    """The aggregator (and its allocation→site routing cache) survives
+    """The aggregator (and its reservation→site routing cache) survives
     across build calls until the site configuration changes."""
     with patch("market_storefront.utils.config.settings", _settings()):
         first = cc.build_capacity_client(lambda: None)
@@ -201,6 +202,40 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
     assert [c[0] for c in calls] == ["close", "reopen"]
     # Availability came from the site snapshot, keyed for the home site.
     assert calls[0][2][(None, "compute-kvm1-001")] == 6
+
+
+@pytest.mark.asyncio
+async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
+    client: cc.RemoteCapacityClient,
+):
+    """A mixed-direction registration e.g. GPU count grew while RAM shrank.
+    "capacity_changed" must run both reconciliation passes and not be silently
+    ignored like an unrecognized kind would be."""
+    calls: list[str] = []
+
+    async def fake_close(db_path, *, member_availability=None):
+        calls.append("close")
+        return []
+
+    async def fake_reopen(db_path, *, member_availability=None):
+        calls.append("reopen")
+        return []
+
+    subscriber = cc._make_listing_reconcile_subscriber(
+        lambda: SimpleNamespace(db_path="/tmp/x.db"), client,
+    )
+    with patch(
+        "market_storefront.services.publication_service."
+        "close_stale_compute_listings_after_capacity_change",
+        fake_close,
+    ), patch(
+        "market_storefront.services.publication_service."
+        "reopen_available_compute_listings_after_capacity_change",
+        fake_reopen,
+    ):
+        await subscriber(CapacityDelta(kind="capacity_changed", version=1))
+
+    assert calls == ["close", "reopen"]
 
 
 @pytest.mark.asyncio

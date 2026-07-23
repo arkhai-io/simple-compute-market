@@ -1,8 +1,8 @@
 # Simple Compute Market
 
-Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through a listings registry, negotiate prices peer-to-peer over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
+Simple Compute Market is a reference implementation of an open compute market. Buyers find sellers through federated listing registries, negotiate prices peer-to-peer with seller storefronts over signed HTTP, and settle on-chain with escrow-backed obligations via [Alkahest](https://github.com/arkhai-io/alkahest). Buyers run a CLI; sellers run a storefront server; the registry is only a listings index; provisioning stays with the seller's own service.
 
-Compute is the concrete domain, but the goal is the pattern: userland buyer, storefront, and registry roles with peer-to-peer negotiation and escrowed settlement. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
+Compute is the concrete domain, but the goal is the pattern: independent userland buyer, storefront, registry, and seller resource-service roles with peer-to-peer negotiation and escrowed settlement. There is no canonical platform role that owns both discovery and fulfillment. Another asset class should be able to reuse that shape by substituting its own resource schemas, escrow contracts, and execution modules.
 
 ## Design notes
 
@@ -12,16 +12,16 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 
 - `domains/vms/buyer/` — VM buyer CLI (`market` console script)
 - `domains/vms/storefront/` — VM seller server + admin CLI (`market-storefront` console script)
-- `domains/vms/provisioning/service/` — VM provisioning microservice
+- `provisioning/compute/service/` — VM provisioning microservice
 - `kit/alkahest/`, `kit/config/`, `kit/identity/` — Shared from-below helpers for chain settlement, config, and identity
 - `kit/policy/` — Shared negotiation middleware machinery
-- `core/registry/` — Listings registry / indexer API (FastAPI)
+- `core/registry/` — Listing registry API (FastAPI)
 - `core/registry-client/` — Async + sync Python client for the registry HTTP API
 - `core/storefront-client/` — Async + sync Python client for the storefront HTTP API
 - `compose/` — Docker Compose stacks for the seller side
 - `helm/` — Kubernetes/Helm charts for production seller + registry deployments
 - `scripts/zerotier/` — ZeroTier controller scripts
-- `docs/` — User/operator quickstarts and configuration reference (developer/internal docs live under `docs/development/`)
+- `docs/` — User/operator quickstarts, domain-authoring guides, and configuration reference (repo-internal development docs live under `docs/development/`)
 - `scripts/` — Repo-root wrappers for build, install, validation, and clean-room workflows
 - `tools/` — Repo-owned developer and validation tools
 
@@ -29,9 +29,13 @@ Simple Compute Market is inspired by [Compositional Game Theory (CGT)](https://g
 
 Pick the role you're standing up:
 
+- **Understand market roles** → [`docs/roles.md`](./docs/roles.md)
 - **Buy compute** → [`docs/buyer-quickstart.md`](./docs/buyer-quickstart.md)
-- **Sell compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
-- **Run your own indexer registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
+- **Sell VM compute** → [`docs/seller-quickstart.md`](./docs/seller-quickstart.md)
+- **Sell bare-metal compute** → [`docs/bare-metal-seller-quickstart.md`](./docs/bare-metal-seller-quickstart.md)
+- **Run your own listing registry** → [`docs/indexer-quickstart.md`](./docs/indexer-quickstart.md)
+- **Implement a new market domain** → [`docs/domain-authoring/`](./docs/domain-authoring/)
+- **Deploy cookbook examples** → [`docs/cookbooks/`](./docs/cookbooks/)
 - **Add FRP reverse-proxy for VM subdomains (seller)** → [`docs/seller-frp-setup.md`](./docs/seller-frp-setup.md)
 - **Set up a private ZeroTier overlay (operator)** → [`docs/zerotier-setup.md`](./docs/zerotier-setup.md)
 
@@ -52,5 +56,6 @@ Validation and issue-discovery docs:
 
 ## Reference
 
-- [`docs/development/ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) — end-to-end design: components, request flow, on-chain schema, negotiation policy machinery
+- [`openspec/README.md`](./openspec/README.md) — canonical capability specifications, active changes, and planning workflow; [`ARCHITECTURE.md`](./docs/development/ARCHITECTURE.md) is the non-normative orientation page
 - [`docs/configuration.md`](./docs/configuration.md) — config reference: bundled negotiation + aggregation policies and how to write custom ones
+- [`docs/roles.md`](./docs/roles.md) — canonical role boundaries: registries, storefronts, seller resource services, and buyers

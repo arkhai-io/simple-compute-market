@@ -32,14 +32,14 @@ def sign_eip191(private_key: str, message: str) -> str:
 
     msg = encode_defunct(text=message)
     signed = Account.sign_message(msg, private_key=private_key)
-    return signed.signature.hex()
+    return str(signed.signature.hex())
 
 
 def address_from_private_key(private_key: str) -> str:
     """Derive the EIP-191 wallet address (lowercase) for a private key."""
     from eth_account import Account
 
-    return Account.from_key(private_key).address.lower()
+    return str(Account.from_key(private_key).address).lower()
 
 
 def build_auth_headers(

@@ -21,9 +21,6 @@ dependencies = [
     "arkhai-kit-identity",
 ]
 
-[tool.uv.sources]
-arkhai-kit-identity = { path = "../../kit/identity", editable = true }
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 

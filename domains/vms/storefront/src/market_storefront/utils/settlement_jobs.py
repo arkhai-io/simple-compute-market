@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from arkhai_vms_common import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from market_core.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,14 @@ def _resolve_duration_seconds(thread: dict[str, Any], order_dict: dict[str, Any]
         or order_dict.get("max_duration_seconds")
         or 3600
     )
+
+
+def _resolve_start_utc(thread: dict[str, Any]) -> str | None:
+    raw = thread.get("requested_start_utc")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 def _resolve_compute_resource(order_dict: dict[str, Any]) -> dict[str, Any] | None:
@@ -130,6 +138,7 @@ async def start_settlement_job(
     # request; for now built locally from the negotiation thread + listing.
     provision = make_vm_provision_terms(
         duration_seconds=_resolve_duration_seconds(thread, our_order_dict),
+        start_utc=_resolve_start_utc(thread),
         ssh_public_key=ssh_public_key,
         compute_resource=_resolve_compute_resource(our_order_dict),
     )
@@ -247,18 +256,20 @@ async def _run_settlement_job_bg(
     claim_escrow_address: str | None = None,
 ) -> None:
     """Background coroutine: run fulfillment, patch the job row."""
-    # Imported here so unit tests can mock fulfill_compute_obligation by
-    # patching the symbol on this module.
-    from market_storefront.services.fulfillment_service import fulfill_compute_obligation
+    from market_storefront.domain_runtime import get_market_domain_contract
     from market_storefront.utils.config import settings
 
+    fulfillment = get_market_domain_contract().fulfillment
+    assert fulfillment is not None
+
     try:
-        result = await fulfill_compute_obligation(
+        result = await fulfillment.fulfill(
             client=alkahest_client,
             escrow_uid=escrow_uid,
             ssh_public_key=provision.ssh_public_key,
             order=order_dict,
             duration_seconds=provision.duration_seconds,
+            start_utc=provision.start_utc,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
         )

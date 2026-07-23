@@ -12,10 +12,10 @@ MODULE ?= contracts
 
 # Path to the monorepo .dist/ wheel directory, relative to e2e-tests/.
 # Used by uv when resolving pure-Python internal packages (arkhai-vms-buyer,
-# arkhai-kit-policy, arkhai-vms-storefront, arkhai-vms-provisioning) that are distributed as wheels rather than editable
+# arkhai-kit-policy, arkhai-vms-storefront, and the VM operator client) that are distributed as wheels rather than editable
 # source installs.  The Dockerfile passes --find-links /dist on the uv sync
 # CLI instead; this variable is for local development only.
-DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+DIST_DIR ?= ../.dist
 
 .PHONY: build venv test test-e2e
 
@@ -31,14 +31,10 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client \
-	--upgrade-package arkhai-vms-provisioning \
-	--upgrade-package arkhai-vms-storefront \
-	--reinstall-package arkhai-core-registry-client \
-	--reinstall-package arkhai-core-storefront-client \
-	--reinstall-package arkhai-vms-provisioning \
-	--reinstall-package arkhai-vms-storefront
+	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
+	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
+	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
 
 # -----------------------------------------------------------------------
 # Build
@@ -98,7 +94,7 @@ NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_tokens_deal
+              or e2e_credits_deal
 
 test-buyer-machine:
 	docker run --rm \
