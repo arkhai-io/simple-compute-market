@@ -70,7 +70,9 @@ def provider():
 
 @pytest.fixture
 def service(provider):
-    return FulfillmentService(provider_registry=ProviderRegistry({"ansible": provider}))
+    return FulfillmentService(
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+    )
 
 
 class TestCreateIdempotency:

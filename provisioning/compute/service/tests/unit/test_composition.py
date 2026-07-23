@@ -17,6 +17,7 @@ from compute_provisioning_service import (
     ExecutorAdapterContribution,
     compose_adapter_bundles,
 )
+from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 
 
 @dataclass
@@ -69,6 +70,19 @@ def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
         action_kinds=frozenset(actions),
         release_executor=FakeReleaseExecutor(),
     )
+
+
+def test_vm_bundle_scopes_ansible_provider_to_compute_gpu():
+    provider = FakeProvider()
+    bundle = build_vm_adapter_bundle(
+        compute_adapter=FakeAdapter("vm"),
+        release_executor=FakeReleaseExecutor(),
+        fulfillment_provider=provider,
+    )
+
+    assert bundle.fulfillment_providers == {
+        ("ansible", "compute.gpu"): provider,
+    }
 
 
 def test_composes_executor_and_provider_namespaces_independently():
@@ -129,6 +143,68 @@ def test_duplicate_provider_identifies_both_bundles_independently_of_executors()
                     executors=(contribution("bare_metal", "grant_access"),),
                     fulfillment_providers={"ansible": provider},
                 ),
+            ]
+        )
+
+
+def test_same_provider_name_may_be_scoped_to_different_resource_kinds():
+    vm_provider = FakeProvider()
+    bare_metal_provider = FakeProvider()
+    composed = compose_adapter_bundles(
+        [
+            ExecutorAdapterBundle(
+                name="vm",
+                executors=(contribution("vm", "create"),),
+                fulfillment_providers={
+                    ("ansible", "compute.gpu"): vm_provider,
+                },
+            ),
+            ExecutorAdapterBundle(
+                name="bare-metal",
+                executors=(contribution("bare_metal", "grant_access"),),
+                fulfillment_providers={
+                    ("ansible", "bare_metal"): bare_metal_provider,
+                },
+            ),
+        ]
+    )
+
+    assert composed.provider_registry.require("ansible", "compute.gpu") is vm_provider
+    assert composed.provider_registry.require("ansible", "bare_metal") is bare_metal_provider
+
+
+def test_duplicate_scoped_provider_identifies_both_bundles():
+    provider = FakeProvider()
+    with pytest.raises(
+        ValueError,
+        match="duplicate fulfillment provider .*ansible.*compute.gpu.*'first'.*'second'",
+    ):
+        compose_adapter_bundles(
+            [
+                ExecutorAdapterBundle(
+                    name="first",
+                    executors=(contribution("vm", "create"),),
+                    fulfillment_providers={("ansible", "compute.gpu"): provider},
+                ),
+                ExecutorAdapterBundle(
+                    name="second",
+                    executors=(contribution("bare_metal", "grant_access"),),
+                    fulfillment_providers={("ansible", "compute.gpu"): provider},
+                ),
+            ]
+        )
+
+
+@pytest.mark.parametrize("key", [("", "compute.gpu"), ("ansible", "")])
+def test_empty_scoped_provider_identity_is_rejected(key):
+    with pytest.raises(ValueError, match="empty provider or resource-kind identity"):
+        compose_adapter_bundles(
+            [
+                ExecutorAdapterBundle(
+                    name="invalid",
+                    executors=(contribution("vm", "create"),),
+                    fulfillment_providers={key: FakeProvider()},
+                )
             ]
         )
 

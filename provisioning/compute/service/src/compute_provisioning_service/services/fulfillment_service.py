@@ -84,7 +84,10 @@ class FulfillmentService:
     ) -> FulfillmentValidationResult:
         issues: list[FulfillmentValidationIssue] = []
         try:
-            provider = self._provider_registry.require(resource.provider)
+            provider = self._provider_registry.require(
+                resource.provider,
+                resource.resource_kind,
+            )
         except Exception as exc:
             issues.append(FulfillmentValidationIssue(code="provider_not_found", message=str(exc), field="resource.provider"))
             return FulfillmentValidationResult(tuple(issues))
@@ -141,7 +144,10 @@ class FulfillmentService:
                 raise FulfillmentConflictError(
                     f"capacity_reservation_id={request.capacity_reservation_id!r} does not exist"
                 )
-        provider = self._provider_registry.require(resource.provider)
+        provider = self._provider_registry.require(
+            resource.provider,
+            resource.resource_kind,
+        )
         result = await provider.create(request, resource)
         self._entries[request.capacity_reservation_id] = FulfillmentEntry(
             request=request, resource=resource, create_result=result
@@ -153,7 +159,10 @@ class FulfillmentService:
         if entry.teardown_result is not None:
             return entry.teardown_result
 
-        provider = self._provider_registry.require(entry.resource.provider)
+        provider = self._provider_registry.require(
+            entry.resource.provider,
+            entry.resource.resource_kind,
+        )
         result = await provider.teardown(
             capacity_reservation_id,
             entry.resource,
@@ -179,7 +188,10 @@ class FulfillmentService:
                 f"capacity_reservation_id={capacity_reservation_id!r} has no {operation!r} operation "
                 "to check status for"
             )
-        provider = self._provider_registry.require(entry.resource.provider)
+        provider = self._provider_registry.require(
+            entry.resource.provider,
+            entry.resource.resource_kind,
+        )
         return await provider.get_status(
             capacity_reservation_id, entry.resource, result.provider_metadata
         )

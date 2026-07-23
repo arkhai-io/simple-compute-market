@@ -32,7 +32,9 @@ def build_vm_adapter_bundle(
                 release_executor=release_executor,
             ),
         ),
-        fulfillment_providers={"ansible": fulfillment_provider},
+        fulfillment_providers={
+            ("ansible", "compute.gpu"): fulfillment_provider,
+        },
         router_mounts=vm_router_mounts(),
         readiness_checks=checks,
     )

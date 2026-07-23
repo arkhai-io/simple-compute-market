@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeAlias
 if TYPE_CHECKING:
     from .settlement_types import PhysicalSettlementRequest, SettlementResource
 
@@ -50,8 +50,41 @@ class FulfillmentStatusFailedError(FulfillmentError): pass
 class FulfillmentTeardownFailedError(FulfillmentError): pass
 class FulfillmentRequestInvalidError(FulfillmentError): pass
 
+ProviderRegistrationKey: TypeAlias = str | tuple[str, str]
+
+
 class ProviderRegistry:
-    def __init__(self, providers:dict[str,FulfillmentProvider]): self._providers=dict(providers)
-    def require(self, provider:str)->FulfillmentProvider:
-        try: return self._providers[provider]
-        except KeyError: raise ProviderNotFoundError(f"No FulfillmentProvider registered for provider={provider!r}") from None
+    """Resolve domain providers by infrastructure mechanism and resource kind.
+
+    Provider-only registrations remain as an explicit compatibility fallback.
+    A scoped registration is never inferred for a provider-only lookup or for a
+    different resource kind.
+    """
+
+    def __init__(
+        self,
+        providers: dict[ProviderRegistrationKey, FulfillmentProvider],
+    ) -> None:
+        self._providers = dict(providers)
+
+    def require(
+        self,
+        provider: str,
+        resource_kind: str | None = None,
+    ) -> FulfillmentProvider:
+        if resource_kind is not None:
+            scoped = self._providers.get((provider, resource_kind))
+            if scoped is not None:
+                return scoped
+        legacy = self._providers.get(provider)
+        if legacy is not None:
+            return legacy
+        scope = (
+            f", resource_kind={resource_kind!r}"
+            if resource_kind is not None
+            else ""
+        )
+        raise ProviderNotFoundError(
+            "No FulfillmentProvider registered for "
+            f"provider={provider!r}{scope}"
+        )

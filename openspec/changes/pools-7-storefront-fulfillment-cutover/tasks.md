@@ -227,7 +227,8 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
   - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
   - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
 - [ ] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
-- [ ] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
+- [x] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
+  - [x] 6.2.1 Route provider resolution by exact `(provider, resource_kind)` in `kit/fulfillment`, compute-service composition, and every `FulfillmentService` call site. Retain provider-only registrations only as explicit compatibility fallback; add registry/composition/service tests; register the VM provider for `("ansible", "compute.gpu")`; promote the contract to `openspec/specs/fulfillment/spec.md`.
 - [ ] 6.3 Split provider behavior into synchronous `prepare_create`/`prepare_teardown` and post-commit `dispatch_create`/`dispatch_teardown` operations.
 - [ ] 6.4 Validate and persist versioned prepared input in the same transaction that accepts a pending provider command.
 - [ ] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.

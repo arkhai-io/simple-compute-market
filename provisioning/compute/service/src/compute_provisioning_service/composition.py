@@ -9,7 +9,11 @@ from typing import Any
 from compute_provisioning import ExecutorAdapter, ExecutorAdapterRegistry
 from compute_provisioning.app import ComputeProvisioningRouterMount
 from compute_provisioning.release import ExecutorReleaseDispatcher, ExecutorReleasePort
-from market_fulfillment import FulfillmentProvider, ProviderRegistry
+from market_fulfillment import (
+    FulfillmentProvider,
+    ProviderRegistrationKey,
+    ProviderRegistry,
+)
 
 
 @dataclass(frozen=True)
@@ -32,7 +36,9 @@ class ExecutorAdapterBundle:
 
     name: str
     executors: tuple[ExecutorAdapterContribution, ...]
-    fulfillment_providers: Mapping[str, FulfillmentProvider] = field(default_factory=dict)
+    fulfillment_providers: Mapping[ProviderRegistrationKey, FulfillmentProvider] = field(
+        default_factory=dict,
+    )
     router_mounts: tuple[ComputeProvisioningRouterMount, ...] = ()
     readiness_checks: Mapping[str, Callable[[], Any]] = field(default_factory=dict)
 
@@ -74,6 +80,33 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
     return executor_kind
 
 
+def _normalize_provider_key(
+    bundle_name: str,
+    key: ProviderRegistrationKey,
+) -> ProviderRegistrationKey:
+    if isinstance(key, str):
+        provider = key.strip()
+        if not provider:
+            raise ValueError(
+                f"adapter bundle {bundle_name!r} has an empty provider identity"
+            )
+        return provider
+    if not isinstance(key, tuple) or len(key) != 2:
+        raise ValueError(
+            f"adapter bundle {bundle_name!r} has an invalid provider registration {key!r}"
+        )
+    if not all(isinstance(value, str) for value in key):
+        raise ValueError(
+            f"adapter bundle {bundle_name!r} has a non-string provider registration {key!r}"
+        )
+    provider, resource_kind = (value.strip() for value in key)
+    if not provider or not resource_kind:
+        raise ValueError(
+            f"adapter bundle {bundle_name!r} has an empty provider or resource-kind identity"
+        )
+    return provider, resource_kind
+
+
 def compose_adapter_bundles(
     bundles: tuple[ExecutorAdapterBundle, ...] | list[ExecutorAdapterBundle],
     *,
@@ -83,11 +116,11 @@ def compose_adapter_bundles(
 
     executor_owners: dict[str, str] = {}
     action_owners: dict[tuple[str, str], str] = {}
-    provider_owners: dict[str, str] = {}
+    provider_owners: dict[ProviderRegistrationKey, str] = {}
     readiness_owners: dict[str, str] = {}
     adapters: list[ExecutorAdapter] = []
     release_executors: dict[str, ExecutorReleasePort] = {}
-    providers: dict[str, FulfillmentProvider] = {}
+    providers: dict[ProviderRegistrationKey, FulfillmentProvider] = {}
     routers: list[ComputeProvisioningRouterMount] = []
     readiness_checks: dict[str, Callable[[], Any]] = {}
 
@@ -121,18 +154,16 @@ def compose_adapter_bundles(
             adapters.append(contribution.adapter)
             release_executors[executor_kind] = contribution.release_executor
 
-        for provider_name, provider in bundle.fulfillment_providers.items():
-            provider_name = provider_name.strip()
-            if not provider_name:
-                raise ValueError(f"adapter bundle {bundle_name!r} has an empty provider identity")
-            previous = provider_owners.get(provider_name)
+        for contributed_key, provider in bundle.fulfillment_providers.items():
+            provider_key = _normalize_provider_key(bundle_name, contributed_key)
+            previous = provider_owners.get(provider_key)
             if previous is not None:
                 raise ValueError(
-                    f"duplicate fulfillment provider {provider_name!r}: "
+                    f"duplicate fulfillment provider {provider_key!r}: "
                     f"bundles {previous!r} and {bundle_name!r}"
                 )
-            provider_owners[provider_name] = bundle_name
-            providers[provider_name] = provider
+            provider_owners[provider_key] = bundle_name
+            providers[provider_key] = provider
 
         for check_name, check in bundle.readiness_checks.items():
             if not callable(check):

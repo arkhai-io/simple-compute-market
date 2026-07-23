@@ -232,12 +232,17 @@ A `FulfillmentProvider` implements asynchronous:
 
 A provider may expose side-effect-free `validate_create` or preparation behavior. Validation errors MUST be represented as structured issues when used by dry-run surfaces and mapped to typed failures for execution.
 
-`ProviderRegistry` maps a provider identity to exactly one provider instance. Duplicate provider identities fail composition. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
+`ProviderRegistry` MUST resolve a provider using the selected resource's exact `(provider, resource_kind)` pair so independently owned domain adapters may use the same infrastructure mechanism without interpreting one another's requests. Duplicate exact pairs fail composition. A provider-only registration is an explicit compatibility fallback: an exact pair takes precedence, but a scoped registration is never inferred for a provider-only lookup or a different resource kind. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
+
+#### Scenario: Same infrastructure provider serves two resource kinds
+
+- **WHEN** VM and bare-metal adapters both register the `ansible` provider identity for their own resource kinds
+- **THEN** fulfillment dispatches to the exact domain-owned provider for the selected resource kind
 
 #### Scenario: Unknown provider
 
-- **WHEN** a selected resource names an unregistered provider
-- **THEN** validation and execution report `provider_not_found` without falling through to another provider
+- **WHEN** a selected resource names an unregistered provider and resource-kind pair
+- **THEN** validation and execution report `provider_not_found` without falling through to a provider registered for another resource kind
 
 #### Scenario: Equivalent create retry
 

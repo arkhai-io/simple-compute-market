@@ -58,7 +58,7 @@ Implementation therefore resumes at the durable lifecycle/persistence work in ta
   pull for v1, push deferred to a separate change."
 - Resolve `pools-3`'s deferred release-path wiring: give
   `VmReleaseExecutor` (or its replacement) a way to resolve
-  `SettlementRecord` → `ProviderRegistry.require(provider).teardown(...)`
+  `SettlementRecord` → `ProviderRegistry.require(provider, resource_kind).teardown(...)`
   for allocations that went through the settlement path, now that a real
   caller exists to design the call shape against.
 - Resolve `pools-2`'s deferred "persist Capacity Settlement Assignments...

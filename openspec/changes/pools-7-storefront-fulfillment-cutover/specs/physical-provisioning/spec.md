@@ -70,6 +70,14 @@ identity.
 - **THEN** all outputs are represented under the same `fulfillment_id` with
   distinct `provisioned_resource_id` values
 
+### Requirement: Resource-kind-scoped provider routing
+
+The provisioning service MUST resolve fulfillment providers using the selected resource's exact `(provider, resource_kind)` pair. Different domain adapters MAY register the same infrastructure provider identity for distinct resource kinds. Dispatch MUST NOT fall through to a provider registered for another resource kind.
+
+#### Scenario: VM and bare-metal resources use Ansible
+- **WHEN** both resource kinds are assigned from pools whose provider identity is `ansible`
+- **THEN** each fulfillment is dispatched to its own domain adapter's scoped Ansible provider
+
 ### Requirement: Versioned prepared provider operations
 
 Before committing a pending provider-command state, the provider MUST prepare
