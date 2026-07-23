@@ -19,6 +19,25 @@ A bare-metal storefront MUST interpret bare-metal listings, messages, agreed ter
 - **WHEN** an operator or lifecycle transition ends a fulfilled bare-metal agreement
 - **THEN** the storefront requests teardown through the recorded fulfillment and bare-metal executor identity and does not release capacity until authoritative teardown policy permits it
 
+### Requirement: Truthful pre-fulfillment seller protocol
+
+Before selected-site fulfillment is composed, the runnable bare-metal storefront MUST expose listing and negotiation operations, durable commercial settlement verification, health, and persistent operator pause state without claiming that provisioning or access delivery is available. Settlement MUST use the terms accepted during negotiation and MUST NOT accept replacement access or routing input.
+
+#### Scenario: Commercial settlement is verified before fulfillment is composed
+
+- **WHEN** a buyer settles a successfully negotiated bare-metal agreement and escrow verification succeeds
+- **THEN** the storefront durably reports `settlement_verified` with fulfillment unavailable and returns no provisioning job, credential, receipt, or access result
+
+#### Scenario: Settlement is retried
+
+- **WHEN** the same buyer retries an identical verified settlement
+- **THEN** the storefront returns the existing verification result without duplicating state
+
+#### Scenario: Storefront is paused and restarted
+
+- **WHEN** an authenticated operator pauses the storefront and its process restarts
+- **THEN** the paused state remains active and new negotiations are rejected until an authenticated resume operation
+
 ### Requirement: Trusted bare-metal resource projections
 
 A provisioning site that supports specific-resource bare-metal publication MUST expose an operator-enabled complete projection generation in which each eligible resource carries distinct `physical_resource_id`, `physical_host_id`, and executor-local `machine_id` values together with authoritative availability, allocation mode, access methods, capacity, and allowlisted capabilities. The projection MUST exclude credentials, authority URLs, provider configuration, private inventory attributes, and routing metadata.

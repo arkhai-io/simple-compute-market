@@ -53,6 +53,16 @@ The composition will supply:
 
 The shared storefront remains opaque to machine IDs, SSH access details, and bare-metal action payloads. Bare-metal hooks validate those values before crossing the compute contract.
 
+### Expose a truthful pre-fulfillment HTTP contract
+
+The runnable application exposes shared listing and negotiation wire carriers, bare-metal-owned commercial-settlement carriers, health, and persistent operator pause/resume state before POOLS-7 fulfillment lands. Negotiation uses a bare-metal-owned orchestrator around schema-opaque core persistence and the injected domain hooks; VM and API-credit controllers are templates only and are not imported. Domain-invalid opening requests fail before a thread or bare-metal artifact is persisted.
+
+A successful settlement endpoint means only that the persisted accepted agreement and escrow have been verified and a valid settlement plan has been rebuilt. It returns `status="settlement_verified"` and `fulfillment_available=false`; it does not return a provisioning job, credential, receipt, access result, reservation, or other fulfillment claim. Settlement input cannot replace the SSH key or other provision terms accepted during negotiation. Identical settlement retries are idempotent, while conflicting reuse of an escrow identity is rejected.
+
+Global pause/resume state is stored in the storefront database so it survives process restart. Public health reports only authorities actually composed; before trusted projection polling and POOLS-7 wiring it reports those capabilities as unavailable rather than healthy. Negotiation read routes retain the existing shared unauthenticated compatibility contract in this increment; changing their privacy boundary requires a coordinated client and protocol change. Buyer mutation routes continue to use shared signed-request verification, and operator mutation/status routes use the configured admin key.
+
+Reusing VM-shaped settle models was rejected because they accept settlement-time SSH input and advertise provisioning jobs or tenant credentials. Delaying all settlement HTTP until POOLS-7 was also rejected because commercial verification and durable agreement state can be exposed truthfully without claiming fulfillment.
+
 ### Treat selected-site routing as trusted storefront state
 
 Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. Capacity placement selects one site before reservation; the resulting reservation/fulfillment state retains that trusted site binding. Fulfillment, polling, and teardown route through that binding rather than a process-global provisioning URL.
