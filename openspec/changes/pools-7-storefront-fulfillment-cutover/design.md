@@ -63,7 +63,11 @@ cutover.
   resource or a mechanism.
 - `provider` (`"ansible"` today) is an **infrastructure mechanism**
   distinction — how to reach a resource (playbook and executor variables from the pool
-  provider-configuration envelope). `ProviderRegistry` dispatches on this.
+  provider-configuration envelope).
+- `resource_kind` is the **provider-routing domain**. The canonical bare-metal
+  resource kind is `"bare_metal"`; it remains distinct from the identically
+  spelled executor kind and from `virtualization_type`. `ProviderRegistry`
+  dispatches on exact `(provider, resource_kind)` pairs.
 - `market-platform-compute-40-multi-domain-proof` is explicit evidence
   these coexist rather than one replacing the other: it proves
   "VM-shareable and bare-metal-exclusive allocations against the same
@@ -931,8 +935,10 @@ resolves the exact `(provider, resource_kind)` pair from the persisted selected
 resource. Duplicate exact pairs fail startup, but the same provider identity may
 be registered for distinct resource kinds. Legacy provider-only registrations
 remain explicit compatibility fallbacks; a scoped registration is never
-inferred for another resource kind or a provider-only lookup. This preserves
-domain ownership without requiring provider-name migrations in resource pools.
+inferred for another resource kind or a provider-only lookup. The canonical
+registrations are `("ansible", "compute.gpu")` for VM fulfillment and
+`("ansible", "bare_metal")` for bare-metal fulfillment. This preserves domain
+ownership without requiring provider-name migrations in resource pools.
 
 ## Provider input snapshot: prepare/dispatch split (design review continued, 2026-07-17)
 
@@ -1365,7 +1371,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Scheduling uses a narrow transaction-scoped persistence boundary over the existing repositories; deterministic database-concurrency tests instrument that semantic boundary with independent sessions and explicit barriers | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`; `docs/development/ARCHITECTURE.md#deterministic-database-concurrency-tests` |
 | `resize_reservation` supersedes a reservation via one self-managed-session transaction (release-then-reserve, never two independently committed calls); no `_in_session` twin is built without a real co-transactional caller | `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-settlement-abandonment` |
 | `SettlementAbandonmentHook` is called unconditionally from every capacity-reclaiming path (TTL lapse, release, resize); `market_site` never imports `market_fulfillment` to implement it | `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-settlement-abandonment` |
-| Fulfillment providers resolve by exact `(provider, resource_kind)` with only explicit provider-only compatibility fallback | `openspec/specs/fulfillment/spec.md#provider-contract` |
+| Fulfillment providers resolve by exact `(provider, resource_kind)` with only explicit provider-only compatibility fallback; canonical Ansible routes are `compute.gpu` for VM and `bare_metal` for bare metal | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/physical-provisioning/spec.md#validated-executor-registration`; `openspec/specs/physical-provisioning/architecture.md#registration-boundary` |
 | Provider preparation is synchronous and side-effect-free; accepted versioned commands commit before post-commit dispatch, which reads no mutable pool/host configuration | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Periodic SQLite recovery workers claim bounded non-overlapping batches under the single-writer boundary, release locks before provider calls, reclaim expired leases, and back off failed work | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `docs/development/ARCHITECTURE.md#fulfillment` |
 

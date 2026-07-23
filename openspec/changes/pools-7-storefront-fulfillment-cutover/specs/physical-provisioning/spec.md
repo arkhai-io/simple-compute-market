@@ -75,8 +75,9 @@ identity.
 The provisioning service MUST resolve fulfillment providers using the selected resource's exact `(provider, resource_kind)` pair. Different domain adapters MAY register the same infrastructure provider identity for distinct resource kinds. Dispatch MUST NOT fall through to a provider registered for another resource kind.
 
 #### Scenario: VM and bare-metal resources use Ansible
-- **WHEN** both resource kinds are assigned from pools whose provider identity is `ansible`
+- **WHEN** VM fulfillment selects `("ansible", "compute.gpu")` and bare-metal fulfillment selects `("ansible", "bare_metal")`
 - **THEN** each fulfillment is dispatched to its own domain adapter's scoped Ansible provider
+- **AND** neither registration serves or substitutes for the other resource kind
 
 ### Requirement: Versioned prepared provider operations
 

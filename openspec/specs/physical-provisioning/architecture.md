@@ -18,7 +18,7 @@ This replaces a VM-shaped provisioning core with an executor-neutral composition
 
 ## Registration boundary
 
-Adapters register executor actions and FulfillmentProviders explicitly. Duplicate identities fail during startup because silent replacement would make persisted records execute under a different implementation. Provider and executor registration remain independent: fulfillment create/status/teardown and lease-release actions have different contracts and may evolve separately.
+Adapters register executor actions and FulfillmentProviders explicitly. Duplicate executor/action registrations and duplicate exact `(provider, resource_kind)` registrations fail during startup because silent replacement would make persisted records execute under a different implementation. Provider and executor registration remain independent: fulfillment create/status/teardown and lease-release actions have different contracts and may evolve separately. VM and bare-metal adapters may both use Ansible while routing through `("ansible", "compute.gpu")` and `("ansible", "bare_metal")`; neither adapter is a fallback for the other kind.
 
 ## Durable jobs, transient workers
 
@@ -28,7 +28,7 @@ This distinction makes accepted work observable while avoiding false recovery pr
 
 ## Selected-resource execution
 
-Concrete providers operate on the Settlement Resource selected by fulfillment scheduling. The VM Ansible adapter resolves pool/provider configuration, validates it, and snapshots prepared inputs at dispatch. Administrative pool edits therefore affect later operations rather than rewriting the accepted execution.
+Concrete providers operate on the Settlement Resource selected by fulfillment scheduling. The VM and bare-metal Ansible adapters each validate their own domain request and selected resource through a scoped provider route, then snapshot prepared inputs before dispatch. Administrative pool edits therefore affect later operations rather than rewriting the accepted execution.
 
 Operational inventory is authoritative service state, not a checked-in Ansible inventory. Bootstrap inventory may import hosts, and an adapter may render transient execution inventory, but operator mutations and job-history references remain tied to persisted resources.
 

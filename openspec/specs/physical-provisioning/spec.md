@@ -100,7 +100,7 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
+Service composition MUST reject duplicate executor/action kinds, duplicate exact fulfillment-provider `(provider, resource_kind)` pairs, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle. VM and bare-metal adapters MAY both register `ansible`; their canonical scoped routes are `("ansible", "compute.gpu")` and `("ansible", "bare_metal")`, respectively, and cross-kind fallback is prohibited.
 
 #### Scenario: Two adapters claim one executor kind
 

@@ -162,7 +162,7 @@ Capacity events are anonymous availability deltas broadcast through a pull feed.
 
 ### Resource pools
 
-Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
+Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Fulfillment resolves the selected resource through an exact `(provider, resource_kind)` domain-adapter registration; sharing an infrastructure provider such as Ansible does not permit VM and bare-metal adapters to substitute for one another. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
 
 ## Shared vocabulary and identities
 
