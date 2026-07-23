@@ -5,16 +5,18 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
+from core_storefront.escrow_verification import verify_escrow_for_settlement
 from market_core import MarketDomainContract, validate_domain_contract
 
 from .domain_runtime import get_market_domain_contract
 from .negotiation import default_seller_round_hook
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
+from .settlement_service import BareMetalSettlementService
 from .sqlite_client import SQLiteClient
 
 
@@ -27,6 +29,9 @@ class BareMetalStorefrontRuntime:
     seller_id: str
     admin_key: str | None = None
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
+    chain_clients: Mapping[str, Any] = field(default_factory=dict)
+    chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
+    escrow_verifier: Callable[..., Awaitable[None]] = verify_escrow_for_settlement
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
@@ -36,6 +41,17 @@ class BareMetalStorefrontRuntime:
             seller_id=self.seller_id,
             round_hook=default_seller_round_hook(),
             build_plan=self.plan_builder,
+        )
+
+    def settlement_service(self) -> BareMetalSettlementService:
+        """Build commercial verification from explicitly configured chains."""
+        return BareMetalSettlementService(
+            db=self.db,
+            seller_wallet=self.seller_id,
+            chain_clients=self.chain_clients,
+            chain_config_paths=self.chain_config_paths,
+            build_plan=self.plan_builder,
+            verify_escrow=self.escrow_verifier,
         )
 
     async def health(self) -> dict[str, object]:
@@ -51,7 +67,7 @@ class BareMetalStorefrontRuntime:
         checks = {
             "api": "ok",
             "database": "ok",
-            "commercial_settlement": "ok",
+            "commercial_settlement": "ok" if self.chain_clients else "unavailable",
             "site_projection": "unavailable",
             "fulfillment": "unavailable",
         }

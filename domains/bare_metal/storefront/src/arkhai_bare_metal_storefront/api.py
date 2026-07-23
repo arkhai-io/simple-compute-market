@@ -22,8 +22,14 @@ from core_storefront.models.negotiation_models import (
 from core_storefront.models.system_models import AdminPauseResponse, HealthResponse
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
+from .models import (
+    BareMetalSettleRequest,
+    BareMetalSettleResponse,
+    BareMetalSettleStatusResponse,
+)
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
+from .settlement_service import SettlementRequestError
 
 router = APIRouter()
 
@@ -188,6 +194,57 @@ async def get_negotiation(
     if detail is None:
         raise HTTPException(status_code=404, detail="negotiation not found")
     return NegotiationDetailResponse.model_validate(detail)
+
+
+@router.post(
+    "/api/v1/settle/{escrow_uid}",
+    response_model=BareMetalSettleResponse,
+)
+async def settle(
+    escrow_uid: str,
+    body: BareMetalSettleRequest,
+    request: Request,
+) -> BareMetalSettleResponse:
+    runtime = _runtime(request)
+    try:
+        identity = verify_buyer_signature(
+            headers=request.headers,
+            operation="settle_escrow",
+            resource_id=escrow_uid,
+            claimed_address=body.buyer_address,
+        )
+        return await runtime.settlement_service().verify(
+            escrow_uid=escrow_uid,
+            request=body,
+            buyer_identity=identity.identifier,
+        )
+    except (AuthError, SettlementRequestError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.get(
+    "/api/v1/settle/{escrow_uid}/status",
+    response_model=BareMetalSettleStatusResponse,
+)
+async def settle_status(
+    escrow_uid: str,
+    buyer_address: str,
+    request: Request,
+) -> BareMetalSettleStatusResponse:
+    runtime = _runtime(request)
+    try:
+        identity = verify_buyer_signature(
+            headers=request.headers,
+            operation="settle_status",
+            resource_id=escrow_uid,
+            claimed_address=buyer_address,
+        )
+        return await runtime.settlement_service().status(
+            escrow_uid=escrow_uid,
+            buyer_identity=identity.identifier,
+        )
+    except (AuthError, SettlementRequestError) as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.get("/health", response_model=HealthResponse)
