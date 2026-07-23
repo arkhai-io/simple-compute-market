@@ -1323,7 +1323,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Recovery-claim fields live on the aggregate row, not a separate claims table | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | The scheduled market is immutable and every fulfillment acceptance must match it | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Settlement persistence documents and tests SQLite transaction guarantees rather than portable row-lock claims | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
-| Recovery selection in Section 3 is provisional; Section 7 owns the final operational claim protocol | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Recovery selection in Section 3 is provisional; Section 6 (recovery and lifecycle convergence, renumbered 2026-07-23) owns the final operational claim protocol | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Generic lifecycle updates are limited to the shared mutable lifecycle payload and cannot alter aggregate invariants | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Repository callers provide validated canonical models; persistence performs structural JSON equality rather than arbitrary-input canonicalization | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | `CapacityLedgerService` session-accepting entry points let a higher-layer caller compose one transaction across reservation state and settlement assignment | `openspec/specs/site-capacity/spec.md#relationship-to-fulfillment-scheduling` |
@@ -1593,9 +1593,9 @@ These decisions refine the Section 3 persistence design after review. They prese
 
 The compute provisioning service uses SQLite and has no planned PostgreSQL deployment. Section 3 must therefore describe and test the strongest concurrency guarantee actually available in that environment rather than claiming portable `SELECT ... FOR UPDATE` semantics. Fulfillment acceptance must serialize access to the existing aggregate within an explicit SQLite transaction so concurrent callers cannot durably create or return different `fulfillment_id` values. Aggregate creation remains guarded by the `capacity_reservation_id` primary key; an observable insert race must be translated by re-reading the winning row and applying the ordinary equivalent/conflicting request rules.
 
-### Recovery selection remains provisional until Section 7
+### Recovery selection remains provisional until Section 6
 
-The recovery columns belong on the aggregate row, but the Section 3 helper is not the final multi-worker claim protocol. It must be named and documented as a single-worker SQLite persistence primitive. Section 7 owns the operational worker model, acquisition/lease semantics, duplicate-dispatch prevention, and the tests that prove those guarantees. Permanent Section 3 documentation may describe the durable claim fields and lease intent, but must not present the provisional helper as the completed recovery algorithm.
+The recovery columns belong on the aggregate row, but the Section 3 helper is not the final multi-worker claim protocol. It must be named and documented as a single-worker SQLite persistence primitive. Section 6 ("Add provisioning-owned recovery and lifecycle convergence," renumbered from 7 on 2026-07-23 — see "Section 5/6/7 resequencing decision" below) owns the operational worker model, acquisition/lease semantics, duplicate-dispatch prevention, and the tests that prove those guarantees. Permanent Section 3 documentation may describe the durable claim fields and lease intent, but must not present the provisional helper as the completed recovery algorithm.
 
 ### Generic lifecycle updates with kit-owned restrictions
 
@@ -1852,3 +1852,177 @@ registered post-Section-2) and confirming no other caller still depends
 on attributes-only registration, as its own explicit task — not a
 same-commit incidental deletion while rewriting candidate enumeration
 for an unrelated reason.
+
+## Section 5/6/7 resequencing decision (discuss phase, resolved 2026-07-23)
+
+Section 4 is accepted as complete. `tasks.md` Section 4's remaining items
+(4.7.4–4.7.6, 4.10.4, 4.11.4–4.11.5, 4.13, 4.15) are executable-validation and
+production-composition test gaps, not open design or implementation
+questions, and are deferred to the final POOLS-7 review pass rather than
+blocking further sections. That deferral is a validation-completeness
+decision, not a reopening of any Section 4 design question above.
+
+Inspecting the current codebase for what "Migrate existing hosts and active
+leases" (originally Section 5) actually depends on surfaced a genuine
+sequencing problem, recorded in full below and now resolved by reordering
+the plan.
+
+### The problem
+
+The original order was 5 (migrate hosts/leases) → 6 (fulfillment acceptance)
+→ 7 (recovery/lifecycle convergence). Checked against current code:
+
+- `proposal.md`/this file's "Active allocation backfill during cutover" and
+  "Active-allocation migration and backfill" sections say the migration
+  derives, per reservation, "selected resource, provider identity, and
+  **versioned teardown input**." But `AnsibleFulfillmentProvider.create()`/
+  `.teardown()` (originally Section 6, task 6.3) still use the pre-split
+  shape — no `prepare_create`/`prepare_teardown` distinct from
+  `dispatch_create`/`dispatch_teardown` — and `AnsibleFulfillmentMetadata`
+  (`vm_host`, `vm_target`, job ids, `operation`) is a plain Pydantic model
+  dumped to a dict via `FulfillmentResult(provider_metadata=metadata.model_dump())`,
+  not a `VersionedEnvelope`. There is today no concrete `kind`/`schema_version`
+  registered for "ansible teardown operation" anywhere in `envelopes.py` or
+  the adapter. Task 1.6 deliberately deferred concrete payload kinds to "the
+  sections that need them" — that section was originally 6.
+- `compute_provisioning_service/services/fulfillment_service.py`'s
+  `FulfillmentService` is still the pre-Section-3 in-memory implementation
+  (`FulfillmentEntry` in a process-local `dict`; its own docstring says "used
+  until durable lifecycle records own retries"). `begin_fulfillment` as a
+  durable, callable operation does not exist yet.
+- Even if the envelope shape were pulled forward in isolation, a second,
+  independent problem remains: a backfilled row sitting in `dispatching` or
+  `teardown_dispatch_pending` needs something to converge it to a terminal
+  state. That convergence sweep was originally Section 7, also unbuilt.
+  Running the migration before it exists would leave real backfilled rows
+  frozen indefinitely while the *actual* VM lifecycle keeps progressing
+  through today's pre-cutover path (`LeaseLifecycleService`, direct executor
+  polling, `VmReleaseExecutor`) — since Sections 9/10 (the storefront/teardown
+  cutover that retires that old path) come later regardless of this
+  reordering. By the time a recovery sweep eventually exists, it would
+  inherit rows already stale relative to reality, turning an ordinary
+  crash-recovery sweep into one that also has to handle "this row is old and
+  possibly already resolved in the real world" as a normal case.
+
+Two candidate fixes were considered:
+
+  (a) **Full reorder** — implement fulfillment acceptance and recovery first,
+      migration last, so the migration only has to reproduce a shape both
+      consuming systems already accept and can already converge.
+  (b) **Pull forward only the pieces migration strictly needs** — define just
+      the versioned envelope kind (and possibly a narrow one-shot poll-and-
+      correct step in place of a full watchdog) ahead of the rest of Sections
+      6/7, without reordering the sections themselves.
+
+(b) is lighter-weight but concentrates risk on correctly guessing, in
+isolation, the interface the real prepare/dispatch split will want, and does
+not close the convergence-drift problem unless a second narrow slice of
+Section 7 is also pulled forward — at which point it is doing most of the
+work of (a) without the clarity of an explicit reorder.
+
+### Resolved: full reorder
+
+`tasks.md`'s implementation order changes to: **Section 4 (done) → fulfillment
+acceptance and provider preparation → recovery and lifecycle convergence →
+migrate existing hosts and active leases → Section 8 onward (unchanged)**.
+
+Concretely, section numbers and their task-ID prefixes are reassigned:
+
+| Old section | New section | Title |
+|---|---|---|
+| 6 | 5 | Implement fulfillment acceptance and provider preparation |
+| 7 | 6 | Add provisioning-owned recovery and lifecycle convergence |
+| 5 | 7 | Migrate existing hosts and active leases |
+
+Sections 1–4 and 8–12 keep their numbers; only the internal ordering of the
+three sections above changes. `tasks.md` has been updated to this numbering,
+including its own internal cross-references (task 3.5's "task 6.1" →
+"task 5.1"; task 3.11's "Section 7" → "Section 6"; the design-promotion
+record row and the "Recovery selection remains provisional" heading above,
+both updated the same way).
+
+Rationale for the full reorder over the narrower pull-forward: by the time
+migration/backfill runs, the exact envelope shape, `begin_fulfillment`
+durability, and the recovery sweep all already exist and are already proven
+against freshly-created rows. The backfill's job becomes narrow and
+testable — "produce rows indistinguishable from ones the fulfillment-
+acceptance path would have created natively, in whatever state matches
+reality" — rather than inventing a payload shape in isolation that the later
+section might define incompatibly, which would force a second, corrective
+migration; that outcome sits poorly against this change's own "comprehensive
+breaking migration, no compatibility shims" posture (`proposal.md`,
+"Active allocation backfill during cutover"). The drift window between "row
+backfilled" and "something can actually converge it" also shrinks to
+approximately zero, since the recovery sweep is already running when the
+migration executes. Section 8 (pull-based status/result queries) is
+independent of this reordering — it only reads whatever is in the aggregate,
+backfilled or not — and keeps its position and number.
+
+## Section 7 (migrate existing hosts and active leases) — status and remaining open questions
+
+Renumbered from Section 5 per the resequencing decision above. One finding
+from the original discuss pass is resolved below as a correction; the
+remaining questions are recorded but explicitly **not resolved this
+session** — deferred to a future discuss-phase pass on this section, per
+this session's direction.
+
+### Resolved: task 7.1 (originally 5.1) was stale, not pending work
+
+"Create the default resource pool and migrate all existing hosts and
+pool-membership/resource-capacity records before fulfillment backfill" reads
+as new work, but `_migrate_resource_pools_and_hosts_pool_id` (creates the
+`default` `ResourcePool` + `AnsiblePoolConfig`, backfills `hosts.pool_id`) and
+`_migrate_capacity_model_cutover` (`_migrate_site_resources_pool_id`,
+`_migrate_capacity_buckets_and_current_debits`, `_migrate_retire_site_resources`)
+already run today and already backfill every pre-existing host into the
+default pool, every `site_resources` row into a `CapacityBucket`, and every
+reservation with a `resource_id` into a `CapacityReservationDebit` —
+unconditional on reservation state, so this already covers `reserved`,
+`leased`, `releasing`, `released`, everything. `tasks.md` task 7.1 has been
+corrected to state this as the current fact and closed; the section's real,
+unstarted scope begins at 7.2 — backfilling a `SettlementRecord` for
+pre-existing reservations, which Section 2 did not do.
+
+### Open, deferred: reservation-state-to-`SettlementRecordState` mapping (task 7.2)
+
+`ReservationState` has nine values; "active or releasing" is not itself one
+of them, and a concrete per-state mapping is needed before 7.2 can be
+planned as concrete subtasks. Candidate mapping, **not accepted or rejected
+this session — revisit when this section is next discussed**:
+
+- `reserved` — no `SettlementRecord` at all (nothing scheduled or dispatched
+  yet; post-cutover this reservation goes through `schedule_resource` fresh
+  like any new one).
+- `provisioning` — candidate: `dispatching`.
+- `leased` — candidate: `active`.
+- `releasing` — candidate: `teardown_dispatch_pending` (no
+  `vm_remove_job_id` yet) or `tearing_down` (one exists).
+- `release_failed` — candidate: `teardown_failed`.
+- `unmanaged` — genuinely unresolved: give it a `SettlementRecord` (in what
+  state?) so an operator can act on it through the new tooling, or exclude
+  it entirely as a pre-cutover-only admin concern?
+- `provisioning_failed`, `released`, `force_released` — candidate: skip
+  (terminal; matches the proposal's existing "skip terminal/expired
+  historical allocations" language), but should be stated explicitly.
+
+### Open, deferred: what "cannot be mapped unambiguously" means, concretely (task 7.5)
+
+The proposal says the migration "fails visibly when an active reservation
+cannot be mapped unambiguously." Candidate concrete failure conditions,
+**not accepted or rejected this session**:
+
+1. A `leased`/`releasing`/`release_failed` row with no `vm_host`, or with
+   both `vm_target` and `executor_target` null. (`VmReleaseExecutor.submit_release`
+   silently no-ops on this today; should the migration instead treat it as a
+   visible failure rather than reproducing that same silent swallow?)
+2. A `resource_id` that cannot resolve to a `CapacityBucket`/`pool_id` (would
+   only happen if Section 2's own backfill missed a row — re-validate this
+   invariant during migration, or trust Section 2's own tests and skip the
+   check?).
+3. A resolvable `pool_id` with no `AnsiblePoolConfig` row (provider identity
+   cannot be determined — hard failure, or per-row skip with a warning?).
+
+These three open items (the `unmanaged` mapping, and questions 2–3 above)
+remain unresolved and are recorded here per `AGENTS.md`'s discuss-phase rule,
+so Section 7 planning does not proceed from an assumed answer until they are
+revisited.
