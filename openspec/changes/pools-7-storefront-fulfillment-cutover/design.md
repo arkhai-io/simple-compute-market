@@ -1619,3 +1619,230 @@ Production code and stable tests must reference only permanent current-state doc
 | Recovery columns are durable, while the Section 3 selector is single-worker only and final acquisition semantics belong to provisioning recovery | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Generic lifecycle updates are limited to prepared operation payloads, provider metadata, and failure fields | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Repository callers supply validated canonical models and envelopes | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
+
+## Section 4 scheduling implementation — design questions (discuss phase, opened 2026-07-23)
+
+Section 3 built the durable aggregate and repository; `tasks.md` Section 4
+(`schedule_resource`, atomic assignment, requirement-supersede, watchdog
+abandonment) is not yet implemented. Inspecting the current
+`PhysicalSettlementScheduler`, `CapacityLedgerService`, and
+`ResourcePoolService` against tasks 4.1–4.7 surfaces gaps this document's
+existing sections do not resolve. These are recorded here, with a proposed
+default for each, before planning Section 4's task list in detail.
+
+### 1. Session-scoped eligible-candidate enumeration is not fully designed
+
+Task 4.3 requires one transaction that locks/validates the reservation,
+enumerates every eligible candidate, and creates the assigned settlement
+row. Today, eligibility enumeration is two self-managed-session calls —
+`CapacityLedgerService.list_resources()` and
+`ResourcePoolService.list_pools(enabled_only=True)` — glued together in
+`PhysicalSettlementScheduler._eligible_candidates`, which also re-derives
+a reservation's own held-capacity credit-back by hand over the returned
+dict payload. `CapacityLedgerService._find_candidate` already does
+session-scoped, debit-aware availability computation through the same
+canonical `resource_satisfies_requirement`/`ResourceFeasibilityView` path,
+but it is private, returns only the first match, and knows nothing about
+pool enablement (owned by `market_resource_pools`, a different kit
+package against the same database).
+
+**Proposed:** add two narrow, session-scoped read methods, mirroring the
+`lock_reservation`/`assign_settlement_resource_in_session`/
+`backing_resource_id_in_session` precedent from Section 3:
+
+- `CapacityLedgerService.iter_scheduling_candidates_in_session(db, *, resource_kind, exclude_reservation_id) -> list[ResourceFeasibilityView]` —
+  every enabled bucket's canonical feasibility view, with
+  `exclude_reservation_id`'s own current debit credited back into
+  `available` (replacing the scheduler's ad hoc credit-back).
+- `ResourcePoolService.list_pools_in_session(db, *, enabled_only=True) -> list[ResourcePool]`.
+
+This keeps `ResourcePool`'s row shape private to `market_resource_pools`
+rather than having the fulfillment scheduler query its ORM model
+directly, even though the dependency layers would permit that import.
+
+**Resolved (2026-07-23):** `schedule_resource` is a convenience operation
+— its purpose is to fold what would otherwise be several separate
+storefront/provisioning round trips (each with its own error taxonomy)
+into one call with one error taxonomy and one commit/rollback boundary,
+so the storefront does not have to duplicate compensating error handling
+across calls the provisioning service could have made atomic itself.
+Given that goal, leaving reservation-lock, candidate enumeration, and
+settlement-row creation as separate self-managed-session calls is
+rejected: a failure partway through would leave the reservation locked
+and validated but nothing rebound or recorded, and the storefront would
+need its own recovery logic for that partial state — exactly the
+duplicated error handling this operation exists to avoid. The two new
+session-scoped read methods above are approved as designed: implement
+`CapacityLedgerService.iter_scheduling_candidates_in_session` and
+`ResourcePoolService.list_pools_in_session`, and drive both, plus
+`lock_reservation`/`assign_settlement_resource_in_session`, from one
+transaction owned by `PhysicalSettlementScheduler.schedule_resource`.
+
+### 2. Round-robin cursor durability has no designed storage shape
+
+`DeterministicRoundRobinPolicy` keeps `_last_pool_id`/
+`_last_resource_by_pool` as plain instance attributes with no persistence.
+Task 4.1 requires "deterministic persisted fairness state." The
+`SettlementSchedulingPolicy` protocol is currently a pure, synchronous,
+no-I/O `select(requirement, candidates) -> SettlementCandidate` call.
+
+**Proposed:** keep the policy protocol pure (no database access; stays
+unit-testable without a session). Add a new `kit/fulfillment` table,
+`scheduling_cursors` (`policy_scope` primary key, `last_pool_id`,
+`last_resource_by_pool` JSON), and change the protocol to
+`select(requirement, candidates, cursor) -> (SettlementCandidate,
+updated_cursor)`, with the scheduler reading/writing the cursor row via
+the repository inside the same transaction as the assignment write.
+
+**Genuinely open, not just a confirmation:** what is `policy_scope`?
+Today one `DeterministicRoundRobinPolicy` instance is shared across every
+`select_resource` call in a process regardless of `resource_kind` — but
+`market-platform-compute-40-multi-domain-proof` loads VM and bare-metal
+adapters concurrently in one provisioner, and those have different
+`resource_kind` values. Scoping the cursor globally would let VM
+scheduling activity perturb bare-metal round-robin fairness and vice
+versa; scoping it per `resource_kind` matches today's de facto isolation
+(each kind's eligible-candidate set never overlaps) but has no stated
+requirement backing it. This needs an explicit decision, not an inferred
+one, since `openspec/specs/fulfillment/spec.md` currently describes
+fairness scope not at all.
+
+**Resolved (2026-07-23):**
+
+- **Scope:** one cursor row per `resource_kind`, all rows in a single
+  `scheduling_cursors` table (`resource_kind` primary key). A buyer
+  negotiates for one `resource_kind` at a time (a VM, a bare-metal
+  instance, a pod), never across kinds within one reservation, so
+  isolating fairness per `resource_kind` matches how demand is actually
+  partitioned rather than an arbitrary finer- or coarser-grained key.
+  This becomes a normative statement in
+  `openspec/specs/fulfillment/spec.md`'s scheduling-and-assignment
+  requirement, not just an implementation detail, since it defines the
+  boundary within which round-robin fairness is guaranteed.
+- **Policy stays pure; cursor read/update is the scheduler's job, inside
+  the transaction:** `select_resource`'s atomic transaction reads the
+  `resource_kind`'s cursor row, calls the pure
+  `select(requirement, candidates, cursor) -> (candidate, updated_cursor)`,
+  and writes the updated cursor back alongside the settlement-record
+  insert, all before commit.
+- **Concurrency:** this repository is SQLite-only (Section 3's
+  established concurrency contract). `schedule_resource`'s transaction
+  already reserves SQLite's single-writer slot via `BEGIN IMMEDIATE`
+  (the same mechanism `accept_fulfillment` uses) before it reads the
+  cursor row, so concurrent `schedule_resource` calls for the same
+  `resource_kind` serialize at the database level — there is no
+  additional in-application lock/release bookkeeping (owner id,
+  acquisition time) to add for this repository today. That kind of
+  lock/lease scheme — the same shape as the existing recovery-claim
+  columns (`claimed_by`, `claim_expires_at`, `attempt_count`) — remains
+  the fallback pattern to reach for only if a future deployment needs
+  genuine multi-writer concurrency beyond what SQLite's single-writer
+  guarantee provides; it is not needed to satisfy Section 4, and should
+  not be spent now. Document this cursor's concurrency contract the same
+  honest way Section 3 documented the aggregate's: a SQLite single-writer
+  guarantee, not portable row-lock semantics.
+
+### 3. `resize_reservation`'s transaction boundary and caller
+
+Design.md's existing "Requirements change under negotiation" section
+specifies `resize_reservation`'s internals (release-then-reserve in one
+transaction, `on_supersede` hook) but not whether it needs a caller-supplied-
+session twin the way `assign_settlement_resource` does. No current call
+site invokes it — the storefront-side negotiation-resize caller is
+Section 9 scope, not Section 4.
+
+**Proposed:** `resize_reservation` ships as a single self-managed-session
+method only (like `reserve()`), with no `_in_session` twin, since nothing
+in this change composes it into a larger transaction. If Section 9 later
+needs to fold it into a broader commit, that is new evidence to add the
+twin then, not a reason to build it speculatively now.
+
+**Resolved (2026-07-23):** confirmed as proposed. `resize_reservation`
+does not need to be composable into a larger transaction for this change.
+Section 4 establishes the self-managed-session/`_in_session`-twin pattern
+(item 1 above, and Section 3's existing `assign_settlement_resource`
+precedent) clearly enough that adding the twin later, if and when a real
+co-transactional caller shows up, is a small, well-understood addition —
+not a reason to build it speculatively now.
+
+### 4. Where `on_supersede` and the abandonment hook are composed
+
+Task 4.5's `on_supersede: SettlementAbandonmentHook | None` and task 4.6's
+watchdog abandonment both need a concrete hook implemented by
+`market_fulfillment` and wired at a composition root, since
+`market_site` cannot import `market_fulfillment`. Inspection of
+`CapacityLedgerService` shows exactly two capacity-reclaiming code paths
+that can strand an `assigned` `SettlementRecord`: `_expire_stale_holds`
+(TTL-hold lapse before commit) and `release()` (terminal release; reached
+from both `LeaseLifecycleService`'s watchdog and `LedgerSiteAuthority.
+record_release_success`). `resize_reservation`'s supersede path is a
+third. All three live inside `CapacityLedgerService` itself — there is no
+need for a second hook on `LeaseLifecycleService`, since it never bypasses
+the ledger's `release()`.
+
+**Proposed:** thread one `SettlementAbandonmentHook`-shaped parameter into
+`CapacityLedgerService.__init__` (same `Protocol`-in-`market_site`,
+implementation-in-`market_fulfillment` shape already specified), invoked
+from `_expire_stale_holds`, `release()`, and `resize_reservation`. Compose
+the concrete hook in `compute_provisioning_service/container.py` alongside
+`capacity_ledger_service`, even though no HTTP caller reaches
+`resize_reservation` yet — matching the precedent `pools-2`/`pools-3` set
+by shipping the scheduler/provider ahead of a real caller.
+
+**Resolved (2026-07-23):** the hook is called unconditionally from all
+three sites, with no pre-check in `market_site` for whether a
+`SettlementRecord` exists before invoking it. `market_fulfillment`'s
+concrete implementation is responsible for the no-op case (no matching
+row, or a row already outside `assigned`). This keeps
+`CapacityLedgerService` ignorant of settlement-record existence checks
+(it only knows it must offer every capacity-reclaiming site a chance to
+react) and keeps the "does anything need to be abandoned" decision fully
+owned by `market_fulfillment`, consistent with the dependency boundary.
+
+### 5. Dead pool-id attribute fallback
+
+`PhysicalSettlementScheduler._eligible_candidates` still falls back to
+`attributes.get("pool_id")` when a resource payload's `pool_id` column is
+absent. Section 2's `site_resource_pools`/`CapacityBucket` rework made
+`pool_id` an authoritative, always-populated column sourced from
+`Host`/`ResourcePool`. **Proposed:** remove the fallback as part of
+Section 4's rewrite of candidate enumeration (item 1 above) rather than
+carrying it forward into the new session-scoped method — flagged
+separately because it is a small cleanup, not a load-bearing design
+decision like items 1–4.
+
+**Verified (2026-07-23), proposal reversed — the fallback is not dead:**
+
+- Every production write path to `CapacityBucket` was checked. The only
+  in-repository caller of `CapacityLedgerService.register_resource` is
+  the compatibility HTTP endpoint (`kit/site/src/market_site/router.py`,
+  `PUT /capacity/resources/{resource_id}`), which passes `pool_id` as its
+  own explicit request field straight to the real column — not through
+  `attributes`. No production code constructs `CapacityBucket` rows
+  directly outside `ledger.py`/`db.py` (i.e., the Section 2 migration's
+  Host/ResourcePool-derived rows are the only other source of truth, and
+  they are out of scope for this fallback).
+- However, `kit/fulfillment/tests/unit/test_scheduler.py`'s own resource
+  helpers (`_resource`, `_resource_with_capacity`) register test
+  resources with `attributes={"pool_id": pool_id}` and **do not** pass
+  the real `pool_id=` column at all. Every existing scheduler test
+  therefore currently exercises the codebase entirely through the
+  attributes-JSON fallback path — removing it today would make every
+  candidate resolve to `pool_id=None` and break `test_scheduler.py`
+  outright. `kit/site/tests/unit/test_ledger.py` also has a named test,
+  `test_attribute_view_prefers_real_pool_id_over_attributes_json`, whose
+  own docstring states this is deliberately supported "during the
+  transition before the storefront's attributes-JSON-only push is
+  retired" — i.e. the ledger's own test suite documents the fallback as
+  an intentionally still-open transitional behavior, not a residual bug.
+
+**Revised decision:** do not remove the fallback as part of Section 4.
+Treat it as still load-bearing until proven otherwise. If Section 4's
+new session-scoped candidate enumeration (item 1) is a good occasion to
+finally retire it, that requires first updating
+`kit/fulfillment/tests/unit/test_scheduler.py`'s helpers to pass a real
+`pool_id=` column (matching how production resources are actually
+registered post-Section-2) and confirming no other caller still depends
+on attributes-only registration, as its own explicit task — not a
+same-commit incidental deletion while rewriting candidate enumeration
+for an unrelated reason.
