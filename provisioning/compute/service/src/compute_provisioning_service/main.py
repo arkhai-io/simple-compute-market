@@ -156,6 +156,16 @@ PROVISIONING_OPENAPI_TAGS = [
 #   /api/v1/pools/*                  <- resource pool registry (CRUD, import, validate)
 # ---------------------------------------------------------------------------
 
+def _capacity_resource_inventory() -> list[dict[str, object]]:
+    ledger = _container_module.resolved_capacity_ledger_service
+    if ledger is None:
+        raise RuntimeError("capacity ledger is not initialized")
+    return load_capacity_resource_inventory(
+        container.session_factory(),
+        capacity_resources=ledger.list_resources(),
+    )
+
+
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
@@ -195,9 +205,7 @@ app = build_compute_provisioning_app(
         ComputeProvisioningRouterMount(
             make_capacity_router(
                 lambda: _container_module.resolved_capacity_ledger_service,
-                get_resource_inventory=lambda: load_capacity_resource_inventory(
-                    container.session_factory()
-                ),
+                get_resource_inventory=_capacity_resource_inventory,
             ),
             "/api/v1",
         ),

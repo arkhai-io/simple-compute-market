@@ -5,9 +5,8 @@ Responsibilities
 * Spawn and stream ``ansible-playbook`` processes (``start_playbook`` /
   ``wait_for_playbook``).
 * Build the extra-vars YAML file consumed by the VM-operations playbook
-  (``build_vars_file``).  This was previously ``ProvisioningService._write_vars_file``.
+  (``build_vars_file``).
 * Parse structured JSON output from playbook stdout (``parse_playbook_result``).
-  Previously ``ProvisioningService._parse_result`` and helpers.
 * Parse the Ansible INI inventory (``parse_inventory``, ``lookup_host_ip``).
 * Run ``ansible -m ping`` connectivity checks (``check_connectivity``).
 
@@ -353,8 +352,7 @@ class AnsibleService:
 
         Shared by ``_build_vm_vars`` (actual rendering) and
         ``reserved_var_keys`` (synchronous pre-dispatch validation) so the
-        two can never disagree about which fields are built-in — see
-        POOLS-3 design.md Decision 6.
+        two cannot disagree about which fields are built in.
         """
         lines = [
             f"vm_host: {params.vm_host}",
@@ -446,8 +444,7 @@ class AnsibleService:
         lines = self._build_builtin_var_lines(params)
 
         if params.provider_extra_vars:
-            # Pool-supplied extra vars (POOLS-3 fulfillment provider). Built-in
-            # job identity/sizing fields above are authoritative — a colliding
+            # Built-in job identity and sizing fields are authoritative, so a colliding
             # key is a pool-configuration error, not a silent override. This
             # is a defensive second check: AnsibleFulfillmentProvider is
             # expected to have already validated via reserved_var_keys()

@@ -1,10 +1,20 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: Seller-side spot automation
-Seller automation can inspect interruptible deals, dry-run decisions, truncate leases, and execute settlement splits with audit evidence. The implementation MUST preserve the ownership and compatibility constraints in the `storefront-publication` baseline specification.
+### Requirement: Interruptible agreement control and decision evidence
 
-#### Scenario: Change acceptance
-- **WHEN** the implementation is complete and its focused verification runs
-- **THEN** seller automation can inspect interruptible deals, dry-run decisions, truncate leases, and execute settlement splits with audit evidence.
+A storefront MUST expose an authenticated view of active interruptible agreements with references to their listing, agreement, site reservation/fulfillment, and settlement state. Every dry-run or live strategy evaluation MUST have durable stable identity and record policy/version/config digest, referenced inputs, decision/reason, mode, and resulting operation identifiers.
 
-<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->
+#### Scenario: Strategy evaluates an agreement in dry-run mode
+
+- **WHEN** an authorized runner evaluates an active interruptible agreement without live execution
+- **THEN** no lease or settlement mutation occurs and durable decision evidence records the proposed action and rationale
+
+#### Scenario: Agreement changes before live action
+
+- **WHEN** referenced agreement/site/settlement state no longer matches the evaluated input
+- **THEN** live execution stops or reevaluates rather than applying the stale decision
+
+#### Scenario: Operator inspects partial interruption
+
+- **WHEN** settlement, truncation, teardown, or release has not converged
+- **THEN** the control view reports each authoritative step separately and does not claim one event proves completion

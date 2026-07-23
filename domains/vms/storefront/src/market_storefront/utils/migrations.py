@@ -127,12 +127,9 @@ def _migrate_compute_allocation_callback_metadata(conn: sqlite3.Connection) -> N
 
 
 def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
-    # NOTE: creates ``compute_capacity_pools`` directly (POOLS-4 rename) —
-    # a fresh database never sees the old ``compute_inventory_pools`` name.
-    # This migration keeps its original id/function name (migrations aren't
-    # renamed retroactively); see ``_migrate_rename_compute_capacity_pools``
-    # for the rename applied to databases that already ran this migration
-    # under the old table name.
+    # Fresh databases use the current table name. The migration identifier is
+    # stable because existing databases may already have recorded it; the
+    # later rename migration handles databases created with the legacy name.
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS compute_capacity_pools (
@@ -370,13 +367,11 @@ def _migrate_allocation_hold_expiry(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_rename_compute_capacity_pools(conn: sqlite3.Connection) -> None:
-    """POOLS-4: rename ``compute_inventory_pools`` to ``compute_capacity_pools``.
+    """Rename the legacy pool table while preserving schema relationships.
 
-    Pure rename — same columns, same foreign-key relationship from
-    ``compute_pool_members``, same reconciler behavior. A no-op on any
-    database that already ran ``_migrate_compute_inventory_pools`` under
-    its current (post-POOLS-4) form, which creates the table under the new
-    name directly, or that has already run this migration.
+    This is a pure rename with the same columns, foreign-key relationship from
+    ``compute_pool_members``, and reconciler behavior. It is a no-op when the
+    database was created with the current table name or was already renamed.
     """
     old_exists = _table_exists(conn, "compute_inventory_pools")
     new_exists = _table_exists(conn, "compute_capacity_pools")

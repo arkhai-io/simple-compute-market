@@ -1,10 +1,20 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: PyPI trusted publishing setup
-Every consumable Arkhai distribution has a PyPI project and trusted publisher matching release automation. The implementation MUST preserve the ownership and compatibility constraints in the `deployment-state` baseline specification.
+### Requirement: Complete trusted-publishing distribution graph
 
-#### Scenario: Change acceptance
-- **WHEN** the implementation is complete and its focused verification runs
-- **THEN** every consumable Arkhai distribution has a PyPI project and trusted publisher matching release automation.
+Release automation MUST maintain a reviewed inventory of every current consumable Arkhai distribution, its source/build path, dependency order, protected GitHub environment, and matching PyPI trusted publisher/project. Excluded demo, test-harness, sample, or internal-tooling projects MUST be classified explicitly rather than omitted accidentally.
 
-<!-- Provenance: migrated from docs/development/TODO.md and linked ad hoc design notes. -->
+#### Scenario: Distribution is added or renamed
+
+- **WHEN** repository metadata introduces or renames a consumable distribution
+- **THEN** release inventory, path triggers, environment/project mapping, dependency order, and documentation are updated together before publication
+
+#### Scenario: Distribution is published
+
+- **WHEN** trusted release automation publishes an included distribution
+- **THEN** it builds without source overrides and a clean downstream consumer can install the required dependency graph from PyPI without repository or `.dist` access
+
+#### Scenario: External setup is missing
+
+- **WHEN** the workflow names a distribution without a matching current-name protected environment or PyPI trusted publisher/project
+- **THEN** release readiness remains blocked and matrix presence is not reported as completed external configuration

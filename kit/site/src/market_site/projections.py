@@ -64,16 +64,21 @@ def resource_pool_projection(resources: Iterable[Mapping[str, Any]]) -> list[dic
         resource = dict(raw)
         pool_id = str(resource.get("pool_id") or resource["resource_id"])
         attrs = dict(resource.get("attributes") or {})
-        pools.setdefault(pool_id, []).append(
-            {
-                "physical_resource_id": str(resource["resource_id"]),
-                "resource_type": resource.get("resource_type"),
-                "resource_subtype": resource.get("resource_subtype"),
-                "capacity": dict(resource.get("capacity") or {}),
-                "attributes": attrs,
-                "enabled": bool(resource.get("enabled", True)),
-            }
-        )
+        projected = {
+            "physical_resource_id": str(resource["resource_id"]),
+            "resource_type": resource.get("resource_type"),
+            "resource_subtype": resource.get("resource_subtype"),
+            "capacity": dict(resource.get("capacity") or {}),
+            "attributes": attrs,
+            "enabled": bool(resource.get("enabled", True)),
+        }
+        if resource.get("available") is not None:
+            projected["available"] = dict(resource.get("available") or {})
+        if resource.get("publication_views") is not None:
+            projected["publication_views"] = dict(
+                resource.get("publication_views") or {},
+            )
+        pools.setdefault(pool_id, []).append(projected)
     result: list[dict[str, Any]] = []
     for pool_id in sorted(pools):
         inventory = sorted(pools[pool_id], key=lambda row: row["physical_resource_id"])

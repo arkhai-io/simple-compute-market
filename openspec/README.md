@@ -2,8 +2,10 @@
 
 OpenSpec separates the system's durable current contract from the temporary work required to change it.
 
-- `specs/` describes the implemented system: behavior, ownership, invariants, lifecycle semantics, and durable design rationale.
-- `changes/` describes a transition: proposal, alternatives, unresolved questions, delta requirements, migration concerns, and implementation tasks.
+- `specs/<capability>/spec.md` describes the implemented normative contract: behavior, ownership, invariants, and lifecycle semantics.
+- `specs/<capability>/architecture.md` may preserve durable current-state models, motivations, trade-offs, relationships, and limitations in freeform prose.
+- `specs/README.md` is the canonical capability documentation index.
+- `changes/` describes a transition: proposal, alternatives, unresolved questions, delta requirements, migration concerns, and implementation tasks. [`changes/README.md`](changes/README.md) groups active changes into delivery campaigns without replacing each change's acceptance boundary.
 - `changes/archive/` records completed transitions after their durable results have been synchronized into `specs/` and, where repository-wide, `docs/development/ARCHITECTURE.md`.
 - `config.yaml` supplies repository context and artifact-quality rules.
 
@@ -14,29 +16,30 @@ Use `bunx @fission-ai/openspec@latest list` to inspect active changes, `show <na
 | Knowledge | Permanent home |
 |---|---|
 | Repository-wide dependency layers, authority boundaries, common vocabulary, and major flows | `docs/development/ARCHITECTURE.md` |
-| Subsystem behavior, package ownership, lifecycle, identifiers, errors, and durable rationale | `openspec/specs/<subsystem>/spec.md` |
+| Subsystem behavior, package ownership, lifecycle, identifiers, and errors | `openspec/specs/<subsystem>/spec.md` |
+| Subsystem conceptual models, durable rationale, trade-offs, relationships, and current limits | `openspec/specs/<subsystem>/architecture.md` |
 | Proposed behavior and unresolved alternatives | `openspec/changes/<change>/proposal.md` and `design.md` |
 | Implementation sequence, files, validation, and manual migration work | `openspec/changes/<change>/tasks.md` |
 | Change provenance and review discussion | Git history and pull requests |
 
-`ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. Permanent specs may include rationale when it is needed to prevent a future implementation from violating an important boundary; they should not preserve the chronology of how the decision was reached.
+`ARCHITECTURE.md` is a current-state cross-system map. It should link to detailed subsystem specifications rather than duplicate every endpoint and state transition. Permanent specs may include short rationale needed to interpret a requirement. Broader explanatory prose belongs in the capability's companion `architecture.md`. Neither document preserves the chronology of how a decision was reached.
 
-## Capability specification pattern
+## Capability documentation pattern
 
-A subsystem specification should normally contain:
+A subsystem `spec.md` should contain its purpose and normative requirements for responsibilities, authority, dependencies, terminology, lifecycle, errors, retry, idempotency, versioning, and other observable behavior. Every requirement has acceptance scenarios and may point to implementation or test evidence.
 
-1. Purpose and responsibilities.
-2. Non-responsibilities and authority boundaries.
-3. Package or service ownership.
-4. Dependency constraints.
-5. Official terminology and identifiers.
-6. Lifecycle and state semantics.
-7. Behavioral requirements and acceptance scenarios.
-8. Error, retry, idempotency, and versioning rules where applicable.
-9. Durable rationale for non-obvious architectural choices.
-10. Evidence pointing to the tests or implementation surfaces that prove the current contract.
+A companion `architecture.md` may explain:
 
-Specifications describe the current system. Avoid wording such as "completed in POOLS-7" or "formerly lived in". Planned and partially implemented behavior remains in a change until it is true.
+1. Conceptual models and major flows.
+2. Why an authority or dependency boundary exists.
+3. Ownership relationships and explicit non-responsibilities.
+4. Alternatives and trade-offs that remain relevant to the current design.
+5. Operational consequences and current limitations.
+6. Links to adjacent capability contracts.
+
+Both files describe the current system. Avoid wording such as "completed in POOLS-7" or "formerly lived in". Planned and partially implemented behavior remains in a change until it is true. When architecture prose states behavior implementations must satisfy, add the corresponding normative requirement to `spec.md`.
+
+OpenSpec validates and synchronizes `spec.md` but ignores companion architecture files. Every applicable change therefore names companion promotion in `tasks.md` and its design-promotion record.
 
 ## Change documentation requirements
 
@@ -86,23 +89,9 @@ Before marking implementation complete:
 - [ ] Manual deletions are represented by review tombstones and listed in the delivery summary.
 - [ ] Validation evidence and any unrun suites are disclosed.
 
-## Current capability specifications
+## Current capability documentation
 
-| Capability | Contract |
-|---|---|
-| [Market composition](specs/market-composition/spec.md) | Core/kit/domain dependency direction, role ownership, and plugins |
-| [Registry discovery](specs/registry-discovery/spec.md) | Publication, filter-spec validation, identity, and compatibility |
-| [Negotiation protocol](specs/negotiation-protocol/spec.md) | Signed synchronous rounds, policy hooks, and deterministic Terms |
-| [Settlement servicing](specs/settlement-servicing/spec.md) | Plans, claims, mechanism codecs, and heartbeats |
-| [Storefront publication](specs/storefront-publication/spec.md) | Seller surfaces, listing reconciliation, and domain runtimes |
-| [Site capacity](specs/site-capacity/spec.md) | Capacity authority, reservations, aggregation, and events |
-| [Resource-pool management](specs/resource-pool-management/spec.md) | Pool administration, provider configuration, and host membership |
-| [Fulfillment](specs/fulfillment/spec.md) | Settlement-resource scheduling, provider execution contracts, identities, and versioned envelopes |
-| [Physical provisioning](specs/physical-provisioning/spec.md) | Executor dispatch, asynchronous jobs, and lease release |
-| [Buyer orchestration](specs/buyer-orchestration/spec.md) | Plugins, policy selection, aggregation, and recovery |
-| [Deployment and state](specs/deployment-state/spec.md) | Topology, persistence, migrations, packaging, and internal wheels |
-| [Testing and compatibility](specs/test-compatibility/spec.md) | Test levels, fixtures, e2e staging, and rollout contracts |
-| [Planning governance](specs/planning-governance/spec.md) | Specification ownership, evidence, and change readiness |
+See the canonical [capability documentation index](specs/README.md) for every normative contract and architecture companion.
 
 ## Contributor workflow
 

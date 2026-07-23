@@ -33,7 +33,9 @@ The capability is distributed as `arkhai-kit-fulfillment` and imported as `marke
 
 Provider-neutral scheduling and provider execution contracts live together in this package. Resource-pool administration must not import fulfillment contracts merely to type its provider configuration, and fulfillment must not depend on a deployed provisioning service. Concrete providers and domain requirement translators live in domain adapters or service composition.
 
-## Dependency boundary
+## Requirements
+
+### Requirement: Dependency boundary
 
 `market_fulfillment` is a higher kit layer than the site and resource-pool authorities. It may depend on `market_site` and `market_resource_pools`. Those lower layers MUST NOT import `market_fulfillment`, including under `TYPE_CHECKING`.
 
@@ -49,7 +51,7 @@ Carrier modules for IDs, envelopes, requests, requirements, resources, and provi
 - **WHEN** the VM provisioning composition registers an Ansible provider
 - **THEN** the adapter depends on `market_fulfillment` and VM/Ansible packages while the fulfillment kit remains free of VM vocabulary
 
-## Identities
+### Requirement: Fulfillment identities
 
 Fulfillment lifecycle IDs MUST be opaque UUIDv7 strings:
 
@@ -68,7 +70,7 @@ Commercial agreement IDs do not belong in the generic physical settlement reques
 - **WHEN** one provider operation produces two VMs or pods
 - **THEN** both outputs have distinct `provisioned_resource_id` values while sharing one `fulfillment_id` and capacity reservation
 
-## Physical settlement request
+### Requirement: Physical settlement request
 
 A `PhysicalSettlementRequest` MUST contain:
 
@@ -89,7 +91,7 @@ The request MUST NOT carry an `agreement_id` or legacy `allocation_id` alias. Do
 - **WHEN** accepted terms intentionally identify a concrete physical resource
 - **THEN** the request may constrain scheduling to that resource and the scheduler verifies eligibility rather than silently selecting another resource
 
-## Multidimensional eligibility
+### Requirement: Multidimensional eligibility
 
 A candidate is eligible only when it is enabled, satisfies pool and resource constraints, has the required resource kind, and has availability greater than or equal to every requested dimension.
 
@@ -114,20 +116,39 @@ A scheduling request MAY narrow the dimensions it asks for relative to what the 
 - **WHEN** a schedule request asks for more of a dimension than the capacity reservation holds for that same dimension
 - **THEN** scheduling rejects the request rather than silently admitting a shape reservation-time admission never verified fits anywhere
 
-## Scheduling and assignment
+### Requirement: Scheduling and assignment
 
 `PhysicalSettlementScheduler` owns placement. It enumerates eligible candidates through the site and pool authorities, delegates ordering/selection to a `SettlementSchedulingPolicy`, and returns a `SettlementResource`.
 
-The current policy is deterministic round-robin. For an unchanged ordered candidate set and policy state, selection is reproducible. Policy remains replaceable; static pool priority is not part of the resource-pool schema.
+The current policy is deterministic two-level round-robin. It sorts eligible pool IDs and chooses the pool after the last automatic selection, then sorts eligible resource IDs in that pool and chooses the resource after that pool's last automatic selection. If a previous cursor no longer names an eligible candidate, selection resumes at the first sorted eligible value. For an unchanged candidate set and policy state, selection is reproducible. Policy remains replaceable; static pool priority is not part of the resource-pool schema.
+
+An explicit resource constraint bypasses policy choice but not reservation, pool, resource, shape, attribute, or capacity eligibility, and it does not advance automatic-selection cursors.
 
 Scheduling and fulfillment execution are separate calls. A provider receives the already-selected `SettlementResource` and MUST NOT substitute another resource. If a selected resource becomes unusable, execution reports a typed failure and orchestration returns to the scheduler boundary according to lifecycle policy.
 
-The same `capacity_reservation_id` and equivalent request MUST return the existing assignment when durable assignment is available. A conflicting retry MUST fail rather than creating a second binding.
+The same `capacity_reservation_id` and equivalent request MUST return the existing assignment when assignment state is available. A conflicting retry MUST fail rather than creating a second binding. Current assignment and cursor storage is process-local: idempotency is guaranteed only within one running scheduler instance, not across restart or replica boundaries, until the compute lifecycle supplies durable assignment persistence.
+
+Scheduling errors distinguish a missing or expired reservation, a request that conflicts with reservation or existing-assignment state, and a valid request for which no candidate is eligible.
 
 #### Scenario: Equivalent scheduling retry
 
-- **WHEN** the same reservation and normalized requirements are scheduled again
-- **THEN** the existing settlement-resource assignment is returned
+- **WHEN** the same reservation and normalized requirements are scheduled again in the scheduler instance that holds the assignment
+- **THEN** the existing settlement-resource assignment is returned without advancing policy cursors
+
+#### Scenario: Previous cursor is no longer eligible
+
+- **WHEN** the previously selected pool or resource is absent from the eligible candidate set
+- **THEN** round-robin resumes deterministically from the first sorted eligible pool or resource
+
+#### Scenario: Explicit resource is ineligible
+
+- **WHEN** a request identifies a resource in a disabled pool or without sufficient capacity
+- **THEN** scheduling rejects it without invoking automatic policy or advancing cursors
+
+#### Scenario: Scheduler process restarts
+
+- **WHEN** an assignment exists only in process-local state and the scheduler restarts
+- **THEN** the process does not claim distributed idempotency and a retry may be evaluated as a new assignment
 
 #### Scenario: Provider attempts independent placement
 
@@ -176,7 +197,7 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 - **WHEN** a claimed row's claim has expired and no other claim has replaced it
 - **THEN** a subsequent claim attempt may claim it again
 
-## Provider contract
+### Requirement: Provider contract
 
 A `FulfillmentProvider` implements asynchronous:
 
@@ -205,7 +226,7 @@ A provider may expose side-effect-free `validate_create` or preparation behavior
 - **WHEN** the same reservation is retried with different requirements or a different selected resource
 - **THEN** orchestration reports a fulfillment conflict
 
-## Versioned envelopes
+### Requirement: Versioned envelopes
 
 Generic dictionaries crossing a domain, provider, process, or persistence boundary MUST be wrapped in `VersionedEnvelope` or a more specific typed model.
 
@@ -229,9 +250,9 @@ This contract applies to prepared provider inputs, provider metadata snapshots, 
 - **WHEN** a generic envelope is parameterized with a typed payload model and required payload fields are missing
 - **THEN** validation fails before dispatch or persistence
 
-## Error taxonomy
+### Requirement: Stable error taxonomy
 
-Generic orchestration distinguishes stable categories including:
+Generic orchestration MUST distinguish stable categories including:
 
 - provider missing or unavailable;
 - provider configuration invalid;
@@ -242,9 +263,14 @@ Generic orchestration distinguishes stable categories including:
 - reservation expired or missing;
 - request/assignment mismatch.
 
-Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors should identify retryability or operator action when the lifecycle begins persisting operations.
+Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors SHOULD identify retryability or operator action when the lifecycle persists operations.
 
-## Packaging and typing
+#### Scenario: Concrete provider reports an execution failure
+
+- **WHEN** a provider-specific create, status, or teardown operation fails
+- **THEN** the shared boundary maps it to a stable generic category while retaining safe diagnostics
+
+### Requirement: Packaging and typing
 
 The distribution MUST include `market_fulfillment/py.typed`. Consumers install it from the repository `.dist` wheel during local development and builds. Touched projects MUST NOT add editable relative sibling sources for internal kit dependencies.
 

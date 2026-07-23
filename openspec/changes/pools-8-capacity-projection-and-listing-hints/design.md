@@ -1,129 +1,95 @@
 ## Context
 
-This content was originally designed as part of `pools-7-storefront-
-fulfillment-cutover`'s design review (2026-07-17) and split out here —
-see that change's `proposal.md`/`design.md` "Scope split" sections for
-why. Nothing below reflects new analysis beyond what that review already
-settled; it's relocated, not reconsidered.
+The site authority now publishes two independent projections: `site_resource_pools` for host/resource facts and `site_capacity_buckets` for grouped advisory capacity. Each has revision/digest identity. VM storefront startup loads and polls both into atomic in-memory caches with stale retention. No production publication or claim-building reader consumes those caches, accepted identities are not durable across restart, and pool labels/provider/enabled/policy tags are absent from the resource projection.
 
-## `CapacityProjection` schema
+Storefront `resources` and capacity-pool tables still combine commercial metadata with locally authored physical identity. Wholesale replacement would remove pricing, settlement, and operator state that the site authority does not own.
 
-```python
-class CachedResourcePool(Base):
-    __tablename__ = "capacity_projection_pools"
+## Goals / Non-Goals
 
-    site = Column(String, primary_key=True)
-    pool_id = Column(String, primary_key=True)
-    label = Column(String, nullable=False)
-    provider = Column(String, nullable=False)
-    enabled = Column(Boolean, nullable=False)
-    policy_tags = Column(JSON, nullable=False, default=dict)
-    synced_at = Column(DateTime, nullable=False)
-```
+**Goals:**
+- Persist complete independently versioned projection generations per trusted site.
+- Map provisioning identity into storefront-owned commercial publication without conflating authorities.
+- Consume mapped identity for listings and Capacity Reservation claims.
+- Add additive, advisory, domain-owned listing and hold hints.
+- Remove only local physical-authority state proven superseded.
 
-Pull-based sync job (analogous to, but the reverse direction of, the
-storefront's existing `sync_site_resources()` push):
+**Non-Goals:**
+- Make projections authoritative for admission or assignment.
+- Rebuild existing producer/cache behavior.
+- Equate Resource Pools with storefront commercial pools.
+- Put domain enum values in `kit/resource-pools` or `kit/site`.
 
-```python
-async def sync_resource_pools(sites: dict[str, RemotePoolsClient]) -> int:
-    """Pull-based mirror of every configured site's pool admin API —
-    replaces the storefront's local resources table as the source of
-    pool/resource identities used in reservation claims and listing
-    publication."""
-    ...
-```
+## Decisions
 
-Must NOT be read by anything in the admission/reservation path
-(`AggregateCapacityClient.reserve()`/`probe()`, `PhysicalSettlementScheduler`)
-— those continue to use live, per-request data, unchanged. This cache is
-for pricing/listing-publication decisions only. See `pools-7`'s
-`design.md`, "`CapacityProjection` MUST NOT replace the live per-request
-snapshot these policies read," for the reasoning — that constraint is
-unaffected by this split; it just now lives in the change that actually
-builds `CapacityProjection`.
+### Persist configured sites and projection families independently
 
-## Listing-mode hint consumption
+Storefront persistence records each operator-trusted `site_id` binding separately from remote payloads. For each `(site_id, projection_kind)`, it stores the accepted revision, digest, fetched/stale metadata, and one complete generation. Replacement is transactional per family; failure retains the previous generation as stale and never writes an empty projection.
 
-```python
-# kit/resource-pools — domain-neutral: the key name only.
-LISTING_MODE_TAG = "listing_mode"
+A restart loads durable generations before polling. Revision sequences are authority-local and projection-family-local; comparing revisions across sites or families is invalid.
 
-# domains/vms — VM-domain interpretation + default.
-class VmListingMode(str, Enum):
-    pooled = "pooled"
-    specific_resource = "specific_resource"
+### Keep projection identity separate from commercial inventory
 
-def resolve_vm_listing_mode(pool: CachedResourcePool, member_count: int) -> VmListingMode:
-    declared = pool.policy_tags.get(LISTING_MODE_TAG)
-    if declared in (VmListingMode.pooled.value, VmListingMode.specific_resource.value):
-        return VmListingMode(declared)
-    return (VmListingMode.specific_resource if member_count == 1
-            else VmListingMode.pooled)   # unchanged pools-4 structural default
-```
+A mapping layer relates projected `(site_id, pool_id, resource_id?)` identity to storefront-owned publication records containing pricing, settlement mechanisms, seller policy, and listing history. Site projection refresh updates physical facts and availability inputs; it does not overwrite commercial policy.
 
-The reconciler-driven publish path (`domains/vms/listings/reconciler.py`,
-`cli_publish.py`) already has the structural default above, confirmed
-during `pools-4`'s design review. This change's job is narrower than it
-might first appear: let an explicit hint override that default, don't
-replace it. The reconciler calls `resolve_vm_listing_mode` once per pool
-it's about to publish listings for, in the same place the structural
-default already lives.
+The mapping must define missing, disabled, moved, and conflicting identities. Disappearing physical support closes or suppresses derived listings but does not erase agreement history.
 
-**Extensibility confirmed against `apicredits`, not just asserted:**
-since `apicredits` is explicitly in scope for `pools-7`'s broader
-`kit`/`CapacityReservation` reshape, the shape only counts as
-domain-neutral if `apicredits` can express something VM doesn't need
-without touching `kit/resource-pools`. It can:
+### Route pinned claims directly
 
-```python
-class ApiCreditsListingMode(str, Enum):
-    shared_quota = "shared_quota"     # listing draws from a pooled quota bucket
-    dedicated_key = "dedicated_key"   # listing is pinned to one provider API key
+Listings derived from one site carry an internal trusted mapping to that site and projected pool/resource identity. Claim construction uses the mapping and routes reservation to the producing authority. It does not broadcast a pinned state-changing request across sites. Public listing payloads expose only intended market identity/labels, not authority credentials or URLs.
 
-def resolve_apicredits_listing_mode(pool: CachedResourcePool) -> ApiCreditsListingMode:
-    declared = pool.policy_tags.get(LISTING_MODE_TAG)
-    if declared in (ApiCreditsListingMode.shared_quota.value, ApiCreditsListingMode.dedicated_key.value):
-        return ApiCreditsListingMode(declared)
-    return ApiCreditsListingMode.shared_quota
-```
+### Extend resource projection with pool metadata
 
-`kit/resource-pools` owns one string key; each domain owns its own enum
-and default rule; no cross-domain coupling.
+The resource-pool projection adds the minimum normalized metadata required by publication: pool label, enabled state, provider/mechanism reference where safe, and opaque `policy_tags`. Any payload change advances that projection's revision/digest. Credentials and provider secrets are never projected.
 
-**Enforcement posture:** explicitly a hint, never provisioning-enforced.
-`PhysicalSettlementScheduler`'s explicit-`resource_id` eligibility path
-(`pools-2`) is unaffected by a pool's `listing_mode` regardless — a
-buyer's explicit resource request is honored even against a pool tagged
-`pooled`. A storefront that never reads the tag, or one running against a
-provisioning service that predates this feature, falls through to the
-unchanged structural default. Purely additive.
+A separate pool-metadata projection was considered but rejected for the first implementation because publication needs an atomic view of member identity and pool hints. If payload size or update frequency later warrants separation, it requires its own independent identity and cache.
 
-## Pool-level reservation TTL hint
+### Keep hints advisory and domain-owned
 
-An operator may want a pool-level limit on how long a
-`CapacityReservation` against their resources can sit unscheduled/held.
-Same shape and posture as the listing-mode hint: an additive
-`ResourcePool.policy_tags` entry (`{"max_reservation_hold_seconds": 900}`),
-read and voluntarily respected by a cooperating storefront when it
-chooses the `ttl_seconds` it passes to `reserve()` — never enforced by
-the provisioning service itself (`reserve()` already accepts a
-caller-supplied `ttl_seconds`; no new ledger capability needed, only a
-place for the operator to express a preference and a storefront willing
-to read it).
+`kit/resource-pools` defines only stable key names:
 
-## Open question inherited from `pools-7`
+- `listing_mode`
+- `max_reservation_hold_seconds`
 
-`pools-7`'s design review also surfaced, but did not resolve, whether
-`AggregateCapacityClient`'s ranked site-fallback (`fill_first`/
-`most_available`) is still meaningful once every claim is pool/resource-
-pinned (post-`pools-4`) and pool/resource IDs are only unique per site —
-a pinned claim's owning site is arguably already known at publish time,
-making ranked multi-site fallback for that claim mostly vestigial. This
-touches `CapacityProjection` in that a resolution would likely mean
-site-tagging every cached pool/resource identity explicitly
-(`site_id + pool_id + optional resource_id`) so claims can route
-directly rather than being tried in ranked order. Not resolved here;
-see `pools-7`'s `design.md`, "Open question surfaced by writing this
-table down," for the full analysis. Whoever picks this change up should
-check whether `pools-7` (or a further follow-on) has resolved it before
-finalizing `CapacityProjection`'s key shape.
+Each domain validates values and applies defaults. VM and bare metal may distinguish pooled versus specific-resource publication; API credits may use quota/key semantics. Unknown or invalid values produce an operator-visible explanation and fall back to the domain's structural default.
+
+A cooperating storefront caps its requested hold TTL to the nonnegative operator preference and its own policy. The site ledger continues enforcing only the actual caller-supplied TTL and does not treat the tag as authority.
+
+### Retire local physical state reader by reader
+
+Before removing any table or field, inventory publication, claim construction, negotiation, pricing, admin, recovery, migration, and e2e readers. Remove `resource_capacity_validator.py` only after its local physical-inventory input has no caller. Preserve commercial metadata and transition/idempotency state even if stored in an existing table.
+
+### Share contracts, not domain semantics
+
+Core storefront may own schema-opaque projection persistence and reconciliation ports. Domain packages own projection-to-listing interpretation and hint enums. Site/resource-pool kits do not import storefront or domain code.
+
+## Risks / Trade-offs
+
+- **[Projection data becomes stale]** → Retain last complete generation with explicit freshness and require live admission for every reservation.
+- **[Mapping duplicates identity]** → Store references and commercial overlays, not an independently authored physical truth.
+- **[Pool metadata leaks secrets]** → Project allowlisted normalized fields only and test payload redaction.
+- **[Pinned site is unavailable]** → Report/retry that authority; do not silently reserve elsewhere under the same listing.
+- **[Local inventory removal breaks operator workflows]** → Gate each deletion on reader inventory, migration, and focused compatibility evidence.
+
+## Migration Plan
+
+1. Add durable configured-site and projection-generation tables without changing current publication.
+2. Extend producer payloads additively and load old payloads with absent optional metadata.
+3. Backfill commercial mappings from current listings/local inventory where identity is unambiguous; quarantine ambiguous rows.
+4. Switch publication and claim construction behind observable comparison/feature controls.
+5. Remove proven-superseded physical-authority writers/readers only after parity and restart tests.
+
+Rollback restores the previous publication/claim reader while retaining additive projection tables. Listings created from mappings retain enough provenance to close safely; no migration deletes agreement history.
+
+## Open Questions
+
+- Are Resource Pool IDs globally generated after POOLS-7 identity cleanup, or must every persistent/publication reference remain explicitly site-scoped?
+- Which existing storefront table should own the commercial overlay versus a new mapping table?
+- Should provider identity be projected directly, or reduced to a non-sensitive mechanism label for publication?
+
+## Permanent Documentation Promotion
+
+| Decision | Permanent destination |
+|---|---|
+| Independent durable projection generations and stale behavior | `openspec/specs/site-capacity/spec.md` and `architecture.md` |
+| Commercial mapping, direct claim routing, and retirement boundary | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
+| Domain-neutral hint keys and domain-owned values | `openspec/specs/resource-pool-management/spec.md` and `architecture.md` |

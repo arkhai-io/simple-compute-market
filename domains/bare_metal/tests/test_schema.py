@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
+    BARE_METAL_PROVISION_VERSION,
     BARE_METAL_SCHEMA_KIND,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
@@ -18,9 +19,11 @@ from arkhai_bare_metal import (
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
+    BareMetalProvisionTerms,
     BareMetalReceipt,
     BareMetalTerms,
     bare_metal_executor_ref,
+    make_bare_metal_provision_terms,
     materialization_to_lease_create,
     receipt_from_lease_view,
 )
@@ -77,6 +80,35 @@ def test_bare_metal_message_accepts_ssh_public_key():
     assert message.kind == BARE_METAL_SCHEMA_KIND
     assert message.access_method == SSH_ACCESS_METHOD
     assert message.ssh_public_key == "ssh-ed25519 AAAA buyer"
+
+
+def test_bare_metal_message_unwraps_versioned_provision_terms():
+    envelope = make_bare_metal_provision_terms(
+        duration_seconds=3600,
+        ssh_public_key="ssh-ed25519 AAAA buyer",
+    )
+    original = envelope.model_dump(mode="json")
+
+    message = BareMetalMessage.model_validate(envelope)
+
+    assert envelope.version == BARE_METAL_PROVISION_VERSION
+    assert message.duration_seconds == 3600
+    assert message.ssh_public_key == "ssh-ed25519 AAAA buyer"
+    assert envelope.model_dump(mode="json") == original
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"kind": "compute.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v1", "version": 2, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key", "unknown": True}},
+        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "   "}},
+    ],
+)
+def test_bare_metal_provision_terms_reject_invalid_envelopes(value):
+    with pytest.raises(ValidationError):
+        BareMetalProvisionTerms.model_validate(value)
 
 
 def test_bare_metal_terms_are_canonical_negotiation_handoff():

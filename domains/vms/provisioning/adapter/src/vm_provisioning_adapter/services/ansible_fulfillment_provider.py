@@ -30,10 +30,10 @@ if TYPE_CHECKING:
 class AnsiblePoolConfig:
     """Provider-local, typed view of a pool's Ansible provider configuration.
 
-    Deliberately narrower than the persisted provider_config dict: no
-    ``inventory_group`` (see Pools 3 design.md Decision 6 — it's not used for
-    dispatch; concrete placement is entirely PhysicalSettlementScheduler's
-    job, and an inventory group would be a second, conflicting scheduler).
+    Deliberately narrower than persisted provider configuration:
+    ``inventory_group`` is not used for dispatch because concrete placement
+    belongs exclusively to ``PhysicalSettlementScheduler``. Treating an
+    inventory group as placement would introduce a conflicting scheduler.
     """
 
     playbook_path: str
@@ -112,12 +112,10 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         The reserved set is derived dynamically via
         AnsibleJobService.reserved_var_keys(base_params) — the same logic
         AnsibleService uses when actually rendering the vars file — rather
-        than a separately hand-maintained list. This closes a gap found
-        during implementation review: a hardcoded list here previously
-        missed several real built-in fields (e.g. executor_kind), so a
-        colliding extra_var could pass this check and only get caught
-        later, asynchronously, when the background job worker rendered the
-        vars file. base_params must not have provider_extra_vars set yet —
+        than a separately hand-maintained list. A hardcoded list can miss
+        built-in fields such as ``executor_kind`` and defer a collision until
+        asynchronous rendering. ``base_params`` must not have
+        ``provider_extra_vars`` set yet —
         reserved_var_keys ignores that field regardless, but passing an
         already-merged params object here would be a caller error.
         """

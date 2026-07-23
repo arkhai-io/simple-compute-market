@@ -1,22 +1,27 @@
 ## Context
 
-This change is split from the legacy planning corpus so it can be reviewed, implemented, verified, and archived independently. Planned and independently implementable.
+IaC emits `root_ssh_*`, `gcs_bucket_url`, `gcs_image_path`, and `golden_image_name`; provisioning declares `golden_root_ssh_*`, `golden_image_name`, `golden_gcs_bucket`, and `golden_gcs_project`. Only some are consumed, while runtime jobs use other GCS names. Helm mounts a provisioning Secret profile but golden values are absent; old docs describe a pre-extraction injection mechanism.
 
 ## Goals / Non-Goals
 
-**Goals:**
-- Golden-image automation emits Dynaconf key names consumed directly by provisioning and documents secret transfer.
+**Goals:** one consumed generated profile; Secret-safe transfer; coherent GCS ownership; tested operator workflow.
 
-**Non-Goals:**
-- No adapter or second configuration format.
+**Non-Goals:** image-builder redesign or secret storage in ConfigMap/logs.
 
 ## Decisions
 
-- Keep ownership aligned with `physical-provisioning` and its baseline specification.
-- Preserve existing wire, persistence, and deployment compatibility unless the proposal explicitly calls for a coordinated cutover.
-- Remove obsolete in-repository callers or paths in the same implementation; do not leave indefinite aliases.
+- Generated profile uses provisioning-consumed `golden_root_ssh_filename`, `golden_root_ssh_password`, and `golden_image_name`.
+- Before implementation, trace GCS bucket/path ownership. If service defaults are required, define and consume explicit bucket/path settings; otherwise keep them request/Ansible fields and remove dead service declarations. `golden_gcs_project` is not retained without a consumer.
+- Split generated non-secret and secret fragments or provide a redacting conversion command; apply secrets to the pre-existing provisioning Secret profile.
+- Never print secret values in Helm render diagnostics or operational commands.
+- Update the VM IaC guide to current Helm/Dynaconf profile workflow.
 
 ## Risks / Trade-offs
 
-- Legacy prose may describe landed and pending work together; implementation MUST re-check current code before editing.
-- Cross-service changes require focused contract tests at each changed boundary.
+- **[Renamed keys break existing generated files]** → Support one bounded validation/migration message and regenerate from source.
+- **[GCS defaults conflict with request values]** → Define explicit precedence and test both paths.
+- **[Secret leaks during transfer]** → Redact output, use restrictive files/Secret input, and add render/log scans.
+
+## Permanent Documentation Promotion
+
+The validated config/secret contract belongs in `physical-provisioning` spec/architecture; operator generation/application procedure belongs in VM provisioning IaC documentation.

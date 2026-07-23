@@ -25,7 +25,8 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 Implementation is not complete when code merely passes tests. It is complete when:
 
 - the planned code and tests are implemented;
-- accepted subsystem design is present in `openspec/specs/<subsystem>/spec.md`;
+- accepted subsystem behavior is present in `openspec/specs/<subsystem>/spec.md`;
+- accepted subsystem design rationale is present in `openspec/specs/<subsystem>/architecture.md` when it does not fit normative scenarios;
 - accepted repository-wide architecture is present in `docs/development/ARCHITECTURE.md`;
 - permanent documentation describes the current system rather than announcing completion;
 - temporary migration and changelog commentary has been removed from production code;
@@ -35,11 +36,13 @@ Implementation is not complete when code merely passes tests. It is complete whe
 ## Documentation ownership
 
 - `docs/development/ARCHITECTURE.md` is the repository-wide architecture reference: system shape, dependency layers, authority boundaries, shared vocabulary, major flows, deployment topology, packaging rules, and testing philosophy.
-- `openspec/specs/` contains authoritative current subsystem behavior, invariants, ownership, lifecycle semantics, and durable design rationale.
+- `openspec/specs/<subsystem>/spec.md` contains authoritative current subsystem behavior, invariants, ownership, and lifecycle semantics.
+- `openspec/specs/<subsystem>/architecture.md` may contain durable current-state conceptual models, design motivation, trade-offs, relationships, and limitations. It does not replace normative requirements.
+- `openspec/specs/README.md` is the canonical capability documentation index.
 - `openspec/changes/` contains proposed deltas, design exploration, migration notes, implementation tasks, and temporary compatibility concerns.
 - Git history and pull requests contain provenance and change history.
 
-Production code must not depend on `openspec/changes` for design context. Before a change is considered implemented, durable knowledge from the change must be promoted to `openspec/specs` or `ARCHITECTURE.md`.
+Production code must not depend on `openspec/changes` for design context. Before a change is considered implemented, durable knowledge from the change must be promoted to the owning `spec.md`, companion `architecture.md`, or repository-wide `ARCHITECTURE.md`. OpenSpec does not synchronize companion architecture files automatically, so applicable changes must name that promotion explicitly in tasks and the design-promotion record.
 
 ## Python comments and docstrings
 

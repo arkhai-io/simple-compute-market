@@ -43,15 +43,31 @@ A domain that supports seller publication MUST provide its publication source an
 - **THEN** it produces domain listings through its contract and the shared runner publishes or reconciles their opaque payloads
 
 ### Requirement: Domain runtime composition
-The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus publication, negotiation-policy, settlement-verification, plan-construction, and fulfillment hooks. VM, bare-metal, and API-credit composition roots MUST supply their implementations explicitly, and generic storefront services MUST NOT import or branch on those concrete domains.
+The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus the lifecycle hooks declared by that domain. A concrete storefront composition MUST supply its implementations explicitly, and generic storefront services MUST NOT import or branch on concrete domains.
 
-#### Scenario: Storefront composition selects a domain
-- **WHEN** a VM, bare-metal, or API-credit storefront is assembled
+#### Scenario: Current storefront composition selects a domain
+- **WHEN** a VM or API-credit storefront is assembled
 - **THEN** its composition root supplies a validated domain contract used by every shared storefront service that interprets domain behavior
 
 #### Scenario: Domain validation fails
 - **WHEN** a domain codec or hook rejects a payload
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
+
+### Requirement: Trusted provisioning-site identity
+A storefront MUST bind each provisioning connection to an operator-configured `site_id`. It MUST derive routing and ownership from that trusted binding rather than accepting a counterparty-provided site identity.
+
+#### Scenario: Provisioner reports a conflicting site identity
+- **WHEN** a configured provisioning connection reports a `site_id` different from the storefront binding
+- **THEN** the storefront retains the configured identity and rejects or ignores the conflicting assertion
+
+### Requirement: Storefronts cache independent site projections
+Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains host-granular inside the provisioning site authority.
+
+A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
+
+#### Scenario: One projection refresh fails
+- **WHEN** a storefront cannot refresh one site projection after previously loading a complete generation
+- **THEN** it retains that generation as stale without replacing the other independently versioned projection
 
 ## Evidence
 
@@ -61,19 +77,4 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 
-Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior.
-
-### Requirement: Trusted provisioning-site identity
-A storefront MUST bind each provisioning connection to an operator-configured `site_id`. It MUST derive routing and ownership from that trusted binding rather than accepting a counterparty-provided site identity.
-
-#### Scenario: Provisioner reports a conflicting site identity
-- **WHEN** a configured provisioning connection reports a `site_id` different from the storefront binding
-- **THEN** the storefront retains the configured identity and rejects or ignores the conflicting assertion
-
-
-## Site projection consumption
-
-Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains host-granular inside the provisioning site authority.
-
-### Requirement: Storefronts cache independent site projections
-A storefront SHALL load the resource-pool and capacity-bucket projections at startup, poll their independent revision-and-digest identities, and replace each cached generation atomically. Refresh failure SHALL retain the last complete generation and mark it stale rather than representing an empty projection. Topology-sensitive authoritative errors MAY trigger one coalesced drift check but SHALL NOT automatically retry a state-changing request.
+Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.

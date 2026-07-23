@@ -16,13 +16,15 @@
 | [Deployment topology](#deployment-topology) | Local and deployed structure |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
 | [Testing strategy](#testing-strategy) | Test levels and boundary validation |
-| [Subsystem specification index](#subsystem-specification-index) | Permanent detailed contracts |
+| [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
 ## System overview
 
 Arkhai is a reference implementation of an agent-driven marketplace. Buyers discover listings through registries, negotiate with seller storefronts through signed synchronous HTTP rounds, materialize settlement plans, and service obligations over time. Market-domain code defines what is traded; shared role packages provide schema-opaque control flow; reusable kit capabilities provide identity, policy, settlement, capacity, resource-pool, and fulfillment machinery.
 
 Physical delivery is deliberately separate from commercial agreement. A seller may advertise fungible capacity or intentionally expose a specific resource. The storefront owns market-facing listings and deal state. Site authorities own admitted capacity. Resource-pool services own provisioning routing metadata. Fulfillment scheduling binds admitted capacity to a settlement resource, and providers execute against that selected resource.
+
+Not every market has physical delivery. API credits reuse the same schema-opaque negotiation and settlement roles while a quota authority issues prepaid bearer-key balances. They do not acquire compute-provisioning dependencies merely to fit the physical lifecycle.
 
 ```text
 buyer (`market`) ── discovery ──> registry
@@ -125,7 +127,7 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
                                       └────────────────────┘
 ```
 
-The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time.
+The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time. The API-credits seller stack instead composes a storefront with a credits service and quota authority; the credits service owns keys, balances, grants, and online consumption.
 
 ## Authority boundaries
 
@@ -140,6 +142,7 @@ The buyer is normally a pure HTTP client. The registry is a shared discovery ser
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
 | Lease expiry and physical release | Provisioning lifecycle plus site authority | Capacity is released only after executor/provider success or explicit force release |
 | On-chain/mechanism claim state | Settlement servicing engine | Mechanism-neutral core with kit/domain codecs and policies |
+| API keys, credit balances, grants, and consumption | API-credits service | Wallet authorization for purchase is distinct from bearer authorization for use |
 
 ### Storefront capacity boundary
 
@@ -326,26 +329,6 @@ The e2e test pod cannot import service internals. It uses typed clients, explici
 
 See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
 
-## Subsystem specification index
+## Capability documentation index
 
-| Subsystem | Permanent specification |
-|---|---|
-| Core/kit/domain composition | [Market composition](../../openspec/specs/market-composition/spec.md) |
-| Registry publication and discovery | [Registry discovery](../../openspec/specs/registry-discovery/spec.md) |
-| Signed negotiation rounds | [Negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md) |
-| Settlement plans and servicing | [Settlement servicing](../../openspec/specs/settlement-servicing/spec.md) |
-| Storefront publication and projections | [Storefront publication](../../openspec/specs/storefront-publication/spec.md) |
-| Site capacity authority | [Site capacity](../../openspec/specs/site-capacity/spec.md) |
-| Resource-pool administration | [Resource-pool management](../../openspec/specs/resource-pool-management/spec.md) |
-| Scheduling and provider fulfillment | [Fulfillment](../../openspec/specs/fulfillment/spec.md) |
-| Executors, jobs, and lease release | [Physical provisioning](../../openspec/specs/physical-provisioning/spec.md) |
-| Buyer plugins and recovery | [Buyer orchestration](../../openspec/specs/buyer-orchestration/spec.md) |
-| Deployment, persistence, and packaging | [Deployment and state](../../openspec/specs/deployment-state/spec.md) |
-| Test hierarchy and compatibility | [Testing and compatibility](../../openspec/specs/test-compatibility/spec.md) |
-| Specification/change workflow | [Planning governance](../../openspec/specs/planning-governance/spec.md) and [`openspec/README.md`](../../openspec/README.md) |
-
-### Site inventory, capacity accounting, and projections
-
-Provisioning separates physical inventory, private capacity accounting, and storefront projection concerns. Physical hosts and their resource-pool membership remain authoritative provisioning inventory. A host-level `CapacityBucket` carries the multidimensional balance used for admission; a current `CapacityReservationDebit` links a reservation to that private bucket. Storefront reservation contracts do not expose bucket or backing-resource identity. Scheduling may atomically rebind the debit before persisting `settlement_resource_id`.
-
-The storefront pulls two independently versioned projections. `site_resource_pools` retains allowlisted per-resource facts for individual-resource listings. `site_capacity_buckets` groups identical currently available shapes for capacity listings, using deterministic grouping keys and counts rather than physical-resource identifier lists. Each projection has an independent revision and canonical digest so a storefront can compare in constant time, fetch only when drift is detected, and atomically replace the corresponding cached generation. Projection rows are advisory publication inputs; authoritative admission always debits a provisioning-private host-level `CapacityBucket` through a current `CapacityReservationDebit`.
+The canonical [capability documentation index](../../openspec/specs/README.md) links each normative `spec.md` and its optional freeform `architecture.md` companion. Capability contracts own detailed behavior; companions own durable subsystem models and rationale; this document remains the cross-system map.

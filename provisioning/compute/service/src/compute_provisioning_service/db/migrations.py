@@ -551,8 +551,8 @@ def _migrate_retire_site_resources(engine: Engine) -> None:
         connection.execute(text("DROP TABLE site_resources"))
 
 
-def _migrate_pools7_capacity_model_cutover(engine: Engine) -> None:
-    """Apply the undeployed POOLS-7 reservation and capacity-model cutover."""
+def _migrate_capacity_model_cutover(engine: Engine) -> None:
+    """Apply the reservation and private capacity-accounting cutover."""
     _migrate_rename_site_allocations_to_capacity_reservations(engine)
     _migrate_capacity_reservations_settlement_resource_id(engine)
     _migrate_site_resources_pool_id(engine)
@@ -587,6 +587,6 @@ _MIGRATIONS: tuple[Migration, ...] = (
     ),
     Migration(
         "20260722_001_pools7_capacity_model_cutover",
-        _migrate_pools7_capacity_model_cutover,
+        _migrate_capacity_model_cutover,
     ),
 )

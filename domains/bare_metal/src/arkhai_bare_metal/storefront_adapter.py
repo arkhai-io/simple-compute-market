@@ -1,57 +1,48 @@
-"""Bare-metal storefront publication adapter.
-
-The bare-metal domain package owns this adapter because it is domain semantics:
-turn shared site capacity into bare-metal listing candidates and track derived
-bare-metal listings. Concrete storefront executables still come from core role
-packages and inject local infrastructure callbacks.
-"""
+"""Bare-metal publication source composed over trusted site generations."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from core_storefront.publication_sources import PublicationSource
 
+from .projections import TrustedBareMetalProjection
 from .storefront_publication import (
     bare_metal_listing_candidates,
     close_stale_bare_metal_listings,
     open_bare_metal_listing_keys,
     record_derived_bare_metal_listing,
     reopen_derived_bare_metal_listing_if_present,
-    stale_open_bare_metal_listing_ids,
 )
 
-CapacitySnapshot = Callable[[], list[dict[str, Any]]]
+ProjectionSnapshot = Callable[
+    [],
+    Iterable[TrustedBareMetalProjection] | None,
+]
 CloseListing = Callable[[str, str, str | None], dict[str, Any]]
 PublishExistingListing = Callable[..., dict[str, Any]]
+
+
+def _complete_projections(
+    projection_snapshot: ProjectionSnapshot,
+) -> list[TrustedBareMetalProjection]:
+    snapshot = projection_snapshot()
+    if snapshot is None:
+        return []
+    return list(snapshot)
 
 
 def available_bare_metal_listing_candidates(
     db_path: str,
     *,
-    capacity_snapshot: CapacitySnapshot,
+    projection_snapshot: ProjectionSnapshot,
 ) -> list[dict[str, Any]]:
-    """Return publishable bare-metal candidates from the shared capacity view."""
+    """Return candidates from retained complete trusted generations."""
     del db_path
-    return bare_metal_listing_candidates(capacity_snapshot())
-
-
-def open_bare_metal_publication_keys(db_path: str) -> set[str]:
-    """Return derivation keys already covered by open bare-metal listings."""
-    return open_bare_metal_listing_keys(db_path)
-
-
-def stale_open_bare_metal_publication_ids(
-    db_path: str,
-    *,
-    capacity_snapshot: CapacitySnapshot,
-) -> list[str]:
-    """Return open bare-metal listing IDs no longer backed by availability."""
-    resources = capacity_snapshot()
-    if not resources:
-        return []
-    return stale_open_bare_metal_listing_ids(db_path, resources)
+    return bare_metal_listing_candidates(
+        _complete_projections(projection_snapshot),
+    )
 
 
 def close_stale_bare_metal_publications(
@@ -59,16 +50,13 @@ def close_stale_bare_metal_publications(
     db_path: str,
     base_url: str,
     private_key: str | None,
-    capacity_snapshot: CapacitySnapshot,
+    projection_snapshot: ProjectionSnapshot,
     close_listing: CloseListing,
 ) -> list[str]:
-    """Close stale derived bare-metal listings and update tracking rows."""
-    resources = capacity_snapshot()
-    if not resources:
-        return []
+    """Close stale listings only where a complete generation is available."""
     return close_stale_bare_metal_listings(
         db_path=db_path,
-        resources=resources,
+        projections=_complete_projections(projection_snapshot),
         close_listing=lambda listing_id: close_listing(
             base_url,
             listing_id,
@@ -78,12 +66,8 @@ def close_stale_bare_metal_publications(
 
 
 def bare_metal_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
-    """Return skip keys that identify one bare-metal publication candidate."""
-    keys: set[str] = set()
-    for value in (candidate.get("derivation_key"), candidate.get("machine_id")):
-        if value is not None:
-            keys.add(str(value))
-    return keys
+    """Return the one authority-scoped key identifying a candidate."""
+    return {str(candidate["derivation_key"])}
 
 
 def record_published_bare_metal_listing(
@@ -91,11 +75,11 @@ def record_published_bare_metal_listing(
     candidate: dict[str, Any],
     listing_id: str,
 ) -> None:
-    """Record the local derived-listing row for a new bare-metal listing."""
+    """Record publication provenance for a newly created listing."""
     record_derived_bare_metal_listing(
         db_path,
         listing_id=listing_id,
-        listing=candidate["listing"],
+        candidate=candidate,
     )
 
 
@@ -111,7 +95,7 @@ def reopen_bare_metal_listing_adapter(
     *,
     publish_existing_listing: PublishExistingListing,
 ) -> dict[str, Any] | None:
-    """Reopen a tracked bare-metal listing through caller-supplied publisher."""
+    """Reopen a tracked listing through caller-supplied publication."""
     return reopen_derived_bare_metal_listing_if_present(
         db_path=db_path,
         base_url=base_url,
@@ -127,11 +111,11 @@ def reopen_bare_metal_listing_adapter(
 
 def bare_metal_publication_adapter(
     *,
-    capacity_snapshot: CapacitySnapshot,
+    projection_snapshot: ProjectionSnapshot,
     close_listing: CloseListing,
     publish_existing_listing: PublishExistingListing,
 ) -> PublicationSource:
-    """Build the bare-metal publication source for a concrete storefront."""
+    """Build the source selected by the concrete bare-metal storefront."""
 
     def reopen_existing(
         db_path: str,
@@ -157,19 +141,21 @@ def bare_metal_publication_adapter(
 
     return PublicationSource(
         name="bare_metal",
-        open_keys=open_bare_metal_publication_keys,
+        open_keys=open_bare_metal_listing_keys,
         close_stale=lambda db_path, base_url, private_key: (
             close_stale_bare_metal_publications(
                 db_path=db_path,
                 base_url=base_url,
                 private_key=private_key,
-                capacity_snapshot=capacity_snapshot,
+                projection_snapshot=projection_snapshot,
                 close_listing=close_listing,
             )
         ),
-        available_candidates=lambda db_path: available_bare_metal_listing_candidates(
-            db_path,
-            capacity_snapshot=capacity_snapshot,
+        available_candidates=lambda db_path: (
+            available_bare_metal_listing_candidates(
+                db_path,
+                projection_snapshot=projection_snapshot,
+            )
         ),
         skip_keys=bare_metal_candidate_skip_keys,
         offer_resource=lambda candidate: dict(candidate["offer_resource"]),

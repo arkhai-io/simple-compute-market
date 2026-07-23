@@ -30,6 +30,7 @@ rules:
   specs:
     - Express durable observable behavior and ownership boundaries, not source paths alone.
     - Give every requirement at least one WHEN/THEN scenario with a verifiable outcome.
+    - Keep broader conceptual models and design motivation in the capability's permanent architecture.md companion.
     - Use the repository's official settlement and capacity vocabulary.
   design:
     - Record compatibility, migration, rollback, and cross-service ownership decisions when relevant.
@@ -37,4 +38,5 @@ rules:
   tasks:
     - Order implementation by real dependencies and keep independently archivable outcomes in separate changes.
     - Include focused behavioral verification before documentation cleanup.
+    - Name exact permanent spec.md, architecture.md, or repository ARCHITECTURE.md promotion destinations for accepted decisions.
     - Do not add changelog or broad documentation work until the requested behavior is proven.

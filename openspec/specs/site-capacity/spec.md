@@ -13,6 +13,58 @@ A site authority MUST own physical resource capacity and allocations; a storefro
 - **WHEN** listing reconciliation cannot obtain an authoritative snapshot
 - **THEN** it skips capacity-driven close/reopen actions rather than treating ignorance as zero capacity
 
+### Requirement: Storefront capacity-claim identity
+VM compute listings MUST normalize surrounding whitespace and carry at least one valid `pool_id` or `resource_id`. Every supplied identity MUST begin with an alphanumeric character, contain only letters, digits, `.`, `_`, `:`, or `-`, and contain at most 128 characters. A pool-only listing produces a pool-scoped reservation claim. A listing carrying `resource_id`, whether alone or with `pool_id`, produces a resource-specific claim and excludes `pool_id`. Ordinary pool-scoped claims MUST NOT require or select a `vm_host` or `resource_id`.
+
+Claim construction MUST reject a missing, empty, or malformed settlement order and any extracted claim lacking both identities before probing or reserving capacity. Stored listings that violate the identity invariant MUST fail closed on publication or republication. Resuming such a listing MUST return an actionable conflict before changing pause state or contacting a registry; the seller-authenticated close operation MUST remain available without implicit identity backfill or automatic unpublication.
+
+#### Scenario: Pool-only listing creates an ordinary reservation
+- **WHEN** a buyer reserves through a listing carrying `pool_id` without `resource_id`
+- **THEN** the claim carries `pool_id` and capacity/shape attributes without requiring or selecting a specific host or resource
+
+#### Scenario: Resource-only listing creates a specific reservation
+- **WHEN** a buyer reserves through a listing carrying `resource_id` without `pool_id`
+- **THEN** the claim carries the explicit `resource_id` and does not require pool-scoped matching
+
+#### Scenario: Listing carries both capacity identities
+- **WHEN** a listing carries both `pool_id` and `resource_id`
+- **THEN** the claim carries `resource_id` and drops `pool_id`
+
+#### Scenario: Listing carries neither capacity identity
+- **WHEN** a compute listing is created without `pool_id` or `resource_id`
+- **THEN** model validation rejects it before persistence or publication
+
+#### Scenario: Listing carries a malformed capacity identity
+- **WHEN** a supplied identity is empty, whitespace-only, malformed, or too long
+- **THEN** model validation rejects it before persistence or publication
+
+#### Scenario: Settlement order is absent or malformed
+- **WHEN** VM fulfillment receives no valid non-empty settlement order
+- **THEN** fulfillment fails before probing or reserving capacity rather than constructing an unscoped claim
+
+#### Scenario: Legacy-invalid listing is resumed
+- **WHEN** an operator resumes a stored listing that lacks a valid capacity identity
+- **THEN** the storefront returns an actionable conflict without changing pause state or contacting a registry
+
+#### Scenario: Legacy-invalid listing is explicitly closed
+- **WHEN** the operator invokes the seller-authenticated close operation after the validation conflict
+- **THEN** the storefront removes it from active registry discovery without inventing a capacity identity
+
+### Requirement: Reservation scheduling view
+A capacity reservation MUST expose its identity, lifecycle state, hold expiry, reserved dimensions, resource kind, and generic scheduling constraints through the site-authority boundary. Scheduling MUST reject a missing or expired reservation and any request that conflicts with the reservation's generic physical requirements. Commercial agreement identity and terms remain at the storefront and MUST NOT be required by generic scheduling.
+
+#### Scenario: Reservation is missing
+- **WHEN** scheduling references a `capacity_reservation_id` that the site authority does not know
+- **THEN** scheduling reports a missing-reservation error before policy selection
+
+#### Scenario: Reservation hold expired
+- **WHEN** scheduling references an uncommitted hold whose expiry has passed
+- **THEN** scheduling reports reservation expiry before policy selection
+
+#### Scenario: Request exceeds reserved dimensions
+- **WHEN** a scheduling request asks for more of a dimension than the reservation holds
+- **THEN** scheduling reports a request mismatch before assignment or provider execution
+
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
@@ -28,7 +80,7 @@ A storefront MAY aggregate multiple site clients as soft state but MUST route ea
 - **THEN** the aggregator may reserve at the eligible site and records which site owns the allocation
 
 ### Requirement: Capacity and deal events
-Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront.
+Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront. Capacity deltas for multidimensional resources MUST report the per-dimension availability change so consumers do not infer one dimension from another.
 
 #### Scenario: Capacity is released
 - **WHEN** an allocation release commits in the site ledger
@@ -67,10 +119,6 @@ The site authority MUST own Physical Resources, settlement-relevant Resource Poo
 - **WHEN** site authority modules are imported without VM or bare-metal provisioning packages
 - **THEN** resource, reservation, allocation, and event behavior remains available without concrete executor imports
 
-#### Scenario: Administrative pool is created before settlement integration
-- **WHEN** an operator creates or assigns hosts to a provisioning resource pool during POOLS-1
-- **THEN** existing site-capacity reservation and allocation selection behavior remains unchanged
-
 ### Requirement: Idempotent release recording
 The site authority MUST record release exactly once for an allocation and advance capacity version only when the authoritative allocation transition commits.
 
@@ -85,25 +133,28 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - **WHEN** an executor lifecycle transition releases an allocation
 - **THEN** projection subscribers can reconcile from the capacity version and the owning storefront can correlate its deal event without either channel exposing the other's private payload
 
-## Evidence
+**Evidence**
 
 - Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
-- Multidimensional capacity (declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, per-dimension event deltas): `kit/site/tests/unit/test_ledger.py` (POOLS-6 pass 1 tests).
+- Multidimensional capacity, including declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, and per-dimension event deltas: `kit/site/tests/unit/test_ledger.py`.
 - Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
 - Storefront-to-site HTTP contract: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
+- Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
+- Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
+- Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
 
-Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline; they remain proposed in `prove-multi-domain-capacity`.
+Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
 
-## Capacity settlement lifecycle
+**Capacity settlement lifecycle**
 
 A **Capacity Reservation** records accepted capacity, the agreement/deal relationship, requested shape or units, lifecycle state, and any hold expiry. A reservation is not itself a concrete provisioning decision.
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
 
-## Relationship to fulfillment scheduling
+**Relationship to fulfillment scheduling**
 
 The site authority admits and persists capacity reservations. The higher-layer [fulfillment capability](../fulfillment/spec.md) binds an admitted reservation to a Settlement Resource and records that assignment through the site boundary before provider dispatch.
 
@@ -122,13 +173,13 @@ Provisioning-owned site-capacity persistence MUST NOT redundantly store storefro
 - **AND** provisioning capacity rows remain scoped by the local database authority rather than a redundant site column
 
 
-## Internal capacity accounting
+**Internal capacity accounting**
 
 A storefront-facing capacity reservation identifies the durable hold by `capacity_reservation_id` and exposes lifecycle metadata, expiry, and reserved dimensions. It does not expose the provisioning authority's initial accounting choice.
 
 Within the site authority, a `CapacityBucket` is the host-level multidimensional accounting boundary. For the VM domain there is one current bucket per host. `backing_resource_id` links the bucket to its physical inventory record, while `CapacityReservationDebit` records the reservation's current bucket and debited dimensions. Scheduling may atomically replace that debit when it rebinds a reservation to another eligible host and then records `settlement_resource_id`.
 
-## Storefront projection families
+**Storefront projection families**
 
 The site authority publishes two independent pull projections:
 
@@ -140,5 +191,13 @@ Each projection family has its own monotonic revision and canonical snapshot dig
 ### Requirement: Capacity accounting is private to the site authority
 The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
 
+#### Scenario: Storefront reads a capacity reservation
+- **WHEN** a storefront reads an admitted reservation
+- **THEN** it receives lifecycle state and reserved dimensions without private bucket or backing-resource identity
+
 ### Requirement: Physical inventory and grouped capacity are separate projections
 A site authority SHALL expose `site_resource_pools` from authoritative domain inventory and `site_capacity_buckets` from current bucket availability. Each projection SHALL have an independent monotonic revision and canonical digest. Grouped capacity SHALL contain deterministic grouping criteria and `resource_count`, SHALL NOT contain physical-resource identifiers, and SHALL NOT be used as an allocation target.
+
+#### Scenario: Storefront refreshes grouped capacity
+- **WHEN** the capacity-bucket projection revision changes
+- **THEN** the storefront can replace that projection independently without receiving physical-resource identifiers or using a group as an allocation target

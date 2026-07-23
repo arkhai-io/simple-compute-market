@@ -1,22 +1,26 @@
 ## Context
 
-This change is split from the legacy planning corpus so it can be reviewed, implemented, verified, and archived independently. Planned and independently implementable.
+Provisioning and e2e loaders duplicate mechanics but differ in prefixes, dotenv files, `.secrets.toml`, include behavior, profile helpers, and provisioning's storefront fallback. `kit/config` has no Dynaconf dependency or shared factory today.
 
 ## Goals / Non-Goals
 
-**Goals:**
-- Provisioning and e2e settings use one kit/config loader with unchanged layering.
+**Goals:** parameterized shared mechanics with byte-for-behavior consumer parity and correct wheel dependencies.
 
-**Non-Goals:**
-- Storefront profile-free loading is not part of this deduplication.
+**Non-Goals:** one universal configuration policy or inclusion of the storefront loader.
 
 ## Decisions
 
-- Keep ownership aligned with `deployment-state` and its baseline specification.
-- Preserve existing wire, persistence, and deployment compatibility unless the proposal explicitly calls for a coordinated cutover.
-- Remove obsolete in-repository callers or paths in the same implementation; do not leave indefinite aliases.
+- Add a small immutable loader-options contract for roots, ordered files/includes, profile selection, prefix, nested separator, dotenv/secrets, missing-file behavior, and merge flags.
+- Shared code resolves profiles/order and constructs Dynaconf; consumer modules retain exported settings objects, validators, helpers, and special fallbacks.
+- Capture current consumer behavior in characterization tests before extraction and run old/new parity fixtures during cutover.
+- Add Dynaconf as an explicit `arkhai-kit-config` dependency and verify both consumers from built wheels.
 
 ## Risks / Trade-offs
 
-- Legacy prose may describe landed and pending work together; implementation MUST re-check current code before editing.
-- Cross-service changes require focused contract tests at each changed boundary.
+- **[Abstraction erases meaningful differences]** → Parameterize only shared mechanics and reject options that cannot express current behavior.
+- **[Merge precedence changes subtly]** → Compare nested values and source order across profile/env/secrets/include fixtures.
+- **[Dependency inversion]** → Kit remains lower-level and imports no provisioning/e2e modules.
+
+## Permanent Documentation Promotion
+
+Shared construction and preserved precedence belong in `deployment-state` spec/architecture; consumer-specific operational profile documentation remains with each role.
