@@ -47,3 +47,10 @@ The implemented baseline is deterministic two-level round-robin with multidimens
 - [Site capacity](../site-capacity/spec.md)
 - [Resource-pool management](../resource-pool-management/spec.md)
 - [Physical provisioning](../physical-provisioning/spec.md)
+
+
+## Fulfillment acceptance and dispatch acknowledgement
+
+Fulfillment acceptance freezes provider input before side effects. One transaction serializes acceptance, loads the selected resource and provider configuration, prepares the provider-specific envelope, and persists it with `dispatch_pending`. Dispatch happens after commit. A second short transaction records normalized provider metadata and advances the aggregate to the submitted/dispatching state. The acknowledgement gap is intentional: recovery redispatches the immutable envelope with the same executor idempotency key, allowing the provider to return the original job.
+
+Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.

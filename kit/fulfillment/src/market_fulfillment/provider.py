@@ -4,14 +4,23 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TYPE_CHECKING
+from .envelopes import VersionedEnvelope
 if TYPE_CHECKING:
-    from .settlement_types import PhysicalSettlementRequest, SettlementResource
+    from .settlement_types import SettlementResource
 
 class ProviderOperationState(str, Enum):
     pending='pending'; succeeded='succeeded'; failed='failed'; unknown='unknown'
 
 @dataclass(frozen=True)
 class FulfillmentResult:
+    provider_metadata: dict[str, Any]
+
+@dataclass(frozen=True)
+class SettlementResult:
+    capacity_reservation_id: str
+    fulfillment_id: str
+    resource: 'SettlementResource'
+    provisioned_resources: tuple[dict[str, Any], ...]
     provider_metadata: dict[str, Any]
 
 @dataclass(frozen=True)
@@ -34,9 +43,13 @@ class FulfillmentValidationResult:
 
 class FulfillmentProvider(ABC):
     @abstractmethod
-    async def create(self, request:'PhysicalSettlementRequest', resource:'SettlementResource')->FulfillmentResult: ...
+    def prepare_create(self, request: VersionedEnvelope[Any], resource:'SettlementResource', pool_config:dict[str,Any]) -> VersionedEnvelope[Any]: ...
     @abstractmethod
-    async def teardown(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->FulfillmentResult: ...
+    async def dispatch_create(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
+    @abstractmethod
+    def prepare_teardown(self, settlement_result:SettlementResult, pool_config:dict[str,Any]) -> VersionedEnvelope[Any]: ...
+    @abstractmethod
+    async def dispatch_teardown(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
     @abstractmethod
     async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
 

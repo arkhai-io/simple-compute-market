@@ -29,6 +29,7 @@ from .provider import (
     FulfillmentProvider,
     FulfillmentRequestInvalidError,
     FulfillmentResult,
+    SettlementResult,
     FulfillmentStatusFailedError,
     FulfillmentTeardownFailedError,
     FulfillmentValidationIssue,
@@ -41,6 +42,11 @@ from .provider import (
     ProviderUnavailableError,
 )
 from .repository import SettlementRepository, begin_sqlite_write_transaction
+from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator
+from .fulfillment_persistence import (
+    FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
+    SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
+)
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduler import MissingResourceKindError, PhysicalSettlementScheduler
 from .scheduling_persistence import (
@@ -67,6 +73,13 @@ __all__ = [
     "CapacityReservationExpiredError",
     "begin_sqlite_write_transaction",
     "FulfillmentBase",
+    "SqlAlchemyFulfillmentUnitOfWork",
+    "SqlAlchemyFulfillmentTransaction",
+    "FulfillmentUnitOfWork",
+    "FulfillmentTransaction",
+    "FulfillmentAcceptanceDecision",
+    "FulfillmentOrchestrator",
+    "FulfillmentAcceptance",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
     "FulfillmentError",
@@ -101,6 +114,7 @@ __all__ = [
     "SettlementEntityNotFoundError",
     "SettlementRecord",
     "SettlementRecordState",
+    "SettlementResult",
     "SettlementRepository",
     "SettlementRequestMismatchError",
     "SettlementRequirement",

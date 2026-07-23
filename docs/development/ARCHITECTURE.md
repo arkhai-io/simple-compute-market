@@ -327,7 +327,7 @@ Boundary changes require more than moved unit tests. Validation should cover:
 
 The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
 
-Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, downloads Linux x86-64 CPython 3.13 third-party wheels, and proves each project independently from a fresh environment with network access disabled before packaging the artifact.
+Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, retains marker-specific locked dependencies needed for offline universal resolution, copies the current tracked repository into a clean verification tree, removes selected project environments, and runs each selected project's actual `make test` target with network and Python downloads disabled before packaging the artifact. Project Makefiles must keep interpreter selection configurable so the review environment can use the wheelhouse's declared Python version.
 
 See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
 
@@ -339,3 +339,8 @@ The canonical [capability documentation index](../../openspec/specs/README.md) l
 
 Database-concurrency tests use independent sessions and connections against the same database, establish transaction ownership through explicit synchronization at a semantic persistence boundary, and assert final durable state. Tests must not depend on uncontrolled thread races, scheduler timing, or elapsed-time ordering. Synchronization waits are bounded so lock regressions fail rather than hang. Test-only subclasses or adapters may pause a narrow persistence interface after a meaningful write; production code must not expose test-only hooks.
 
+
+
+### Durable fulfillment acceptance
+
+The fulfillment kit owns provider-neutral acceptance orchestration. It loads an already-selected settlement resource, freezes provider-specific prepared input and pool configuration in one transaction, dispatches after commit, and acknowledges provider metadata in a second transaction. Domain adapters own provider-specific payloads and metadata interpretation. Provisioning composition supplies the database unit of work and concrete providers; storefront code does not import provider-specific types.

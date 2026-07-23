@@ -395,9 +395,9 @@ class SettlementRepository:
         """Lease pending rows for one SQLite recovery worker.
 
         This helper records the durable lease shape and supports a deployment
-        with exactly one recovery worker. It is not a concurrent worker-claim
-        protocol; Section 7's recovery workflow owns duplicate-dispatch
-        prevention under the service's final execution model.
+        with exactly one recovery worker. It is not a concurrent worker-claim protocol; the provisioning-owned
+        recovery workflow owns duplicate-dispatch prevention when multiple
+        workers are enabled.
         """
 
         now = now or datetime.now(timezone.utc)

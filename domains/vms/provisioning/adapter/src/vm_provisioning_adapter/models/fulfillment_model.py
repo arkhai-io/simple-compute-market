@@ -1,4 +1,5 @@
-"""VM-domain fulfillment request and provider metadata models."""
+"""VM-domain fulfillment request, prepared operation, and provider metadata models."""
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 class VmFulfillmentRequirements(BaseModel):
@@ -15,10 +16,15 @@ class VmFulfillmentRequirements(BaseModel):
     vm_gpu_devices: list[str] | None = None
     vm_gpu_partition_size: str | None = None
 
+class AnsiblePreparedOperation(BaseModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    action: Literal['create','teardown']
+    parameters: dict[str, Any]
+
 class AnsibleFulfillmentMetadata(BaseModel):
     create_job_id: str
     vm_host: str
     vm_target: str
     teardown_job_id: str | None = None
     current_job_id: str
-    operation: str
+    operation: Literal['create','teardown']

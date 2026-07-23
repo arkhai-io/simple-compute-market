@@ -7,6 +7,7 @@ from compute_provisioning import CredentialEnvelope, ResultEnvelope
 from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,
+    VersionedEnvelope,
     ProviderNotFoundError,
     ProviderOperationState,
     ProviderStatus,
@@ -53,10 +54,16 @@ class FakeReleaseExecutor:
 
 
 class FakeProvider(FulfillmentProvider):
-    async def create(self, request, resource):
+    def prepare_create(self, request, resource, pool_config):
+        return VersionedEnvelope(kind="fake.create", schema_version=1, payload={})
+
+    async def dispatch_create(self, prepared):
         return FulfillmentResult(provider_metadata={})
 
-    async def teardown(self, capacity_reservation_id, resource, provider_metadata):
+    def prepare_teardown(self, settlement_result, pool_config):
+        return VersionedEnvelope(kind="fake.teardown", schema_version=1, payload={})
+
+    async def dispatch_teardown(self, prepared):
         return FulfillmentResult(provider_metadata={})
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):

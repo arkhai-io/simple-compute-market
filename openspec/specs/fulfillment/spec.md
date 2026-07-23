@@ -189,6 +189,18 @@ Either check rejects a retry whose stored values differ as a conflict; it does n
 - **WHEN** `begin_fulfillment` is retried for the same `capacity_reservation_id` with a different `fulfillment_request`
 - **THEN** it reports a fulfillment conflict rather than returning the first fulfillment's result
 
+#### Scenario: Equivalent retry after provider acknowledgement
+
+- **WHEN** an equivalent `begin_fulfillment` retry finds provider metadata already acknowledged
+- **THEN** it returns the existing fulfillment without dispatching again
+
+#### Scenario: Dispatch fails after durable acceptance
+
+- **WHEN** provider dispatch fails after the acceptance transaction commits
+- **THEN** the fulfillment remains accepted in `dispatch_pending` and the accepted fulfillment view is returned for recovery
+
+Provider submission acknowledgement is a second short transaction. Identical metadata is idempotent; conflicting provider identity is rejected without rewriting the stored value. The gap between provider submission and acknowledgement is recovered by redispatching the persisted prepared operation with the same deterministic idempotency key.
+
 A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id`, denormalized `fulfillment_id`, and an optional domain-specific `domain_resource_ref`. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
 
 There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.
@@ -210,15 +222,17 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 
 ### Requirement: Provider contract
 
-A `FulfillmentProvider` implements asynchronous:
+A `FulfillmentProvider` separates pure synchronous preparation from asynchronous side effects:
 
-- `create(request, resource) -> FulfillmentResult`;
-- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`;
-- `teardown(capacity_reservation_id, resource, provider_metadata) -> FulfillmentResult`.
+- `prepare_create(request, resource, pool_config) -> VersionedEnvelope`;
+- `dispatch_create(prepared) -> FulfillmentResult`;
+- `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
+- `dispatch_teardown(prepared) -> FulfillmentResult`;
+- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`.
 
-`create` and `teardown` MUST be idempotent for equivalent retries. Provider metadata is opaque to generic orchestration and contains only normalized, serializable operational state needed for later status or teardown. Credentials and sensitive access material should be referenced or delivered through a dedicated secure channel rather than assumed to be generic metadata.
+Preparation receives caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
 
-A provider may expose side-effect-free `validate_create` or preparation behavior. Validation errors MUST be represented as structured issues when used by dry-run surfaces and mapped to typed failures for execution.
+Prepared operations are immutable and persisted before dispatch. Dispatch commands use deterministic reservation-scoped idempotency keys. Provider metadata is normalized and validated by the concrete adapter before it crosses the shared persistence boundary. Credentials and sensitive access material use a dedicated secure channel rather than generic metadata.
 
 `ProviderRegistry` maps a provider identity to exactly one provider instance. Duplicate provider identities fail composition. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
 
@@ -306,3 +320,12 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_repository.py`.
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`.
+
+### Requirement: Fulfillment validation
+
+The fulfillment validation endpoint accepts the same reservation, market, and fulfillment-request signature as acceptance. It loads the already-scheduled aggregate, selected resource, current pool configuration, provider, and preparation path, but performs no lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
+
+#### Scenario: Validation succeeds without acceptance
+
+- **WHEN** a valid fulfillment request is submitted to the validation endpoint
+- **THEN** preparation validation succeeds and the aggregate remains in its prior state with no prepared operation persisted

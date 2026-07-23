@@ -24,8 +24,9 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementRepository,
     SqlAlchemySchedulingUnitOfWork,
+    FulfillmentOrchestrator,
+    SqlAlchemyFulfillmentUnitOfWork,
 )
-from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
 
@@ -221,7 +222,7 @@ class Container(containers.DeclarativeContainer):
     )
 
     # ------------------------------------------------------------------
-    # FulfillmentService takes an already-selected SettlementResource as
+    # Fulfillment orchestration takes an already-selected SettlementResource as
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
     ansible_fulfillment_provider = providers.Singleton(
@@ -301,10 +302,17 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
+    fulfillment_unit_of_work = providers.Singleton(
+        SqlAlchemyFulfillmentUnitOfWork,
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+        repository=settlement_repository,
+    )
+
     fulfillment_service = providers.Singleton(
-        FulfillmentService,
+        FulfillmentOrchestrator,
         provider_registry=provider_registry,
-        capacity_ledger=capacity_ledger_service,
+        unit_of_work=fulfillment_unit_of_work,
     )
 
     lifecycle_event_sink = providers.Singleton(
@@ -363,5 +371,5 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
-resolved_fulfillment_service: "FulfillmentService | None" = None
+resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

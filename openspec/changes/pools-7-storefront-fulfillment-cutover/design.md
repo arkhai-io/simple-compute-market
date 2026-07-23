@@ -2126,3 +2126,15 @@ Shared fulfillment orchestration does not know Ansible job IDs, targets, playboo
 | `resource` names the full `SettlementResource` model; bare identities use `settlement_resource_id` | `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identifiers`; `openspec/specs/fulfillment/spec.md` |
 | The durable fulfillment orchestrator lives in `kit/fulfillment`, alongside `PhysicalSettlementScheduler` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
 | `deal_ref` remains on legacy contract classes until Section 9/11 retire their callers | `openspec/changes/pools-7-storefront-fulfillment-cutover/tasks.md` (Section 11 scope; not a permanent-doc statement until removed) |
+
+
+## Section 5 design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Session-scoped provider configuration read | `openspec/specs/resource-pool-management/spec.md#requirement-session-scoped-pool-reads` |
+| Pure prepare / async dispatch provider contract | `openspec/specs/fulfillment/spec.md#requirement-provider-contract` |
+| Durable acceptance, state-sensitive retries, and two-transaction acknowledgement | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement` |
+| Provider-neutral settlement-result handoff and adapter-owned metadata | `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement` |
+| Side-effect-free dry-run parity | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-validation` |
+| Repository composition boundary | `docs/development/ARCHITECTURE.md#durable-fulfillment-acceptance` |

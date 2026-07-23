@@ -153,6 +153,13 @@ class ResourcePoolService:
                 db.expunge(pool)
             return pool
 
+    def get_pool_in_session(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
+        """Load a pool and provider configuration in the caller's transaction."""
+        pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
+        if pool is not None:
+            self._attach_provider_config(db, pool)
+        return pool
+
     def _require_pool(self, db: Session, pool_id: str) -> ResourcePool:
         pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
         if pool is None:
