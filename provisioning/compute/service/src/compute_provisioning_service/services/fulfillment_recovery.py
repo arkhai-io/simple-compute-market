@@ -132,6 +132,12 @@ class FulfillmentRecoveryService:
                 SettlementRecordState.dispatching.value,
                 provider_metadata=dict(result.provider_metadata),
             )
+            for domain_resource_ref in result.provisioned_resource_refs:
+                self._repository.add_provisioned_resource(
+                    db,
+                    capacity_reservation_id=command.capacity_reservation_id,
+                    domain_resource_ref=domain_resource_ref,
+                )
             self._repository.clear_claim(
                 db,
                 command.capacity_reservation_id,
@@ -161,14 +167,6 @@ class FulfillmentRecoveryService:
                     db,
                     command.capacity_reservation_id,
                     SettlementRecordState.active.value,
-                )
-                domain_ref = command.provider_metadata.get("vm_target")
-                self._repository.add_provisioned_resource(
-                    db,
-                    capacity_reservation_id=command.capacity_reservation_id,
-                    domain_resource_ref=(
-                        str(domain_ref) if domain_ref is not None else None
-                    ),
                 )
             else:
                 self._repository.transition(

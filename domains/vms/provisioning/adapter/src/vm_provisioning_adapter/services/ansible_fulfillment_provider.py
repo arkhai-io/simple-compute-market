@@ -269,7 +269,10 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_target=str(payload["vm_target"]),
             operation="create",
         )
-        return FulfillmentResult(provider_metadata=metadata.model_dump())
+        return FulfillmentResult(
+            provider_metadata=metadata.model_dump(),
+            provisioned_resource_refs=(metadata.vm_target,),
+        )
 
     async def create(
         self, request: PhysicalSettlementRequest, resource: SettlementResource

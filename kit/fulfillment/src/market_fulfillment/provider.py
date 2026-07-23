@@ -14,6 +14,7 @@ class ProviderOperationState(str, Enum):
 @dataclass(frozen=True)
 class FulfillmentResult:
     provider_metadata: dict[str, Any]
+    provisioned_resource_refs: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class ProviderStatus:

@@ -36,7 +36,8 @@ class _Provider(FulfillmentProvider):
         if self.fail_dispatch:
             raise RuntimeError("offline")
         return FulfillmentResult(
-            provider_metadata={"job_id": "job-1", "vm_target": "vm-1"}
+            provider_metadata={"job_id": "job-1"},
+            provisioned_resource_refs=("resource-output-1",),
         )
 
     def prepare_teardown(self, capacity_reservation_id, resource, provider_metadata):
@@ -133,7 +134,9 @@ async def test_recovery_dispatches_then_converges_success(
             db,
             "reservation-1",
         )
-        assert [item.domain_resource_ref for item in outputs] == ["vm-1"]
+        assert [item.domain_resource_ref for item in outputs] == [
+            "resource-output-1"
+        ]
 
 
 @pytest.mark.asyncio

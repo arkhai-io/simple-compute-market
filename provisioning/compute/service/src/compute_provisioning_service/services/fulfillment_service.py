@@ -262,6 +262,12 @@ class FulfillmentService:
                         SettlementRecordState.dispatching.value,
                         provider_metadata=dict(result.provider_metadata),
                     )
+                    for domain_resource_ref in result.provisioned_resource_refs:
+                        self._repository.add_provisioned_resource(
+                            db,
+                            capacity_reservation_id=capacity_reservation_id,
+                            domain_resource_ref=domain_resource_ref,
+                        )
                     accepted_state = str(updated.state)
                     db.commit()
 
