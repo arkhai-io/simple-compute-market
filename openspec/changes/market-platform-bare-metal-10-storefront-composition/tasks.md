@@ -15,7 +15,7 @@
 - [x] 2.6 Extend site/compute projection production, revision/digest behavior, and redaction so complete and authoritative-empty generations preserve the bare-metal contract without exposing credentials, URLs, provider configuration, or private inventory.
 - [x] 2.7 Implement the domain projection interpreter with no identity fallback, site-scoped derivation keys, explicit capacity/capability conflict rejection, and unavailable/stale/authoritative-empty generation semantics.
 - [x] 2.8 Move derived bare-metal publication tracking into the storefront migration chain and add injected core publication selection/runner wiring without runtime DDL or VM imports.
-- [ ] 2.9 Add producer, projection-carrier, interpreter, digest/redaction, publication, migration, and two-site collision tests proving exact opaque listing payloads.
+- [x] 2.9 Add producer, projection-carrier, interpreter, digest/redaction, publication, migration, and two-site collision tests proving exact opaque listing payloads.
 - [ ] 2.10 Add HTTP contract tests for listing, negotiation, settlement, operator state, health, and domain-validation failures through the runnable application.
 
 ## 3. Trusted multi-site composition
