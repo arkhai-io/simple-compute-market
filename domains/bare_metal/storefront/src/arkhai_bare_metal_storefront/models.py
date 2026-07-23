@@ -21,6 +21,17 @@ class BareMetalSettleResponse(BaseModel):
     fulfillment_available: Literal[False] = False
 
 
+class TrustedSiteDiagnostic(BaseModel):
+    site_id: str
+    authority_configured: bool
+    credential_configured: bool
+
+
+class TrustedSitesResponse(BaseModel):
+    sites: list[TrustedSiteDiagnostic]
+    count: int
+
+
 class BareMetalSettleStatusResponse(BaseModel):
     escrow_uid: str
     negotiation_id: str

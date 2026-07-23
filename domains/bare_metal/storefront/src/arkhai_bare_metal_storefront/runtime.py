@@ -17,6 +17,7 @@ from .negotiation import default_seller_round_hook
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
+from .site_config import TrustedSiteBindings, parse_trusted_site_bindings
 from .sqlite_client import SQLiteClient
 
 
@@ -28,6 +29,7 @@ class BareMetalStorefrontRuntime:
     domain: MarketDomainContract
     seller_id: str
     admin_key: str | None = None
+    sites: TrustedSiteBindings = field(default_factory=TrustedSiteBindings)
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
@@ -68,6 +70,7 @@ class BareMetalStorefrontRuntime:
             "api": "ok",
             "database": "ok",
             "commercial_settlement": "ok" if self.chain_clients else "unavailable",
+            "site_configuration": "ok" if self.sites.bindings else "unavailable",
             "site_projection": "unavailable",
             "fulfillment": "unavailable",
         }
@@ -92,7 +95,7 @@ def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
 ) -> BareMetalStorefrontRuntime:
-    """Build the minimal runtime; trusted site bindings are composed later."""
+    """Build the runtime and fail startup on malformed trusted site bindings."""
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
     )
@@ -107,4 +110,7 @@ def build_runtime_from_environment(
         domain=selected_domain,
         seller_id=os.environ.get("BARE_METAL_STOREFRONT_SELLER_ID", ""),
         admin_key=os.environ.get("BARE_METAL_STOREFRONT_ADMIN_KEY") or None,
+        sites=parse_trusted_site_bindings(
+            os.environ.get("BARE_METAL_STOREFRONT_SITES_JSON"),
+        ),
     )

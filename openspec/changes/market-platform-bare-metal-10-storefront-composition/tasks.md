@@ -20,7 +20,7 @@
 
 ## 3. Trusted multi-site composition
 
-- [ ] 3.1 Add bare-metal storefront configuration for stable `site_id` to provisioning authority URL and credential bindings, including startup validation and redacted diagnostics.
+- [x] 3.1 Add bare-metal storefront configuration for stable `site_id` to provisioning authority URL and credential bindings, including startup validation and redacted diagnostics.
 - [ ] 3.2 Reuse or extract schema-opaque aggregate capacity/projection wiring so the bare-metal storefront can load, poll, reserve, and retain independent generations from several sites.
 - [ ] 3.3 Persist the selected trusted site with agreement lifecycle correlation and reject buyer-controlled URL, credential, or conflicting site assertions as routing authority.
 - [ ] 3.4 Add focused tests for placement across two sites, selected-site write routing after restart, projection staleness, and conflicting untrusted routing data.

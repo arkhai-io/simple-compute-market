@@ -65,7 +65,9 @@ Reusing VM-shaped settle models was rejected because they accept settlement-time
 
 ### Treat selected-site routing as trusted storefront state
 
-Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. Capacity placement selects one site before reservation; the resulting reservation/fulfillment state retains that trusted site binding. Fulfillment, polling, and teardown route through that binding rather than a process-global provisioning URL.
+Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. The initial process boundary reads `BARE_METAL_STOREFRONT_SITES_JSON` as an array of exact `{site_id, authority_url, admin_key}` objects. Site IDs are unique and restricted to stable identifier characters; authority URLs must be absolute HTTP(S) URLs without embedded credentials, query strings, or fragments; credentials must be non-empty. Invalid configured entries fail startup. An absent value keeps the truthful pre-fulfillment mode available. Runtime bindings are immutable and diagnostics expose only site IDs plus authority/credential presence booleans—not URLs or secret values.
+
+Capacity placement selects one site before reservation; the resulting reservation/fulfillment state retains that trusted site binding. Fulfillment, polling, and teardown route through that binding rather than a process-global provisioning URL.
 
 For bare-metal publication, the trusted site producer exposes an opt-in complete per-resource projection. `physical_resource_id` is the Site authority's Physical Resource identity; `physical_host_id` is the stable cross-mode accounting identity; `machine_id` is executor-local. None may be inferred from another. The same projection generation carries authoritative per-resource availability, allocation mode, supported access methods, capacity dimensions, and explicitly allowlisted capabilities. Anonymous aggregate capacity buckets remain the fungible publication path and are not joined heuristically to resource identities.
 
