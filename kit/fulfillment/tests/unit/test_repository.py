@@ -1,5 +1,5 @@
 """Tests for SettlementRepository: the two independent equivalence scopes,
-conflicting-retry rejection, provisioned-resource attachment, and single-worker recovery leases.
+conflicting-retry rejection, provisioned-resource attachment, and recovery leases.
 """
 
 from __future__ import annotations
@@ -675,6 +675,54 @@ def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_fac
         assert len(claimed_again) == 1
         assert claimed_again[0].claimed_by == "worker-2"
         assert claimed_again[0].attempt_count == 2
+
+
+def test_concurrent_sqlite_claims_do_not_overlap(tmp_path, repo):
+    database = tmp_path / "fulfillment-claims.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    with sessions() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-claim-race",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-claim-race",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+            prepared_create_operation=envelope("provider.create", 1, {}),
+        )
+        db.commit()
+
+    barrier = Barrier(2)
+
+    def claim(worker_id: str) -> list[str]:
+        barrier.wait(timeout=5)
+        with sessions() as db:
+            rows = repo.claim_pending(
+                db,
+                states=[SettlementRecordState.dispatch_pending.value],
+                limit=1,
+                lease_seconds=60,
+                worker_id=worker_id,
+            )
+            ids = [str(row.capacity_reservation_id) for row in rows]
+            db.commit()
+            return ids
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(claim, ["worker-a", "worker-b"]))
+
+    assert sorted(len(result) for result in results) == [0, 1]
+    assert [item for result in results for item in result] == ["cr-claim-race"]
 
 
 def test_transition_allows_shared_lifecycle_fields(session_factory, repo):

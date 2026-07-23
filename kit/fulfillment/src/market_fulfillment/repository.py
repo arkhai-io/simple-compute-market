@@ -456,7 +456,7 @@ class SettlementRepository:
     # Recovery claims
     # ------------------------------------------------------------------
 
-    def select_pending_for_single_worker(
+    def claim_pending(
         self,
         db: Session,
         *,
@@ -466,20 +466,18 @@ class SettlementRepository:
         worker_id: str,
         now: datetime | None = None,
     ) -> list[SettlementRecord]:
-        """Lease pending rows for one SQLite recovery worker.
+        """Atomically lease pending rows under SQLite's single-writer boundary."""
 
-        This helper records the durable lease shape and supports a deployment
-        with exactly one recovery worker. It is not a concurrent worker-claim
-        protocol; Section 7's recovery workflow owns duplicate-dispatch
-        prevention under the service's final execution model.
-        """
-
+        begin_sqlite_write_transaction(db)
         now = now or datetime.now(timezone.utc)
         candidates = (
             db.query(SettlementRecord)
             .filter(SettlementRecord.state.in_(list(states)))
             .filter(
-                (SettlementRecord.claimed_by.is_(None))
+                (
+                    SettlementRecord.claimed_by.is_(None)
+                    & SettlementRecord.claim_expires_at.is_(None)
+                )
                 | (SettlementRecord.claim_expires_at <= now)
             )
             .order_by(SettlementRecord.created_at.asc())
@@ -492,3 +490,46 @@ class SettlementRepository:
             record.attempt_count = (record.attempt_count or 0) + 1
         db.flush()
         return candidates
+
+    def clear_claim(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        worker_id: str,
+        retry_at: datetime | None = None,
+    ) -> None:
+        record = self.get(db, capacity_reservation_id)
+        if record is None:
+            raise SettlementEntityNotFoundError(
+                f"no settlement assignment exists for capacity_reservation_id="
+                f"{capacity_reservation_id!r}"
+            )
+        if record.claimed_by != worker_id:
+            raise FulfillmentConflictError(
+                "fulfillment recovery claim is no longer owned by this worker"
+            )
+        record.claimed_by = None
+        record.claim_expires_at = retry_at
+        db.flush()
+
+    def select_pending_for_single_worker(
+        self,
+        db: Session,
+        *,
+        states: Sequence[str],
+        limit: int,
+        lease_seconds: int,
+        worker_id: str,
+        now: datetime | None = None,
+    ) -> list[SettlementRecord]:
+        """Compatibility alias for the atomic SQLite claim operation."""
+
+        return self.claim_pending(
+            db,
+            states=states,
+            limit=limit,
+            lease_seconds=lease_seconds,
+            worker_id=worker_id,
+            now=now,
+        )

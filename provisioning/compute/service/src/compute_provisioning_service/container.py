@@ -25,6 +25,9 @@ from market_fulfillment import (
     SettlementRepository,
     SqlAlchemySchedulingUnitOfWork,
 )
+from compute_provisioning_service.services.fulfillment_recovery import (
+    FulfillmentRecoveryService,
+)
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
@@ -304,6 +307,13 @@ class Container(containers.DeclarativeContainer):
         repository=settlement_repository,
     )
 
+    fulfillment_recovery_service = providers.Singleton(
+        FulfillmentRecoveryService,
+        provider_registry=provider_registry,
+        session_factory=session_factory,
+        repository=settlement_repository,
+    )
+
     lifecycle_event_sink = providers.Singleton(
         StorefrontLifecycleEventSink,
         settings=config,
@@ -361,4 +371,5 @@ resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentService | None" = None
+resolved_fulfillment_recovery_service: "FulfillmentRecoveryService | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

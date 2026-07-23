@@ -1367,6 +1367,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | `SettlementAbandonmentHook` is called unconditionally from every capacity-reclaiming path (TTL lapse, release, resize); `market_site` never imports `market_fulfillment` to implement it | `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-settlement-abandonment` |
 | Fulfillment providers resolve by exact `(provider, resource_kind)` with only explicit provider-only compatibility fallback | `openspec/specs/fulfillment/spec.md#provider-contract` |
 | Provider preparation is synchronous and side-effect-free; accepted versioned commands commit before post-commit dispatch, which reads no mutable pool/host configuration | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Periodic SQLite recovery workers claim bounded non-overlapping batches under the single-writer boundary, release locks before provider calls, reclaim expired leases, and back off failed work | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `docs/development/ARCHITECTURE.md#fulfillment` |
 
 ### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
 

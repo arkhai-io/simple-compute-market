@@ -254,14 +254,18 @@ PhysicalSettlementScheduler.schedule_resource(...)
         ↓
 Capacity Settlement Assignment / SettlementResource
         ↓
-FulfillmentProvider.create(...)
+FulfillmentProvider.prepare_create(...)
         ↓
-Provider result + zero or more Provisioned Resources
+Durable dispatch_pending command
+        ↓
+post-commit dispatch + periodic claimed recovery
+        ↓
+Provider status + zero or more Provisioned Resources
         ↓
 status / teardown / durable results
 ```
 
-Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
+Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Preparation snapshots a versioned command before acceptance commits; dispatch and recovery use only that snapshot. Periodic workers claim bounded batches under SQLite's single-writer boundary, commit the claim before provider calls, and use expiring leases plus bounded backoff to resume work after process or provider failure. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 
 Provider-specific dictionaries crossing domain or persistence boundaries use a versioned envelope with a non-empty `kind`, positive `schema_version`, and typed or explicitly validated payload. Readers reject unknown `(kind, schema_version)` pairs rather than guessing.
 

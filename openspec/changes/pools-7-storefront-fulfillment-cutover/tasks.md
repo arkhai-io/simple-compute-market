@@ -239,12 +239,12 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 ## 7. Add provisioning-owned recovery and lifecycle convergence
 
-- [ ] 7.0 Replace the Section 3 single-worker SQLite recovery-selection helper with the final recovery acquisition workflow. Define the actual provisioning-service worker model, guarantee that one pending provider operation is not concurrently dispatched twice, validate lease expiry/reclaim behavior with independent sessions or processes as supported by SQLite, and promote the resulting current-state recovery semantics into `openspec/specs/fulfillment/spec.md`.
+- [x] 7.0 Replace the Section 3 single-worker SQLite recovery-selection helper with the final recovery acquisition workflow. Define the actual provisioning-service worker model, guarantee that one pending provider operation is not concurrently dispatched twice, validate lease expiry/reclaim behavior with independent sessions or processes as supported by SQLite, and promote the resulting current-state recovery semantics into `openspec/specs/fulfillment/spec.md`.
 
-- [ ] 7.1 Implement a periodic multi-replica-safe watchdog framework with bounded database claims/leases, claim expiry, attempt counters, exponential backoff with jitter, and no locks held during external calls.
+- [x] 7.1 Implement a periodic multi-replica-safe watchdog framework with bounded database claims/leases, claim expiry, attempt counters, exponential backoff with jitter, and no locks held during external calls.
 - [ ] 7.2 Add separate handlers for create submission recovery, create status convergence, teardown submission recovery, teardown status convergence, and abandonment reconciliation.
 - [ ] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
-- [ ] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
+- [x] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
 - [ ] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
 - [ ] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
 

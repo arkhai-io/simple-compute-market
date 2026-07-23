@@ -213,7 +213,17 @@ Fulfillment acceptance freezes prepared create input before entering `dispatch_p
 
 The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Scheduling acquires that same writer boundary before aggregate creation; databases with row-lock support serialize through the locked Capacity Reservation.
 
-Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository exposes only a single-worker SQLite selection primitive at this layer. The provisioning-owned recovery workflow defines duplicate-dispatch prevention and any concurrent acquisition semantics.
+Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository MUST reserve SQLite's single-writer slot before selecting and updating a bounded claim batch, so independently running service workers cannot commit overlapping live claims. Workers commit claims before external calls, release database locks during provider dispatch/status reads, reclaim expired claims, and schedule failed or still-pending work with bounded exponential backoff and jitter. Deterministic provider command identities make a retry after uncertain acknowledgement observe the same underlying command.
+
+#### Scenario: Concurrent recovery workers claim pending work
+
+- **WHEN** independently running SQLite workers attempt to claim the same pending command
+- **THEN** their claim transactions serialize and at most one worker commits a live claim for that aggregate
+
+#### Scenario: External provider call is slow
+
+- **WHEN** a claimed recovery command invokes its provider
+- **THEN** no database transaction or SQLite writer lock remains open during that external call
 
 #### Scenario: Expired claim is reclaimed
 
