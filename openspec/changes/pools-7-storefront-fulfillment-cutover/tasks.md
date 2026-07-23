@@ -222,7 +222,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 ## 6. Implement fulfillment acceptance and provider preparation
 
 - [ ] 6.0 Implement the versioned authenticated public fulfillment boundary recorded in `design.md`, “Public fulfillment transport and caller ownership.”
-  - [ ] 6.0.1 Add compute-contract request/response carriers and client methods for scheduling, dry-run, fulfillment acceptance, status, result, and teardown using the accepted `/api/v1` routes and error taxonomy.
+  - [x] 6.0.1 Add compute-contract request/response carriers and client methods for scheduling, dry-run, fulfillment acceptance, status, result, and teardown using the accepted `/api/v1` routes and error taxonomy.
   - [x] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
   - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
   - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
@@ -244,7 +244,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 - [x] 7.1 Implement a periodic multi-replica-safe watchdog framework with bounded database claims/leases, claim expiry, attempt counters, exponential backoff with jitter, and no locks held during external calls.
 - [ ] 7.2 Add separate handlers for create submission recovery, create status convergence, teardown submission recovery, teardown status convergence, and abandonment reconciliation.
-- [ ] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
+- [x] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
 - [x] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
 - [ ] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
 - [ ] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
@@ -282,10 +282,10 @@ design.
 
 ## 10. Cut over teardown and physical-resource reclamation
 
-- [ ] 10.1 Add `begin_fulfillment_teardown(fulfillment_id)` as the whole-fulfillment teardown contract; keep `provisioned_resource_id` in the schema for a future per-resource teardown extension.
-- [ ] 10.2 Resolve the backfilled or native fulfillment aggregate, prepare versioned teardown input, and persist teardown-pending state before provider submission.
-- [ ] 10.3 Drive teardown submission, retry, status convergence, final resource reclamation, and capacity release entirely from provisioning-owned watchdog handlers.
-- [ ] 10.4 Do not return physical capacity to scheduling until teardown succeeds or an explicit operator recovery action resolves the resource.
+- [x] 10.1 Add `begin_fulfillment_teardown(fulfillment_id)` as the whole-fulfillment teardown contract; keep `provisioned_resource_id` in the schema for a future per-resource teardown extension.
+- [x] 10.2 Resolve the backfilled or native fulfillment aggregate, prepare versioned teardown input, and persist teardown-pending state before provider submission.
+- [x] 10.3 Drive teardown submission, retry, status convergence, final resource reclamation, and capacity release entirely from provisioning-owned watchdog handlers.
+- [x] 10.4 Do not return physical capacity to scheduling until teardown succeeds or an explicit operator recovery action resolves the resource.
 - [ ] 10.5 Replace the old `VmReleaseExecutor` direct path once backfilled and new fulfillments use settlement teardown; remove the legacy fallback rather than retaining a cutover marker.
 - [ ] 10.6 Add idempotent repeated teardown, partial failure, restart, lost submission acknowledgement, backfilled VM, and final capacity-release tests.
 

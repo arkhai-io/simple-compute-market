@@ -313,6 +313,7 @@ class Container(containers.DeclarativeContainer):
         provider_registry=provider_registry,
         session_factory=session_factory,
         repository=settlement_repository,
+        capacity_ledger_service=capacity_ledger_service,
     )
 
     lifecycle_event_sink = providers.Singleton(

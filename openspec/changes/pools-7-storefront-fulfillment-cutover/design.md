@@ -1375,6 +1375,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Provider preparation is synchronous and side-effect-free; accepted versioned commands commit before post-commit dispatch, which reads no mutable pool/host configuration | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Periodic SQLite recovery workers claim bounded non-overlapping batches under the single-writer boundary, release locks before provider calls, reclaim expired leases, and back off failed work | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `docs/development/ARCHITECTURE.md#fulfillment` |
 | Pull-based results project durable state at read time; active credential issuance uses a durable non-overlapping claim, provider-owned live rotation, transient private job material, deletion after consumption, and generation advancement only after success | `openspec/specs/fulfillment/spec.md#requirement-pull-based-fulfillment-result-and-live-credentials`; `docs/development/ARCHITECTURE.md#fulfillment` |
+| Whole-fulfillment teardown persists immutable pending input at the authenticated command boundary; recovery exclusively dispatches/converges it and releases capacity only after provider success | `openspec/specs/fulfillment/spec.md#requirement-provisioning-owned-whole-fulfillment-teardown`; `docs/development/ARCHITECTURE.md#release` |
 
 ### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
 

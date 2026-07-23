@@ -123,6 +123,22 @@ class SettlementRepository:
             .all()
         )
 
+    def set_provisioned_resource_status(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        status: str,
+    ) -> None:
+        (
+            db.query(ProvisionedResource)
+            .filter(
+                ProvisionedResource.capacity_reservation_id
+                == capacity_reservation_id
+            )
+            .update({ProvisionedResource.status: status})
+        )
+        db.flush()
+
     # ------------------------------------------------------------------
     # Scheduling: schedule_resource's idempotency boundary
     # ------------------------------------------------------------------

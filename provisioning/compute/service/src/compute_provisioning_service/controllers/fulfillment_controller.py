@@ -220,6 +220,34 @@ class FulfillmentController:
             ],
         )
 
+    @router.post(
+        "/fulfillments/{fulfillment_id}/teardown",
+        response_model=FulfillmentAcceptanceView,
+    )
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+        request: Request,
+    ) -> FulfillmentAcceptanceView:
+        try:
+            accepted = await self._fulfillment_service.begin_teardown(
+                fulfillment_id=fulfillment_id,
+                owner_principal=str(request.state.storefront_principal),
+            )
+        except SettlementEntityNotFoundError as exc:
+            raise _fulfillment_not_found(fulfillment_id) from exc
+        except FulfillmentConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ProviderConfigInvalidError, FulfillmentRequestInvalidError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (ProviderNotFoundError, ProviderUnavailableError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return FulfillmentAcceptanceView(
+            capacity_reservation_id=accepted.capacity_reservation_id,
+            fulfillment_id=accepted.fulfillment_id,
+            state=accepted.state,
+        )
+
     @router.post("/fulfillments/dry-run", response_model=FulfillmentDryRunView)
     def dry_run_fulfillment(
         self,

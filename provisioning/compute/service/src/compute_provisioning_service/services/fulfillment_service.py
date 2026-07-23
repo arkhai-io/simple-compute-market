@@ -413,3 +413,77 @@ class FulfillmentService:
             fulfillment_id=fulfillment_id,
             state=accepted_state,
         )
+
+    async def begin_teardown(
+        self,
+        *,
+        fulfillment_id: str,
+        owner_principal: str,
+    ) -> FulfillmentAcceptance:
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            record = self._repository.get_by_fulfillment_id(db, fulfillment_id)
+            if record is None or record.owner_principal != owner_principal:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment exists for fulfillment_id={fulfillment_id!r}"
+                )
+            resource = _resource_from_record(record)
+            provider = self._provider_registry.require(
+                resource.provider, resource.resource_kind
+            )
+            if record.state == SettlementRecordState.active.value:
+                prepared = provider.prepare_teardown(
+                    str(record.capacity_reservation_id),
+                    resource,
+                    dict(record.provider_metadata or {}),
+                )
+                record = self._repository.transition(
+                    db,
+                    str(record.capacity_reservation_id),
+                    SettlementRecordState.teardown_dispatch_pending.value,
+                    prepared_teardown_operation=prepared.model_dump(mode="json"),
+                )
+            elif record.state == SettlementRecordState.teardown_failed.value:
+                if record.prepared_teardown_operation is None:
+                    raise FulfillmentConflictError(
+                        "failed teardown has no prepared operation"
+                    )
+                prepared = VersionedEnvelope.model_validate(
+                    record.prepared_teardown_operation
+                )
+                record = self._repository.transition(
+                    db,
+                    str(record.capacity_reservation_id),
+                    SettlementRecordState.teardown_dispatch_pending.value,
+                )
+            elif record.state in {
+                SettlementRecordState.teardown_dispatch_pending.value,
+                SettlementRecordState.tearing_down.value,
+                SettlementRecordState.torn_down.value,
+            }:
+                prepared = (
+                    VersionedEnvelope.model_validate(
+                        record.prepared_teardown_operation
+                    )
+                    if record.prepared_teardown_operation is not None
+                    else None
+                )
+                db.commit()
+                return FulfillmentAcceptance(
+                    capacity_reservation_id=str(record.capacity_reservation_id),
+                    fulfillment_id=fulfillment_id,
+                    state=str(record.state),
+                )
+            else:
+                raise FulfillmentConflictError(
+                    f"fulfillment in state {record.state!r} cannot be torn down"
+                )
+            capacity_reservation_id = str(record.capacity_reservation_id)
+            state = str(record.state)
+            db.commit()
+
+        return FulfillmentAcceptance(
+            capacity_reservation_id=capacity_reservation_id,
+            fulfillment_id=fulfillment_id,
+            state=state,
+        )

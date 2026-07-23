@@ -222,6 +222,20 @@ For an active fulfillment, the service MUST claim credential rotation durably be
 - **WHEN** live credential rotation fails before delivery
 - **THEN** the result query fails as temporarily unavailable, the durable claim is released or expires, and `credential_generation` remains unchanged
 
+### Requirement: Provisioning-owned whole-fulfillment teardown
+
+The authenticated teardown command MUST address one owned `fulfillment_id`. It prepares and persists immutable provider teardown input with `teardown_dispatch_pending` before any provider call. Provisioning-owned recovery workers exclusively submit and poll teardown, persist `tearing_down`, `teardown_failed`, or `torn_down`, and mark all child outputs torn down. Physical capacity MUST remain held until the provider reports successful teardown; only then may the worker idempotently release the owning capacity reservation before committing terminal fulfillment state.
+
+#### Scenario: Teardown request is repeated
+
+- **WHEN** the owner repeats teardown while it is pending, in progress, or complete
+- **THEN** the service returns the existing whole-fulfillment teardown state without preparing a different command
+
+#### Scenario: Provider teardown is not successful
+
+- **WHEN** provider teardown is pending, unknown, or failed
+- **THEN** physical capacity remains unavailable to scheduling and recovery retains or retries the durable teardown operation
+
 Prepared provider create/teardown input is captured as a `VersionedEnvelope`-typed payload on the aggregate, frozen before the transaction that marks the corresponding dispatch-pending state commits, so a recovery retry dispatches from what was accepted rather than a live re-read of pool or provider configuration.
 
 Repository callers provide validated canonical `SettlementRequirement` and `VersionedEnvelope` models. Persistence serializes their JSON-compatible model form and uses structural equality; it does not accept arbitrary dictionaries as an equivalence boundary or infer equivalence among unvalidated representations.

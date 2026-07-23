@@ -62,6 +62,10 @@ class ComputeProvisioningClientProtocol(Protocol):
         self,
         fulfillment_id: str,
     ) -> FulfillmentResultView: ...
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+    ) -> FulfillmentAcceptanceView: ...
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted: ...
     async def get_job(self, job_id: str) -> ProvisioningJob: ...
     async def cancel_job(self, job_id: str) -> ProvisioningJob: ...
@@ -165,6 +169,16 @@ class ComputeProvisioningClient:
             f"/api/v1/fulfillments/{fulfillment_id}/result",
         )
         return FulfillmentResultView.model_validate(payload)
+
+    async def begin_fulfillment_teardown(
+        self,
+        fulfillment_id: str,
+    ) -> FulfillmentAcceptanceView:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/fulfillments/{fulfillment_id}/teardown",
+        )
+        return FulfillmentAcceptanceView.model_validate(payload)
 
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted:
         return JobAccepted.model_validate(await self._request("POST", "/api/v1/actions", envelope))

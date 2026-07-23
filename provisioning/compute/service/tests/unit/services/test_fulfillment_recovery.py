@@ -44,7 +44,8 @@ class _Provider(FulfillmentProvider):
         raise NotImplementedError
 
     async def dispatch_teardown(self, prepared):
-        raise NotImplementedError
+        self.dispatches += 1
+        return FulfillmentResult(provider_metadata={"job_id": "teardown-job"})
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         return self.status
@@ -154,3 +155,62 @@ async def test_dispatch_failure_releases_claim_with_backoff(
         assert record.attempt_count == 1
 
     assert await recovery.run_once() == 0
+
+
+class _Ledger:
+    def __init__(self) -> None:
+        self.releases = []
+
+    def release(self, **kwargs):
+        self.releases.append(kwargs)
+        return {"state": "released"}
+
+
+@pytest.mark.asyncio
+async def test_teardown_recovery_releases_capacity_only_after_provider_success(
+    recovery, provider, session_factory
+):
+    await recovery.run_once()
+    provider.status = ProviderStatus(state=ProviderOperationState.succeeded)
+    await recovery.run_once()
+    with session_factory() as db:
+        SettlementRepository().transition(
+            db,
+            "reservation-1",
+            SettlementRecordState.teardown_dispatch_pending.value,
+            prepared_teardown_operation={
+                "kind": "fake.teardown",
+                "schema_version": 1,
+                "payload": {},
+            },
+        )
+        db.commit()
+
+    ledger = _Ledger()
+    teardown_recovery = FulfillmentRecoveryService(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        capacity_ledger_service=ledger,
+        worker_id="teardown-worker",
+        jitter=lambda low, high: low,
+    )
+    provider.status = ProviderStatus(state=ProviderOperationState.pending)
+    assert await teardown_recovery.run_once() == 1
+    assert ledger.releases == []
+
+    provider.status = ProviderStatus(state=ProviderOperationState.succeeded)
+    assert await teardown_recovery.run_once() == 1
+    assert ledger.releases == [
+        {
+            "capacity_reservation_id": "reservation-1",
+            "owner_principal": "seller-a",
+        }
+    ]
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.state == SettlementRecordState.torn_down.value
+        resources = SettlementRepository().list_provisioned_resources(
+            db, "reservation-1"
+        )
+        assert {item.status for item in resources} == {"torn_down"}

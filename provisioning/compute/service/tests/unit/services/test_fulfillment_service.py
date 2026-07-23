@@ -36,6 +36,7 @@ class _FakeProvider(FulfillmentProvider):
         self.on_dispatch: Callable[[], None] | None = None
         self.credential_reads = 0
         self.fail_credentials = False
+        self.teardown_dispatches = 0
 
     def prepare_create(self, capacity_reservation_id, fulfillment_request, resource):
         self.prepare_calls += 1
@@ -61,7 +62,8 @@ class _FakeProvider(FulfillmentProvider):
         return VersionedEnvelope(kind="fake.teardown", schema_version=1, payload={})
 
     async def dispatch_teardown(self, prepared):
-        return FulfillmentResult(provider_metadata={})
+        self.teardown_dispatches += 1
+        return FulfillmentResult(provider_metadata={"job_id": "teardown-1"})
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         return ProviderStatus(state=ProviderOperationState.succeeded)
@@ -415,3 +417,42 @@ async def test_failed_credential_rotation_does_not_advance_generation(
         record = db.get(SettlementRecord, "reservation-1")
         assert record.credential_generation == 0
         assert record.claimed_by is None
+
+@pytest.mark.asyncio
+async def test_teardown_prepares_before_dispatch_and_is_idempotent(
+    service, provider, session_factory
+):
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    with session_factory() as db:
+        SettlementRepository().transition(
+            db, "reservation-1", SettlementRecordState.active.value
+        )
+        db.commit()
+
+    teardown = await service.begin_teardown(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+    repeated = await service.begin_teardown(
+        fulfillment_id=accepted.fulfillment_id,
+        owner_principal="seller-a",
+    )
+
+    assert teardown.state == SettlementRecordState.teardown_dispatch_pending.value
+    assert repeated.state == SettlementRecordState.teardown_dispatch_pending.value
+    assert provider.teardown_dispatches == 0
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.prepared_teardown_operation["kind"] == "fake.teardown"
+        assert record.teardown_provider_metadata is None
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        await service.begin_teardown(
+            fulfillment_id=accepted.fulfillment_id,
+            owner_principal="seller-b",
+        )
