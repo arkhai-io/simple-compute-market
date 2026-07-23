@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Iterable, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .http_models import (
     ReservationListResponse,
@@ -45,6 +45,34 @@ from .ledger import CapacityConflictError, CapacityLedgerService
 from .projections import SiteProjectionService
 
 logger = logging.getLogger(__name__)
+
+
+def _storefront_principal(request: Request) -> str:
+    return str(
+        getattr(request.state, "storefront_principal", "local-development"),
+    )
+
+
+def _public_reservation(
+    reservation: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if reservation is None:
+        return None
+    public = dict(reservation)
+    public.pop("owner_principal", None)
+    return public
+
+
+def _require_owned_reservation(
+    ledger: CapacityLedgerService,
+    capacity_reservation_id: str,
+    principal: str,
+) -> None:
+    if ledger.reservation_owner_principal(capacity_reservation_id) != principal:
+        raise HTTPException(
+            status_code=404,
+            detail=f"reservation {capacity_reservation_id!r} not found",
+        )
 
 
 def make_capacity_router(
@@ -184,6 +212,7 @@ def make_capacity_router(
     )
     def reserve(
         body: ReserveRequest,
+        request: Request,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationResponse:
         """Reserve capacity matching the claim.
@@ -199,6 +228,7 @@ def make_capacity_router(
                 ttl_seconds=body.ttl_seconds,
                 lease_start_utc=body.lease_start_utc,
                 lease_duration_seconds=body.lease_duration_seconds,
+                owner_principal=_storefront_principal(request),
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
@@ -217,8 +247,14 @@ def make_capacity_router(
     def commit(
         capacity_reservation_id: str,
         body: CommitRequest,
+        request: Request,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationResponse:
+        _require_owned_reservation(
+            ledger,
+            capacity_reservation_id,
+            _storefront_principal(request),
+        )
         try:
             reservation = ledger.commit(
                 resource_id=body.resource_id,
@@ -234,7 +270,7 @@ def make_capacity_router(
                 status_code=404,
                 detail=f"reservation {capacity_reservation_id!r} not found",
             )
-        return ReservationResponse(reservation=reservation)
+        return ReservationResponse(reservation=_public_reservation(reservation))
 
     @router.post(
         "/releases",
@@ -243,19 +279,23 @@ def make_capacity_router(
     )
     def release(
         body: ReleaseRequest,
+        request: Request,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationResponse:
         """Release by capacity_reservation_id or by deal ref (escrow_uid).
 
         Idempotent: releasing an already-released or unknown reservation
-        returns ``reservation: null``.
+        returns ``reservation: null``. A known identifier owned by another
+        principal remains indistinguishable from an unknown identifier.
         """
-        return ReservationResponse(reservation=ledger.release(
+        principal = _storefront_principal(request)
+        return ReservationResponse(reservation=_public_reservation(ledger.release(
             capacity_reservation_id=body.capacity_reservation_id,
             deal_ref=body.deal_ref,
             failure_reason=body.failure_reason,
             failure_message=body.failure_message,
-        ))
+            owner_principal=principal,
+        )))
 
     @router.post(
         "/reservations/{capacity_reservation_id}/truncate-lease",
@@ -265,6 +305,7 @@ def make_capacity_router(
     def truncate_lease(
         capacity_reservation_id: str,
         body: TruncateLeaseRequest,
+        request: Request,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationResponse:
         """Shorten an active lease (settlement decided the deal is over).
@@ -273,9 +314,16 @@ def make_capacity_router(
         normal lease-end path. Returns ``reservation: null`` when the reservation
         is unknown or no longer held.
         """
-        return ReservationResponse(reservation=ledger.truncate_lease(
-            capacity_reservation_id=capacity_reservation_id,
-            lease_end_utc=body.lease_end_utc,
+        _require_owned_reservation(
+            ledger,
+            capacity_reservation_id,
+            _storefront_principal(request),
+        )
+        return ReservationResponse(reservation=_public_reservation(
+            ledger.truncate_lease(
+                capacity_reservation_id=capacity_reservation_id,
+                lease_end_utc=body.lease_end_utc,
+            ),
         ))
 
     # ------------------------------------------------------------------
@@ -288,17 +336,26 @@ def make_capacity_router(
         summary="List ledger reservations",
     )
     def list_reservations(
+        request: Request,
         state: str | None = Query(default=None),
         escrow_uid: str | None = Query(default=None),
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationListResponse:
-        reservations = ledger.list_reservations(state=state)
+        reservations = ledger.list_reservations(
+            state=state,
+            owner_principal=_storefront_principal(request),
+        )
         if escrow_uid is not None:
             reservations = [
                 a for a in reservations if a.get("escrow_uid") == escrow_uid
             ]
         return ReservationListResponse(
-            reservations=reservations, total=len(reservations),
+            reservations=[
+                public
+                for reservation in reservations
+                if (public := _public_reservation(reservation)) is not None
+            ],
+            total=len(reservations),
         )
 
     @router.get(
@@ -308,15 +365,19 @@ def make_capacity_router(
     )
     def get_reservation(
         capacity_reservation_id: str,
+        request: Request,
         ledger: CapacityLedgerService = Depends(get_ledger),
     ) -> ReservationResponse:
-        reservation = ledger.get_reservation(capacity_reservation_id)
+        reservation = ledger.get_reservation(
+            capacity_reservation_id,
+            owner_principal=_storefront_principal(request),
+        )
         if reservation is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"reservation {capacity_reservation_id!r} not found",
             )
-        return ReservationResponse(reservation=reservation)
+        return ReservationResponse(reservation=_public_reservation(reservation))
 
     # ------------------------------------------------------------------
     # Event feed

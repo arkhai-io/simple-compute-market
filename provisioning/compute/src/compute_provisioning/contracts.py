@@ -35,6 +35,22 @@ class VersionedContractModel(BaseModel):
         return self
 
 
+class FulfillmentScheduleRequest(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    market: str = Field(min_length=1)
+    requirements: dict[str, Any] = Field(default_factory=dict)
+    resource_id: str | None = None
+
+
+class SettlementResourceView(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    settlement_resource_id: str = Field(min_length=1)
+    pool_id: str = Field(min_length=1)
+    resource_kind: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExecutorKind(str, Enum):
     VM = "vm"
     BARE_METAL = "bare_metal"

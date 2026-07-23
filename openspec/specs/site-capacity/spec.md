@@ -65,6 +65,18 @@ A capacity reservation MUST expose its identity, lifecycle state, hold expiry, r
 - **WHEN** a scheduling request asks for more of a dimension than the reservation holds
 - **THEN** scheduling reports a request mismatch before assignment or provider execution
 
+### Requirement: Storefront-owned reservation authority
+
+Each capacity reservation MUST persist the opaque authenticated storefront principal that created it. Storefront-facing reservation reads and mutations MUST require that credential-bound principal and MUST return not found to a different valid principal. Caller-controlled correlation headers and opaque deal data MUST NOT grant reservation authority. Internal authority workflows MAY omit a principal only where they do not cross the storefront HTTP boundary.
+
+#### Scenario: Another storefront presents a reservation identifier
+- **WHEN** a valid non-owning storefront credential reads, commits, truncates, or releases the reservation
+- **THEN** the authority returns not found and leaves the reservation unchanged
+
+#### Scenario: Legacy single-key deployment creates a reservation
+- **WHEN** the provisioning authority uses the compatible single administrative storefront key
+- **THEN** the reservation is owned by the stable legacy administrative principal and ownership survives restart
+
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 

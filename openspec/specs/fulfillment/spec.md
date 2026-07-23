@@ -166,9 +166,21 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 - **WHEN** a provider cannot use the selected resource
 - **THEN** it reports validation or execution failure and does not choose a replacement resource
 
+### Requirement: Credential-bound fulfillment ownership
+
+Scheduling MUST verify the authenticated storefront principal against the owning capacity reservation and persist that same immutable principal on the fulfillment aggregate. Equivalent retries MUST include principal equality. Fulfillment reads and mutations MUST return not found to a different valid principal rather than revealing lifecycle or credential state. Caller-controlled identity headers MUST NOT grant authority.
+
+#### Scenario: Owning storefront retries scheduling
+- **WHEN** the credential-bound owner repeats an equivalent scheduling request
+- **THEN** the existing assignment is returned without advancing fairness or changing ownership
+
+#### Scenario: Another storefront presents the fulfillment identifier
+- **WHEN** a different valid principal requests fulfillment state or mutation
+- **THEN** the service returns not found and exposes no aggregate state
+
 ### Requirement: Durable settlement persistence
 
-One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
+The provisioning service MUST maintain one durable `SettlementRecord` aggregate per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
 
 The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `failed`, `torn_down`, and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
 

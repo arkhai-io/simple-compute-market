@@ -223,7 +223,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 - [ ] 6.0 Implement the versioned authenticated public fulfillment boundary recorded in `design.md`, “Public fulfillment transport and caller ownership.”
   - [ ] 6.0.1 Add compute-contract request/response carriers and client methods for scheduling, dry-run, fulfillment acceptance, status, result, and teardown using the accepted `/api/v1` routes and error taxonomy.
-  - [ ] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
+  - [x] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
   - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
   - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
 - [ ] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.

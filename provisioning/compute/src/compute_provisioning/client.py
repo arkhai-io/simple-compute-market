@@ -10,6 +10,7 @@ import httpx
 from .contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
+    FulfillmentScheduleRequest,
     JobAccepted,
     LeaseForceRelease,
     LeaseRegistration,
@@ -17,6 +18,7 @@ from .contracts import (
     LeaseTermination,
     LeaseView,
     ProvisioningJob,
+    SettlementResourceView,
 )
 
 
@@ -35,6 +37,10 @@ class ComputeProvisioningTimeoutError(ComputeProvisioningError):
 
 
 class ComputeProvisioningClientProtocol(Protocol):
+    async def schedule_resource(
+        self,
+        request: FulfillmentScheduleRequest,
+    ) -> SettlementResourceView: ...
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted: ...
     async def get_job(self, job_id: str) -> ProvisioningJob: ...
     async def cancel_job(self, job_id: str) -> ProvisioningJob: ...
@@ -89,6 +95,17 @@ class ComputeProvisioningClient:
         response = await self._client.request(method, path, json=payload)
         self._raise(response)
         return response.json()
+
+    async def schedule_resource(
+        self,
+        request: FulfillmentScheduleRequest,
+    ) -> SettlementResourceView:
+        payload = await self._request(
+            "POST",
+            "/api/v1/fulfillment/schedules",
+            request,
+        )
+        return SettlementResourceView.model_validate(payload)
 
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted:
         return JobAccepted.model_validate(await self._request("POST", "/api/v1/actions", envelope))

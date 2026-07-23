@@ -156,6 +156,8 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites, and one site may serve several storefronts.
 
+Storefront-to-provisioning credentials map to opaque operator-configured principals. Capacity reservations and fulfillment aggregates retain that credential-bound owner; caller-controlled agent headers and deal payloads are correlation data, not authority. A valid non-owner receives not found for reservation or fulfillment access so identifiers do not reveal lifecycle state. The compatible single-key deployment is one principal, not an authorization bypass.
+
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
 ### Resource pools

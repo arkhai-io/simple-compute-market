@@ -71,6 +71,34 @@ def test_probe_mismatched_claim_returns_none(seeded: CapacityLedgerService):
     assert seeded.probe(claim={"gpu_count": 9}) is None
 
 
+def test_reservation_owner_filters_reads_lists_and_release(
+    seeded: CapacityLedgerService,
+):
+    reserved = seeded.reserve(
+        claim={"gpu_count": 1},
+        owner_principal="seller-a",
+    )
+    assert reserved is not None
+    reservation_id = reserved["capacity_reservation_id"]
+
+    assert seeded.reservation_owner_principal(reservation_id) == "seller-a"
+    assert seeded.get_reservation(
+        reservation_id,
+        owner_principal="seller-b",
+    ) is None
+    assert seeded.list_reservations(owner_principal="seller-b") == []
+    assert seeded.release(
+        capacity_reservation_id=reservation_id,
+        owner_principal="seller-b",
+    ) is None
+    assert seeded.get_reservation(reservation_id)["state"] == "reserved"
+
+    assert seeded.release(
+        capacity_reservation_id=reservation_id,
+        owner_principal="seller-a",
+    )["state"] == "released"
+
+
 def test_vm_claim_with_vm_host_does_not_match_hostless_resource(
     ledger: CapacityLedgerService,
 ):

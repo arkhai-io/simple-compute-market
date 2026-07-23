@@ -20,6 +20,7 @@ from .contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
     ExecutorKind,
+    FulfillmentScheduleRequest,
     JobAccepted,
     JobState,
     LeaseForceRelease,
@@ -33,6 +34,7 @@ from .contracts import (
     ProvisioningErrorEnvelope,
     ProvisioningJob,
     ResultEnvelope,
+    SettlementResourceView,
     contract_major,
 )
 from .events import IdempotentLifecycleEventSink, LifecycleEventSink
@@ -85,6 +87,7 @@ __all__ = [
     "ExecutorKind",
     "ExecutorMismatchError",
     "FunctionalExecutorAdapter",
+    "FulfillmentScheduleRequest",
     "IdempotentLifecycleEventSink",
     "JobAccepted",
     "JobState",
@@ -112,6 +115,7 @@ __all__ = [
     "PoolValidateResponse",
     "PoolValidationProblem",
     "ResultEnvelope",
+    "SettlementResourceView",
     "UnsupportedExecutorActionError",
     "contract_major",
     "DEFAULT_COMPUTE_PROVISIONING_DESCRIPTION",

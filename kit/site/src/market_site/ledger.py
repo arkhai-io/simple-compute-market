@@ -598,8 +598,12 @@ class CapacityLedgerService:
         ttl_seconds: float | None = None,
         lease_start_utc: str | None = None,
         lease_duration_seconds: int | None = None,
+        owner_principal: str = "legacy-admin",
     ) -> dict[str, Any] | None:
         """Atomically check-and-reserve capacity matching ``claim``."""
+        owner_principal = str(owner_principal).strip()
+        if not owner_principal:
+            raise ValueError("owner_principal must be non-empty")
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         deal = dict(deal_ref or {})
         window_start, window_end = _lease_window(
@@ -620,6 +624,7 @@ class CapacityLedgerService:
             mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
             reservation = CapacityReservation(
                 capacity_reservation_id=str(uuid.uuid4()),
+                owner_principal=owner_principal,
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
                 state=ReservationState.reserved.value,
@@ -921,6 +926,7 @@ class CapacityLedgerService:
         state: str = ReservationState.released.value,
         failure_reason: str | None = None,
         failure_message: str | None = None,
+        owner_principal: str | None = None,
     ) -> dict[str, Any] | None:
         """Return a held/leased reservation's capacity to the pool."""
         escrow_uid = dict(deal_ref or {}).get("escrow_uid")
@@ -929,7 +935,10 @@ class CapacityLedgerService:
                 db, capacity_reservation_id=capacity_reservation_id,
                 escrow_uid=None if capacity_reservation_id else escrow_uid,
             )
-            if reservation is None:
+            if reservation is None or (
+                owner_principal is not None
+                and reservation.owner_principal != owner_principal
+            ):
                 return None
             # Capacity reclamation always offers fulfillment a chance to
             # reconcile an assigned settlement, including idempotent retries
@@ -1046,6 +1055,7 @@ class CapacityLedgerService:
             mirrored_units = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))
             new_reservation = CapacityReservation(
                 capacity_reservation_id=str(uuid.uuid4()),
+                owner_principal=old_reservation.owner_principal,
                 units=mirrored_units,
                 dimensions=_serialize_dimensions(requested),
                 state=ReservationState.reserved.value,
@@ -1361,10 +1371,29 @@ class CapacityLedgerService:
     # Reservation queries (watchdog / deal-event plumbing)
     # ------------------------------------------------------------------
 
-    def get_reservation(self, capacity_reservation_id: str) -> dict[str, Any] | None:
+    def get_reservation(
+        self,
+        capacity_reservation_id: str,
+        *,
+        owner_principal: str | None = None,
+    ) -> dict[str, Any] | None:
         with self._lock, self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
-            return self._reservation_payload(reservation) if reservation else None
+            if reservation is None or (
+                owner_principal is not None
+                and reservation.owner_principal != owner_principal
+            ):
+                return None
+            return self._reservation_payload(reservation)
+
+    def reservation_owner_principal(
+        self,
+        capacity_reservation_id: str,
+    ) -> str | None:
+        """Return opaque authenticated ownership for authorization checks."""
+        with self._lock, self._session_factory() as db:
+            reservation = db.get(CapacityReservation, capacity_reservation_id)
+            return str(reservation.owner_principal) if reservation is not None else None
 
     def get_reservation_by_escrow(self, escrow_uid: str) -> dict[str, Any] | None:
         with self._lock, self._session_factory() as db:
@@ -1384,12 +1413,17 @@ class CapacityLedgerService:
             return self._backing_resource_id(db, capacity_reservation_id)
 
     def list_reservations(
-        self, *, state: str | None = None
+        self,
+        *,
+        state: str | None = None,
+        owner_principal: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock, self._session_factory() as db:
             q = db.query(CapacityReservation)
             if state is not None:
                 q = q.filter(CapacityReservation.state == state)
+            if owner_principal is not None:
+                q = q.filter(CapacityReservation.owner_principal == owner_principal)
             rows = q.order_by(CapacityReservation.created_at.asc()).all()
             return [self._reservation_payload(row) for row in rows]
 
@@ -1766,6 +1800,7 @@ class CapacityLedgerService:
     def _reservation_payload(reservation: CapacityReservation) -> dict[str, Any]:
         return {
             "capacity_reservation_id": reservation.capacity_reservation_id,
+            "owner_principal": reservation.owner_principal,
             "settlement_resource_id": reservation.settlement_resource_id,
             "pool_id": None,
             "units": int(reservation.units or 0),

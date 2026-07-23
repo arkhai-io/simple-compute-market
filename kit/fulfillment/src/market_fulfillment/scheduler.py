@@ -85,6 +85,9 @@ class PhysicalSettlementScheduler:
                     market=request.market, scheduling_requirements=requirement,
                     resource=_resource_from_record(existing),
                     resource_id_constraint=request.resource_id,
+                    owner_principal=str(
+                        reservation.get("owner_principal") or "legacy-admin",
+                    ),
                 )
                 return _resource_from_record(record)
 
@@ -130,6 +133,9 @@ class PhysicalSettlementScheduler:
                 capacity_reservation_id=request.capacity_reservation_id, market=request.market,
                 scheduling_requirements=requirement, resource=resource,
                 resource_id_constraint=request.resource_id,
+                owner_principal=str(
+                    reservation.get("owner_principal") or "legacy-admin",
+                ),
             )
             return _resource_from_record(record)
 

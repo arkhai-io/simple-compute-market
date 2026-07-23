@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from compute_provisioning import ComputeProvisioningClient, FulfillmentScheduleRequest
 from compute_provisioning_service import container as _container_module
+from httpx import ASGITransport
+from market_resource_pools import PoolCreate
 import pytest
 
 from vm_provisioning_operator.models import CreateVmRequest, HostCreate
@@ -29,6 +32,55 @@ async def _register_host(client) -> None:
             ssh_key_value="~/.ssh/id_ed25519",
         )
     )
+
+
+class TestFulfillmentClientEndpointCoverage:
+    async def test_schedule_uses_public_client_and_durable_owner(
+        self,
+        client_and_queue,
+    ):
+        _client, _ = client_and_queue
+        pools = _container_module.resolved_resource_pool_service
+        ledger = _container_module.resolved_capacity_ledger_service
+        pools.create_pool(PoolCreate(
+            id="pool-schedule",
+            label="Schedule Pool",
+            provider="ansible",
+            enabled=True,
+            provider_config={
+                "playbook_path": "/fake/playbook.yml",
+                "extra_vars": {},
+            },
+        ))
+        ledger.register_resource(
+            resource_id="resource-schedule",
+            pool_id="pool-schedule",
+            total_units=2,
+            resource_type="compute.gpu",
+        )
+        reserved = ledger.reserve(
+            claim={"gpu_count": 1},
+            deal_ref={"market": "vms"},
+            owner_principal="local-development",
+        )
+        assert reserved is not None
+
+        from compute_provisioning_service.main import app
+
+        async with ComputeProvisioningClient(
+            "http://test",
+            transport=ASGITransport(app=app),
+        ) as client:
+            selected = await client.schedule_resource(
+                FulfillmentScheduleRequest(
+                    capacity_reservation_id=reserved["capacity_reservation_id"],
+                    market="vms",
+                    requirements={"resource_kind": "compute.gpu"},
+                ),
+            )
+
+        assert selected.settlement_resource_id == "resource-schedule"
+        assert selected.pool_id == "pool-schedule"
 
 
 class TestVmClientEndpointCoverage:
@@ -108,6 +160,7 @@ class TestCapacityClientEndpointCoverage:
         reserved = ledger.reserve(
             claim={"gpu_count": 1, "vm_host": HOST},
             deal_ref={"escrow_uid": "escrow-client-capacity"},
+            owner_principal="local-development",
         )
         assert reserved is not None
         committed = ledger.commit(

@@ -72,9 +72,11 @@ def _scheduling_matches(
     market: str,
     serialized_requirements: dict,
     resource_id_constraint: str | None,
+    owner_principal: str,
 ) -> bool:
     return bool(
-        record.market == market
+        record.owner_principal == owner_principal
+        and record.market == market
         and record.scheduling_requirements == serialized_requirements
         and (
             resource_id_constraint is None
@@ -131,6 +133,7 @@ class SettlementRepository:
         scheduling_requirements: SettlementRequirement,
         resource: SettlementResource,
         resource_id_constraint: str | None = None,
+        owner_principal: str = "legacy-admin",
     ) -> SettlementRecord:
         """Create the aggregate in ``assigned`` state, or return it on an
         equivalent retry.
@@ -152,6 +155,7 @@ class SettlementRepository:
                 market=market,
                 serialized_requirements=serialized_requirements,
                 resource_id_constraint=resource_id_constraint,
+                owner_principal=owner_principal,
             ):
                 return existing
             raise SettlementRequestMismatchError(
@@ -171,6 +175,7 @@ class SettlementRepository:
 
         record = SettlementRecord(
             capacity_reservation_id=capacity_reservation_id,
+            owner_principal=owner_principal,
             market=market,
             scheduling_requirements=serialized_requirements,
             resource_id_constraint=resource_id_constraint,

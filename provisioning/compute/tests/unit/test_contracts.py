@@ -10,6 +10,7 @@ from compute_provisioning import (
     ExecutorActionEnvelope,
     ExecutorAdapterRegistry,
     FunctionalExecutorAdapter,
+    FulfillmentScheduleRequest,
     IdempotentLifecycleEventSink,
     LifecycleEvent,
     ResultEnvelope,
@@ -79,6 +80,37 @@ async def test_event_sink_deduplicates_only_after_successful_delivery():
 
 async def _record(values, value):
     values.append(value)
+
+
+@pytest.mark.asyncio
+async def test_client_maps_versioned_schedule_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/fulfillment/schedules"
+        payload = __import__("json").loads(request.content)
+        assert payload["contract_version"] == COMPUTE_PROVISIONING_CONTRACT_VERSION
+        return httpx.Response(
+            200,
+            json={
+                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                "capacity_reservation_id": payload["capacity_reservation_id"],
+                "settlement_resource_id": "resource-1",
+                "pool_id": "pool-1",
+                "resource_kind": "bare_metal",
+                "provider": "ansible",
+                "attributes": {},
+            },
+        )
+
+    async with ComputeProvisioningClient(
+        "http://provisioner", transport=httpx.MockTransport(handler)
+    ) as client:
+        selected = await client.schedule_resource(
+            FulfillmentScheduleRequest(
+                capacity_reservation_id="reservation-1",
+                market="bare_metal",
+            ),
+        )
+    assert selected.settlement_resource_id == "resource-1"
 
 
 @pytest.mark.asyncio

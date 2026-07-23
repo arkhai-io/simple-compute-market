@@ -225,9 +225,11 @@ def db_engine():
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    # Site-ledger tables ride market_site's own metadata.
+    # Site-ledger and fulfillment tables ride their own kit metadata.
+    from market_fulfillment.db import Base as FulfillmentBase
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this

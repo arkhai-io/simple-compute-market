@@ -92,6 +92,12 @@ class SettlementRecord(Base):
 
     capacity_reservation_id = Column(String, primary_key=True)
     fulfillment_id = Column(String, nullable=True, unique=True, index=True)
+    owner_principal = Column(
+        String,
+        nullable=False,
+        default="legacy-admin",
+        index=True,
+    )
 
     market = Column(String, nullable=False)
     scheduling_requirements = Column(JSON, nullable=False)

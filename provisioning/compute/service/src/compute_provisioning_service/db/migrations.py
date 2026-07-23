@@ -103,6 +103,13 @@ def check_schema_version(engine: Engine) -> None:
             f"fulfillment tables: {', '.join(sorted(missing))}. Reconcile schema "
             "drift before starting the service."
         )
+    for table_name in ("capacity_reservations", "settlement_records"):
+        if not _column_exists(engine, table_name, "owner_principal"):
+            raise SchemaDriftError(
+                "Database schema records the current migration but is missing "
+                f"{table_name}.owner_principal. Reconcile schema drift before "
+                "starting the service."
+            )
 
 
 def _drift_message(*, current: str, expected: str) -> str:
@@ -579,6 +586,24 @@ def _migrate_capacity_model_cutover(engine: Engine) -> None:
     _migrate_retire_site_resources(engine)
 
 
+def _migrate_storefront_ownership(engine: Engine) -> None:
+    """Bind legacy rows to the compatible single-storefront principal."""
+    for table_name in ("capacity_reservations", "settlement_records"):
+        _add_column_if_missing(
+            engine,
+            table_name,
+            "owner_principal",
+            "VARCHAR NOT NULL DEFAULT 'legacy-admin'",
+        )
+        if _table_exists(engine, table_name):
+            _create_index_if_missing(
+                engine,
+                f"ix_{table_name}_owner_principal",
+                f"CREATE INDEX IF NOT EXISTS ix_{table_name}_owner_principal "
+                f"ON {table_name} (owner_principal)",
+            )
+
+
 def _migrate_fulfillment_aggregate(engine: Engine) -> None:
     """Create the provisioning-owned fulfillment aggregate and fairness state."""
     from market_fulfillment.db import Base as FulfillmentBase
@@ -618,5 +643,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260723_001_fulfillment_aggregate",
         _migrate_fulfillment_aggregate,
+    ),
+    Migration(
+        "20260723_002_storefront_ownership",
+        _migrate_storefront_ownership,
     ),
 )

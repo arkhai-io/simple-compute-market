@@ -206,6 +206,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "executor_target",
         "release_job_id",
         "executor_ref",
+        "owner_principal",
     }.issubset(reservation_columns)
 
     # capacity/dimensions columns land on genuinely
@@ -244,6 +245,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     assert pre_existing["pool_id"] == "legacy-pool"
     reservation = ledger.get_reservation("pre-existing-alloc")
     assert reservation["dimensions"] == {"gpu_count": 3}
+    assert reservation["owner_principal"] == "legacy-admin"
 
     assert {"settlement_records", "provisioned_resources", "scheduling_cursors"}.issubset(
         inspector.get_table_names()
@@ -324,6 +326,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260720_001_multidimensional_capacity",
         "20260722_001_pools7_capacity_model_cutover",
         "20260723_001_fulfillment_aggregate",
+        "20260723_002_storefront_ownership",
     }
 
 
@@ -359,6 +362,7 @@ def test_run_migrations_is_idempotent():
     assert reservation_columns.count("release_job_id") == 1
     assert reservation_columns.count("executor_ref") == 1
     assert reservation_columns.count("dimensions") == 1
+    assert reservation_columns.count("owner_principal") == 1
     event_columns = [
         column["name"] for column in inspector.get_columns("capacity_events")
     ]
@@ -376,7 +380,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 11
+    assert migration_count == 12
 
 
 # ---------------------------------------------------------------------------

@@ -96,6 +96,30 @@ def test_schedule_retry_with_equivalent_requirements_returns_existing(session_fa
         assert retried.settlement_resource_id == "host-a"
 
 
+def test_schedule_retry_with_different_owner_conflicts(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+            owner_principal="seller-a",
+        )
+        db.commit()
+
+    with session_factory() as db:
+        with pytest.raises(SettlementRequestMismatchError):
+            repo.schedule(
+                db,
+                capacity_reservation_id="cr-1",
+                market="vms",
+                scheduling_requirements=_requirement(),
+                resource=_resource(),
+                owner_principal="seller-b",
+            )
+
+
 def test_schedule_retry_with_different_requirements_conflicts(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
