@@ -221,11 +221,11 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 ## 6. Implement fulfillment acceptance and provider preparation
 
-- [ ] 6.0 Implement the versioned authenticated public fulfillment boundary recorded in `design.md`, “Public fulfillment transport and caller ownership.”
+- [x] 6.0 Implement the versioned authenticated public fulfillment boundary recorded in `design.md`, “Public fulfillment transport and caller ownership.”
   - [x] 6.0.1 Add compute-contract request/response carriers and client methods for scheduling, dry-run, fulfillment acceptance, status, result, and teardown using the accepted `/api/v1` routes and error taxonomy.
   - [x] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
-  - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
-  - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
+  - [x] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
+  - [x] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
 - [x] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
 - [x] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
   - [x] 6.2.1 Route provider resolution by exact `(provider, resource_kind)` in `kit/fulfillment`, compute-service composition, and every `FulfillmentService` call site. Retain provider-only registrations only as explicit compatibility fallback; add registry/composition/service tests; register the VM provider for `("ansible", "compute.gpu")`; promote the contract to `openspec/specs/fulfillment/spec.md`.
@@ -243,7 +243,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 - [x] 7.0 Replace the Section 3 single-worker SQLite recovery-selection helper with the final recovery acquisition workflow. Define the actual provisioning-service worker model, guarantee that one pending provider operation is not concurrently dispatched twice, validate lease expiry/reclaim behavior with independent sessions or processes as supported by SQLite, and promote the resulting current-state recovery semantics into `openspec/specs/fulfillment/spec.md`.
 
 - [x] 7.1 Implement a periodic multi-replica-safe watchdog framework with bounded database claims/leases, claim expiry, attempt counters, exponential backoff with jitter, and no locks held during external calls.
-- [ ] 7.2 Add separate handlers for create submission recovery, create status convergence, teardown submission recovery, teardown status convergence, and abandonment reconciliation.
+- [x] 7.2 Add separate handlers for create submission recovery, create status convergence, teardown submission recovery, teardown status convergence, and abandonment reconciliation.
 - [x] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
 - [x] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
 - [ ] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
