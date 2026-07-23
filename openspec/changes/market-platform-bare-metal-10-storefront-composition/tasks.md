@@ -13,7 +13,7 @@
 - [x] 2.4 Implement schema-opaque persistence/use of bare-metal listing, message, terms, materialization, receipt, and result payloads without adding VM-shaped columns or generic branches.
 - [x] 2.5 Define the opt-in per-resource bare-metal projection carrier with distinct `site_id` provenance, `physical_resource_id`, `physical_host_id`, and executor-local `machine_id`, plus same-generation availability, allocation mode, access methods, capacity, and allowlisted capabilities.
 - [x] 2.6 Extend site/compute projection production, revision/digest behavior, and redaction so complete and authoritative-empty generations preserve the bare-metal contract without exposing credentials, URLs, provider configuration, or private inventory.
-- [ ] 2.7 Implement the domain projection interpreter with no identity fallback, site-scoped derivation keys, explicit capacity/capability conflict rejection, and unavailable/stale/authoritative-empty generation semantics.
+- [x] 2.7 Implement the domain projection interpreter with no identity fallback, site-scoped derivation keys, explicit capacity/capability conflict rejection, and unavailable/stale/authoritative-empty generation semantics.
 - [ ] 2.8 Move derived bare-metal publication tracking into the storefront migration chain and add injected core publication selection/runner wiring without runtime DDL or VM imports.
 - [ ] 2.9 Add producer, projection-carrier, interpreter, digest/redaction, publication, migration, and two-site collision tests proving exact opaque listing payloads.
 - [ ] 2.10 Add HTTP contract tests for listing, negotiation, settlement, operator state, health, and domain-validation failures through the runnable application.

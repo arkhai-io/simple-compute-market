@@ -1,8 +1,10 @@
 """Bare-metal market domain schema."""
 
 from .publication import (
+    BARE_METAL_PUBLICATION_VIEW,
     available_bare_metal_listings,
     bare_metal_listing_key,
+    trusted_bare_metal_projection,
 )
 from .projections import (
     BareMetalResourceProjection,
@@ -54,6 +56,7 @@ __all__ = [
     "BARE_METAL_EXECUTOR_KIND",
     "BARE_METAL_PROVISION_KIND",
     "BARE_METAL_PROVISION_VERSION",
+    "BARE_METAL_PUBLICATION_VIEW",
     "BARE_METAL_SCHEMA_KIND",
     "EXCLUSIVE_ALLOCATION_MODE",
     "NODE_GRANT_ACCESS_ACTION",
@@ -88,4 +91,5 @@ __all__ = [
     "reopen_derived_bare_metal_listing_if_present",
     "receipt_from_lease_view",
     "stale_open_bare_metal_listing_ids",
+    "trusted_bare_metal_projection",
 ]
