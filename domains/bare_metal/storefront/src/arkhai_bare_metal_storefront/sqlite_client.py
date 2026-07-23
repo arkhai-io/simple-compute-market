@@ -6,6 +6,7 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
@@ -108,6 +109,156 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.close()
 
         return await asyncio.to_thread(_count)
+
+    async def persist_bare_metal_opening(
+        self,
+        *,
+        negotiation_id: str,
+        listing_id: str,
+        seller_id: str,
+        buyer_agent_id: str,
+        buyer_identity: str,
+        seller_reference_amount: int,
+        strategy: str,
+        message: BareMetalMessage,
+        proposal: Mapping[str, Any],
+        buyer_amount: int | None,
+        seller_action: str,
+        seller_amount: int | None,
+        terms: BareMetalTerms | None,
+        agreed_amount: int | None,
+    ) -> None:
+        """Atomically persist one validated opening and seller decision."""
+        message_payload = json.dumps(
+            self._market_domain.codecs.message(message).model_dump(
+                mode="json",
+                exclude_none=True,
+            ),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        terms_payload = None
+        if terms is not None:
+            terms_payload = json.dumps(
+                self._market_domain.codecs.terms(terms).model_dump(
+                    mode="json",
+                    exclude_none=True,
+                ),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        proposal_payload = json.dumps(
+            dict(proposal),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        terminal_state = "success" if seller_action == "accept" else None
+        status = "terminated" if terminal_state else "active"
+        seller_action_taken = {
+            "accept": "accept_offer",
+            "counter": "counter_offer",
+        }.get(seller_action, seller_action)
+        seller_message_type = {
+            "accept": "accepted",
+            "counter": "counter_proposal",
+        }.get(seller_action, seller_action)
+
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO negotiation_threads(
+                      negotiation_id, our_listing_id, their_listing_id,
+                      our_agent_id, their_agent_id, status, created_at,
+                      updated_at, terminal_state, requested_duration_seconds,
+                      buyer_escrow_proposal, agreed_price,
+                      agreed_duration_seconds, agreed_at, buyer
+                    ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        listing_id,
+                        seller_id,
+                        buyer_agent_id,
+                        status,
+                        now,
+                        now,
+                        terminal_state,
+                        message.duration_seconds,
+                        proposal_payload,
+                        None if agreed_amount is None else str(agreed_amount),
+                        message.duration_seconds if agreed_amount is not None else None,
+                        now if agreed_amount is not None else None,
+                        buyer_identity,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO negotiation_local_state(
+                      negotiation_id, owner_id, our_initial_price, our_strategy
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        seller_id,
+                        str(seller_reference_amount),
+                        strategy,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO negotiation_messages(
+                      negotiation_id, round, sender, our_price, their_price,
+                      proposed_price, action_taken, message_type, timestamp
+                    ) VALUES (?, 0, ?, ?, ?, ?, 'initial_proposal',
+                              'initial_proposal', ?)
+                    """,
+                    (
+                        negotiation_id,
+                        buyer_agent_id,
+                        str(seller_reference_amount),
+                        None if buyer_amount is None else str(buyer_amount),
+                        None if buyer_amount is None else str(buyer_amount),
+                        now,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO negotiation_messages(
+                      negotiation_id, round, sender, our_price, their_price,
+                      proposed_price, action_taken, message_type, timestamp
+                    ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id,
+                        seller_id,
+                        str(seller_reference_amount),
+                        None if buyer_amount is None else str(buyer_amount),
+                        None if seller_amount is None else str(seller_amount),
+                        seller_action_taken,
+                        seller_message_type,
+                        now,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO bare_metal_agreement_payloads(
+                      negotiation_id, message_json, terms_json
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (negotiation_id, message_payload, terms_payload),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
 
     async def upsert_bare_metal_listing(
         self,

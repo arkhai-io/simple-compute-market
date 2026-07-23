@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from market_core import MarketDomainContract, validate_domain_contract
 
 from .domain_runtime import get_market_domain_contract
+from .negotiation import default_seller_round_hook
+from .negotiation_service import BareMetalNegotiationService
+from .settlement import build_bare_metal_settlement_plan
 from .sqlite_client import SQLiteClient
 
 
@@ -21,6 +26,17 @@ class BareMetalStorefrontRuntime:
     domain: MarketDomainContract
     seller_id: str
     admin_key: str | None = None
+    plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
+
+    def negotiation_service(self) -> BareMetalNegotiationService:
+        """Build the request-scoped bare-metal negotiation orchestrator."""
+        return BareMetalNegotiationService(
+            db=self.db,
+            domain=self.domain,
+            seller_id=self.seller_id,
+            round_hook=default_seller_round_hook(),
+            build_plan=self.plan_builder,
+        )
 
     async def health(self) -> dict[str, object]:
         """Report composed authorities without implying fulfillment readiness."""
