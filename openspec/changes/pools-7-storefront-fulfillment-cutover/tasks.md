@@ -226,15 +226,15 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
   - [x] 6.0.2 Replace caller-asserted agent authority with operator-configured credential-to-principal authentication while preserving the legacy single-key deployment as one principal and local open mode as one development principal.
   - [ ] 6.0.3 Persist the authenticated principal on capacity reservation creation and the settlement aggregate; verify it for scheduling and every fulfillment read/mutation, returning not found to a different valid principal.
   - [ ] 6.0.4 Add API/client/auth/migration tests for compatible single-principal operation, two-principal isolation, spoofed `X-Agent-ID`, restart persistence, status mappings, and route coverage.
-- [ ] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
+- [x] 6.1 Add `begin_fulfillment(capacity_reservation_id, fulfillment_request)` returning `fulfillment_id`; load the persisted scheduled resource rather than trusting a caller-supplied resource.
 - [x] 6.2 Preserve `FulfillmentService`'s boundary: it receives an already-selected `SettlementResource` and does not call the scheduler.
   - [x] 6.2.1 Route provider resolution by exact `(provider, resource_kind)` in `kit/fulfillment`, compute-service composition, and every `FulfillmentService` call site. Retain provider-only registrations only as explicit compatibility fallback; add registry/composition/service tests; register the VM provider for `("ansible", "compute.gpu")`; promote the contract to `openspec/specs/fulfillment/spec.md`.
-- [ ] 6.3 Split provider behavior into synchronous `prepare_create`/`prepare_teardown` and post-commit `dispatch_create`/`dispatch_teardown` operations.
-- [ ] 6.4 Validate and persist versioned prepared input in the same transaction that accepts a pending provider command.
+- [x] 6.3 Split provider behavior into synchronous `prepare_create`/`prepare_teardown` and post-commit `dispatch_create`/`dispatch_teardown` operations.
+- [x] 6.4 Validate and persist versioned prepared input in the same transaction that accepts a pending provider command.
 - [ ] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.
-- [ ] 6.6 Persist provider job identity and normalized provider metadata without exposing VM-specific job state as the cross-domain lifecycle contract.
+- [x] 6.6 Persist provider job identity and normalized provider metadata without exposing VM-specific job state as the cross-domain lifecycle contract.
 - [ ] 6.7 Add tests for equivalent/conflicting retries, pool-config mutation after acceptance, duplicate submission races, and create/teardown command deduplication.
-- [ ] 6.8 Expose provider preparation through a public side-effect-free dry-run endpoint that uses the same validation path as `begin_fulfillment` without persisting or dispatching work.
+- [x] 6.8 Expose provider preparation through a public side-effect-free dry-run endpoint that uses the same validation path as `begin_fulfillment` without persisting or dispatching work.
 - [ ] 6.9 Add integration coverage that reads persisted prepared Ansible create and teardown inputs and verifies `vm_host`, `vm_target`, every VM create field, provider configuration snapshot, and exact teardown identity.
 
 ## 7. Add provisioning-owned recovery and lifecycle convergence

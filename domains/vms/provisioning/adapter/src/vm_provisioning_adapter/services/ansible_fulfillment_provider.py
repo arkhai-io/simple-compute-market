@@ -6,7 +6,12 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+from compute_provisioning import ExecutorActionEnvelope
+from market_fulfillment import (
+    PhysicalSettlementRequest,
+    SettlementResource,
+    VersionedEnvelope,
+)
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
 from market_fulfillment import (
@@ -153,43 +158,213 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
         return params, req
 
-    async def create(
-        self, request: PhysicalSettlementRequest, resource: SettlementResource
+    @staticmethod
+    def _contract(
+        *,
+        capacity_reservation_id: str,
+        action_kind: str,
+        params: AnsibleJobParams,
+    ) -> ExecutorActionEnvelope:
+        version = 1
+        return ExecutorActionEnvelope(
+            capacity_reservation_id=capacity_reservation_id,
+            deal_ref={},
+            executor_kind="vm",
+            action_kind=action_kind,
+            idempotency_key=(
+                f"{capacity_reservation_id}:{action_kind}:v{version}"
+            ),
+            parameters=dataclasses.asdict(params),
+        )
+
+    @staticmethod
+    def _decode_prepared(
+        prepared: VersionedEnvelope,
+        *,
+        expected_kind: str,
+    ) -> tuple[AnsibleJobParams, ExecutorActionEnvelope, dict[str, Any]]:
+        if prepared.kind != expected_kind or prepared.schema_version != 1:
+            raise ProviderConfigInvalidError(
+                f"unsupported prepared operation {prepared.kind!r} "
+                f"version {prepared.schema_version}"
+            )
+        if not isinstance(prepared.payload, dict):
+            raise ProviderConfigInvalidError("prepared operation payload must be an object")
+        payload = dict(prepared.payload)
+        try:
+            params_payload = payload["job_params"]
+            contract_payload = payload["contract"]
+            if not isinstance(params_payload, dict):
+                raise TypeError("job_params must be an object")
+            params = AnsibleJobParams(**params_payload)
+            contract = ExecutorActionEnvelope.model_validate(contract_payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid prepared operation payload: {exc}"
+            ) from exc
+        if contract.parameters != dataclasses.asdict(params):
+            raise ProviderConfigInvalidError(
+                "prepared operation contract does not match job parameters"
+            )
+        return params, contract, payload
+
+    def prepare_create(
+        self,
+        capacity_reservation_id: str,
+        fulfillment_request: VersionedEnvelope,
+        resource: SettlementResource,
+    ) -> VersionedEnvelope:
+        if (
+            fulfillment_request.kind != "vms.fulfillment"
+            or fulfillment_request.schema_version != 1
+            or not isinstance(fulfillment_request.payload, dict)
+        ):
+            raise ProviderConfigInvalidError(
+                "unsupported VM fulfillment request kind or schema version"
+            )
+        request = PhysicalSettlementRequest(
+            capacity_reservation_id=capacity_reservation_id,
+            market="vms",
+            requirements=dict(fulfillment_request.payload),
+            resource_id=resource.settlement_resource_id,
+        )
+        params, requirements = self._build_create_params(request, resource)
+        contract = self._contract(
+            capacity_reservation_id=capacity_reservation_id,
+            action_kind="fulfillment_create",
+            params=params,
+        )
+        return VersionedEnvelope(
+            kind="ansible.vm.create",
+            schema_version=1,
+            payload={
+                "job_params": dataclasses.asdict(params),
+                "contract": contract.model_dump(mode="json"),
+                "vm_target": requirements.vm_target,
+            },
+        )
+
+    async def dispatch_create(
+        self,
+        prepared: VersionedEnvelope,
     ) -> FulfillmentResult:
         try:
-            params, req = self._build_create_params(request, resource)
-            response = await self._job_service.submit(params, self._job_queue_provider())
+            params, contract, payload = self._decode_prepared(
+                prepared,
+                expected_kind="ansible.vm.create",
+            )
+            response = await self._job_service.submit(
+                params,
+                self._job_queue_provider(),
+                contract=contract,
+            )
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
             raise FulfillmentCreateFailedError(str(exc)) from exc
         metadata = AnsibleFulfillmentMetadata(
-            create_job_id=response.job_id, current_job_id=response.job_id,
-            vm_host=params.vm_host, vm_target=req.vm_target, operation="create",
+            create_job_id=response.job_id,
+            current_job_id=response.job_id,
+            vm_host=params.vm_host,
+            vm_target=str(payload["vm_target"]),
+            operation="create",
         )
         return FulfillmentResult(provider_metadata=metadata.model_dump())
 
-    async def teardown(
-        self, capacity_reservation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
+    async def create(
+        self, request: PhysicalSettlementRequest, resource: SettlementResource
+    ) -> FulfillmentResult:
+        """Compatibility wrapper over the prepare/dispatch provider contract."""
+        fulfillment_request = VersionedEnvelope(
+            kind="vms.fulfillment",
+            schema_version=1,
+            payload=dict(request.requirements),
+        )
+        return await self.dispatch_create(
+            self.prepare_create(
+                request.capacity_reservation_id,
+                fulfillment_request,
+                resource,
+            )
+        )
+
+    def prepare_teardown(
+        self,
+        capacity_reservation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> VersionedEnvelope:
+        metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        pool_config = self._validate_resource(resource)
+        base_params = AnsibleJobParams(
+            vm_host=metadata.vm_host,
+            vm_action="vm_remove",
+            vm_target=metadata.vm_target,
+            escrow_uid=capacity_reservation_id,
+            playbook_path=pool_config.playbook_path,
+        )
+        self._validate_extra_vars(base_params, pool_config.extra_vars)
+        params = dataclasses.replace(
+            base_params,
+            provider_extra_vars=pool_config.extra_vars,
+        )
+        contract = self._contract(
+            capacity_reservation_id=capacity_reservation_id,
+            action_kind="fulfillment_teardown",
+            params=params,
+        )
+        return VersionedEnvelope(
+            kind="ansible.vm.teardown",
+            schema_version=1,
+            payload={
+                "job_params": dataclasses.asdict(params),
+                "contract": contract.model_dump(mode="json"),
+                "create_metadata": metadata.model_dump(mode="json"),
+            },
+        )
+
+    async def dispatch_teardown(
+        self,
+        prepared: VersionedEnvelope,
     ) -> FulfillmentResult:
         try:
-            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
-            pool_config = self._validate_resource(resource)
-            base_params = AnsibleJobParams(
-                vm_host=metadata.vm_host, vm_action="vm_remove", vm_target=metadata.vm_target,
-                escrow_uid=capacity_reservation_id, playbook_path=pool_config.playbook_path,
+            params, contract, payload = self._decode_prepared(
+                prepared,
+                expected_kind="ansible.vm.teardown",
             )
-            self._validate_extra_vars(base_params, pool_config.extra_vars)
-            params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
-            response = await self._job_service.submit(params, self._job_queue_provider())
+            metadata = AnsibleFulfillmentMetadata.model_validate(
+                payload["create_metadata"]
+            )
+            response = await self._job_service.submit(
+                params,
+                self._job_queue_provider(),
+                contract=contract,
+            )
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
             raise FulfillmentTeardownFailedError(str(exc)) from exc
         updated = metadata.model_copy(update={
-            "teardown_job_id": response.job_id, "current_job_id": response.job_id, "operation": "teardown"
+            "teardown_job_id": response.job_id,
+            "current_job_id": response.job_id,
+            "operation": "teardown",
         })
         return FulfillmentResult(provider_metadata=updated.model_dump())
+
+    async def teardown(
+        self,
+        capacity_reservation_id: str,
+        resource: SettlementResource,
+        provider_metadata: dict[str, Any],
+    ) -> FulfillmentResult:
+        """Compatibility wrapper over the prepare/dispatch provider contract."""
+        return await self.dispatch_teardown(
+            self.prepare_teardown(
+                capacity_reservation_id,
+                resource,
+                provider_metadata,
+            )
+        )
 
     async def get_status(
         self,

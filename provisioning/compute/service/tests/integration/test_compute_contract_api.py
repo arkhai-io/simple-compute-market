@@ -114,6 +114,37 @@ async def test_contract_submission_is_idempotent_and_correlated(client_and_queue
 
 
 @pytest.mark.asyncio
+async def test_contract_idempotency_key_rejects_changed_command(client_and_queue):
+    legacy_client, _ = client_and_queue
+    await legacy_client.register_host(HostCreate(
+        name="kvm1",
+        kvm_host="127.0.0.1",
+        ssh_user="ubuntu",
+        ssh_key_type="path",
+        ssh_key_value="/tmp/test-key",
+    ))
+    reservation = _leased_vm_reservation()
+
+    async with ComputeProvisioningClient(
+        "http://test", transport=ASGITransport(app=app)
+    ) as client:
+        await client.submit_action(_vm_action(reservation))
+        with pytest.raises(ComputeProvisioningError) as raised:
+            await client.submit_action(
+                _vm_action(
+                    reservation,
+                    parameters={
+                        "vm_target": "different-target",
+                        "ssh_pubkey": "ssh-ed25519 test",
+                    },
+                )
+            )
+
+    assert raised.value.status_code == 422
+    assert "different executor command" in str(raised.value)
+
+
+@pytest.mark.asyncio
 async def test_bare_metal_uses_same_executor_neutral_client(client_and_queue):
     legacy_client, _ = client_and_queue
     await legacy_client.register_host(HostCreate(

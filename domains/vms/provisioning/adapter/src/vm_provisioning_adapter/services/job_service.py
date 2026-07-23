@@ -109,6 +109,11 @@ class AnsibleJobService:
                     idempotency_key=contract.idempotency_key,
                 )
                 if existing is not None:
+                    self._require_equivalent_contract_job(
+                        existing,
+                        contract=contract,
+                        raw_params=raw_params,
+                    )
                     return JobSubmitResponse(job_id=existing.id, status=existing.status)
             job = AnsibleJob(
                 id=job_id,
@@ -141,6 +146,11 @@ class AnsibleJobService:
                 )
                 if existing is None:
                     raise
+                self._require_equivalent_contract_job(
+                    existing,
+                    contract=contract,
+                    raw_params=raw_params,
+                )
                 job_id = existing.id
                 return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
@@ -392,6 +402,23 @@ class AnsibleJobService:
             "status": JobStatus.cancelled.value,
             "message": "Job cancelled successfully",
         }
+
+    @staticmethod
+    def _require_equivalent_contract_job(
+        existing: AnsibleJob,
+        *,
+        contract: ExecutorActionEnvelope,
+        raw_params: dict,
+    ) -> None:
+        if not (
+            existing.contract_version == contract.contract_version
+            and existing.deal_ref == contract.deal_ref
+            and existing.executor_kind == contract.executor_kind
+            and existing.params == raw_params
+        ):
+            raise ValueError(
+                "idempotency key already belongs to a different executor command"
+            )
 
     @staticmethod
     def _contract_job(

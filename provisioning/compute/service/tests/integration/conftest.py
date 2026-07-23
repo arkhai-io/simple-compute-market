@@ -499,6 +499,14 @@ async def client_and_queue(
     app.container.resource_pool_service.override(resource_pool_service)
     app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
     app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
+    for provider in (
+        app.container.ansible_fulfillment_provider,
+        app.container.vm_adapter_bundle,
+        app.container.composed_adapters,
+        app.container.provider_registry,
+        app.container.fulfillment_service,
+    ):
+        provider.reset()
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -514,6 +522,7 @@ async def client_and_queue(
     _container_module.resolved_physical_settlement_scheduler = (
         physical_settlement_scheduler
     )
+    _container_module.resolved_fulfillment_service = app.container.fulfillment_service()
     _container_module.resolved_capacity_reservation_watchdog = (
         capacity_reservation_watchdog
     )
@@ -587,6 +596,14 @@ async def client_and_queue(
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
+    for provider in (
+        app.container.fulfillment_service,
+        app.container.provider_registry,
+        app.container.composed_adapters,
+        app.container.vm_adapter_bundle,
+        app.container.ansible_fulfillment_provider,
+    ):
+        provider.reset()
 
 
 @pytest_asyncio.fixture

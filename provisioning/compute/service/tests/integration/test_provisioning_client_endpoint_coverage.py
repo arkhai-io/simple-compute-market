@@ -10,9 +10,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from compute_provisioning import ComputeProvisioningClient, FulfillmentScheduleRequest
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    FulfillmentBeginRequest,
+    FulfillmentRequestEnvelope,
+    FulfillmentScheduleRequest,
+)
 from compute_provisioning_service import container as _container_module
 from httpx import ASGITransport
+from market_fulfillment import SettlementRecord
 from market_resource_pools import PoolCreate
 import pytest
 
@@ -57,6 +63,7 @@ class TestFulfillmentClientEndpointCoverage:
             pool_id="pool-schedule",
             total_units=2,
             resource_type="compute.gpu",
+            attributes={"vm_host": "kvm1"},
         )
         reserved = ledger.reserve(
             claim={"gpu_count": 1},
@@ -81,6 +88,49 @@ class TestFulfillmentClientEndpointCoverage:
 
         assert selected.settlement_resource_id == "resource-schedule"
         assert selected.pool_id == "pool-schedule"
+
+    async def test_begin_and_dry_run_use_durable_scheduled_resource(
+        self,
+        client_and_queue,
+    ):
+        await self.test_schedule_uses_public_client_and_durable_owner(
+            client_and_queue,
+        )
+        session_factory = _container_module.resolved_session_factory
+        assert session_factory is not None
+        with session_factory() as db:
+            scheduled = db.query(SettlementRecord).one()
+            assert scheduled.owner_principal == "local-development"
+            capacity_reservation_id = scheduled.capacity_reservation_id
+        request = FulfillmentBeginRequest(
+            capacity_reservation_id=capacity_reservation_id,
+            market="vms",
+            fulfillment_request=FulfillmentRequestEnvelope(
+                kind="vms.fulfillment",
+                schema_version=1,
+                payload={
+                    "vm_target": "vm-reservation-1",
+                    "vm_ram": 4096,
+                    "vm_vcpus": 2,
+                    "vm_disk_size": "40G",
+                    "ssh_pubkey": "ssh-ed25519 AAAA",
+                },
+            ),
+        )
+
+        from compute_provisioning_service.main import app
+
+        async with ComputeProvisioningClient(
+            "http://test",
+            transport=ASGITransport(app=app),
+        ) as client:
+            dry_run = await client.dry_run_fulfillment(request)
+            accepted = await client.begin_fulfillment(request)
+            repeated = await client.begin_fulfillment(request)
+
+        assert dry_run.valid
+        assert accepted.fulfillment_id == repeated.fulfillment_id
+        assert accepted.state == "dispatching"
 
 
 class TestVmClientEndpointCoverage:

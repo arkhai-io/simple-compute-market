@@ -54,10 +54,16 @@ class FakeReleaseExecutor:
 
 
 class FakeProvider(FulfillmentProvider):
-    async def create(self, request, resource):
+    def prepare_create(self, capacity_reservation_id, fulfillment_request, resource):
+        raise NotImplementedError
+
+    async def dispatch_create(self, prepared):
         return FulfillmentResult(provider_metadata={})
 
-    async def teardown(self, capacity_reservation_id, resource, provider_metadata):
+    def prepare_teardown(self, capacity_reservation_id, resource, provider_metadata):
+        raise NotImplementedError
+
+    async def dispatch_teardown(self, prepared):
         return FulfillmentResult(provider_metadata={})
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):

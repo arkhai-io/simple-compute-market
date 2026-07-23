@@ -5,24 +5,34 @@ from __future__ import annotations
 from typing import cast
 
 from compute_provisioning.contracts import (
+    FulfillmentAcceptanceView,
+    FulfillmentBeginRequest,
+    FulfillmentDryRunView,
     FulfillmentScheduleRequest,
+    FulfillmentValidationIssueView,
     SettlementResourceView,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
 from market_fulfillment import (
     CapacityReservationExpiredError,
+    FulfillmentConflictError,
+    FulfillmentRequestInvalidError,
     NoEligibleSettlementResourceError,
     PhysicalSettlementRequest,
     PhysicalSettlementScheduler,
+    ProviderConfigInvalidError,
+    ProviderNotFoundError,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
+    VersionedEnvelope,
 )
 from market_site.ledger import CapacityLedgerService
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
-router = APIRouter(prefix="/fulfillment", tags=["fulfillment"])
+router = APIRouter(tags=["fulfillment"])
 
 
 def _not_found(reservation_id: str) -> HTTPException:
@@ -42,11 +52,15 @@ class FulfillmentController:
         capacity_ledger: CapacityLedgerService = Depends(
             lambda: _container_module.resolved_capacity_ledger_service,
         ),
+        fulfillment_service: FulfillmentService = Depends(
+            lambda: _container_module.resolved_fulfillment_service,
+        ),
     ) -> None:
         self._scheduler = cast(PhysicalSettlementScheduler, scheduler)
         self._capacity_ledger = cast(CapacityLedgerService, capacity_ledger)
+        self._fulfillment_service = cast(FulfillmentService, fulfillment_service)
 
-    @router.post("/schedules", response_model=SettlementResourceView)
+    @router.post("/fulfillment/schedules", response_model=SettlementResourceView)
     def schedule_resource(
         self,
         body: FulfillmentScheduleRequest,
@@ -84,6 +98,69 @@ class FulfillmentController:
             resource_kind=selected.resource_kind,
             provider=selected.provider,
             attributes=selected.attributes,
+        )
+
+    @staticmethod
+    def _envelope(body: FulfillmentBeginRequest) -> VersionedEnvelope:
+        return VersionedEnvelope.model_validate(
+            body.fulfillment_request.model_dump(mode="json")
+        )
+
+    @router.post("/fulfillments", response_model=FulfillmentAcceptanceView)
+    async def begin_fulfillment(
+        self,
+        body: FulfillmentBeginRequest,
+        request: Request,
+    ) -> FulfillmentAcceptanceView:
+        try:
+            accepted = await self._fulfillment_service.begin_fulfillment(
+                capacity_reservation_id=body.capacity_reservation_id,
+                market=body.market,
+                fulfillment_request=self._envelope(body),
+                owner_principal=str(request.state.storefront_principal),
+            )
+        except SettlementEntityNotFoundError as exc:
+            raise _not_found(body.capacity_reservation_id) from exc
+        except (FulfillmentConflictError, SettlementRequestMismatchError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (
+            FulfillmentRequestInvalidError,
+            ProviderConfigInvalidError,
+            ProviderNotFoundError,
+            ValueError,
+        ) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return FulfillmentAcceptanceView(
+            capacity_reservation_id=accepted.capacity_reservation_id,
+            fulfillment_id=accepted.fulfillment_id,
+            state=accepted.state,
+        )
+
+    @router.post("/fulfillments/dry-run", response_model=FulfillmentDryRunView)
+    def dry_run_fulfillment(
+        self,
+        body: FulfillmentBeginRequest,
+        request: Request,
+    ) -> FulfillmentDryRunView:
+        try:
+            validation = self._fulfillment_service.validate_create(
+                capacity_reservation_id=body.capacity_reservation_id,
+                market=body.market,
+                fulfillment_request=self._envelope(body),
+                owner_principal=str(request.state.storefront_principal),
+            )
+        except SettlementEntityNotFoundError as exc:
+            raise _not_found(body.capacity_reservation_id) from exc
+        return FulfillmentDryRunView(
+            valid=validation.valid,
+            issues=[
+                FulfillmentValidationIssueView(
+                    code=issue.code,
+                    message=issue.message,
+                    field=issue.field,
+                )
+                for issue in validation.issues
+            ],
         )
 
     @classmethod

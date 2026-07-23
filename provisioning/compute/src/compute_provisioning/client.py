@@ -10,6 +10,9 @@ import httpx
 from .contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
+    FulfillmentAcceptanceView,
+    FulfillmentBeginRequest,
+    FulfillmentDryRunView,
     FulfillmentScheduleRequest,
     JobAccepted,
     LeaseForceRelease,
@@ -41,6 +44,14 @@ class ComputeProvisioningClientProtocol(Protocol):
         self,
         request: FulfillmentScheduleRequest,
     ) -> SettlementResourceView: ...
+    async def begin_fulfillment(
+        self,
+        request: FulfillmentBeginRequest,
+    ) -> FulfillmentAcceptanceView: ...
+    async def dry_run_fulfillment(
+        self,
+        request: FulfillmentBeginRequest,
+    ) -> FulfillmentDryRunView: ...
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted: ...
     async def get_job(self, job_id: str) -> ProvisioningJob: ...
     async def cancel_job(self, job_id: str) -> ProvisioningJob: ...
@@ -106,6 +117,24 @@ class ComputeProvisioningClient:
             request,
         )
         return SettlementResourceView.model_validate(payload)
+
+    async def begin_fulfillment(
+        self,
+        request: FulfillmentBeginRequest,
+    ) -> FulfillmentAcceptanceView:
+        payload = await self._request("POST", "/api/v1/fulfillments", request)
+        return FulfillmentAcceptanceView.model_validate(payload)
+
+    async def dry_run_fulfillment(
+        self,
+        request: FulfillmentBeginRequest,
+    ) -> FulfillmentDryRunView:
+        payload = await self._request(
+            "POST",
+            "/api/v1/fulfillments/dry-run",
+            request,
+        )
+        return FulfillmentDryRunView.model_validate(payload)
 
     async def submit_action(self, envelope: ExecutorActionEnvelope) -> JobAccepted:
         return JobAccepted.model_validate(await self._request("POST", "/api/v1/actions", envelope))

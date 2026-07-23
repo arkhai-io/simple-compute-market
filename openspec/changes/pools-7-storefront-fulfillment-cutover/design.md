@@ -1366,6 +1366,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | `resize_reservation` supersedes a reservation via one self-managed-session transaction (release-then-reserve, never two independently committed calls); no `_in_session` twin is built without a real co-transactional caller | `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-settlement-abandonment` |
 | `SettlementAbandonmentHook` is called unconditionally from every capacity-reclaiming path (TTL lapse, release, resize); `market_site` never imports `market_fulfillment` to implement it | `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-settlement-abandonment` |
 | Fulfillment providers resolve by exact `(provider, resource_kind)` with only explicit provider-only compatibility fallback | `openspec/specs/fulfillment/spec.md#provider-contract` |
+| Provider preparation is synchronous and side-effect-free; accepted versioned commands commit before post-commit dispatch, which reads no mutable pool/host configuration | `openspec/specs/fulfillment/spec.md#provider-contract`; `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 
 ### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
 

@@ -1,153 +1,259 @@
-"""Unit tests for FulfillmentService.
-
-Uses a fake FulfillmentProvider, not AnsibleFulfillmentProvider — this is a
-FulfillmentService-boundary test (idempotency/conflict/dispatch counting),
-not an Ansible-integration test.
-"""
+"""Durable acceptance tests for the fulfillment service boundary."""
 
 from __future__ import annotations
 
-import pytest
+from collections.abc import Callable
 
-from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from market_fulfillment import (
+    FulfillmentBase,
     FulfillmentConflictError,
     FulfillmentProvider,
     FulfillmentResult,
-    ProviderNotFoundError,
     ProviderOperationState,
+    ProviderRegistry,
     ProviderStatus,
+    SettlementEntityNotFoundError,
+    SettlementRecord,
+    SettlementRecordState,
+    SettlementRepository,
+    VersionedEnvelope,
 )
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
-from market_fulfillment import ProviderRegistry
 
 
 class _FakeProvider(FulfillmentProvider):
-    def __init__(self):
-        self.create_calls = 0
-        self.teardown_calls = 0
-        self.status_calls = 0
+    def __init__(self) -> None:
+        self.prepare_calls = 0
+        self.dispatch_calls = 0
+        self.fail_dispatch = False
+        self.on_dispatch: Callable[[], None] | None = None
 
-    async def create(self, request, resource):
-        self.create_calls += 1
-        return FulfillmentResult(provider_metadata={"job_id": f"create-{self.create_calls}"})
+    def prepare_create(self, capacity_reservation_id, fulfillment_request, resource):
+        self.prepare_calls += 1
+        return VersionedEnvelope(
+            kind="fake.create",
+            schema_version=1,
+            payload={
+                "resource_id": resource.settlement_resource_id,
+                "resource_kind": resource.resource_kind,
+                "requirements": fulfillment_request.payload,
+            },
+        )
 
-    async def teardown(self, capacity_reservation_id, resource, provider_metadata):
-        self.teardown_calls += 1
-        return FulfillmentResult(provider_metadata={"job_id": f"teardown-{self.teardown_calls}"})
+    async def dispatch_create(self, prepared):
+        self.dispatch_calls += 1
+        if self.on_dispatch is not None:
+            self.on_dispatch()
+        if self.fail_dispatch:
+            raise RuntimeError("provider unavailable")
+        return FulfillmentResult(provider_metadata={"job_id": "job-1"})
+
+    def prepare_teardown(self, capacity_reservation_id, resource, provider_metadata):
+        return VersionedEnvelope(kind="fake.teardown", schema_version=1, payload={})
+
+    async def dispatch_teardown(self, prepared):
+        return FulfillmentResult(provider_metadata={})
 
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):
-        self.status_calls += 1
         return ProviderStatus(state=ProviderOperationState.succeeded)
 
 
-def _request(**overrides) -> PhysicalSettlementRequest:
-    defaults = dict(
-        capacity_reservation_id="alloc-1",
-        market="vms",
-        requirements={"units": 1},
+@pytest.fixture
+def session_factory() -> sessionmaker[Session]:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
-    defaults.update(overrides)
-    return PhysicalSettlementRequest(**defaults)
-
-
-def _resource(**overrides) -> SettlementResource:
-    defaults = dict(
-        settlement_resource_id="res-1",
-        pool_id="pool-1",
-        resource_kind="vm",
-        provider="ansible",
-        attributes={},
-    )
-    defaults.update(overrides)
-    return SettlementResource(**defaults)
+    FulfillmentBase.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @pytest.fixture
-def provider():
+def provider() -> _FakeProvider:
     return _FakeProvider()
 
 
 @pytest.fixture
-def service(provider):
+def service(session_factory, provider) -> FulfillmentService:
+    with session_factory() as db:
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id="reservation-1",
+                owner_principal="seller-a",
+                market="vms",
+                scheduling_requirements={
+                    "resource_kind": "vm",
+                    "dimensions": {"units": 1},
+                    "attributes": {},
+                },
+                settlement_resource_id="resource-1",
+                pool_id="pool-1",
+                provider="ansible",
+                resource_attributes={"vm_host": "host-1"},
+                state=SettlementRecordState.assigned.value,
+            )
+        )
+        db.commit()
     return FulfillmentService(
         provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        session_factory=session_factory,
+        repository=SettlementRepository(),
     )
 
 
-class TestCreateIdempotency:
-    async def test_first_create_dispatches(self, service, provider):
-        result = await service.create(_request(), _resource())
-        assert provider.create_calls == 1
-        assert result.provider_metadata["job_id"] == "create-1"
+def _request(payload: dict | None = None) -> VersionedEnvelope:
+    return VersionedEnvelope(
+        kind="vms.fulfillment",
+        schema_version=1,
+        payload=payload or {"units": 1},
+    )
 
-    async def test_equivalent_retry_returns_existing_result_without_redispatch(
-        self, service, provider
-    ):
-        first = await service.create(_request(), _resource())
-        second = await service.create(_request(), _resource())
-        assert provider.create_calls == 1
-        assert second is first
 
-    async def test_conflicting_requirements_raises_before_dispatch(self, service, provider):
-        # agreement_id no longer exists on PhysicalSettlementRequest
-        # requirements are the normalized values this equivalence
-        # check now has left, besides market and the resource, to prove a
-        # same-capacity_reservation_id retry with a genuinely different
-        # request is rejected rather than silently treated as a retry.
-        await service.create(_request(), _resource())
-        with pytest.raises(FulfillmentConflictError):
-            await service.create(_request(requirements={"units": 2}), _resource())
-        assert provider.create_calls == 1
+@pytest.mark.asyncio
+async def test_acceptance_commits_prepared_input_before_dispatch(
+    service, provider, session_factory
+):
+    def assert_pending_is_visible() -> None:
+        with session_factory() as db:
+            record = db.get(SettlementRecord, "reservation-1")
+            assert record is not None
+            assert record.fulfillment_id is not None
+            assert record.state == SettlementRecordState.dispatch_pending.value
+            assert record.prepared_create_operation["kind"] == "fake.create"
 
-    async def test_conflicting_resource_raises_before_dispatch(self, service, provider):
-        # Differs only in a resource field the request itself doesn't
-        # carry — proves comparison uses the stored SettlementResource,
-        # not request.resource_id.
-        await service.create(_request(), _resource())
-        with pytest.raises(FulfillmentConflictError):
-            await service.create(_request(), _resource(settlement_resource_id="res-2"))
-        assert provider.create_calls == 1
+    provider.on_dispatch = assert_pending_is_visible
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
 
-    async def test_unregistered_provider_propagates(self, service):
-        with pytest.raises(ProviderNotFoundError):
-            await service.create(_request(), _resource(provider="kubernetes"))
+    assert accepted.state == SettlementRecordState.dispatching.value
+    assert provider.prepare_calls == 1
+    assert provider.dispatch_calls == 1
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.provider_metadata == {"job_id": "job-1"}
 
-    def test_unregistered_provider_is_structured_during_validation(self, service):
-        result = service.validate_create(
-            _request(), _resource(provider="kubernetes")
+
+@pytest.mark.asyncio
+async def test_equivalent_retry_reuses_identity_without_repreparing_or_redispatching(
+    service, provider
+):
+    first = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    second = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+
+    assert second.fulfillment_id == first.fulfillment_id
+    assert provider.prepare_calls == 1
+    assert provider.dispatch_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_conflicting_retry_is_rejected_before_provider_dispatch(service, provider):
+    await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+
+    with pytest.raises(FulfillmentConflictError):
+        await service.begin_fulfillment(
+            capacity_reservation_id="reservation-1",
+            market="vms",
+            fulfillment_request=_request({"units": 2}),
+            owner_principal="seller-a",
         )
-        assert not result.valid
-        assert result.issues[0].code == "provider_not_found"
+    assert provider.prepare_calls == 1
+    assert provider.dispatch_calls == 1
 
 
-class TestTeardownIdempotency:
-    async def test_teardown_dispatches_once(self, service, provider):
-        await service.create(_request(), _resource())
-        first = await service.teardown("alloc-1")
-        second = await service.teardown("alloc-1")
-        assert provider.teardown_calls == 1
-        assert second is first
+@pytest.mark.asyncio
+async def test_dispatch_failure_leaves_durable_pending_command(
+    service, provider, session_factory
+):
+    provider.fail_dispatch = True
+    accepted = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
 
-    async def test_teardown_without_create_raises(self, service):
-        with pytest.raises(LookupError):
-            await service.teardown("never-created")
+    assert accepted.state == SettlementRecordState.dispatch_pending.value
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.state == SettlementRecordState.dispatch_pending.value
+        assert record.prepared_create_operation is not None
 
 
-class TestGetStatus:
-    async def test_defaults_to_create_operation(self, service, provider):
-        await service.create(_request(), _resource())
-        status = await service.get_status("alloc-1")
-        assert status.state is ProviderOperationState.succeeded
-        assert provider.status_calls == 1
+@pytest.mark.asyncio
+async def test_owner_isolation_hides_assignment_before_preparation(service, provider):
+    with pytest.raises(SettlementEntityNotFoundError):
+        await service.begin_fulfillment(
+            capacity_reservation_id="reservation-1",
+            market="vms",
+            fulfillment_request=_request(),
+            owner_principal="seller-b",
+        )
+    assert provider.prepare_calls == 0
+    assert provider.dispatch_calls == 0
 
-    async def test_teardown_operation_requires_teardown_to_have_happened(
-        self, service, provider
-    ):
-        await service.create(_request(), _resource())
-        with pytest.raises(LookupError):
-            await service.get_status("alloc-1", operation="teardown")
 
-        await service.teardown("alloc-1")
-        status = await service.get_status("alloc-1", operation="teardown")
-        assert status.state is ProviderOperationState.succeeded
+@pytest.mark.asyncio
+async def test_equivalent_retry_survives_service_reconstruction(
+    service, provider, session_factory
+):
+    first = await service.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    reconstructed = FulfillmentService(
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+    )
+    second = await reconstructed.begin_fulfillment(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+    assert second.fulfillment_id == first.fulfillment_id
+    assert provider.dispatch_calls == 1
+
+
+def test_dry_run_uses_preparation_without_persisting(service, provider, session_factory):
+    validation = service.validate_create(
+        capacity_reservation_id="reservation-1",
+        market="vms",
+        fulfillment_request=_request(),
+        owner_principal="seller-a",
+    )
+
+    assert validation.valid
+    assert provider.prepare_calls == 1
+    assert provider.dispatch_calls == 0
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        assert record.fulfillment_id is None
+        assert record.prepared_create_operation is None

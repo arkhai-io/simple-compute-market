@@ -222,15 +222,11 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 
 ### Requirement: Provider contract
 
-A `FulfillmentProvider` implements asynchronous:
+A `FulfillmentProvider` implements synchronous side-effect-free `prepare_create` and `prepare_teardown` operations plus asynchronous `dispatch_create`, `dispatch_teardown`, and `get_status` operations. Preparation MUST return a validated `VersionedEnvelope` containing the complete immutable provider command. The service persists that envelope and its pending lifecycle state in one transaction before dispatch. Dispatch MUST interpret only the supplied envelope and MUST NOT reread mutable pool or host configuration.
 
-- `create(request, resource) -> FulfillmentResult`;
-- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`;
-- `teardown(capacity_reservation_id, resource, provider_metadata) -> FulfillmentResult`.
+Create and teardown dispatch MUST be idempotent for equivalent retries. Ansible dispatch uses deterministic contract identities derived from the capacity reservation, action kind, and prepared-command schema version; reuse with different normalized command parameters fails rather than returning an unrelated job. Provider metadata is opaque to generic orchestration and contains only normalized, serializable operational state needed for later status or teardown. Credentials and sensitive access material should be referenced or delivered through a dedicated secure channel rather than assumed to be generic metadata.
 
-`create` and `teardown` MUST be idempotent for equivalent retries. Provider metadata is opaque to generic orchestration and contains only normalized, serializable operational state needed for later status or teardown. Credentials and sensitive access material should be referenced or delivered through a dedicated secure channel rather than assumed to be generic metadata.
-
-A provider may expose side-effect-free `validate_create` or preparation behavior. Validation errors MUST be represented as structured issues when used by dry-run surfaces and mapped to typed failures for execution.
+Dry-run validation MUST use the same preparation path as acceptance while discarding the prepared envelope without persistence or dispatch. Validation errors MUST be represented as structured issues and mapped to typed failures for execution.
 
 `ProviderRegistry` MUST resolve a provider using the selected resource's exact `(provider, resource_kind)` pair so independently owned domain adapters may use the same infrastructure mechanism without interpreting one another's requests. Duplicate exact pairs fail composition. A provider-only registration is an explicit compatibility fallback: an exact pair takes precedence, but a scoped registration is never inferred for a provider-only lookup or a different resource kind. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
 
@@ -243,6 +239,11 @@ A provider may expose side-effect-free `validate_create` or preparation behavior
 
 - **WHEN** a selected resource names an unregistered provider and resource-kind pair
 - **THEN** validation and execution report `provider_not_found` without falling through to a provider registered for another resource kind
+
+#### Scenario: Pool configuration changes after acceptance
+
+- **WHEN** pool configuration changes after a create command has been prepared and persisted
+- **THEN** initial dispatch and every recovery retry use the persisted prepared envelope without reading the changed configuration
 
 #### Scenario: Equivalent create retry
 

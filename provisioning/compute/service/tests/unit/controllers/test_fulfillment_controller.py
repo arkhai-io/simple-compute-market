@@ -46,6 +46,7 @@ def test_schedule_returns_neutral_resource_for_owner() -> None:
     controller = FulfillmentController(
         scheduler=scheduler,
         capacity_ledger=_Ledger("seller-a"),
+        fulfillment_service=SimpleNamespace(),
     )
 
     result = controller.schedule_resource(
@@ -68,6 +69,7 @@ def test_schedule_hides_reservation_from_other_principal() -> None:
     controller = FulfillmentController(
         scheduler=scheduler,
         capacity_ledger=_Ledger("seller-a"),
+        fulfillment_service=SimpleNamespace(),
     )
 
     with pytest.raises(HTTPException) as raised:

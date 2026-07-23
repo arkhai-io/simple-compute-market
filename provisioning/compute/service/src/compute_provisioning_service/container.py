@@ -300,7 +300,8 @@ class Container(containers.DeclarativeContainer):
     fulfillment_service = providers.Singleton(
         FulfillmentService,
         provider_registry=provider_registry,
-        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
+        repository=settlement_repository,
     )
 
     lifecycle_event_sink = providers.Singleton(

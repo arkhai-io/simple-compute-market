@@ -14,7 +14,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from market_fulfillment import PhysicalSettlementRequest, SettlementResource
+from market_fulfillment import (
+    PhysicalSettlementRequest,
+    SettlementResource,
+    VersionedEnvelope,
+)
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import AnsibleFulfillmentProvider
 from vm_provisioning_adapter.services.ansible_service import AnsibleService
 from market_fulfillment import (
@@ -28,6 +32,14 @@ from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 def _request() -> PhysicalSettlementRequest:
     return PhysicalSettlementRequest(
         capacity_reservation_id="alloc-1", market="vms", requirements={"vm_target":"vm-alloc-1","vm_ram":4096,"vm_vcpus":2,"vm_disk_size":"40G","ssh_pubkey":"ssh-ed25519 AAAA"}
+    )
+
+
+def _fulfillment_request() -> VersionedEnvelope:
+    return VersionedEnvelope(
+        kind="vms.fulfillment",
+        schema_version=1,
+        payload=dict(_request().requirements),
     )
 
 
@@ -89,24 +101,45 @@ class TestCreate:
         assert result.provider_metadata["vm_target"] == "vm-alloc-1"
         job_service.submit.assert_awaited_once()
 
-    async def test_create_snapshots_pool_config_into_job_params(
+    async def test_create_dispatches_only_from_prepared_pool_snapshot(
         self, provider, job_service, resource_pool_service
     ):
         resource_pool_service.get_pool.return_value = _pool(
             {"playbook_path": "playbooks/custom.yaml", "extra_vars": {"region": "eu"}}
         )
-        await provider.create(_request(), _resource())
+        prepared = provider.prepare_create(
+            "alloc-1",
+            _fulfillment_request(),
+            _resource(),
+        )
+        assert resource_pool_service.get_pool.call_count > 0
 
-        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.playbook_path == "playbooks/custom.yaml"
-        assert submitted_params.provider_extra_vars == {"region": "eu"}
-
-        # A later pool edit does not change what was already submitted —
-        # the provider read the pool once, at dispatch time.
+        resource_pool_service.get_pool.reset_mock()
         resource_pool_service.get_pool.return_value = _pool(
             {"playbook_path": "playbooks/changed.yaml", "extra_vars": {}}
         )
+        await provider.dispatch_create(prepared)
+
+        resource_pool_service.get_pool.assert_not_called()
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        contract = job_service.submit.await_args.kwargs["contract"]
         assert submitted_params.playbook_path == "playbooks/custom.yaml"
+        assert submitted_params.provider_extra_vars == {"region": "eu"}
+        assert contract.action_kind == "fulfillment_create"
+        assert contract.idempotency_key == "alloc-1:fulfillment_create:v1"
+        assert contract.parameters == dataclasses.asdict(submitted_params)
+
+    def test_unknown_fulfillment_request_version_is_rejected(self, provider):
+        with pytest.raises(ProviderConfigInvalidError, match="unsupported VM"):
+            provider.prepare_create(
+                "alloc-1",
+                VersionedEnvelope(
+                    kind="vms.fulfillment",
+                    schema_version=2,
+                    payload=dict(_request().requirements),
+                ),
+                _resource(),
+            )
 
     async def test_missing_pool_raises_provider_config_invalid(
         self, provider, resource_pool_service
@@ -124,12 +157,32 @@ class TestCreate:
 
 
 class TestTeardown:
-    async def test_teardown_is_dispatch_only(self, provider, job_service):
-        result = await provider.teardown("alloc-1", _resource(), {"create_job_id":"create-job","current_job_id":"create-job","vm_host":"kvm1","vm_target":"vm-alloc-1","operation":"create"})
+    async def test_teardown_is_dispatched_from_prepared_input(
+        self, provider, job_service, resource_pool_service
+    ):
+        metadata = {
+            "create_job_id": "create-job",
+            "current_job_id": "create-job",
+            "vm_host": "kvm1",
+            "vm_target": "vm-alloc-1",
+            "operation": "create",
+        }
+        prepared = provider.prepare_teardown(
+            "alloc-1",
+            _resource(),
+            metadata,
+        )
+        resource_pool_service.get_pool.reset_mock()
+        result = await provider.dispatch_teardown(prepared)
+
+        resource_pool_service.get_pool.assert_not_called()
         assert result.provider_metadata["teardown_job_id"] == "job-1"
         submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        contract = job_service.submit.await_args.kwargs["contract"]
         assert submitted_params.vm_action == "vm_remove"
         assert submitted_params.vm_target == "vm-alloc-1"
+        assert contract.action_kind == "fulfillment_teardown"
+        assert contract.idempotency_key == "alloc-1:fulfillment_teardown:v1"
 
 
 class TestGetStatus:
@@ -173,9 +226,10 @@ class TestGetStatus:
 
 
 class TestExtraVarsCollision:
-    """Collision detection is now synchronous, before dispatch — see
-    POOLS-3 design.md Decision 6. AnsibleFulfillmentProvider derives the
-    reserved-key set dynamically via AnsibleJobService.reserved_var_keys
+    """Collision detection is synchronous and uses the dispatch renderer's keys.
+
+    AnsibleFulfillmentProvider derives the reserved-key set dynamically via
+    AnsibleJobService.reserved_var_keys
     (which delegates to AnsibleService, the same logic _build_vm_vars uses
     to render the file), instead of a separately hand-maintained list.
     This closes a gap found during implementation review: an earlier

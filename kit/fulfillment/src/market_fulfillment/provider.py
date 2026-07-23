@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TYPE_CHECKING, TypeAlias
 if TYPE_CHECKING:
-    from .settlement_types import PhysicalSettlementRequest, SettlementResource
+    from .envelopes import VersionedEnvelope
+    from .settlement_types import SettlementResource
 
 class ProviderOperationState(str, Enum):
     pending='pending'; succeeded='succeeded'; failed='failed'; unknown='unknown'
@@ -33,12 +34,43 @@ class FulfillmentValidationResult:
         return not self.issues
 
 class FulfillmentProvider(ABC):
+    """Prepare immutable commands before commit and dispatch them afterward."""
+
     @abstractmethod
-    async def create(self, request:'PhysicalSettlementRequest', resource:'SettlementResource')->FulfillmentResult: ...
+    def prepare_create(
+        self,
+        capacity_reservation_id: str,
+        fulfillment_request: "VersionedEnvelope",
+        resource: "SettlementResource",
+    ) -> "VersionedEnvelope": ...
+
     @abstractmethod
-    async def teardown(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->FulfillmentResult: ...
+    async def dispatch_create(
+        self,
+        prepared: "VersionedEnvelope",
+    ) -> FulfillmentResult: ...
+
     @abstractmethod
-    async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
+    def prepare_teardown(
+        self,
+        capacity_reservation_id: str,
+        resource: "SettlementResource",
+        provider_metadata: dict[str, Any],
+    ) -> "VersionedEnvelope": ...
+
+    @abstractmethod
+    async def dispatch_teardown(
+        self,
+        prepared: "VersionedEnvelope",
+    ) -> FulfillmentResult: ...
+
+    @abstractmethod
+    async def get_status(
+        self,
+        capacity_reservation_id: str,
+        resource: "SettlementResource",
+        provider_metadata: dict[str, Any],
+    ) -> ProviderStatus: ...
 
 class FulfillmentError(Exception): pass
 class ProviderNotFoundError(FulfillmentError): pass

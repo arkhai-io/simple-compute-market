@@ -201,6 +201,7 @@ class SettlementRepository:
         market: str,
         fulfillment_request: VersionedEnvelope,
         prepared_create_operation: VersionedEnvelope,
+        owner_principal: str | None = None,
     ) -> SettlementRecord:
         """Accept a fulfillment request against an already-scheduled row.
 
@@ -217,7 +218,10 @@ class SettlementRepository:
             .with_for_update()
         )
         record = db.execute(statement).scalar_one_or_none()
-        if record is None:
+        if record is None or (
+            owner_principal is not None
+            and record.owner_principal != owner_principal
+        ):
             raise SettlementEntityNotFoundError(
                 f"no settlement assignment exists for capacity_reservation_id="
                 f"{capacity_reservation_id!r}; schedule_resource must run first"

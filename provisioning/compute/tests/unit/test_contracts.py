@@ -10,6 +10,8 @@ from compute_provisioning import (
     ExecutorActionEnvelope,
     ExecutorAdapterRegistry,
     FunctionalExecutorAdapter,
+    FulfillmentBeginRequest,
+    FulfillmentRequestEnvelope,
     FulfillmentScheduleRequest,
     IdempotentLifecycleEventSink,
     LifecycleEvent,
@@ -111,6 +113,55 @@ async def test_client_maps_versioned_schedule_endpoint():
             ),
         )
     assert selected.settlement_resource_id == "resource-1"
+
+
+@pytest.mark.asyncio
+async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
+    paths = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        payload = __import__("json").loads(request.content)
+        if request.url.path.endswith("/dry-run"):
+            return httpx.Response(
+                200,
+                json={
+                    "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                    "valid": True,
+                    "issues": [],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                "capacity_reservation_id": payload["capacity_reservation_id"],
+                "fulfillment_id": "fulfillment-1",
+                "state": "dispatch_pending",
+            },
+        )
+
+    request = FulfillmentBeginRequest(
+        capacity_reservation_id="reservation-1",
+        market="bare_metal",
+        fulfillment_request=FulfillmentRequestEnvelope(
+            kind="bare_metal.v1",
+            schema_version=1,
+            payload={"ssh_public_key": "ssh-ed25519 AAAA"},
+        ),
+    )
+    async with ComputeProvisioningClient(
+        "http://provisioner", transport=httpx.MockTransport(handler)
+    ) as client:
+        accepted = await client.begin_fulfillment(request)
+        dry_run = await client.dry_run_fulfillment(request)
+
+    assert accepted.fulfillment_id == "fulfillment-1"
+    assert dry_run.valid
+    assert paths == [
+        "/api/v1/fulfillments",
+        "/api/v1/fulfillments/dry-run",
+    ]
 
 
 @pytest.mark.asyncio

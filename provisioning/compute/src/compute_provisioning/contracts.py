@@ -51,6 +51,39 @@ class SettlementResourceView(VersionedContractModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
+class FulfillmentRequestEnvelope(BaseModel):
+    kind: str = Field(min_length=1)
+    schema_version: int = Field(ge=1)
+    payload: dict[str, Any]
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+
+class FulfillmentBeginRequest(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    market: str = Field(min_length=1)
+    fulfillment_request: FulfillmentRequestEnvelope
+
+    model_config = {"extra": "forbid"}
+
+
+class FulfillmentAcceptanceView(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    fulfillment_id: str = Field(min_length=1)
+    state: str = Field(min_length=1)
+
+
+class FulfillmentValidationIssueView(BaseModel):
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    field: str | None = None
+
+
+class FulfillmentDryRunView(VersionedContractModel):
+    valid: bool
+    issues: list[FulfillmentValidationIssueView] = Field(default_factory=list)
+
+
 class ExecutorKind(str, Enum):
     VM = "vm"
     BARE_METAL = "bare_metal"

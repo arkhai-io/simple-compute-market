@@ -1,205 +1,235 @@
-"""Provisioning-side fulfillment consistency boundary.
+"""Durable provisioning-side fulfillment acceptance and provider dispatch.
 
-FulfillmentService sits above ProviderRegistry and is the entry point
-future storefront-facing code calls. It owns:
-
-- validation that the reservation and already-selected resource may be
-  fulfilled;
-- the reservation-to-fulfillment identity;
-- equivalent-retry detection and conflicting-request rejection, for both
-  create and teardown;
-- provider resolution and dispatch;
-- normalization of provider operation state.
-
-It does not call ``PhysicalSettlementScheduler``. Placement and provider
-execution are separate boundaries and orchestration calls them in sequence.
-See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
+The service receives an already-selected settlement resource. Scheduling is a
+separate operation and is never called from this boundary. Provider input is
+prepared synchronously and persisted before any external dispatch occurs.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Literal
 
-from market_fulfillment import FulfillmentValidationIssue, FulfillmentValidationResult
+from sqlalchemy.orm import Session, sessionmaker
 
-from market_fulfillment import PhysicalSettlementRequest, SettlementResource
 from market_fulfillment import (
     FulfillmentConflictError,
     FulfillmentRequestInvalidError,
-    FulfillmentResult,
+    FulfillmentValidationIssue,
+    FulfillmentValidationResult,
     ProviderNotFoundError,
-    ProviderStatus,
+    ProviderRegistry,
+    SettlementEntityNotFoundError,
+    SettlementRecord,
+    SettlementRecordState,
+    SettlementRepository,
+    SettlementRequirement,
+    SettlementResource,
+    VersionedEnvelope,
+    begin_sqlite_write_transaction,
 )
-from market_fulfillment import ProviderRegistry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class FulfillmentEntry:
-    """Process-local fulfillment state used until durable lifecycle records own retries.
-
-    This store provides no cross-process concurrency or restart recovery.
-    """
-
-    request: PhysicalSettlementRequest
-    resource: SettlementResource
-    create_result: FulfillmentResult
-    teardown_result: FulfillmentResult | None = None
+class FulfillmentAcceptance:
+    capacity_reservation_id: str
+    fulfillment_id: str
+    state: str
 
 
-def _is_equivalent(
-    entry: FulfillmentEntry,
-    request: PhysicalSettlementRequest,
-    resource: SettlementResource,
-) -> bool:
-    """Scoped to market/requirements (from the request) and the entire
-    selected SettlementResource — explicitly NOT request.resource_id, which
-    is an optional selection constraint on the request, not part of
-    fulfillment identity. Both PhysicalSettlementRequest and
-    SettlementResource are pydantic models with structural equality, so
-    this is plain field comparison, not a custom fingerprint hash.
-
-    The provisioning boundary is capacity-reservation-centric and does not
-    carry storefront commercial identity. ``capacity_reservation_id`` is not
-    compared here because it is already the lookup key:
-    it is the dict key entries are already looked up by (see
-    ``FulfillmentService.create``/``validate_create``), so comparing it
-    again would be redundant with the lookup that got here.
-    """
-    return (
-        entry.request.market == request.market
-        and entry.request.requirements == request.requirements
-        and entry.resource == resource
+def _resource_from_record(record: SettlementRecord) -> SettlementResource:
+    requirement = SettlementRequirement.model_validate(record.scheduling_requirements)
+    return SettlementResource(
+        settlement_resource_id=str(record.settlement_resource_id),
+        pool_id=str(record.pool_id),
+        resource_kind=requirement.resource_kind,
+        provider=str(record.provider),
+        attributes=dict(record.resource_attributes or {}),
     )
 
 
+def _validate_payload(fulfillment_request: VersionedEnvelope) -> None:
+    if not isinstance(fulfillment_request.payload, dict):
+        raise FulfillmentRequestInvalidError(
+            "fulfillment request payload must be an object"
+        )
+
+
 class FulfillmentService:
-    def __init__(self, *, provider_registry: ProviderRegistry, capacity_ledger=None) -> None:
+    """Accept and dispatch fulfillment without performing placement."""
+
+    def __init__(
+        self,
+        *,
+        provider_registry: ProviderRegistry,
+        session_factory: sessionmaker[Session],
+        repository: SettlementRepository,
+    ) -> None:
         self._provider_registry = provider_registry
-        self._capacity_ledger = capacity_ledger
-        self._entries: dict[str, FulfillmentEntry] = {}
+        self._session_factory = session_factory
+        self._repository = repository
+
+    def _owned_record(
+        self,
+        db: Session,
+        *,
+        capacity_reservation_id: str,
+        owner_principal: str,
+    ) -> SettlementRecord:
+        record = self._repository.get(db, capacity_reservation_id)
+        if record is None or record.owner_principal != owner_principal:
+            raise SettlementEntityNotFoundError(
+                f"no settlement assignment exists for capacity_reservation_id="
+                f"{capacity_reservation_id!r}"
+            )
+        return record
 
     def validate_create(
-        self, request: PhysicalSettlementRequest, resource: SettlementResource
+        self,
+        *,
+        capacity_reservation_id: str,
+        market: str,
+        fulfillment_request: VersionedEnvelope,
+        owner_principal: str,
     ) -> FulfillmentValidationResult:
         issues: list[FulfillmentValidationIssue] = []
         try:
+            with self._session_factory() as db:
+                record = self._owned_record(
+                    db,
+                    capacity_reservation_id=capacity_reservation_id,
+                    owner_principal=owner_principal,
+                )
+                if record.market != market:
+                    raise FulfillmentConflictError(
+                        "fulfillment market differs from the scheduled market"
+                    )
+                if record.fulfillment_id is not None:
+                    if record.fulfillment_request != fulfillment_request.model_dump(
+                        mode="json"
+                    ):
+                        raise FulfillmentConflictError(
+                            "capacity reservation already has a different fulfillment request"
+                        )
+                else:
+                    resource = _resource_from_record(record)
+                    _validate_payload(fulfillment_request)
+                    provider = self._provider_registry.require(
+                        resource.provider,
+                        resource.resource_kind,
+                    )
+                    provider.prepare_create(
+                        capacity_reservation_id,
+                        fulfillment_request,
+                        resource,
+                    )
+        except SettlementEntityNotFoundError:
+            raise
+        except ProviderNotFoundError as exc:
+            issues.append(
+                FulfillmentValidationIssue(
+                    code="provider_not_found",
+                    message=str(exc),
+                    field="resource.provider",
+                )
+            )
+        except FulfillmentConflictError as exc:
+            issues.append(
+                FulfillmentValidationIssue(
+                    code="fulfillment_conflict",
+                    message=str(exc),
+                )
+            )
+        except Exception as exc:
+            issues.append(
+                FulfillmentValidationIssue(
+                    code="request_invalid",
+                    message=str(exc),
+                )
+            )
+        return FulfillmentValidationResult(tuple(issues))
+
+    async def begin_fulfillment(
+        self,
+        *,
+        capacity_reservation_id: str,
+        market: str,
+        fulfillment_request: VersionedEnvelope,
+        owner_principal: str,
+    ) -> FulfillmentAcceptance:
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            record = self._owned_record(
+                db,
+                capacity_reservation_id=capacity_reservation_id,
+                owner_principal=owner_principal,
+            )
+            if record.market != market:
+                raise FulfillmentConflictError(
+                    "fulfillment market differs from the scheduled market"
+                )
+            resource = _resource_from_record(record)
             provider = self._provider_registry.require(
                 resource.provider,
                 resource.resource_kind,
             )
-        except Exception as exc:
-            issues.append(FulfillmentValidationIssue(code="provider_not_found", message=str(exc), field="resource.provider"))
-            return FulfillmentValidationResult(tuple(issues))
-        validator = getattr(provider, "validate_create", None)
-        if validator is not None:
-            try:
-                validator(request, resource)
-            except Exception as exc:
-                issues.append(FulfillmentValidationIssue(code="request_invalid", message=str(exc)))
-        existing = self._entries.get(request.capacity_reservation_id)
-        if existing is not None and not _is_equivalent(existing, request, resource):
-            issues.append(FulfillmentValidationIssue(code="fulfillment_conflict", message="capacity reservation already has a different fulfillment"))
-        return FulfillmentValidationResult(tuple(issues))
+            _validate_payload(fulfillment_request)
 
-
-    @staticmethod
-    def _raise_validation_error(validation: FulfillmentValidationResult) -> None:
-        """Preserve typed create failures while dry-run returns structured issues."""
-        message = "; ".join(issue.message for issue in validation.issues)
-        codes = {issue.code for issue in validation.issues}
-        if "provider_not_found" in codes:
-            raise ProviderNotFoundError(message)
-        if "request_invalid" in codes:
-            raise FulfillmentRequestInvalidError(message)
-        raise FulfillmentConflictError(message)
-
-    async def create(
-        self,
-        request: PhysicalSettlementRequest,
-        resource: SettlementResource,
-    ) -> FulfillmentResult:
-        validation = self.validate_create(request, resource)
-        if not validation.valid:
-            self._raise_validation_error(validation)
-        existing = self._entries.get(request.capacity_reservation_id)
-        if existing is not None:
-            if _is_equivalent(existing, request, resource):
-                return existing.create_result
-            raise FulfillmentConflictError(
-                f"capacity_reservation_id={request.capacity_reservation_id!r} already has a "
-                "fulfillment with a different market, requirements, or "
-                "selected resource"
-            )
-
-        if self._capacity_ledger is not None:
-            # Assignment is recorded before provider dispatch so retries cannot
-            # bind the same admitted capacity to a different physical resource.
-            # See openspec/specs/fulfillment/spec.md#scheduling-and-assignment.
-            assignment = self._capacity_ledger.assign_settlement_resource(
-                capacity_reservation_id=request.capacity_reservation_id,
-                settlement_resource_id=resource.settlement_resource_id,
-            )
-            if assignment is None:
-                raise FulfillmentConflictError(
-                    f"capacity_reservation_id={request.capacity_reservation_id!r} does not exist"
+            was_accepted = record.fulfillment_id is not None
+            if was_accepted:
+                if record.prepared_create_operation is None:
+                    raise FulfillmentConflictError(
+                        "accepted fulfillment has no prepared create operation"
+                    )
+                prepared = VersionedEnvelope.model_validate(
+                    record.prepared_create_operation
                 )
-        provider = self._provider_registry.require(
-            resource.provider,
-            resource.resource_kind,
-        )
-        result = await provider.create(request, resource)
-        self._entries[request.capacity_reservation_id] = FulfillmentEntry(
-            request=request, resource=resource, create_result=result
-        )
-        return result
+            else:
+                prepared = provider.prepare_create(
+                    capacity_reservation_id,
+                    fulfillment_request,
+                    resource,
+                )
 
-    async def teardown(self, capacity_reservation_id: str) -> FulfillmentResult:
-        entry = self._require_entry(capacity_reservation_id)
-        if entry.teardown_result is not None:
-            return entry.teardown_result
-
-        provider = self._provider_registry.require(
-            entry.resource.provider,
-            entry.resource.resource_kind,
-        )
-        result = await provider.teardown(
-            capacity_reservation_id,
-            entry.resource,
-            entry.create_result.provider_metadata,
-        )
-        self._entries[capacity_reservation_id] = FulfillmentEntry(
-            request=entry.request,
-            resource=entry.resource,
-            create_result=entry.create_result,
-            teardown_result=result,
-        )
-        return result
-
-    async def get_status(
-        self,
-        capacity_reservation_id: str,
-        operation: Literal["create", "teardown"] = "create",
-    ) -> ProviderStatus:
-        entry = self._require_entry(capacity_reservation_id)
-        result = entry.create_result if operation == "create" else entry.teardown_result
-        if result is None:
-            raise LookupError(
-                f"capacity_reservation_id={capacity_reservation_id!r} has no {operation!r} operation "
-                "to check status for"
+            accepted = self._repository.accept_fulfillment(
+                db,
+                capacity_reservation_id=capacity_reservation_id,
+                market=market,
+                fulfillment_request=fulfillment_request,
+                prepared_create_operation=prepared,
+                owner_principal=owner_principal,
             )
-        provider = self._provider_registry.require(
-            entry.resource.provider,
-            entry.resource.resource_kind,
-        )
-        return await provider.get_status(
-            capacity_reservation_id, entry.resource, result.provider_metadata
-        )
+            fulfillment_id = str(accepted.fulfillment_id)
+            accepted_state = str(accepted.state)
+            should_dispatch = accepted_state == SettlementRecordState.dispatch_pending.value
+            db.commit()
 
-    def _require_entry(self, capacity_reservation_id: str) -> FulfillmentEntry:
-        entry = self._entries.get(capacity_reservation_id)
-        if entry is None:
-            raise LookupError(
-                f"No fulfillment exists for capacity_reservation_id={capacity_reservation_id!r}"
-            )
-        return entry
+        if should_dispatch:
+            try:
+                result = await provider.dispatch_create(prepared)
+            except Exception:
+                # Acceptance remains durable and the recovery worker retries the
+                # exact persisted command. The HTTP acceptance call is therefore
+                # not made ambiguous by a transient post-commit dispatch failure.
+                logger.exception(
+                    "initial fulfillment dispatch failed for %s",
+                    capacity_reservation_id,
+                )
+            else:
+                with self._session_factory() as db:
+                    updated = self._repository.transition(
+                        db,
+                        capacity_reservation_id,
+                        SettlementRecordState.dispatching.value,
+                        provider_metadata=dict(result.provider_metadata),
+                    )
+                    accepted_state = str(updated.state)
+                    db.commit()
+
+        return FulfillmentAcceptance(
+            capacity_reservation_id=capacity_reservation_id,
+            fulfillment_id=fulfillment_id,
+            state=accepted_state,
+        )
