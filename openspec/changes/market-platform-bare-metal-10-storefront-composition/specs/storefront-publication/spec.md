@@ -71,6 +71,11 @@ A bare-metal storefront MUST bind each configured `site_id` to an operator-trust
 - **WHEN** configured placement reserves bare-metal capacity at one of several eligible sites
 - **THEN** every state-changing lifecycle call for that agreement routes to the selected site's trusted connection
 
+#### Scenario: One site's projection refresh fails
+
+- **WHEN** a configured site's version or snapshot request fails after a complete generation was loaded
+- **THEN** that site's retained generation becomes stale while other sites continue loading and polling independently
+
 #### Scenario: Agreement payload contains routing material
 
 - **WHEN** buyer-controlled or opaque agreement data contains a provisioning URL, credential, or conflicting site assertion

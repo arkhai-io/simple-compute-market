@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,7 +71,10 @@ def test_environment_composition_validates_and_diagnostics_redact_secrets(
         "BARE_METAL_STOREFRONT_DB_PATH",
         str(tmp_path / "storefront.db"),
     )
-    runtime = build_runtime_from_environment()
+    runtime = replace(
+        build_runtime_from_environment(),
+        site_capacity=None,
+    )
     app = build_bare_metal_storefront_app(runtime=runtime)
 
     with TestClient(app) as client:
