@@ -71,14 +71,20 @@ class BareMetalSettlementService:
     ) -> BareMetalSettleResponse:
         existing = await self.db.load_escrow(escrow_uid=escrow_uid)
         if existing is not None:
+            thread = await self._owned_thread(
+                negotiation_id=request.negotiation_id,
+                buyer_identity=buyer_identity,
+            )
+            proposal = EscrowProposal.model_validate(
+                thread.get("buyer_escrow_proposal"),
+            )
             if (
                 existing.get("negotiation_id") == request.negotiation_id
                 and existing.get("status") == "settlement_verified"
+                and existing.get("chain_name") == proposal.chain_name
+                and str(existing.get("escrow_address", "")).lower()
+                == proposal.escrow_address.lower()
             ):
-                await self._owned_thread(
-                    negotiation_id=request.negotiation_id,
-                    buyer_identity=buyer_identity,
-                )
                 return self._response(
                     escrow_uid=escrow_uid,
                     negotiation_id=request.negotiation_id,

@@ -116,6 +116,11 @@ class BareMetalNegotiationService:
         proposal = EscrowProposal.model_validate(request.proposal)
         buyer_amount = _proposal_amount(proposal)
         accepted = _matching_acceptance(listing, proposal)
+        if not (listing.get("accepted_escrows") or []):
+            raise NegotiationRequestError(
+                "listing has no accepted escrow contract",
+                status_code=409,
+            )
         reference_amount = _seller_reference_amount(
             accepted,
             duration_seconds=message.duration_seconds,
@@ -155,7 +160,11 @@ class BareMetalNegotiationService:
         seller_amount = _proposal_amount(
             EscrowProposal.model_validate(decision_payload),
         )
-        agreed_amount = buyer_amount if decision.action == "accept" else None
+        agreed_amount = (
+            (buyer_amount if buyer_amount is not None else 0)
+            if decision.action == "accept"
+            else None
+        )
         artifacts: dict[str, Any] = {}
         if terms is not None:
             artifacts = self.build_plan(

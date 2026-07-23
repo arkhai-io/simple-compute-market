@@ -44,6 +44,27 @@ def test_app_rejects_inconsistent_domain_before_startup() -> None:
         build_bare_metal_storefront_app(domain=invalid)
 
 
+def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
+    app = build_bare_metal_storefront_app()
+    paths = set(app.openapi()["paths"])
+
+    assert {
+        "/api/v1/listings",
+        "/api/v1/listings/{listing_id}",
+        "/api/v1/negotiate/new",
+        "/api/v1/negotiate/{negotiation_id}",
+        "/api/v1/settle/{escrow_uid}",
+        "/api/v1/settle/{escrow_uid}/status",
+        "/api/v1/admin/pause",
+        "/api/v1/admin/resume",
+        "/api/v1/system/status",
+        "/health",
+    } <= paths
+    assert not any("fulfillment" in path or "provision" in path for path in paths)
+    settle_schema = app.openapi()["components"]["schemas"]["BareMetalSettleRequest"]
+    assert set(settle_schema["properties"]) == {"negotiation_id", "buyer_address"}
+
+
 def test_importing_app_does_not_construct_publication_source() -> None:
     contract = get_market_domain_contract()
 
