@@ -27,7 +27,7 @@
 
 ## 4. POOLS-7 fulfillment integration
 
-- [ ] 4.1 Reconcile this design against the accepted POOLS-7 public scheduling, fulfillment, status/result, and teardown contracts before production wiring; do not copy its repositories or recovery workers into the storefront.
+- [ ] 4.1 Reconcile this design against the accepted POOLS-7 public scheduling, fulfillment, status/result, and teardown contracts before production wiring; do not copy its repositories or recovery workers into the storefront. **Blocked: the 2026-07-23 audit confirms durable internal scheduling has landed, but POOLS-7 Sections 6–8 and 10 have not yet published the required HTTP/client contracts. See `design.md`, “POOLS-7 public-contract reconciliation — 2026-07-23.”**
 - [ ] 4.2 Translate accepted `BareMetalMaterialization` into generic Physical Settlement requirements and schedule at the selected provisioning site.
 - [ ] 4.3 Begin fulfillment through the recorded bare-metal executor identity and persist only the returned reservation, settlement, fulfillment, receipt, and result references needed for recovery.
 - [ ] 4.4 Poll normalized fulfillment status/result and expose `BareMetalReceipt` and `BareMetalAccessResult` without requiring reverse push delivery.

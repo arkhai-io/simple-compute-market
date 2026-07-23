@@ -95,6 +95,14 @@ Deployment rendering must prove that disabling either storefront does not leave 
 
 The composition will use POOLS-7 scheduling, fulfillment status, result, and teardown calls. Push delivery is optional acceleration and is not required to complete a bare-metal agreement. This keeps correctness independent of reverse reachability.
 
+### POOLS-7 public-contract reconciliation — 2026-07-23
+
+The integrated POOLS-7 Sections 3–4 now provide the internal durable foundation: `SettlementRecord` persistence, immutable prepared-operation carriers, durable fairness cursors, `PhysicalSettlementScheduler.schedule_resource(PhysicalSettlementRequest)`, and one transaction across reservation validation, candidate selection, capacity assignment/rebind, cursor advancement, and settlement creation. The compute composition resolves that scheduler through one narrow scheduling unit of work, and focused production-container tests prove commit and rollback behavior.
+
+Those capabilities are not yet a storefront-consumable contract. The compute HTTP application exposes capacity, pool, executor-action, job, credential, and lease routes, but no public `schedule_resource`, `begin_fulfillment`, `get_fulfillment_status`, `get_fulfillment_result`, or fulfillment teardown route/client. POOLS-7 Sections 6–8 and 10 remain incomplete, including provider preparation/dispatch recovery and pull result security. The existing direct executor-action routes are the legacy path POOLS-7 intends to replace and MUST NOT be used to claim task 4 fulfillment.
+
+Therefore task 4.1 remains blocked rather than being marked reconciled against a guessed wire contract. Bare-metal tasks 4.2–4.6 begin only after POOLS-7 publishes and tests those request/response, authorization, idempotency, and teardown contracts. Trusted multi-site projection, pre-reservation placement, and durable selected-site routing from Section 3 remain valid prerequisites and do not duplicate POOLS-7 repositories or workers.
+
 ## Risks / Trade-offs
 
 - **[POOLS-7 APIs change while composition work proceeds]** → Keep site routing and fulfillment behind injected ports; bind production wiring only after the POOLS-7 public contract is accepted.
