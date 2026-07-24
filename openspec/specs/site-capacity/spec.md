@@ -85,11 +85,15 @@ Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable a
 - **THEN** the authoritative ledger commits at most one reservation
 
 ### Requirement: Multi-site aggregation
-A storefront MAY aggregate multiple site clients as soft state but MUST route each reserve to one authority and MUST NOT create cross-site hard-state capacity of its own.
+A storefront MAY aggregate multiple site clients as soft state but MUST route each reserve to one authority and MUST NOT create cross-site hard-state capacity of its own. Pre-reservation `most_available` ranking MUST count only snapshot rows compatible with the requested claim. Ranking and fallback end when one authority accepts the reservation.
 
 #### Scenario: One site cannot satisfy a request
 - **WHEN** another configured site can satisfy it
 - **THEN** the aggregator may reserve at the eligible site and records which site owns the allocation
+
+#### Scenario: Largest site does not match the claim
+- **WHEN** the site with the most total free units has no resource matching the requested attributes or dimensions
+- **THEN** `most_available` ranks a smaller compatible site ahead of it
 
 ### Requirement: Capacity and deal events
 Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront. Capacity deltas for multidimensional resources MUST report the per-dimension availability change so consumers do not infer one dimension from another.

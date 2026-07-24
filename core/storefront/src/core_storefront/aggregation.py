@@ -72,14 +72,51 @@ def fill_first(
     return list(site_names)
 
 
-def _site_available_units(snapshot: list[dict[str, Any]]) -> int:
+_CAPACITY_KEYS = frozenset({
+    "units", "gpu_count", "vcpu_count", "ram_gb", "disk_gb"
+})
+
+
+def _row_matches_claim(
+    row: Mapping[str, Any], claim: Mapping[str, Any] | None
+) -> bool:
+    if not claim:
+        return True
+    attributes = dict(row.get("attributes") or {})
+    facts = {**attributes, **dict(row)}
+    for key, expected in claim.items():
+        if key == "dimensions" or key in _CAPACITY_KEYS:
+            continue
+        if expected is not None and facts.get(key) != expected:
+            return False
+    dimensions = dict(claim.get("dimensions") or {})
+    for key in _CAPACITY_KEYS:
+        if key in claim and key not in dimensions:
+            dimensions[key] = claim[key]
+    available_dimensions = dict(row.get("available") or {})
+    for key, required in dimensions.items():
+        available = available_dimensions.get(key)
+        if available is None and key in {"units", "gpu_count"}:
+            available = row.get("available_units")
+        if available is not None and float(available) < float(required):
+            return False
+    return True
+
+
+def _site_available_units(
+    snapshot: list[dict[str, Any]], claim: Mapping[str, Any] | None = None
+) -> tuple[bool, int]:
+    matching = False
     total = 0
     for row in snapshot:
+        if not _row_matches_claim(row, claim):
+            continue
+        matching = True
         available = row.get("available_units")
         if available is None:
             continue
         total += max(int(available), 0)
-    return total
+    return matching, total
 
 
 def most_available(
@@ -95,7 +132,10 @@ def most_available(
         snapshot = snapshots.get(name)
         if snapshot is None:
             return (1, idx)  # unknown availability — try after known sites
-        return (0, -_site_available_units(snapshot) * len(site_names) + idx)
+        matching, available = _site_available_units(snapshot, claim)
+        if not matching:
+            return (1, idx)
+        return (0, -available * len(site_names) + idx)
 
     # Sort by (known first, descending availability), stable on config order.
     ordered = sorted(enumerate(site_names), key=_key)
