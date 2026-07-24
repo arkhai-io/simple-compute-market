@@ -48,7 +48,7 @@ from market_fulfillment import (
     SettlementResult,
     VersionedEnvelope,
 )
-from market_resource_pools import PoolCreate
+from market_resource_pools import PoolCreate, PoolUpdate
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -350,3 +350,142 @@ class TestTeardownPreparation:
         job = await fulfillment.get_job(teardown_job_id)
         assert job["deal_ref"] == {}
         assert job["idempotency_key"] == f"{capacity_reservation_id}:teardown"
+
+
+class TestPoolConfigFrozenAtAcceptance:
+    """Proves the guarantee `get_pool_in_session` exists to provide: pool
+    configuration is frozen into the prepared envelope at acceptance time,
+    not re-read live. Without this, a pool edit after acceptance could
+    silently change what an already-accepted, already-dispatched fulfillment
+    would redispatch with on crash recovery.
+    """
+
+    async def test_pool_config_mutation_after_acceptance_does_not_change_persisted_input(
+        self, fulfillment: FulfillmentApi
+    ):
+        pool_id = "pool-fulfillment-mutation"
+        capacity_reservation_id = await _scheduled_reservation(pool_id)
+
+        await fulfillment.begin(capacity_reservation_id, "vms", _fulfillment_request())
+
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            frozen_params = record.prepared_create_operation["payload"]["parameters"]
+            assert frozen_params["playbook_path"] == _PLAYBOOK_PATH
+            assert frozen_params["provider_extra_vars"] == {"region": "eu"}
+
+        # Mutate the pool's live provider configuration after acceptance.
+        resource_pool_service = _container_module.resolved_resource_pool_service
+        resource_pool_service.update_pool(
+            pool_id,
+            PoolUpdate(
+                provider_config={
+                    "playbook_path": "playbooks/mutated-after-acceptance.yaml",
+                    "extra_vars": {"region": "us"},
+                }
+            ),
+        )
+
+        # The live pool now shows the mutation...
+        with session_factory() as db:
+            pool = resource_pool_service.get_pool_in_session(db, pool_id)
+            assert pool.provider_config["playbook_path"] == (
+                "playbooks/mutated-after-acceptance.yaml"
+            )
+
+        # ...but the already-persisted prepared operation does not, because
+        # it was frozen into the row at acceptance time rather than kept as
+        # a live reference to the pool.
+        with session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            unchanged_params = record.prepared_create_operation["payload"]["parameters"]
+            assert unchanged_params["playbook_path"] == _PLAYBOOK_PATH
+            assert unchanged_params["provider_extra_vars"] == {"region": "eu"}
+
+
+class TestAcknowledgementFailureRecovery:
+    """Proves that if the provider accepts a job but the acknowledgement
+    transaction (transaction 2) fails before recording it, a subsequent
+    retry rediscovers the same job through the deterministic idempotency
+    key rather than dispatching a duplicate -- the crash window this
+    section's two-transaction design deliberately accepts, per design.md's
+    "Accepted Section 5 lifecycle clarifications".
+    """
+
+    async def test_retry_after_failed_acknowledgement_reuses_the_same_job(
+        self, fulfillment: FulfillmentApi
+    ):
+        from market_fulfillment import FulfillmentOrchestrator, ProviderRegistry
+        from market_fulfillment.fulfillment_persistence import (
+            SqlAlchemyFulfillmentTransaction,
+            SqlAlchemyFulfillmentUnitOfWork,
+        )
+
+        capacity_reservation_id = await _scheduled_reservation(
+            "pool-fulfillment-ack-failure"
+        )
+
+        attempts = {"count": 0}
+
+        class FaultyOnceTransaction(SqlAlchemyFulfillmentTransaction):
+            def acknowledge_create(self, *args, **kwargs):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    raise RuntimeError("simulated acknowledgement failure")
+                return super().acknowledge_create(*args, **kwargs)
+
+        from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+            AnsibleFulfillmentProvider,
+        )
+
+        session_factory = _container_module.resolved_session_factory
+        resource_pool_service = _container_module.resolved_resource_pool_service
+        provider = AnsibleFulfillmentProvider(
+            job_service=_container_module.resolved_job_service,
+            job_queue_provider=lambda: _container_module.resolved_job_queue,
+        )
+        faulty_orchestrator = FulfillmentOrchestrator(
+            provider_registry=ProviderRegistry({"ansible": provider}),
+            unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
+                session_factory=session_factory,
+                pool_service=resource_pool_service,
+                transaction_type=FaultyOnceTransaction,
+            ),
+        )
+        request = VersionedEnvelope.model_validate(_fulfillment_request())
+
+        with pytest.raises(RuntimeError, match="simulated acknowledgement failure"):
+            await faulty_orchestrator.begin_fulfillment(
+                capacity_reservation_id, "vms", request
+            )
+
+        with session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            assert record.state == "dispatch_pending"
+            assert dict(record.provider_metadata or {}) == {}
+            assert record.prepared_create_operation is not None
+
+        # Retry: acknowledgement now succeeds, and the provider redispatches
+        # the persisted prepared operation with the same idempotency key.
+        result = await faulty_orchestrator.begin_fulfillment(
+            capacity_reservation_id, "vms", request
+        )
+        assert result.state == "dispatching"
+
+        with session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            job_id = record.provider_metadata["create_job_id"]
+
+            from compute_provisioning_service.db.models import AnsibleJob
+
+            jobs = (
+                db.query(AnsibleJob)
+                .filter(
+                    AnsibleJob.capacity_reservation_id == capacity_reservation_id,
+                    AnsibleJob.action_kind == "create",
+                )
+                .all()
+            )
+            assert len(jobs) == 1
+            assert jobs[0].id == job_id

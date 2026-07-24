@@ -2162,3 +2162,17 @@ Tasks 5.4 and 5.5's text also had a stale `"submitted"` state name (corrected
 everywhere else in this document and in the permanent spec on 2026-07-23, but missed
 in two places in `tasks.md` itself); corrected to `"dispatching"`, the actual
 `SettlementRecordState` value, to match.
+
+## Section 5 closed (2026-07-24)
+
+All twelve Section 5 tasks (5.1–5.12) are complete. The final review pass closed the
+three remaining gaps in 5.8's test checklist (independent-session concurrency proof,
+pool-config-frozen-at-acceptance proof, acknowledgement-failure-recovery proof) —
+see task 5.8 in `tasks.md` for what each test proves and why it was missing. Full
+suite, rebuilt from a clean state: 151 passed across `kit` (alkahest, config, identity,
+policy, site, resource-pools, fulfillment), 302 unit + 146 integration passed in
+`provisioning/compute/service`. No other domain imports `market_fulfillment`, so this
+section's changes are contained; the legacy direct-dispatch path is untouched and
+still fully functional. Nothing calls `begin_fulfillment` in production yet — that is
+Section 9's job — so this section is safe to merge as dormant, additive code ahead of
+Section 6 (recovery/convergence) and Section 9 (storefront cutover).
