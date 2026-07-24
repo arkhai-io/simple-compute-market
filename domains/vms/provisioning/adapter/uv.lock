@@ -158,39 +158,90 @@ wheels = [
 [[package]]
 name = "arkhai-bare-metal"
 version = "0.2.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../bare_metal" }
 dependencies = [
     { name = "arkhai-core" },
     { name = "pydantic" },
 ]
-wheels = [
-    { path = "arkhai_bare_metal-0.2.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-core", specifier = ">=0.2.0" },
+    { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.2.0" },
+    { name = "pydantic", specifier = ">=2.7" },
 ]
+provides-extras = ["storefront"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "arkhai-core-storefront", specifier = ">=0.2.0" },
+    { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
+name = "arkhai-bare-metal-provisioning-adapter"
+version = "0.1.0"
+source = { editable = "../../../bare_metal/provisioning/adapter" }
+dependencies = [
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-compute-provisioning-service" },
+    { name = "arkhai-vms-provisioning-operator-client" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-bare-metal", editable = "../../../bare_metal" },
+    { name = "arkhai-compute-provisioning", editable = "../../../../provisioning/compute" },
+    { name = "arkhai-compute-provisioning-service", editable = "../../../../provisioning/compute/service" },
+    { name = "arkhai-vms-provisioning-operator-client", editable = "../client" },
+    { name = "pydantic", specifier = ">=2.7" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "arkhai-compute-provisioning"
 version = "0.5.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../provisioning/compute" }
 dependencies = [
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
-wheels = [
-    { path = "arkhai_compute_provisioning-0.5.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-kit-resource-pools", editable = "../../../../kit/resource-pools" },
+    { name = "arkhai-kit-site", editable = "../../../../kit/site" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
 version = "0.1.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../provisioning/compute/service" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-bare-metal-provisioning-adapter" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
+    { name = "arkhai-vms-provisioning-adapter" },
+    { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cachetools" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -206,8 +257,38 @@ dependencies = [
     { name = "typing-inspect" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-wheels = [
-    { path = "arkhai_compute_provisioning_service-0.1.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
+    { name = "arkhai-bare-metal", editable = "../../../bare_metal" },
+    { name = "arkhai-bare-metal-provisioning-adapter", editable = "../../../bare_metal/provisioning/adapter" },
+    { name = "arkhai-compute-provisioning", editable = "../../../../provisioning/compute" },
+    { name = "arkhai-core-storefront-client", editable = "../../../../core/storefront-client" },
+    { name = "arkhai-kit-resource-pools", editable = "../../../../kit/resource-pools" },
+    { name = "arkhai-kit-site", editable = "../../../../kit/site" },
+    { name = "arkhai-vms-provisioning-adapter", editable = "." },
+    { name = "arkhai-vms-provisioning-operator-client", editable = "../client" },
+    { name = "cachetools", specifier = ">=5.3" },
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "dependency-injector", specifier = ">=4.41.0" },
+    { name = "dynaconf", specifier = ">=3.0.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "fastapi-utils", specifier = ">=0.8.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "psycopg2-binary", specifier = ">=2.9" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "typing-inspect", specifier = ">=0.9.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
 ]
 
 [[package]]
@@ -224,55 +305,60 @@ wheels = [
 [[package]]
 name = "arkhai-core-storefront-client"
 version = "0.16.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../core/storefront-client" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
-wheels = [
-    { path = "arkhai_core_storefront_client-0.16.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "eth-account", specifier = ">=0.12" },
+    { name = "httpx", specifier = ">=0.27" },
 ]
 
-[[package]]
-name = "arkhai-kit-fulfillment"
-version = "0.1.0"
-source = { registry = "../../../../.dist" }
-dependencies = [
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-site" },
-    { name = "pydantic" },
-    { name = "sqlalchemy" },
-    { name = "uuid6" },
-]
-wheels = [
-    { path = "arkhai_kit_fulfillment-0.1.0-py3-none-any.whl" },
-]
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "arkhai-kit-resource-pools"
 version = "0.1.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../kit/resource-pools" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
-wheels = [
-    { path = "arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-kit-site"
 version = "0.2.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../../../../kit/site" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
-wheels = [
-    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 
 [[package]]
 name = "arkhai-vms-provisioning-adapter"
@@ -282,7 +368,6 @@ dependencies = [
     { name = "arkhai-bare-metal" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-compute-provisioning-service" },
-    { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cryptography" },
@@ -298,12 +383,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
-    { name = "arkhai-compute-provisioning", specifier = ">=0.5.0" },
-    { name = "arkhai-compute-provisioning-service", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
-    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.3.0" },
+    { name = "arkhai-bare-metal", editable = "../../../bare_metal" },
+    { name = "arkhai-compute-provisioning", editable = "../../../../provisioning/compute" },
+    { name = "arkhai-compute-provisioning-service", editable = "../../../../provisioning/compute/service" },
+    { name = "arkhai-kit-resource-pools", editable = "../../../../kit/resource-pools" },
+    { name = "arkhai-vms-provisioning-operator-client", editable = "../client" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
     { name = "pydantic", specifier = ">=2.7" },
@@ -316,15 +400,22 @@ dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 [[package]]
 name = "arkhai-vms-provisioning-operator-client"
 version = "0.3.0"
-source = { registry = "../../../../.dist" }
+source = { editable = "../client" }
 dependencies = [
     { name = "arkhai-compute-provisioning" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
-wheels = [
-    { path = "arkhai_vms_provisioning_operator_client-0.3.0-py3-none-any.whl" },
+
+[package.metadata]
+requires-dist = [
+    { name = "arkhai-compute-provisioning", specifier = ">=0.4.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic", specifier = ">=2.7" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "attrs"
@@ -1852,15 +1943,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
-]
-
-[[package]]
-name = "uuid6"
-version = "2025.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ca/b7/4c0f736ca824b3a25b15e8213d1bcfc15f8ac2ae48d1b445b310892dc4da/uuid6-2025.0.1.tar.gz", hash = "sha256:cd0af94fa428675a44e32c5319ec5a3485225ba2179eefcf4c3f205ae30a81bd", size = 13932, upload-time = "2025-07-04T18:30:35.186Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/b2/93faaab7962e2aa8d6e174afb6f76be2ca0ce89fde14d3af835acebcaa59/uuid6-2025.0.1-py3-none-any.whl", hash = "sha256:80530ce4d02a93cdf82e7122ca0da3ebbbc269790ec1cb902481fa3e9cc9ff99", size = 6979, upload-time = "2025-07-04T18:30:34.001Z" },
 ]
 
 [[package]]

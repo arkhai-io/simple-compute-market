@@ -176,34 +176,3 @@ async def test_failed_executor_submission_holds_capacity_until_force_release():
     assert forced["state"] == "force_released"
     assert forced["failure_reason"] == "admin_force_release"
     assert "ticket-7" in forced["failure_message"]
-
-
-class StubFulfillmentRelease:
-    def __init__(self, managed=True):
-        self.managed = managed
-        self.calls = []
-
-    async def ensure_teardown(self, capacity_reservation_id):
-        self.calls.append(capacity_reservation_id)
-        return self.managed
-
-
-@pytest.mark.asyncio
-async def test_due_settlement_backed_lease_uses_fulfillment_not_legacy_executor():
-    site = FakeSiteAuthority()
-    site.due = [site.reservations["alloc-1"]]
-    executor = StubExecutorRelease()
-    fulfillment = StubFulfillmentRelease()
-    service = LeaseLifecycleService(
-        SimpleNamespace(),
-        site,
-        executor_release=executor,
-        fulfillment_release=fulfillment,
-    )
-
-    result = await service.force_check_leases()
-
-    assert result["checked"] == 1
-    assert fulfillment.calls == ["alloc-1"]
-    assert executor.calls == []
-    assert site.reservations["alloc-1"]["state"] == "leased"

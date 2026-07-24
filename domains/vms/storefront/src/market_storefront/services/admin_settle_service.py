@@ -7,7 +7,8 @@ implement the evaluate→advance→observe pattern:
     evaluate (this module)        advance (POST /settle/{uid})
     ────────────────────────────  ───────────────────────────
     verify_escrow_dry_run         start_settlement_job → verify_escrow_for_settlement
-    evaluate_settle_dry_run       start_settlement_job → durable schedule/begin requests
+    evaluate_settle_dry_run       start_settlement_job → _build_provisioning_job_spec
+                                                        → _do_provision
 """
 from __future__ import annotations
 
@@ -21,32 +22,7 @@ from market_storefront.utils.escrow_verification import (  # noqa: E402
     EscrowVerificationError,
     verify_escrow_for_settlement,
 )
-from market_storefront.services.fulfillment_requests import (  # noqa: E402
-    build_vm_fulfillment_requests,
-)
-
-
-async def _build_provisioning_job_spec(
-    *,
-    order_dict: dict | None,
-    ssh_public_key: str,
-    duration_seconds: int,
-    sqlite_client: Any | None = None,
-) -> dict | None:
-    """Build side-effect-free durable lifecycle requests for admin evaluation."""
-    del duration_seconds, sqlite_client
-    if order_dict is None:
-        return None
-    schedule, begin = build_vm_fulfillment_requests(
-        capacity_reservation_id="admin-dry-run",
-        order=order_dict,
-        ssh_public_key=ssh_public_key,
-        vm_target="admin-dry-run",
-    )
-    return {
-        "schedule_request": schedule.model_dump(mode="json"),
-        "begin_request": begin.model_dump(mode="json"),
-    }
+from market_storefront.services.fulfillment_service import _build_provisioning_job_spec  # noqa: E402
 
 
 class AdminSettleService:
@@ -136,12 +112,14 @@ class AdminSettleService:
         ssh_public_key: str,
         duration_seconds: int,
     ) -> dict:
-        """Build canonical durable lifecycle requests without placement.
+        """Resolve a host from inventory and build the provisioning job spec.
 
-        No chain reads, database writes, capacity reservation, or provider call
-        occurs. Actual resource selection remains provisioning-owned.
+        Tests doWork in isolation — no chain reads, no DB writes, no provisioning.
+        Uses the capacity ledger probe (read-only — consumes nothing).
 
-        Returns canonical schedule/begin requests or a validation reason.
+        Returns:
+            {"would_submit": True, "escrow_uid": ..., "vm_host": ..., "vm_target": ..., "required_attributes": {...}}
+            {"would_submit": False, "escrow_uid": ..., "reason": "<why>"}
 
         Raises:
             ValueError  if the listing is not found in SQLite (caller maps to 404)
@@ -150,23 +128,27 @@ class AdminSettleService:
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
 
-        try:
-            spec = await _build_provisioning_job_spec(
-                order_dict=listing,
-                ssh_public_key=ssh_public_key,
-                duration_seconds=duration_seconds,
-                sqlite_client=self._db,
-            )
-        except ValueError as exc:
-            return {
-                "would_submit": False,
-                "escrow_uid": escrow_uid,
-                "reason": str(exc),
-            }
+        spec = await _build_provisioning_job_spec(
+            order_dict=listing,
+            ssh_public_key=ssh_public_key,
+            duration_seconds=duration_seconds,
+            sqlite_client=self._db,
+        )
+
         if not spec:
             return {
                 "would_submit": False,
                 "escrow_uid": escrow_uid,
-                "reason": "listing cannot produce fulfillment requests",
+                "reason": (
+                    "No available compute VM matched the listing's required attributes. "
+                    "Check that at least one host is registered with state='available'."
+                ),
             }
-        return {"would_submit": True, "escrow_uid": escrow_uid, **spec}
+
+        return {
+            "would_submit": True,
+            "escrow_uid": escrow_uid,
+            "vm_host": spec["vm_host"],
+            "vm_target": spec["vm_target"],
+            "required_attributes": spec["required_attributes"],
+        }

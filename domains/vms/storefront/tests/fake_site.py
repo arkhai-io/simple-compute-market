@@ -265,6 +265,11 @@ def site_capacity(
         "market_storefront.services.capacity_client.build_capacity_client",
         return_value=aggregate,
     )]
+    # fulfillment_service binds the name at import time.
+    patches.append(patch(
+        "market_storefront.services.fulfillment_service.build_capacity_client",
+        return_value=aggregate,
+    ))
     with contextlib.ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)

@@ -225,10 +225,12 @@ def db_engine():
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    # Site-ledger and fulfillment tables ride their own kit metadata.
-    from market_fulfillment.db import Base as FulfillmentBase
+    # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # Durable fulfillment tables (settlement_records, provisioned_resources,
+    # scheduling_cursors) ride market_fulfillment's own metadata.
+    from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
@@ -382,16 +384,11 @@ async def client_and_queue(
         unit_claim_keys=("units", "gpu_count"),
     )
 
-    from market_fulfillment import (
-        PhysicalSettlementScheduler,
-        SqlAlchemySchedulingUnitOfWork,
-    )
+    from market_fulfillment import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
-        unit_of_work=SqlAlchemySchedulingUnitOfWork(
-            session_factory,
-            resource_pool_service,
-            capacity_ledger_service,
-        ),
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
         default_resource_kind="compute.gpu",
     )
 
@@ -416,7 +413,7 @@ async def client_and_queue(
     )
 
     from compute_provisioning.release import ExecutorReleaseDispatcher
-    VM_EXECUTOR_KIND = "vm"
+    from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
     from bare_metal_provisioning_adapter.release import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
@@ -426,6 +423,7 @@ async def client_and_queue(
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
                 release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
             ),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
         },
         default_executor_kind=VM_EXECUTOR_KIND,
     )
@@ -483,6 +481,27 @@ async def client_and_queue(
         lease_lifecycle_service=lease_lifecycle_service,
     )
 
+    from market_fulfillment import (
+        FulfillmentOrchestrator,
+        ProviderRegistry,
+        SqlAlchemyFulfillmentUnitOfWork,
+    )
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
+    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+    )
+    fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+    )
+    fulfillment_service = FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        unit_of_work=fulfillment_unit_of_work,
+    )
+
     # Override container providers
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
@@ -498,14 +517,7 @@ async def client_and_queue(
     app.container.resource_pool_service.override(resource_pool_service)
     app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
     app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
-    for provider in (
-        app.container.ansible_fulfillment_provider,
-        app.container.vm_adapter_bundle,
-        app.container.composed_adapters,
-        app.container.provider_registry,
-        app.container.fulfillment_service,
-    ):
-        provider.reset()
+    app.container.fulfillment_service.override(fulfillment_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -521,10 +533,10 @@ async def client_and_queue(
     _container_module.resolved_physical_settlement_scheduler = (
         physical_settlement_scheduler
     )
-    _container_module.resolved_fulfillment_service = app.container.fulfillment_service()
     _container_module.resolved_capacity_reservation_watchdog = (
         capacity_reservation_watchdog
     )
+    _container_module.resolved_fulfillment_service = fulfillment_service
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
@@ -595,14 +607,7 @@ async def client_and_queue(
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
-    for provider in (
-        app.container.fulfillment_service,
-        app.container.provider_registry,
-        app.container.composed_adapters,
-        app.container.vm_adapter_bundle,
-        app.container.ansible_fulfillment_provider,
-    ):
-        provider.reset()
+    app.container.fulfillment_service.reset_override()
 
 
 @pytest_asyncio.fixture

@@ -24,6 +24,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Planning governance | [Spec](planning-governance/spec.md) | — |
 | Registry discovery | [Spec](registry-discovery/spec.md) | [Architecture](registry-discovery/architecture.md) |
 | Resource-pool management | [Spec](resource-pool-management/spec.md) | [Architecture](resource-pool-management/architecture.md) |
+| Review artifacts | [Spec](review-artifacts/spec.md) | [Architecture](review-artifacts/architecture.md) |
 | Settlement servicing | [Spec](settlement-servicing/spec.md) | [Architecture](settlement-servicing/architecture.md) |
 | Site capacity | [Spec](site-capacity/spec.md) | [Architecture](site-capacity/architecture.md) |
 | Storefront publication | [Spec](storefront-publication/spec.md) | [Architecture](storefront-publication/architecture.md) |

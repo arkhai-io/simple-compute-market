@@ -1,5 +1,5 @@
 """Tests for SettlementRepository: the two independent equivalence scopes,
-conflicting-retry rejection, provisioned-resource attachment, and recovery leases.
+conflicting-retry rejection, provisioned-resource attachment, and single-worker recovery leases.
 """
 
 from __future__ import annotations
@@ -96,30 +96,6 @@ def test_schedule_retry_with_equivalent_requirements_returns_existing(session_fa
         assert retried.settlement_resource_id == "host-a"
 
 
-def test_schedule_retry_with_different_owner_conflicts(session_factory, repo):
-    with session_factory() as db:
-        repo.schedule(
-            db,
-            capacity_reservation_id="cr-1",
-            market="vms",
-            scheduling_requirements=_requirement(),
-            resource=_resource(),
-            owner_principal="seller-a",
-        )
-        db.commit()
-
-    with session_factory() as db:
-        with pytest.raises(SettlementRequestMismatchError):
-            repo.schedule(
-                db,
-                capacity_reservation_id="cr-1",
-                market="vms",
-                scheduling_requirements=_requirement(),
-                resource=_resource(),
-                owner_principal="seller-b",
-            )
-
-
 def test_schedule_retry_with_different_requirements_conflicts(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
@@ -190,35 +166,6 @@ def test_schedule_retry_with_inconsistent_resource_constraint_conflicts(session_
 
 
 # ----------------------------------------------------------------------
-def test_schedule_obeys_caller_rollback(session_factory, repo):
-    with session_factory() as db:
-        repo.schedule(
-            db,
-            capacity_reservation_id="cr-schedule-rollback",
-            market="vms",
-            scheduling_requirements=_requirement(),
-            resource=_resource(),
-        )
-        db.rollback()
-
-    with session_factory() as db:
-        assert repo.get(db, "cr-schedule-rollback") is None
-
-
-def test_schedule_rejects_selected_resource_outside_constraint(session_factory, repo):
-    with session_factory() as db:
-        with pytest.raises(SettlementRequestMismatchError):
-            repo.schedule(
-                db,
-                capacity_reservation_id="cr-constraint",
-                market="vms",
-                scheduling_requirements=_requirement(),
-                resource=_resource(settlement_resource_id="resource-a"),
-                resource_id_constraint="resource-b",
-            )
-        db.rollback()
-
-
 # accept_fulfillment(): fulfillment-level equivalence
 # ----------------------------------------------------------------------
 
@@ -231,7 +178,6 @@ def test_accept_fulfillment_requires_prior_scheduling(session_factory, repo):
                 capacity_reservation_id="cr-missing",
                 market="vms",
                 fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-                prepared_create_operation=envelope("provider.create", 1, {}),
             )
 
 
@@ -252,16 +198,10 @@ def test_accept_fulfillment_generates_fulfillment_id_and_advances_state(session_
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "ubuntu"}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
         assert accepted.fulfillment_id is not None
         assert accepted.state == SettlementRecordState.dispatch_pending.value
-        assert accepted.prepared_create_operation == {
-            "kind": "provider.create",
-            "schema_version": 1,
-            "payload": {},
-        }
 
 
 def test_accept_fulfillment_rejects_first_request_for_different_market(session_factory, repo):
@@ -282,7 +222,6 @@ def test_accept_fulfillment_rejects_first_request_for_different_market(session_f
                 capacity_reservation_id="cr-1",
                 market="bare-metal",
                 fulfillment_request=envelope("host.fulfillment_request", 1, {}),
-                prepared_create_operation=envelope("provider.create", 1, {}),
             )
         db.rollback()
 
@@ -310,7 +249,6 @@ def test_accept_fulfillment_retry_with_equivalent_request_returns_existing(sessi
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "ubuntu"}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
         first_fulfillment_id = first.fulfillment_id
@@ -321,7 +259,6 @@ def test_accept_fulfillment_retry_with_equivalent_request_returns_existing(sessi
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "ubuntu"}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
         assert retried.fulfillment_id == first_fulfillment_id
@@ -344,7 +281,6 @@ def test_accept_fulfillment_retry_with_different_request_conflicts(session_facto
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "ubuntu"}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -355,43 +291,6 @@ def test_accept_fulfillment_retry_with_different_request_conflicts(session_facto
                 capacity_reservation_id="cr-1",
                 market="vms",
                 fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "debian"}),
-                prepared_create_operation=envelope("provider.create", 1, {}),
-            )
-
-
-def test_accept_fulfillment_retry_with_different_prepared_input_conflicts(
-    session_factory,
-    repo,
-):
-    with session_factory() as db:
-        repo.schedule(
-            db,
-            capacity_reservation_id="cr-prepared-conflict",
-            market="vms",
-            scheduling_requirements=_requirement(),
-            resource=_resource(),
-        )
-        repo.accept_fulfillment(
-            db,
-            capacity_reservation_id="cr-prepared-conflict",
-            market="vms",
-            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {"host": "a"}),
-        )
-        db.commit()
-
-    with session_factory() as db:
-        with pytest.raises(FulfillmentConflictError):
-            repo.accept_fulfillment(
-                db,
-                capacity_reservation_id="cr-prepared-conflict",
-                market="vms",
-                fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-                prepared_create_operation=envelope(
-                    "provider.create",
-                    1,
-                    {"host": "b"},
-                ),
             )
 
 
@@ -414,7 +313,6 @@ def test_transition_applies_field_updates(session_factory, repo):
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -504,7 +402,6 @@ def test_add_and_list_provisioned_resources(session_factory, repo):
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
         fulfillment_id = record.fulfillment_id
@@ -520,40 +417,6 @@ def test_add_and_list_provisioned_resources(session_factory, repo):
         assert len(resources) == 1
         assert resources[0].fulfillment_id == fulfillment_id
         assert resources[0].domain_resource_ref == "vm-123"
-
-
-def test_provisioned_resource_retry_by_domain_reference_is_idempotent(
-    session_factory,
-    repo,
-):
-    with session_factory() as db:
-        repo.schedule(
-            db,
-            capacity_reservation_id="cr-resource-retry",
-            market="vms",
-            scheduling_requirements=_requirement(),
-            resource=_resource(),
-        )
-        repo.accept_fulfillment(
-            db,
-            capacity_reservation_id="cr-resource-retry",
-            market="vms",
-            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
-        )
-        first = repo.add_provisioned_resource(
-            db,
-            capacity_reservation_id="cr-resource-retry",
-            domain_resource_ref="vm-1",
-        )
-        retried = repo.add_provisioned_resource(
-            db,
-            capacity_reservation_id="cr-resource-retry",
-            domain_resource_ref="vm-1",
-        )
-        db.commit()
-
-        assert retried.provisioned_resource_id == first.provisioned_resource_id
 
 
 # ----------------------------------------------------------------------
@@ -575,7 +438,6 @@ def test_single_worker_selection_claims_matching_unclaimed_rows(session_factory,
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -607,7 +469,6 @@ def test_single_worker_selection_skips_rows_with_a_live_claim(session_factory, r
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -647,7 +508,6 @@ def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_fac
             capacity_reservation_id="cr-1",
             market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -677,54 +537,6 @@ def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_fac
         assert claimed_again[0].attempt_count == 2
 
 
-def test_concurrent_sqlite_claims_do_not_overlap(tmp_path, repo):
-    database = tmp_path / "fulfillment-claims.db"
-    engine = create_engine(
-        f"sqlite:///{database}",
-        connect_args={"check_same_thread": False, "timeout": 5},
-    )
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(bind=engine, expire_on_commit=False)
-    with sessions() as db:
-        repo.schedule(
-            db,
-            capacity_reservation_id="cr-claim-race",
-            market="vms",
-            scheduling_requirements=_requirement(),
-            resource=_resource(),
-        )
-        repo.accept_fulfillment(
-            db,
-            capacity_reservation_id="cr-claim-race",
-            market="vms",
-            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
-        )
-        db.commit()
-
-    barrier = Barrier(2)
-
-    def claim(worker_id: str) -> list[str]:
-        barrier.wait(timeout=5)
-        with sessions() as db:
-            rows = repo.claim_pending(
-                db,
-                states=[SettlementRecordState.dispatch_pending.value],
-                limit=1,
-                lease_seconds=60,
-                worker_id=worker_id,
-            )
-            ids = [str(row.capacity_reservation_id) for row in rows]
-            db.commit()
-            return ids
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(claim, ["worker-a", "worker-b"]))
-
-    assert sorted(len(result) for result in results) == [0, 1]
-    assert [item for result in results for item in result] == ["cr-claim-race"]
-
-
 def test_transition_allows_shared_lifecycle_fields(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
@@ -734,11 +546,12 @@ def test_transition_allows_shared_lifecycle_fields(session_factory, repo):
         repo.accept_fulfillment(
             db, capacity_reservation_id="cr-allowed", market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
     updates = {
+        "prepared_create_operation": {"kind": "create", "schema_version": 1, "payload": {}},
+        "prepared_teardown_operation": {"kind": "teardown", "schema_version": 1, "payload": {}},
         "provider_metadata": {"job_id": "job-1"},
         "teardown_provider_metadata": {"job_id": "job-2"},
         "failure_reason": "provider_error",
@@ -758,7 +571,6 @@ def test_transition_allows_shared_lifecycle_fields(session_factory, repo):
     [
         ("market", "bare-metal"),
         ("fulfillment_request", {}),
-        ("prepared_create_operation", {}),
         ("state", SettlementRecordState.active.value),
         ("claimed_by", "worker-2"),
         ("updated_at", None),
@@ -776,7 +588,6 @@ def test_transition_rejects_non_lifecycle_fields_before_state_mutation(
         repo.accept_fulfillment(
             db, capacity_reservation_id="cr-forbidden", market="vms",
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
 
@@ -816,7 +627,6 @@ def test_canonical_models_normalize_explicit_defaults_and_nested_payload(session
         repo.accept_fulfillment(
             db, capacity_reservation_id="cr-canonical", market="vms",
             fulfillment_request=nested,
-            prepared_create_operation=envelope("provider.create", 1, {}),
         )
         db.commit()
     with session_factory() as db:
@@ -847,7 +657,6 @@ def test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity(tmp_path,
             record = repo.accept_fulfillment(
                 db, capacity_reservation_id="cr-race", market="vms",
                 fulfillment_request=envelope("vm.fulfillment_request", 1, {"image": "ubuntu"}),
-                prepared_create_operation=envelope("provider.create", 1, {}),
             )
             db.commit()
             assert record.fulfillment_id is not None

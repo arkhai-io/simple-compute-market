@@ -130,9 +130,7 @@ class AnsibleService:
         )
 
         logger.info(
-            "Started ansible-playbook: PID=%d playbook=%s",
-            process.pid,
-            playbook_path.name,
+            "Started ansible-playbook: PID=%d cmd=%s", process.pid, " ".join(cmd)
         )
 
         return AnsibleRun(
@@ -179,6 +177,7 @@ class AnsibleService:
                                 line = run.process.stdout.readline()
                                 if line:
                                     stdout_lines.append(line)
+                                    logger.debug("ansible stdout: %s", line.rstrip())
                         else:
                             line = run.process.stdout.readline()
                             if line:
@@ -196,6 +195,7 @@ class AnsibleService:
                                 line = run.process.stderr.readline()
                                 if line:
                                     stderr_lines.append(line)
+                                    logger.debug("ansible stderr: %s", line.rstrip())
                         else:
                             line = run.process.stderr.readline()
                             if line:

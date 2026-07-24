@@ -241,6 +241,24 @@ class TestGetAndListPools:
         assert pool is not None
         assert pool.label == "Hetzner EU"
 
+    def test_get_pool_in_session_uses_caller_session(self, svc, session_factory):
+        svc.create_pool(
+            PoolCreate(
+                id="session-pool",
+                label="Session Pool",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+
+        with session_factory() as db:
+            pool = svc.get_pool_in_session(db, "session-pool")
+
+            assert pool is not None
+            assert pool in db
+            assert pool.provider_config["playbook_path"] == _ANSIBLE_CONFIG["playbook_path"]
+            assert pool.provider_config["extra_vars"] == {}
+
     def test_list_enabled_only_excludes_disabled(self, svc):
         svc.create_pool(
             PoolCreate(

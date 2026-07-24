@@ -1,20 +1,9 @@
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
-from market_fulfillment import LegacyFulfillmentBackfillCompiler
 
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 from compute_provisioning_service.db.models import Base
-
-
-def _enable_sqlite_foreign_keys(engine: Engine) -> Engine:
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    return engine
 
 
 def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
@@ -22,11 +11,11 @@ def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
         if ":memory:" in database_url:
             # A shared in-memory DB only exists on one connection — tests
             # rely on every session seeing the same data.
-            return _enable_sqlite_foreign_keys(create_engine(
+            return create_engine(
                 database_url,
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool,
-            ))
+            )
         # File-backed: one connection per session. A single shared
         # connection (StaticPool) interleaves concurrent sessions'
         # transactions on one sqlite handle ("cannot commit - no
@@ -34,10 +23,10 @@ def create_db_engine(database_url: str, is_sqlite: bool) -> Engine:
         # but the capacity ledger's event-feed polling made it routine.
         # SQLite's file lock serializes writers; the busy timeout keeps
         # contending sessions waiting instead of erroring.
-        return _enable_sqlite_foreign_keys(create_engine(
+        return create_engine(
             database_url,
             connect_args={"check_same_thread": False, "timeout": 30},
-        ))
+        )
     return create_engine(database_url, pool_size=10, max_overflow=10)
 
 
@@ -50,7 +39,6 @@ def run_migrations(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
-    fulfillment_backfill_compiler: LegacyFulfillmentBackfillCompiler | None = None,
 ) -> None:
     """Create all tables and apply versioned migrations.
 
@@ -68,11 +56,13 @@ def run_migrations(
     # and SQLAlchemy's cross-metadata FK resolution during create_all needs
     # the referenced table to already exist.
     from sqlalchemy import inspect
+    from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
 
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
 
     # Preserve the legacy reservation table name until the versioned rename
     # migration has claimed the current name. Other site tables may be created
@@ -87,6 +77,5 @@ def run_migrations(
         engine,
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
-        fulfillment_backfill_compiler=fulfillment_backfill_compiler,
     )
     SiteBase.metadata.create_all(bind=engine)

@@ -156,13 +156,11 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites, and one site may serve several storefronts.
 
-Storefront-to-provisioning credentials map to opaque operator-configured principals. Capacity reservations and fulfillment aggregates retain that credential-bound owner; caller-controlled agent headers and deal payloads are correlation data, not authority. A valid non-owner receives not found for reservation or fulfillment access so identifiers do not reveal lifecycle state. The compatible single-key deployment is one principal, not an authorization bypass.
-
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
 ### Resource pools
 
-Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Fulfillment resolves the selected resource through an exact `(provider, resource_kind)` domain-adapter registration; sharing an infrastructure provider such as Ansible does not permit VM and bare-metal adapters to substitute for one another. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
+Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
 
 ## Shared vocabulary and identities
 
@@ -195,12 +193,11 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `fulfillment_id` | Durable post-acceptance fulfillment aggregate |
 | `settlement_resource_id` | Selected underlying supply resource |
 | `provisioned_resource_id` | One provider-created output; one fulfillment may create several |
+| `result_id` | One durable settlement/fulfillment result |
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
-| `pool_id` | Globally unique pool identity with explicit site ownership where required |
-
-Fulfillment results are read-time projections over the aggregate and its outputs; there is no durable result record or current `result_id` persistence boundary.
 
 `site_id` is owned at the storefront aggregation boundary and bound to a configured provisioning connection. Provisioning-local capacity persistence is already scoped by its database authority and does not duplicate that storefront-owned identity on every pool, resource, or reservation row. Counterparties cannot self-assert the routing identity used by the storefront.
+| `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
 Commercial agreement identity does not cross the generic provisioning boundary merely for correlation. Storefronts retain commercial context and translate it into fulfillment requirements. The capacity reservation is the generic physical-lifecycle identity.
 
@@ -240,7 +237,7 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 
 1. The storefront reads snapshots for listing and policy decisions.
 2. Accepted terms create a TTL soft hold where required.
-3. Settlement schedules and commits the accepted reservation at its persisted owning site before physical execution.
+3. Settlement commits or recreates the reservation before physical execution.
 4. Fulfillment runs against the committed reservation.
 5. Lease expiry or early termination invokes physical teardown before capacity release.
 
@@ -255,24 +252,14 @@ PhysicalSettlementScheduler.schedule_resource(...)
         ↓
 Capacity Settlement Assignment / SettlementResource
         ↓
-FulfillmentProvider.prepare_create(...)
+FulfillmentProvider.create(...)
         ↓
-Durable dispatch_pending command
-        ↓
-periodic claimed dispatch and recovery
-        ↓
-Provider status + zero or more Provisioned Resources
+Provider result + zero or more Provisioned Resources
         ↓
 status / teardown / durable results
 ```
 
-The storefront persists a restart-safe workflow before scheduling: trusted configured `site_id`, reservation identity, canonical schedule/begin requests, selected resource, provisioning fulfillment identity, remote state, and non-secret result generation. Every post-reservation call routes only to that site; URLs and credentials remain configuration, and provisioning `fulfillment_id` remains distinct from chain `fulfillment_uid`. The workflow worker resumes after restart and does not reread a result once its credential generation and buyer-facing access state are committed.
-
-`schedule_resource` validates and locks the reservation, reads candidates and enabled pools, selects and advances the fairness cursor, optionally rebinds the capacity debit, and creates the settlement assignment in one SQLite `BEGIN IMMEDIATE` commit/rollback boundary.
-
-Status and result are authenticated storefront-to-provisioner reads over durable state. Credential-bound ownership is retained from reservation through fulfillment; valid non-owners receive not found. Active VM result reads rotate credentials live, delete transient job credential material, and advance only the non-secret generation after successful delivery. The aggregate never stores raw credentials. Pull is the correctness path; reverse result push is not part of the current authority flow.
-
-Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Preparation snapshots a versioned command before acceptance commits; dispatch and recovery use only that snapshot. Periodic workers claim bounded batches under SQLite's single-writer boundary, commit the claim before provider calls, and use expiring leases plus bounded backoff to resume work after process or provider failure. Pull-based result reads project durable lifecycle/output state directly. Active credential issuance uses a separate expiring aggregate claim; the domain provider rotates credentials, consumes and deletes private transient job material, and returns it only in the authenticated response before the service advances the non-secret generation. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
+Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 
 Provider-specific dictionaries crossing domain or persistence boundaries use a versioned envelope with a non-empty `kind`, positive `schema_version`, and typed or explicitly validated payload. Readers reject unknown `(kind, schema_version)` pairs rather than guessing.
 
@@ -280,7 +267,7 @@ The current round-robin scheduling policy is deterministic for the same candidat
 
 ### Release
 
-Physical release is proof-driven. Lease expiry and explicit termination first resolve durable fulfillment ownership. Settlement-backed reservations start or resume provisioning-owned provider teardown and never run the legacy executor release path in parallel; only reservations outside fulfillment use a directly registered executor release hook. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
+Physical release is proof-driven. The lifecycle invokes the selected provider or executor teardown. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
 
 ## Deployment topology
 
@@ -340,6 +327,8 @@ Boundary changes require more than moved unit tests. Validation should cover:
 
 The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
 
+Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, retains marker-specific locked dependencies needed for offline universal resolution, copies the current tracked repository into a clean verification tree, removes selected project environments, and runs each selected project's actual `make test` target with network and Python downloads disabled before packaging the artifact. Project Makefiles must keep interpreter selection configurable so the review environment can use the wheelhouse's declared Python version.
+
 See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
 
 ## Capability documentation index
@@ -350,3 +339,8 @@ The canonical [capability documentation index](../../openspec/specs/README.md) l
 
 Database-concurrency tests use independent sessions and connections against the same database, establish transaction ownership through explicit synchronization at a semantic persistence boundary, and assert final durable state. Tests must not depend on uncontrolled thread races, scheduler timing, or elapsed-time ordering. Synchronization waits are bounded so lock regressions fail rather than hang. Test-only subclasses or adapters may pause a narrow persistence interface after a meaningful write; production code must not expose test-only hooks.
 
+
+
+### Durable fulfillment acceptance
+
+The fulfillment kit owns provider-neutral acceptance orchestration. It loads an already-selected settlement resource, freezes provider-specific prepared input and pool configuration in one transaction, dispatches after commit, and acknowledges provider metadata in a second transaction. Domain adapters own provider-specific payloads and metadata interpretation. Provisioning composition supplies the database unit of work and concrete providers; storefront code does not import provider-specific types.

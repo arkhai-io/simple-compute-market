@@ -1,4 +1,4 @@
-"""Negotiation acceptance places a durable, site-bound capacity hold."""
+"""Two-phase reserve: acceptance places the hold, settlement commits it."""
 
 from __future__ import annotations
 
@@ -8,6 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
+from market_storefront.services.vm_fulfillment_service import (
+    _commit_capacity_hold,
+    _commit_fresh_reservation,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import _place_capacity_hold
 
@@ -51,6 +55,112 @@ def _hold(**overrides) -> dict:
     }
     base.update(overrides)
     return base
+
+
+# ---------------------------------------------------------------------------
+# Settlement half: commit the hold before provisioning
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_valid_hold_commits_before_provisioning():
+    capacity = FakeCapacity()
+    captured, stage_event = _events()
+
+    reserved = await _commit_capacity_hold(
+        capacity=capacity,
+        held_reservation=_hold(),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    )
+
+    assert reserved["capacity_reservation_id"] == "alloc-1"
+    assert capacity.reserve_calls == []  # no fresh reserve raced
+    commit = capacity.commit_calls[0]
+    assert commit["capacity_reservation_id"] == "alloc-1"
+    assert commit["idempotency_ref"] == "0xesc"
+    assert captured[0][1] == "capacity_hold_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commits_before_provisioning():
+    capacity = FakeCapacity()
+    captured, stage_event = _events()
+
+    await _commit_fresh_reservation(
+        capacity=capacity,
+        reserved=_hold(),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    )
+
+    commit = capacity.commit_calls[0]
+    assert commit["capacity_reservation_id"] == "alloc-1"
+    assert commit["resource_id"] == "res-1"
+    assert commit["idempotency_ref"] == "0xesc"
+    assert captured[0][1] == "capacity_reservation_committed"
+
+
+@pytest.mark.asyncio
+async def test_fresh_reservation_commit_failure_is_not_ignored():
+    capacity = FakeCapacity(commit_error=RuntimeError("409 conflict"))
+    _, stage_event = _events()
+
+    with pytest.raises(RuntimeError, match="409 conflict"):
+        await _commit_fresh_reservation(
+            capacity=capacity,
+            reserved=_hold(),
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
+
+
+@pytest.mark.asyncio
+async def test_lapsed_hold_falls_back_to_fresh_reserve():
+    capacity = FakeCapacity()
+    _, stage_event = _events()
+
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    assert await _commit_capacity_hold(
+        capacity=capacity,
+        held_reservation=_hold(hold_expires_at=past),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    ) is None
+    assert capacity.commit_calls == []
+
+
+@pytest.mark.asyncio
+async def test_ledger_refusal_falls_back_to_fresh_reserve():
+    """The ledger may have swept the hold between our check and the
+    commit — a refused commit means reserve fresh, not fail the deal."""
+    capacity = FakeCapacity(commit_error=RuntimeError("409 conflict"))
+    _, stage_event = _events()
+
+    assert await _commit_capacity_hold(
+        capacity=capacity,
+        held_reservation=_hold(),
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_no_hold_means_no_commit():
+    capacity = FakeCapacity()
+    _, stage_event = _events()
+    assert await _commit_capacity_hold(
+        capacity=capacity,
+        held_reservation=None,
+        escrow_uid="0xesc",
+        duration_seconds=3600,
+        stage_event=stage_event,
+    ) is None
+    assert capacity.commit_calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ from compute_provisioning import CredentialEnvelope, ResultEnvelope
 from market_fulfillment import (
     FulfillmentProvider,
     FulfillmentResult,
+    VersionedEnvelope,
     ProviderNotFoundError,
     ProviderOperationState,
     ProviderStatus,
@@ -17,10 +18,6 @@ from compute_provisioning_service import (
     ExecutorAdapterContribution,
     compose_adapter_bundles,
 )
-from bare_metal_provisioning_adapter.bundle import (
-    build_bare_metal_adapter_bundle,
-)
-from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 
 
 @dataclass
@@ -57,14 +54,14 @@ class FakeReleaseExecutor:
 
 
 class FakeProvider(FulfillmentProvider):
-    def prepare_create(self, capacity_reservation_id, fulfillment_request, resource):
-        raise NotImplementedError
+    def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config):
+        return VersionedEnvelope(kind="fake.create", schema_version=1, payload={})
 
     async def dispatch_create(self, prepared):
         return FulfillmentResult(provider_metadata={})
 
-    def prepare_teardown(self, capacity_reservation_id, resource, provider_metadata):
-        raise NotImplementedError
+    def prepare_teardown(self, settlement_result, pool_config):
+        return VersionedEnvelope(kind="fake.teardown", schema_version=1, payload={})
 
     async def dispatch_teardown(self, prepared):
         return FulfillmentResult(provider_metadata={})
@@ -79,54 +76,6 @@ def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
         action_kinds=frozenset(actions),
         release_executor=FakeReleaseExecutor(),
     )
-
-
-def test_vm_bundle_scopes_ansible_provider_to_compute_gpu():
-    provider = FakeProvider()
-    bundle = build_vm_adapter_bundle(
-        compute_adapter=FakeAdapter("vm"),
-        fulfillment_provider=provider,
-    )
-
-    assert bundle.fulfillment_providers == {
-        ("ansible", "compute.gpu"): provider,
-    }
-
-
-def test_bare_metal_bundle_scopes_ansible_provider_to_bare_metal():
-    provider = FakeProvider()
-    bundle = build_bare_metal_adapter_bundle(
-        compute_adapter=FakeAdapter("bare_metal"),
-        release_executor=FakeReleaseExecutor(),
-        fulfillment_provider=provider,
-    )
-
-    assert bundle.fulfillment_providers == {
-        ("ansible", "bare_metal"): provider,
-    }
-
-
-def test_vm_and_bare_metal_ansible_routes_coexist_without_fallback():
-    vm_provider = FakeProvider()
-    bare_metal_provider = FakeProvider()
-    composed = compose_adapter_bundles(
-        [
-            build_vm_adapter_bundle(
-                compute_adapter=FakeAdapter("vm"),
-                fulfillment_provider=vm_provider,
-            ),
-            build_bare_metal_adapter_bundle(
-                compute_adapter=FakeAdapter("bare_metal"),
-                release_executor=FakeReleaseExecutor(),
-                fulfillment_provider=bare_metal_provider,
-            ),
-        ]
-    )
-
-    assert composed.provider_registry.require("ansible", "compute.gpu") is vm_provider
-    assert composed.provider_registry.require("ansible", "bare_metal") is bare_metal_provider
-    with pytest.raises(ProviderNotFoundError):
-        composed.provider_registry.require("ansible", "other")
 
 
 def test_composes_executor_and_provider_namespaces_independently():
@@ -187,68 +136,6 @@ def test_duplicate_provider_identifies_both_bundles_independently_of_executors()
                     executors=(contribution("bare_metal", "grant_access"),),
                     fulfillment_providers={"ansible": provider},
                 ),
-            ]
-        )
-
-
-def test_same_provider_name_may_be_scoped_to_different_resource_kinds():
-    vm_provider = FakeProvider()
-    bare_metal_provider = FakeProvider()
-    composed = compose_adapter_bundles(
-        [
-            ExecutorAdapterBundle(
-                name="vm",
-                executors=(contribution("vm", "create"),),
-                fulfillment_providers={
-                    ("ansible", "compute.gpu"): vm_provider,
-                },
-            ),
-            ExecutorAdapterBundle(
-                name="bare-metal",
-                executors=(contribution("bare_metal", "grant_access"),),
-                fulfillment_providers={
-                    ("ansible", "bare_metal"): bare_metal_provider,
-                },
-            ),
-        ]
-    )
-
-    assert composed.provider_registry.require("ansible", "compute.gpu") is vm_provider
-    assert composed.provider_registry.require("ansible", "bare_metal") is bare_metal_provider
-
-
-def test_duplicate_scoped_provider_identifies_both_bundles():
-    provider = FakeProvider()
-    with pytest.raises(
-        ValueError,
-        match="duplicate fulfillment provider .*ansible.*compute.gpu.*'first'.*'second'",
-    ):
-        compose_adapter_bundles(
-            [
-                ExecutorAdapterBundle(
-                    name="first",
-                    executors=(contribution("vm", "create"),),
-                    fulfillment_providers={("ansible", "compute.gpu"): provider},
-                ),
-                ExecutorAdapterBundle(
-                    name="second",
-                    executors=(contribution("bare_metal", "grant_access"),),
-                    fulfillment_providers={("ansible", "compute.gpu"): provider},
-                ),
-            ]
-        )
-
-
-@pytest.mark.parametrize("key", [("", "compute.gpu"), ("ansible", "")])
-def test_empty_scoped_provider_identity_is_rejected(key):
-    with pytest.raises(ValueError, match="empty provider or resource-kind identity"):
-        compose_adapter_bundles(
-            [
-                ExecutorAdapterBundle(
-                    name="invalid",
-                    executors=(contribution("vm", "create"),),
-                    fulfillment_providers={key: FakeProvider()},
-                )
             ]
         )
 

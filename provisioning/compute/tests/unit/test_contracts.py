@@ -10,9 +10,6 @@ from compute_provisioning import (
     ExecutorActionEnvelope,
     ExecutorAdapterRegistry,
     FunctionalExecutorAdapter,
-    FulfillmentBeginRequest,
-    FulfillmentRequestEnvelope,
-    FulfillmentScheduleRequest,
     IdempotentLifecycleEventSink,
     LifecycleEvent,
     ResultEnvelope,
@@ -82,121 +79,6 @@ async def test_event_sink_deduplicates_only_after_successful_delivery():
 
 async def _record(values, value):
     values.append(value)
-
-
-@pytest.mark.asyncio
-async def test_client_maps_versioned_schedule_endpoint():
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/fulfillment/schedules"
-        payload = __import__("json").loads(request.content)
-        assert payload["contract_version"] == COMPUTE_PROVISIONING_CONTRACT_VERSION
-        return httpx.Response(
-            200,
-            json={
-                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                "capacity_reservation_id": payload["capacity_reservation_id"],
-                "settlement_resource_id": "resource-1",
-                "pool_id": "pool-1",
-                "resource_kind": "bare_metal",
-                "provider": "ansible",
-                "attributes": {},
-            },
-        )
-
-    async with ComputeProvisioningClient(
-        "http://provisioner", transport=httpx.MockTransport(handler)
-    ) as client:
-        selected = await client.schedule_resource(
-            FulfillmentScheduleRequest(
-                capacity_reservation_id="reservation-1",
-                market="bare_metal",
-            ),
-        )
-    assert selected.settlement_resource_id == "resource-1"
-
-
-@pytest.mark.asyncio
-async def test_client_maps_fulfillment_acceptance_and_dry_run_endpoints():
-    paths = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        paths.append(request.url.path)
-        if request.method == "GET":
-            payload = {
-                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                "fulfillment_id": "fulfillment-1",
-                "capacity_reservation_id": "reservation-1",
-                "state": "dispatching",
-            }
-            if request.url.path.endswith("/result"):
-                payload.update({
-                    "provisioned_resources": [],
-                    "credential_generation": 0,
-                    "credentials": [],
-                })
-            return httpx.Response(200, json=payload)
-        if request.url.path.endswith("/teardown"):
-            return httpx.Response(
-                200,
-                json={
-                    "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                    "capacity_reservation_id": "reservation-1",
-                    "fulfillment_id": "fulfillment-1",
-                    "state": "tearing_down",
-                },
-            )
-        payload = __import__("json").loads(request.content)
-        if request.url.path.endswith("/dry-run"):
-            return httpx.Response(
-                200,
-                json={
-                    "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                    "valid": True,
-                    "issues": [],
-                },
-            )
-        return httpx.Response(
-            200,
-            json={
-                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
-                "capacity_reservation_id": payload["capacity_reservation_id"],
-                "fulfillment_id": "fulfillment-1",
-                "state": "dispatch_pending",
-            },
-        )
-
-    request = FulfillmentBeginRequest(
-        capacity_reservation_id="reservation-1",
-        market="bare_metal",
-        fulfillment_request=FulfillmentRequestEnvelope(
-            kind="bare_metal.v1",
-            schema_version=1,
-            payload={"ssh_public_key": "ssh-ed25519 AAAA"},
-        ),
-    )
-    async with ComputeProvisioningClient(
-        "http://provisioner", transport=httpx.MockTransport(handler)
-    ) as client:
-        accepted = await client.begin_fulfillment(request)
-        dry_run = await client.dry_run_fulfillment(request)
-        status = await client.get_fulfillment_status(accepted.fulfillment_id)
-        result = await client.get_fulfillment_result(accepted.fulfillment_id)
-        teardown = await client.begin_fulfillment_teardown(
-            accepted.fulfillment_id
-        )
-
-    assert accepted.fulfillment_id == "fulfillment-1"
-    assert dry_run.valid
-    assert status.state == "dispatching"
-    assert result.credential_generation == 0
-    assert teardown.state == "tearing_down"
-    assert paths == [
-        "/api/v1/fulfillments",
-        "/api/v1/fulfillments/dry-run",
-        "/api/v1/fulfillments/fulfillment-1/status",
-        "/api/v1/fulfillments/fulfillment-1/result",
-        "/api/v1/fulfillments/fulfillment-1/teardown",
-    ]
 
 
 @pytest.mark.asyncio

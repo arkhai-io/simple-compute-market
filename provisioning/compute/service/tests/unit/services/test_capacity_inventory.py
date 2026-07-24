@@ -58,7 +58,7 @@ def test_bare_metal_view_uses_explicit_identities_and_same_generation_availabili
     resource = {
         "resource_id": "physical-resource-1",
         "pool_id": "gpu-pool",
-        "resource_type": "bare_metal",
+        "resource_type": "compute.bare-metal",
         "capacity": {"gpu_count": 8, "ram_gb": 512},
         "available": {"gpu_count": 8, "ram_gb": 512},
         "enabled": True,

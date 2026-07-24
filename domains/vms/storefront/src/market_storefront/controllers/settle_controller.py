@@ -58,15 +58,6 @@ class SettleController:
         )
 
         buyer_auth._verify(request, "settle_escrow", escrow_uid, body.buyer_address)
-        thread = await self._db.load_negotiation_thread_row(
-            negotiation_id=body.negotiation_id
-        )
-        if (
-            not thread
-            or not thread.get("buyer")
-            or str(thread["buyer"]).lower() != body.buyer_address.lower()
-        ):
-            raise HTTPException(status_code=404, detail="Settlement not found")
 
         alkahest = _container.get_alkahest_client(body.chain_name)
         if alkahest is None:
@@ -117,15 +108,6 @@ class SettleController:
         job = await self._db.load_escrow(escrow_uid=escrow_uid)
         if not job:
             raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
-        thread = await self._db.load_negotiation_thread_row(
-            negotiation_id=job["negotiation_id"]
-        )
-        if (
-            not thread
-            or not thread.get("buyer")
-            or str(thread["buyer"]).lower() != buyer_address.lower()
-        ):
-            raise HTTPException(status_code=404, detail="Settlement not found")
         return SettleStatusResponse(**serialize_settlement_job(job))
 
 

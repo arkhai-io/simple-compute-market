@@ -26,7 +26,6 @@ from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
     BareMetalSettleStatusResponse,
-    TrustedSitesResponse,
 )
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
@@ -262,17 +261,6 @@ async def system_status(
     runtime = _runtime(request)
     _admin(runtime, x_admin_key)
     return HealthResponse.model_validate(await runtime.health())
-
-
-@router.get("/api/v1/system/sites", response_model=TrustedSitesResponse)
-async def trusted_sites(
-    request: Request,
-    x_admin_key: Annotated[str | None, Header()] = None,
-) -> TrustedSitesResponse:
-    runtime = _runtime(request)
-    _admin(runtime, x_admin_key)
-    sites = list(runtime.sites.diagnostic())
-    return TrustedSitesResponse(sites=sites, count=len(sites))
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)

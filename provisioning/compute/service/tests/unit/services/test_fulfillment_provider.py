@@ -18,13 +18,9 @@ def test_provider_operation_state_values():
     }
 
 
-def test_fulfillment_result_carries_metadata_and_domain_output_references():
-    result = FulfillmentResult(
-        provider_metadata={"job_id": "abc"},
-        provisioned_resource_refs=("domain-resource-1",),
-    )
+def test_fulfillment_result_carries_only_provider_metadata():
+    result = FulfillmentResult(provider_metadata={"job_id": "abc"})
     assert result.provider_metadata == {"job_id": "abc"}
-    assert result.provisioned_resource_refs == ("domain-resource-1",)
     assert not hasattr(result, "credentials")
 
 

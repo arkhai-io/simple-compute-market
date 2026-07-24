@@ -229,24 +229,3 @@ async def test_site_deltas_reach_aggregate_subscribers_tagged():
     assert (seen[0].kind, seen[0].version, seen[0].resource_id) == (
         "reserved", 7, "res-b",
     )
-
-
-def test_most_available_ranks_only_resources_matching_the_claim():
-    ordered = most_available(
-        ["wrong-large", "matching-small"],
-        {
-            "wrong-large": [{
-                "resource_id": "wrong",
-                "available_units": 100,
-                "attributes": {"region": "west"},
-            }],
-            "matching-small": [{
-                "resource_id": "matching",
-                "available_units": 2,
-                "attributes": {"region": "east"},
-            }],
-        },
-        claim={"region": "east", "gpu_count": 1},
-    )
-
-    assert ordered == ["matching-small", "wrong-large"]

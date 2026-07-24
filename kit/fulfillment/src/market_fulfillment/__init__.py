@@ -7,11 +7,6 @@ provider-specific translation and infrastructure behavior.
 See ``openspec/specs/fulfillment/spec.md``.
 """
 
-from .backfill import (
-    LegacyFulfillmentBackfillCompiler,
-    LegacyFulfillmentBackfillDraft,
-    LegacyFulfillmentBackfillInput,
-)
 from .db import (
     Base as FulfillmentBase,
     ProvisionedResource,
@@ -34,21 +29,24 @@ from .provider import (
     FulfillmentProvider,
     FulfillmentRequestInvalidError,
     FulfillmentResult,
+    SettlementResult,
     FulfillmentStatusFailedError,
-    LiveCredential,
-    LiveCredentialResult,
     FulfillmentTeardownFailedError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
     ProviderConfigInvalidError,
     ProviderNotFoundError,
     ProviderOperationState,
-    ProviderRegistrationKey,
     ProviderRegistry,
     ProviderStatus,
     ProviderUnavailableError,
 )
 from .repository import SettlementRepository, begin_sqlite_write_transaction
+from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator
+from .fulfillment_persistence import (
+    FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
+    SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
+)
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduler import MissingResourceKindError, PhysicalSettlementScheduler
 from .scheduling_persistence import (
@@ -75,6 +73,13 @@ __all__ = [
     "CapacityReservationExpiredError",
     "begin_sqlite_write_transaction",
     "FulfillmentBase",
+    "SqlAlchemyFulfillmentUnitOfWork",
+    "SqlAlchemyFulfillmentTransaction",
+    "FulfillmentUnitOfWork",
+    "FulfillmentTransaction",
+    "FulfillmentAcceptanceDecision",
+    "FulfillmentOrchestrator",
+    "FulfillmentAcceptance",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
     "FulfillmentError",
@@ -82,11 +87,6 @@ __all__ = [
     "FulfillmentRequestInvalidError",
     "FulfillmentResult",
     "FulfillmentStatusFailedError",
-    "LiveCredential",
-    "LegacyFulfillmentBackfillCompiler",
-    "LegacyFulfillmentBackfillDraft",
-    "LegacyFulfillmentBackfillInput",
-    "LiveCredentialResult",
     "FulfillmentTeardownFailedError",
     "FulfillmentValidationIssue",
     "FulfillmentValidationResult",
@@ -94,7 +94,6 @@ __all__ = [
     "ProviderConfigInvalidError",
     "ProviderNotFoundError",
     "ProviderOperationState",
-    "ProviderRegistrationKey",
     "ProviderRegistry",
     "ProviderStatus",
     "ProviderUnavailableError",
@@ -115,6 +114,7 @@ __all__ = [
     "SettlementEntityNotFoundError",
     "SettlementRecord",
     "SettlementRecordState",
+    "SettlementResult",
     "SettlementRepository",
     "SettlementRequestMismatchError",
     "SettlementRequirement",

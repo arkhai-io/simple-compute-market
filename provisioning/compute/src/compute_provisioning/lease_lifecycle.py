@@ -18,12 +18,6 @@ logger = logging.getLogger(__name__)
 CapacityReleasedNotifier = Callable[[dict[str, Any]], Awaitable[bool] | bool]
 ParseUtc = Callable[[Any], datetime | None]
 
-class FulfillmentReleasePort(Protocol):
-    """Route settlement-backed reservations into durable teardown."""
-
-    async def ensure_teardown(self, capacity_reservation_id: str) -> bool: ...
-
-
 class ReleaseJobPort(Protocol):
     """Read executor job outcomes without importing a concrete job runner."""
 
@@ -88,7 +82,6 @@ class LeaseLifecycleService:
         release_jobs: ReleaseJobPort | None = None,
         default_executor_kind: str | None = None,
         capacity_released_notifier: CapacityReleasedNotifier | None = None,
-        fulfillment_release: FulfillmentReleasePort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
     ) -> None:
         self._settings = settings
@@ -97,7 +90,6 @@ class LeaseLifecycleService:
         self._release_jobs = release_jobs
         self._default_executor_kind = default_executor_kind
         self._capacity_released_notifier = capacity_released_notifier
-        self._fulfillment_release = fulfillment_release
         self._parse_utc = parse_utc_value
         self._paused = False
         self._resume_event = asyncio.Event()
@@ -198,8 +190,6 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only leased reservations can be terminated.",
                 state=state,
             )
-        if await self._ensure_fulfillment_teardown(lease_id):
-            return reservation
         job_id = await self._run_release_delegate(reservation)
         if not job_id:
             raise InvalidLeaseStateError(
@@ -235,8 +225,6 @@ class LeaseLifecycleService:
                 f"Lease '{lease_id}' is {state}; only release_failed leases can retry release.",
                 state=state,
             )
-        if await self._ensure_fulfillment_teardown(lease_id):
-            return reservation
         job_id = await self._run_release_delegate(reservation)
         if not job_id:
             raise InvalidLeaseStateError(
@@ -295,11 +283,6 @@ class LeaseLifecycleService:
 
         for reservation in self._site_authority.list_time_bounded_reservations_due(now):
             try:
-                if await self._ensure_fulfillment_teardown(
-                    str(reservation["capacity_reservation_id"])
-                ):
-                    checked += 1
-                    continue
                 job_id = await self._run_release_delegate(reservation)
                 if job_id is not None:
                     self._site_authority.begin_release(
@@ -333,11 +316,6 @@ class LeaseLifecycleService:
 
         for reservation in self._site_authority.list_reservations(state="releasing"):
             try:
-                if await self._ensure_fulfillment_teardown(
-                    str(reservation["capacity_reservation_id"])
-                ):
-                    skipped += 1
-                    continue
                 outcome = await self._process_releasing_reservation(
                     reservation, now, grace_seconds,
                 )
@@ -365,15 +343,6 @@ class LeaseLifecycleService:
             "release_failed": release_failed,
             "skipped": skipped,
         }
-
-    async def _ensure_fulfillment_teardown(
-        self, capacity_reservation_id: str
-    ) -> bool:
-        if self._fulfillment_release is None:
-            return False
-        return await self._fulfillment_release.ensure_teardown(
-            capacity_reservation_id
-        )
 
     async def _run_release_delegate(self, reservation: dict[str, Any]) -> str | None:
         return await self._executor_release.submit_release(reservation)

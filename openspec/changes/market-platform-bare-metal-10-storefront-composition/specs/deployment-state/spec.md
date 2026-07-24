@@ -18,13 +18,3 @@ The bare-metal storefront MUST be buildable, configurable, migratable, and deplo
 
 - **WHEN** the bare-metal storefront distribution is installed from its built wheel or image
 - **THEN** it starts without editable sibling-package paths and includes the declared domain and shared-role runtime dependencies
-
-#### Scenario: Trusted site configuration is invalid
-
-- **WHEN** a configured site has a duplicate or malformed stable identity, unsafe authority URL, missing credential, or unknown field
-- **THEN** storefront startup fails rather than dropping, guessing, or merging that binding
-
-#### Scenario: Operator inspects site configuration
-
-- **WHEN** an authenticated operator requests site-binding diagnostics
-- **THEN** the response identifies configured site IDs and configuration presence without returning authority URLs or credential values

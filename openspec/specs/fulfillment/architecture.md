@@ -22,7 +22,7 @@ Scheduling starts from an admitted Capacity Reservation. It enumerates enabled p
 
 An explicit-resource request is an additional constraint, not an authorization bypass. The named resource must still exist, belong to an eligible enabled pool, and satisfy every requested dimension. Deterministic candidate ordering and policy state make the current two-level round-robin policy reproducible.
 
-Selection, any capacity rebind, and the fairness cursor advance share one database transaction. Retrying an equivalent request returns the durable assignment; a conflicting request is rejected rather than silently moving the reservation.
+Selection creates a binding. Retrying an equivalent request returns the existing assignment where the process-local lifecycle can prove equivalence; a conflicting request is rejected rather than silently moving the reservation.
 
 ## Provider boundary
 
@@ -36,16 +36,21 @@ Opaque identifiers keep routing and commercial meaning out of shared carriers. `
 
 Provider-specific payloads cross persistence or package boundaries in versioned envelopes. A non-empty kind and positive schema version select an explicit validator. Unknown versions fail rather than inheriting today's provider assumptions.
 
-## Durable aggregate and lifecycle convergence
+## Current persistence limit
 
-The provisioning database owns one Settlement Record aggregate per Capacity Reservation, its provisioned-resource children, immutable versioned prepared operations, and durable fairness cursors. SQLite scheduling reserves the single writer slot before reading mutable scheduling state; databases with row-lock support lock the reservation. This makes capacity reassignment, assignment persistence, and cursor advancement one rollback-safe unit.
+Scheduler assignments, policy cursors, and generic fulfillment registry entries are process-local. The architecture does not claim restart-safe or distributed assignment idempotency, cross-replica fairness, or a durable generic Settlement Record aggregate. Those guarantees require explicit persistence and concurrency design.
 
-The public lifecycle is credential-owned and versioned: schedule and dry-run remain separate from acceptance; claimed workers exclusively dispatch immutable create/teardown commands and converge status without holding database locks during provider calls. Pull-based status and result reads reconstruct durable state on demand. VM credentials rotate at result-read time, transient credential rows are consumed, and only a monotonic generation remains durable.
-
-Storefronts persist the trusted owning site and immutable lifecycle requests before remote calls. Their reconciler resumes after restart and never broadcasts after reservation. Whole-fulfillment teardown remains provisioning-owned and releases physical capacity only after provider success. Authenticated result push is not a current correctness path; pull is authoritative.
+The implemented baseline is deterministic two-level round-robin with multidimensional eligibility. More advanced fairness policy is not implied by the request or carrier abstractions.
 
 ## Related contracts
 
 - [Site capacity](../site-capacity/spec.md)
 - [Resource-pool management](../resource-pool-management/spec.md)
 - [Physical provisioning](../physical-provisioning/spec.md)
+
+
+## Fulfillment acceptance and dispatch acknowledgement
+
+Fulfillment acceptance freezes provider input before side effects. One transaction serializes acceptance, loads the selected resource and provider configuration, prepares the provider-specific envelope, and persists it with `dispatch_pending`. Dispatch happens after commit. A second short transaction records normalized provider metadata and advances the aggregate to `dispatching`. The acknowledgement gap is intentional: recovery redispatches the immutable envelope with the same executor idempotency key, allowing the provider to return the original job.
+
+Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.

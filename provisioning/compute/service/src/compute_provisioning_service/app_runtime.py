@@ -69,9 +69,6 @@ def resolve_request_path_services() -> None:
         container.physical_settlement_scheduler()
     )
     _container_module.resolved_fulfillment_service = container.fulfillment_service()
-    _container_module.resolved_fulfillment_recovery_service = (
-        container.fulfillment_recovery_service()
-    )
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )
@@ -220,17 +217,6 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             ),
             "Retry scheduler started (interval=%ds)",
             (int(retry_poll_interval),),
-        )
-    )
-
-    fulfillment_recovery = _container_module.resolved_fulfillment_recovery_service
-    if fulfillment_recovery is None:
-        raise RuntimeError("fulfillment recovery service is not resolved")
-    tasks.append(
-        ComputeProvisioningBackgroundTask(
-            "fulfillment-recovery",
-            fulfillment_recovery.run,
-            "Fulfillment recovery worker started",
         )
     )
 

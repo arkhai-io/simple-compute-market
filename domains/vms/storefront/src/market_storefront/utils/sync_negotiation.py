@@ -251,7 +251,6 @@ async def _place_capacity_hold(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
         capacity_reservation_id=str(held["capacity_reservation_id"]),
-        site_id=str(held["site"]) if held.get("site") else None,
         payload=held,
         expires_at=held.get("hold_expires_at"),
     )

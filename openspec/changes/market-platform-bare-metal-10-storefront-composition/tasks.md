@@ -20,14 +20,14 @@
 
 ## 3. Trusted multi-site composition
 
-- [x] 3.1 Add bare-metal storefront configuration for stable `site_id` to provisioning authority URL and credential bindings, including startup validation and redacted diagnostics.
-- [x] 3.2 Reuse or extract schema-opaque aggregate capacity/projection wiring so the bare-metal storefront can load, poll, reserve, and retain independent generations from several sites.
-- [x] 3.3 Persist the selected trusted site with agreement lifecycle correlation and reject buyer-controlled URL, credential, or conflicting site assertions as routing authority.
-- [x] 3.4 Add focused tests for placement across two sites, selected-site write routing after restart, projection staleness, and conflicting untrusted routing data.
+- [ ] 3.1 Add bare-metal storefront configuration for stable `site_id` to provisioning authority URL and credential bindings, including startup validation and redacted diagnostics.
+- [ ] 3.2 Reuse or extract schema-opaque aggregate capacity/projection wiring so the bare-metal storefront can load, poll, reserve, and retain independent generations from several sites.
+- [ ] 3.3 Persist the selected trusted site with agreement lifecycle correlation and reject buyer-controlled URL, credential, or conflicting site assertions as routing authority.
+- [ ] 3.4 Add focused tests for placement across two sites, selected-site write routing after restart, projection staleness, and conflicting untrusted routing data.
 
 ## 4. POOLS-7 fulfillment integration
 
-- [ ] 4.1 Reconcile this design against the accepted POOLS-7 public scheduling, fulfillment, status/result, and teardown contracts before production wiring; do not copy its repositories or recovery workers into the storefront. **Unblocked: POOLS-7 is complete and archived; consume its accepted public contracts as recorded in `design.md`, “POOLS-7 completion reconciliation — 2026-07-24.”**
+- [ ] 4.1 Reconcile this design against the accepted POOLS-7 public scheduling, fulfillment, status/result, and teardown contracts before production wiring; do not copy its repositories or recovery workers into the storefront.
 - [ ] 4.2 Translate accepted `BareMetalMaterialization` into generic Physical Settlement requirements and schedule at the selected provisioning site.
 - [ ] 4.3 Begin fulfillment through the recorded bare-metal executor identity and persist only the returned reservation, settlement, fulfillment, receipt, and result references needed for recovery.
 - [ ] 4.4 Poll normalized fulfillment status/result and expose `BareMetalReceipt` and `BareMetalAccessResult` without requiring reverse push delivery.

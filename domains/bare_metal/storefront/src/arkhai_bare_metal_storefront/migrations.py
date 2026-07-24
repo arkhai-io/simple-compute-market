@@ -77,27 +77,6 @@ def _add_derived_publication_tracking(conn: sqlite3.Connection) -> None:
     )
 
 
-def _add_agreement_site_routing(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE bare_metal_agreement_site_routing (
-          negotiation_id TEXT PRIMARY KEY,
-          site_id TEXT NOT NULL,
-          capacity_reservation_id TEXT NOT NULL UNIQUE,
-          reserved_resource_id TEXT NOT NULL,
-          created_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
-          updated_at TEXT NOT NULL
-            DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """,
-    )
-    conn.execute(
-        "CREATE INDEX idx_bare_metal_agreement_site "
-        "ON bare_metal_agreement_site_routing(site_id)",
-    )
-
-
 def _add_operator_state(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -127,9 +106,5 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0003-operator-state",
         apply=_add_operator_state,
-    ),
-    Migration(
-        id="bare-metal-storefront-0004-agreement-site-routing",
-        apply=_add_agreement_site_routing,
     ),
 )

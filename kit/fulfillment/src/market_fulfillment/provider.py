@@ -3,9 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, TYPE_CHECKING
+from .envelopes import VersionedEnvelope
 if TYPE_CHECKING:
-    from .envelopes import VersionedEnvelope
     from .settlement_types import SettlementResource
 
 class ProviderOperationState(str, Enum):
@@ -14,25 +14,19 @@ class ProviderOperationState(str, Enum):
 @dataclass(frozen=True)
 class FulfillmentResult:
     provider_metadata: dict[str, Any]
-    provisioned_resource_refs: tuple[str, ...] = ()
+
+@dataclass(frozen=True)
+class SettlementResult:
+    capacity_reservation_id: str
+    fulfillment_id: str
+    resource: 'SettlementResource'
+    provisioned_resources: tuple[dict[str, Any], ...]
+    provider_metadata: dict[str, Any]
 
 @dataclass(frozen=True)
 class ProviderStatus:
     state: ProviderOperationState
     detail: str | None = None
-
-
-@dataclass(frozen=True)
-class LiveCredential:
-    kind: str
-    schema_version: int
-    payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class LiveCredentialResult:
-    credentials: tuple[LiveCredential, ...] = ()
-    rotated: bool = False
 
 @dataclass(frozen=True)
 class FulfillmentValidationIssue:
@@ -48,55 +42,16 @@ class FulfillmentValidationResult:
         return not self.issues
 
 class FulfillmentProvider(ABC):
-    """Prepare immutable commands before commit and dispatch them afterward."""
-
     @abstractmethod
-    def prepare_create(
-        self,
-        capacity_reservation_id: str,
-        fulfillment_request: "VersionedEnvelope",
-        resource: "SettlementResource",
-    ) -> "VersionedEnvelope": ...
-
+    def prepare_create(self, *, capacity_reservation_id:str, request: VersionedEnvelope[Any], resource:'SettlementResource', pool_config:dict[str,Any]) -> VersionedEnvelope[Any]: ...
     @abstractmethod
-    async def dispatch_create(
-        self,
-        prepared: "VersionedEnvelope",
-    ) -> FulfillmentResult: ...
-
+    async def dispatch_create(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
     @abstractmethod
-    def prepare_teardown(
-        self,
-        capacity_reservation_id: str,
-        resource: "SettlementResource",
-        provider_metadata: dict[str, Any],
-    ) -> "VersionedEnvelope": ...
-
+    def prepare_teardown(self, settlement_result:SettlementResult, pool_config:dict[str,Any]) -> VersionedEnvelope[Any]: ...
     @abstractmethod
-    async def dispatch_teardown(
-        self,
-        prepared: "VersionedEnvelope",
-    ) -> FulfillmentResult: ...
-
+    async def dispatch_teardown(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
     @abstractmethod
-    async def get_status(
-        self,
-        capacity_reservation_id: str,
-        resource: "SettlementResource",
-        provider_metadata: dict[str, Any],
-    ) -> ProviderStatus: ...
-
-    async def get_live_credentials(
-        self,
-        capacity_reservation_id: str,
-        resource: "SettlementResource",
-        provider_metadata: dict[str, Any],
-        *,
-        credential_generation: int,
-    ) -> LiveCredentialResult:
-        """Return ephemeral credentials; providers without issued secrets opt out."""
-        del capacity_reservation_id, resource, provider_metadata, credential_generation
-        return LiveCredentialResult()
+    async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
 
 class FulfillmentError(Exception): pass
 class ProviderNotFoundError(FulfillmentError): pass
@@ -108,41 +63,8 @@ class FulfillmentStatusFailedError(FulfillmentError): pass
 class FulfillmentTeardownFailedError(FulfillmentError): pass
 class FulfillmentRequestInvalidError(FulfillmentError): pass
 
-ProviderRegistrationKey: TypeAlias = str | tuple[str, str]
-
-
 class ProviderRegistry:
-    """Resolve domain providers by infrastructure mechanism and resource kind.
-
-    Provider-only registrations remain as an explicit compatibility fallback.
-    A scoped registration is never inferred for a provider-only lookup or for a
-    different resource kind.
-    """
-
-    def __init__(
-        self,
-        providers: dict[ProviderRegistrationKey, FulfillmentProvider],
-    ) -> None:
-        self._providers = dict(providers)
-
-    def require(
-        self,
-        provider: str,
-        resource_kind: str | None = None,
-    ) -> FulfillmentProvider:
-        if resource_kind is not None:
-            scoped = self._providers.get((provider, resource_kind))
-            if scoped is not None:
-                return scoped
-        legacy = self._providers.get(provider)
-        if legacy is not None:
-            return legacy
-        scope = (
-            f", resource_kind={resource_kind!r}"
-            if resource_kind is not None
-            else ""
-        )
-        raise ProviderNotFoundError(
-            "No FulfillmentProvider registered for "
-            f"provider={provider!r}{scope}"
-        )
+    def __init__(self, providers:dict[str,FulfillmentProvider]): self._providers=dict(providers)
+    def require(self, provider:str)->FulfillmentProvider:
+        try: return self._providers[provider]
+        except KeyError: raise ProviderNotFoundError(f"No FulfillmentProvider registered for provider={provider!r}") from None

@@ -4,14 +4,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.migrations import (
-    SchemaDriftError,
-    apply_schema_migrations,
-    check_schema_version,
-)
+from compute_provisioning_service.db.migrations import SchemaDriftError, check_schema_version
 from compute_provisioning_service.db.models import AnsibleJob, AnsiblePoolConfig, DEFAULT_POOL_ID, Host, ResourcePool
 from market_site.ledger import CapacityLedgerService
-from vm_provisioning_adapter.runtime import compile_legacy_vm_fulfillment_backfill
 
 
 def _sqlite_memory_engine():
@@ -20,16 +15,6 @@ def _sqlite_memory_engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-
-
-def test_schema_check_rejects_missing_fulfillment_table_after_current_marker():
-    engine = _sqlite_memory_engine()
-    run_migrations(engine)
-    with engine.begin() as connection:
-        connection.execute(text("DROP TABLE scheduling_cursors"))
-
-    with pytest.raises(SchemaDriftError, match="scheduling_cursors"):
-        check_schema_version(engine)
 
 
 def _create_pre_migration_tables(engine):
@@ -194,7 +179,6 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     }
 
     assert "escrow_uid" in ansible_columns
-    assert "credentials_private" in ansible_columns
     assert {
         "contract_version",
         "capacity_reservation_id",
@@ -212,7 +196,6 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "executor_target",
         "release_job_id",
         "executor_ref",
-        "owner_principal",
     }.issubset(reservation_columns)
 
     # capacity/dimensions columns land on genuinely
@@ -245,20 +228,16 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     pre_existing = snapshot["pre-existing-gpu"]
     assert pre_existing["capacity"] == {"gpu_count": 8}
     assert pre_existing["available"] == {"gpu_count": 5}  # 8 total - 3 held
-    # Historical storefront-authored pool hints are normalized into the
-    # operator-created default pool before fulfillment backfill.
-    assert pre_existing["pool_id"] == DEFAULT_POOL_ID
+    # pool_id is backfilled from the pre-existing row's attributes JSON,
+    # where the storefront's old sync push put it -- not left NULL just
+    # because the row predates the real column.
+    assert pre_existing["pool_id"] == "legacy-pool"
     reservation = ledger.get_reservation("pre-existing-alloc")
     assert reservation["dimensions"] == {"gpu_count": 3}
-    assert reservation["owner_principal"] == "legacy-admin"
 
     assert {"settlement_records", "provisioned_resources", "scheduling_cursors"}.issubset(
         inspector.get_table_names()
     )
-    settlement_columns = {
-        column["name"] for column in inspector.get_columns("settlement_records")
-    }
-    assert "credential_generation" in settlement_columns
     settlement_indexes = {
         index["name"] for index in inspector.get_indexes("settlement_records")
     }
@@ -334,11 +313,6 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260718_001_drop_vm_leases_table",
         "20260720_001_multidimensional_capacity",
         "20260722_001_pools7_capacity_model_cutover",
-        "20260723_001_fulfillment_aggregate",
-        "20260723_002_storefront_ownership",
-        "20260723_003_fulfillment_credential_generation",
-        "20260723_004_private_job_credentials",
-        "20260724_001_active_vm_fulfillment_backfill",
     }
 
 
@@ -365,7 +339,6 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("executor_kind") == 1
     assert ansible_columns.count("action_kind") == 1
     assert ansible_columns.count("idempotency_key") == 1
-    assert ansible_columns.count("credentials_private") == 1
     assert host_columns.count("public_host") == 1
     assert host_columns.count("pool_id") == 1
     assert "vm_leases" not in inspector.get_table_names()
@@ -375,7 +348,6 @@ def test_run_migrations_is_idempotent():
     assert reservation_columns.count("release_job_id") == 1
     assert reservation_columns.count("executor_ref") == 1
     assert reservation_columns.count("dimensions") == 1
-    assert reservation_columns.count("owner_principal") == 1
     event_columns = [
         column["name"] for column in inspector.get_columns("capacity_events")
     ]
@@ -393,7 +365,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 15
+    assert migration_count == 10
 
 
 # ---------------------------------------------------------------------------
@@ -437,208 +409,3 @@ def test_fresh_current_schema_contains_only_capacity_bucket_model():
         "capacity_reservations",
         "capacity_reservation_debits",
     }.issubset(tables)
-
-
-def _reopen_vm_backfill(engine) -> None:
-    with engine.begin() as connection:
-        connection.execute(text(
-            "DELETE FROM schema_migrations "
-            "WHERE id = '20260724_001_active_vm_fulfillment_backfill'"
-        ))
-
-
-def _insert_legacy_vm(
-    engine,
-    *,
-    reservation_id: str,
-    state: str,
-    vm_target: str | None,
-    teardown_job_id: str | None = None,
-) -> None:
-    with engine.begin() as connection:
-        connection.execute(text(
-            """
-            INSERT INTO capacity_reservations (
-                capacity_reservation_id, owner_principal, resource_id,
-                units, dimensions, state, executor_kind, executor_target,
-                vm_host, vm_target,
-                lease_end_utc, create_job_id, release_job_id, vm_remove_job_id
-            ) VALUES (
-                :reservation_id, 'legacy-admin', 'pre-existing-gpu',
-                1, '{"gpu_count": 1}', :state, 'vm', :vm_target,
-                'kvm1', :vm_target,
-                '2030-01-01T00:00:00Z', NULL, :teardown_job_id,
-                :teardown_job_id
-            )
-            """
-        ), {
-            "reservation_id": reservation_id,
-            "state": state,
-            "vm_target": vm_target,
-            "teardown_job_id": teardown_job_id,
-        })
-        connection.execute(text(
-            """
-            INSERT INTO capacity_reservation_debits (
-                capacity_reservation_id, capacity_bucket_id, dimensions
-            ) VALUES (
-                :reservation_id, 'bucket:pre-existing-gpu',
-                '{"gpu_count": 1}'
-            )
-            """
-        ), {"reservation_id": reservation_id})
-        if teardown_job_id is not None:
-            connection.execute(text(
-                """
-                INSERT INTO ansible_jobs (
-                    id, status, params, retry_count, max_retries,
-                    credentials_private
-                ) VALUES (
-                    :job_id, 'running', :params, 0, 3, 0
-                )
-                """
-            ), {
-                "job_id": teardown_job_id,
-                "params": (
-                    '{"vm_host":"kvm1","vm_action":"vm_remove",'
-                    f'"vm_target":"{vm_target}"}}'
-                ),
-            })
-
-
-def test_active_and_releasing_vm_backfill_is_teardown_capable():
-    engine = _sqlite_memory_engine()
-    _create_pre_migration_tables(engine)
-    run_migrations(engine)
-    _reopen_vm_backfill(engine)
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-active",
-        state="leased",
-        vm_target="vm-active",
-    )
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-releasing",
-        state="releasing",
-        vm_target="vm-releasing",
-        teardown_job_id="remove-1",
-    )
-
-    apply_schema_migrations(
-        engine,
-        fulfillment_backfill_compiler=compile_legacy_vm_fulfillment_backfill,
-    )
-
-    with engine.begin() as connection:
-        rows = connection.execute(text(
-            """
-            SELECT capacity_reservation_id, state, backfilled,
-                   provider_metadata, prepared_teardown_operation,
-                   teardown_provider_metadata
-            FROM settlement_records
-            ORDER BY capacity_reservation_id
-            """
-        )).mappings().all()
-        outputs = connection.execute(text(
-            "SELECT domain_resource_ref, status FROM provisioned_resources "
-            "ORDER BY domain_resource_ref"
-        )).mappings().all()
-    assert [(row["capacity_reservation_id"], row["state"]) for row in rows] == [
-        ("legacy-active", "active"),
-        ("legacy-releasing", "tearing_down"),
-    ]
-    assert all(bool(row["backfilled"]) for row in rows)
-    active_metadata = __import__("json").loads(rows[0]["provider_metadata"])
-    assert active_metadata["backfilled"] is True
-    assert active_metadata["create_job_id"] is None
-    for row in rows:
-        prepared = __import__("json").loads(row["prepared_teardown_operation"])
-        assert prepared["kind"] == "ansible.vm.teardown"
-        assert prepared["payload"]["job_params"]["playbook_path"]
-    assert rows[1]["teardown_provider_metadata"] is not None
-    assert [(row["domain_resource_ref"], row["status"]) for row in outputs] == [
-        ("vm-active", "active"),
-        ("vm-releasing", "active"),
-    ]
-
-
-def test_ambiguous_vm_backfill_rolls_back_all_rows_and_marker():
-    engine = _sqlite_memory_engine()
-    _create_pre_migration_tables(engine)
-    run_migrations(engine)
-    _reopen_vm_backfill(engine)
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-valid",
-        state="leased",
-        vm_target="vm-valid",
-    )
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-invalid",
-        state="leased",
-        vm_target=None,
-    )
-
-    with pytest.raises(SchemaDriftError, match="ambiguous vm_target"):
-        apply_schema_migrations(
-            engine,
-            fulfillment_backfill_compiler=compile_legacy_vm_fulfillment_backfill,
-        )
-
-    with engine.begin() as connection:
-        assert connection.execute(
-            text("SELECT COUNT(*) FROM settlement_records")
-        ).scalar_one() == 0
-        assert connection.execute(text(
-            "SELECT COUNT(*) FROM schema_migrations "
-            "WHERE id = '20260724_001_active_vm_fulfillment_backfill'"
-        )).scalar_one() == 0
-
-
-def test_terminal_vm_is_skipped_and_duplicate_active_aggregate_fails():
-    engine = _sqlite_memory_engine()
-    _create_pre_migration_tables(engine)
-    run_migrations(engine)
-    _reopen_vm_backfill(engine)
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-terminal",
-        state="released",
-        vm_target="vm-terminal",
-    )
-    _insert_legacy_vm(
-        engine,
-        reservation_id="legacy-duplicate",
-        state="leased",
-        vm_target="vm-duplicate",
-    )
-    with engine.begin() as connection:
-        connection.execute(text(
-            """
-            INSERT INTO settlement_records (
-                capacity_reservation_id, owner_principal, market,
-                scheduling_requirements, settlement_resource_id, pool_id,
-                provider, provider_metadata, state, credential_generation,
-                backfilled, attempt_count
-            ) VALUES (
-                'legacy-duplicate', 'legacy-admin', 'vms',
-                :requirements,
-                'pre-existing-gpu', 'default', 'ansible', '{}',
-                'active', 0, 0, 0
-            )
-            """
-        ), {"requirements": '{"resource_kind":"compute.gpu","dimensions":{"gpu_count":1},"attributes":{}}'})
-
-    with pytest.raises(SchemaDriftError, match="already has a fulfillment"):
-        apply_schema_migrations(
-            engine,
-            fulfillment_backfill_compiler=compile_legacy_vm_fulfillment_backfill,
-        )
-
-    with engine.begin() as connection:
-        assert connection.execute(text(
-            "SELECT COUNT(*) FROM settlement_records "
-            "WHERE capacity_reservation_id = 'legacy-terminal'"
-        )).scalar_one() == 0

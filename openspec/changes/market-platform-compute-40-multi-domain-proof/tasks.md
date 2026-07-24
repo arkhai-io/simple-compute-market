@@ -9,7 +9,7 @@
 ## 2. Complete campaign prerequisites
 
 - [ ] 2.1 Complete and archive `market-platform-bare-metal-10-storefront-composition`, including its runnable seller lifecycle and trusted multi-site configuration.
-- [x] 2.2 Complete and archive the selected-site scheduling, durable fulfillment, pull result, restart recovery, and teardown portions of `pools-7-storefront-fulfillment-cutover`.
+- [ ] 2.2 Complete and archive the selected-site scheduling, durable fulfillment, pull result, restart recovery, and teardown portions of `pools-7-storefront-fulfillment-cutover`.
 - [ ] 2.3 Reconcile the final prerequisite APIs and persistence identities into this design/spec without copying prerequisite implementation into the proof harness.
 - [ ] 2.4 Record exact wheel/image versions and deterministic backend controls used by the proof topology.
 

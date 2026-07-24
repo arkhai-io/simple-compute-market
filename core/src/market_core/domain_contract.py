@@ -223,7 +223,7 @@ class MarketDomainContract:
         return capability in self.declared_capabilities
 
     def capability(self, capability: DomainCapability) -> object | None:
-        return cast(object | None, getattr(self, _CAPABILITY_ATTRIBUTES[capability]))
+        return getattr(self, _CAPABILITY_ATTRIBUTES[capability])
 
 
 class DomainContractValidationError(ValueError):

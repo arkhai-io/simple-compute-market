@@ -7,10 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
-from vm_provisioning_adapter.fulfillment_backfill import (
-    compile_legacy_vm_fulfillment_backfill,
-)
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
+from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -41,7 +39,6 @@ class VmProvisioningRuntime:
     def fulfillment_provider(self, resource_pool_service):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
-            resource_pool_service=resource_pool_service,
             job_queue_provider=self.job_queue_provider,
         )
 
@@ -54,13 +51,15 @@ class VmProvisioningRuntime:
                 site_authority,
                 self.vm_operations_service,
             ),
+            release_executor=VmReleaseExecutor(
+                job_service=self.job_service,
+                job_queue_provider=self.job_queue_provider,
+            ),
             fulfillment_provider=self.fulfillment_provider(resource_pool_service),
             readiness_check=self.readiness,
         )
 
-    def system_service(
-        self, *, lease_lifecycle_service, fulfillment_diagnostics=None
-    ):
+    def system_service(self, *, lease_lifecycle_service):
         from vm_provisioning_adapter.services.system_service import SystemService
 
         return SystemService(
@@ -70,7 +69,6 @@ class VmProvisioningRuntime:
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
-            fulfillment_diagnostics=fulfillment_diagnostics,
         )
 
 

@@ -65,39 +65,19 @@ A capacity reservation MUST expose its identity, lifecycle state, hold expiry, r
 - **WHEN** a scheduling request asks for more of a dimension than the reservation holds
 - **THEN** scheduling reports a request mismatch before assignment or provider execution
 
-#### Scenario: Request uses a smaller reserved shape
-- **WHEN** a scheduling request asks for a compatible shape no larger than the reservation in every dimension
-- **THEN** scheduling may assign that shape without increasing or rewriting the durable reservation
-
-### Requirement: Storefront-owned reservation authority
-
-Each capacity reservation MUST persist the opaque authenticated storefront principal that created it. Storefront-facing reservation reads and mutations MUST require that credential-bound principal and MUST return not found to a different valid principal. Caller-controlled correlation headers and opaque deal data MUST NOT grant reservation authority. Internal authority workflows MAY omit a principal only where they do not cross the storefront HTTP boundary.
-
-#### Scenario: Another storefront presents a reservation identifier
-- **WHEN** a valid non-owning storefront credential reads, schedules, commits, truncates, or releases the reservation
-- **THEN** the authority returns not found and leaves the reservation unchanged
-
-#### Scenario: Legacy single-key deployment creates a reservation
-- **WHEN** the provisioning authority uses the compatible single administrative storefront key
-- **THEN** the reservation is owned by the stable legacy administrative principal and ownership survives restart
-
 ### Requirement: Reservation lifecycle
-Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable `capacity_reservation_id`, support expiry of uncommitted holds, and be idempotent for retries.
+Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
 #### Scenario: Two buyers reserve the same final unit
 - **WHEN** concurrent requests race at one site
 - **THEN** the authoritative ledger commits at most one reservation
 
 ### Requirement: Multi-site aggregation
-A storefront MAY aggregate multiple site clients as soft state but MUST route each reserve to one authority and MUST NOT create cross-site hard-state capacity of its own. Pre-reservation `most_available` ranking MUST count only snapshot rows compatible with the requested claim. Ranking and fallback end when one authority accepts the reservation.
+A storefront MAY aggregate multiple site clients as soft state but MUST route each reserve to one authority and MUST NOT create cross-site hard-state capacity of its own.
 
 #### Scenario: One site cannot satisfy a request
 - **WHEN** another configured site can satisfy it
 - **THEN** the aggregator may reserve at the eligible site and records which site owns the allocation
-
-#### Scenario: Largest site does not match the claim
-- **WHEN** the site with the most total free units has no resource matching the requested attributes or dimensions
-- **THEN** `most_available` ranks a smaller compatible site ahead of it
 
 ### Requirement: Capacity and deal events
 Site authorities MUST publish anonymous versioned capacity deltas for projection subscribers and MUST route deal-scoped execution events to the owning storefront. Capacity deltas for multidimensional resources MUST report the per-dimension availability change so consumers do not infer one dimension from another.
@@ -207,7 +187,7 @@ The site authority reclaims capacity from a reservation in exactly three interna
 - **THEN** the configured `SettlementAbandonmentHook`, if any, is called for the affected `capacity_reservation_id` regardless of whether a settlement assignment exists for it
 
 ### Requirement: Site identity ownership boundary
-Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection and persists it with reservation correlation before post-reservation lifecycle calls. A remote counterparty MUST NOT self-assert that identity in capacity payloads. Once reserved, commit, scheduling, fulfillment, result, and teardown route only to that persisted configured site without broadcast fallback.
+Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection. A remote counterparty MUST NOT self-assert that identity in capacity payloads.
 
 #### Scenario: Capacity payload attempts to assert site identity
 - **WHEN** a provisioning endpoint returns or accepts a payload containing a caller-selected `site_id`

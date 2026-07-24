@@ -105,7 +105,6 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
             "api": "ok",
             "database": "ok",
             "commercial_settlement": "unavailable",
-            "site_configuration": "unavailable",
             "site_projection": "unavailable",
             "fulfillment": "unavailable",
         },

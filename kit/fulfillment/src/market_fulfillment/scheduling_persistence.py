@@ -21,6 +21,8 @@ from .repository import SettlementRepository, begin_sqlite_write_transaction
 class SchedulingTransaction(Protocol):
     """Persistence operations that are safe inside one scheduling transaction."""
 
+    db: Session
+
     def lock_reservation(self, capacity_reservation_id: str) -> Any | None: ...
     def reservation_payload(self, reservation: Any) -> dict[str, Any]: ...
     def get_assignment(self, capacity_reservation_id: str) -> Any | None: ...
@@ -29,6 +31,7 @@ class SchedulingTransaction(Protocol):
     def list_enabled_pools(self) -> list[Any]: ...
     def load_cursor(self, resource_kind: str) -> Any: ...
     def save_cursor(self, resource_kind: str, *, last_pool_id: str | None, last_resource_by_pool: dict[str, str]) -> Any: ...
+    def backing_resource_id(self, capacity_reservation_id: str) -> str | None: ...
     def rebind_capacity(self, *, capacity_reservation_id: str, settlement_resource_id: str) -> None: ...
 
 
@@ -75,6 +78,11 @@ class SqlAlchemySchedulingTransaction:
         return self._repository.save_cursor_in_session(
             self.db, resource_kind, last_pool_id=last_pool_id,
             last_resource_by_pool=last_resource_by_pool,
+        )
+
+    def backing_resource_id(self, capacity_reservation_id: str) -> str | None:
+        return self._capacity_ledger.backing_resource_id_in_session(
+            self.db, capacity_reservation_id
         )
 
     def rebind_capacity(self, *, capacity_reservation_id: str,

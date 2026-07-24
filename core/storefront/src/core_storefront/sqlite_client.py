@@ -30,7 +30,6 @@ from typing import Any
 from .sqlite_migrations import Migration, apply_schema_migrations
 
 logger = logging.getLogger(__name__)
-_UNSET = object()
 
 
 def _amount_to_db_text(value: Any) -> str | None:
@@ -482,7 +481,6 @@ class SQLiteClient:
                   negotiation_id TEXT PRIMARY KEY,
                   listing_id TEXT,
                   capacity_reservation_id TEXT NOT NULL,
-                  site_id TEXT,
                   payload TEXT,
                   expires_at TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -780,7 +778,6 @@ class SQLiteClient:
         negotiation_id: str,
         listing_id: str | None,
         capacity_reservation_id: str,
-        site_id: str | None = None,
         payload: dict[str, Any] | None = None,
         expires_at: str | None = None,
     ) -> None:
@@ -790,14 +787,12 @@ class SQLiteClient:
                 conn.execute(
                     """
                     INSERT INTO capacity_holds(
-                      negotiation_id, listing_id, capacity_reservation_id,
-                      site_id, payload, expires_at
+                      negotiation_id, listing_id, capacity_reservation_id, payload, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id) DO UPDATE SET
                       listing_id=excluded.listing_id,
                       capacity_reservation_id=excluded.capacity_reservation_id,
-                      site_id=excluded.site_id,
                       payload=excluded.payload,
                       expires_at=excluded.expires_at
                     """,
@@ -805,7 +800,6 @@ class SQLiteClient:
                         negotiation_id,
                         listing_id,
                         capacity_reservation_id,
-                        site_id,
                         json.dumps(payload) if payload is not None else None,
                         expires_at,
                     ),
@@ -824,8 +818,7 @@ class SQLiteClient:
             try:
                 row = conn.execute(
                     """
-                    SELECT negotiation_id, listing_id, capacity_reservation_id,
-                           site_id, payload, expires_at
+                    SELECT negotiation_id, listing_id, capacity_reservation_id, payload, expires_at
                     FROM capacity_holds
                     WHERE negotiation_id = ?
                     """,
@@ -836,16 +829,15 @@ class SQLiteClient:
             if row is None:
                 return None
             try:
-                payload = json.loads(row[4]) if row[4] else {}
+                payload = json.loads(row[3]) if row[3] else {}
             except (ValueError, TypeError):
                 payload = {}
             return {
                 "negotiation_id": row[0],
                 "listing_id": row[1],
                 "capacity_reservation_id": row[2],
-                "site_id": row[3],
                 "payload": payload,
-                "expires_at": row[5],
+                "expires_at": row[4],
             }
 
         return await asyncio.to_thread(_load)
@@ -863,258 +855,6 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_delete)
-
-    @staticmethod
-    def _fulfillment_workflow_row(row: tuple[Any, ...]) -> dict[str, Any]:
-        json_indexes = {4, 5, 6, 9}
-        values = list(row)
-        for index in json_indexes:
-            raw = values[index]
-            values[index] = json.loads(raw) if raw else ([] if index == 9 else None)
-        columns = (
-            "escrow_uid", "site_id", "capacity_reservation_id", "phase",
-            "schedule_request", "settlement_resource", "begin_request",
-            "fulfillment_id", "remote_state", "provisioned_resources",
-            "failure_reason", "failure_message", "credential_generation",
-            "next_reconcile_unix", "reconcile_attempts",
-            "last_reconcile_error", "claimed_by", "claim_expires_unix",
-            "created_at", "updated_at",
-        )
-        return dict(zip(columns, values, strict=True))
-
-    async def create_fulfillment_workflow(
-        self,
-        *,
-        escrow_uid: str,
-        site_id: str,
-        capacity_reservation_id: str,
-        schedule_request: dict[str, Any],
-        begin_request: dict[str, Any],
-        phase: str = "reserved",
-    ) -> bool:
-        """Persist immutable orchestration intent before remote lifecycle calls."""
-        if not site_id.strip():
-            raise ValueError("site_id must be non-empty")
-
-        def _create() -> bool:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO storefront_fulfillments (
-                          escrow_uid, site_id, capacity_reservation_id, phase,
-                          schedule_request, begin_request
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            escrow_uid, site_id, capacity_reservation_id, phase,
-                            json.dumps(schedule_request, sort_keys=True),
-                            json.dumps(begin_request, sort_keys=True),
-                        ),
-                    )
-                    conn.commit()
-                    return True
-                except sqlite3.IntegrityError:
-                    return False
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_create)
-
-    async def load_fulfillment_workflow(
-        self, *, escrow_uid: str,
-    ) -> dict[str, Any] | None:
-        def _load() -> dict[str, Any] | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    "SELECT * FROM storefront_fulfillments WHERE escrow_uid = ?",
-                    (escrow_uid,),
-                ).fetchone()
-                return self._fulfillment_workflow_row(row) if row else None
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
-
-    async def update_fulfillment_workflow(
-        self,
-        *,
-        escrow_uid: str,
-        phase: object = _UNSET,
-        settlement_resource: object = _UNSET,
-        fulfillment_id: object = _UNSET,
-        remote_state: object = _UNSET,
-        provisioned_resources: object = _UNSET,
-        failure_reason: object = _UNSET,
-        failure_message: object = _UNSET,
-        credential_generation: object = _UNSET,
-        next_reconcile_unix: object = _UNSET,
-        last_reconcile_error: object = _UNSET,
-        claimed_by: object = _UNSET,
-        claim_expires_unix: object = _UNSET,
-    ) -> None:
-        values_by_column = {
-            "phase": phase,
-            "settlement_resource": settlement_resource,
-            "fulfillment_id": fulfillment_id,
-            "remote_state": remote_state,
-            "provisioned_resources": provisioned_resources,
-            "failure_reason": failure_reason,
-            "failure_message": failure_message,
-            "credential_generation": credential_generation,
-            "next_reconcile_unix": next_reconcile_unix,
-            "last_reconcile_error": last_reconcile_error,
-            "claimed_by": claimed_by,
-            "claim_expires_unix": claim_expires_unix,
-        }
-
-        def _update() -> None:
-            updates: list[str] = []
-            values: list[Any] = []
-            for column, value in values_by_column.items():
-                if value is _UNSET:
-                    continue
-                if column in {"settlement_resource", "provisioned_resources"}:
-                    value = json.dumps(value, sort_keys=True) if value is not None else None
-                updates.append(f"{column} = ?")
-                values.append(value)
-            if not updates:
-                return
-            updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
-            conn = sqlite3.connect(self.db_path)
-            try:
-                conn.execute(
-                    f"UPDATE storefront_fulfillments SET {', '.join(updates)} "
-                    "WHERE escrow_uid = ?",
-                    (*values, escrow_uid),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_update)
-
-    async def apply_fulfillment_result(
-        self,
-        *,
-        escrow_uid: str,
-        connection_details: str,
-        tenant_credentials: str | None,
-        remote_state: str,
-        provisioned_resources: list[dict[str, Any]],
-        failure_reason: str | None,
-        failure_message: str | None,
-        credential_generation: int,
-    ) -> None:
-        """Atomically apply buyer access and its non-secret workflow generation."""
-        def _apply() -> None:
-            conn = sqlite3.connect(self.db_path, timeout=30)
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                current = conn.execute(
-                    "SELECT credential_generation FROM storefront_fulfillments "
-                    "WHERE escrow_uid = ?",
-                    (escrow_uid,),
-                ).fetchone()
-                if current is None:
-                    raise LookupError(f"fulfillment workflow {escrow_uid!r} is missing")
-                if int(credential_generation) <= int(current[0]):
-                    raise ValueError("credential_generation must advance")
-                now = datetime.now().isoformat()
-                conn.execute(
-                    """
-                    UPDATE escrows
-                    SET connection_details = ?, tenant_credentials = ?,
-                        updated_at = ?
-                    WHERE escrow_uid = ?
-                    """,
-                    (connection_details, tenant_credentials, now, escrow_uid),
-                )
-                conn.execute(
-                    """
-                    UPDATE storefront_fulfillments
-                    SET phase = 'result_applied', remote_state = ?,
-                        provisioned_resources = ?, failure_reason = ?,
-                        failure_message = ?, credential_generation = ?,
-                        next_reconcile_unix = NULL,
-                        last_reconcile_error = NULL, claimed_by = NULL,
-                        claim_expires_unix = NULL,
-                        updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                    WHERE escrow_uid = ?
-                    """,
-                    (
-                        remote_state,
-                        json.dumps(provisioned_resources, sort_keys=True),
-                        failure_reason,
-                        failure_message,
-                        int(credential_generation),
-                        escrow_uid,
-                    ),
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_apply)
-
-    async def claim_due_fulfillment_workflows(
-        self,
-        *,
-        worker_id: str,
-        now_unix: float,
-        lease_seconds: float,
-        limit: int = 25,
-    ) -> list[dict[str, Any]]:
-        """Claim a bounded due batch under SQLite's single-writer boundary."""
-        def _claim() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path, timeout=30)
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                rows = conn.execute(
-                    """
-                    SELECT escrow_uid FROM storefront_fulfillments
-                    WHERE phase NOT IN ('ready', 'failed', 'torn_down')
-                      AND (next_reconcile_unix IS NULL OR next_reconcile_unix <= ?)
-                      AND (claimed_by IS NULL OR claim_expires_unix <= ?)
-                    ORDER BY created_at, escrow_uid
-                    LIMIT ?
-                    """,
-                    (now_unix, now_unix, limit),
-                ).fetchall()
-                ids = [str(row[0]) for row in rows]
-                for escrow_uid in ids:
-                    conn.execute(
-                        """
-                        UPDATE storefront_fulfillments
-                        SET claimed_by = ?, claim_expires_unix = ?,
-                            reconcile_attempts = reconcile_attempts + 1,
-                            updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
-                        WHERE escrow_uid = ?
-                        """,
-                        (worker_id, now_unix + lease_seconds, escrow_uid),
-                    )
-                conn.commit()
-                claimed = []
-                for escrow_uid in ids:
-                    row = conn.execute(
-                        "SELECT * FROM storefront_fulfillments WHERE escrow_uid = ?",
-                        (escrow_uid,),
-                    ).fetchone()
-                    if row is not None:
-                        claimed.append(self._fulfillment_workflow_row(row))
-                return claimed
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_claim)
 
     async def upsert_listing(
         self,

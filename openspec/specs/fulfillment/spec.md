@@ -166,21 +166,9 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 - **WHEN** a provider cannot use the selected resource
 - **THEN** it reports validation or execution failure and does not choose a replacement resource
 
-### Requirement: Credential-bound fulfillment ownership
+## Durable settlement persistence
 
-Scheduling MUST verify the authenticated storefront principal against the owning capacity reservation and persist that same immutable principal on the fulfillment aggregate. Equivalent retries MUST include principal equality. Fulfillment reads and mutations MUST return not found to a different valid principal rather than revealing lifecycle or credential state. Caller-controlled identity headers MUST NOT grant authority.
-
-#### Scenario: Owning storefront retries scheduling
-- **WHEN** the credential-bound owner repeats an equivalent scheduling request
-- **THEN** the existing assignment is returned without advancing fairness or changing ownership
-
-#### Scenario: Another storefront presents the fulfillment identifier
-- **WHEN** a different valid principal requests fulfillment state or mutation
-- **THEN** the service returns not found and exposes no aggregate state
-
-### Requirement: Durable settlement persistence
-
-The provisioning service MUST maintain one durable `SettlementRecord` aggregate per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
+One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
 
 The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `failed`, `torn_down`, and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
 
@@ -192,7 +180,7 @@ The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatchin
 Two independently-persisted, independently-immutable-once-written request shapes govern two independent equivalence checks, because they answer different questions for different callers:
 
 - **Scheduling equivalence** governs `schedule_resource`/`select_resource` retries. It compares `market` and the normalized `SettlementRequirement` (`scheduling_requirements`) against the stored values. A caller-supplied resource constraint, if present, is checked separately for consistency against the row's `settlement_resource_id` once assigned — it is not folded into the `market`/`requirements` comparison, since it is an optional pre-selection constraint on the request, not part of the requirement identity being scheduled.
-- **Fulfillment equivalence** governs `begin_fulfillment` acceptance and retries. The supplied `market` must match the immutable market established by scheduling, including on the first acceptance, and both the domain-specific `fulfillment_request` and prepared-create envelopes must match once written. Acceptance never rewrites the scheduled market. There is no caller-supplied resource to compare on this path: `begin_fulfillment` loads the already-scheduled `SettlementResource` from the row rather than trusting one supplied by the caller.
+- **Fulfillment equivalence** governs `begin_fulfillment` acceptance and retries. The supplied `market` must match the immutable market established by scheduling, including on the first acceptance, and the domain-specific `fulfillment_request` envelope must match once written. Acceptance never rewrites the scheduled market. There is no caller-supplied resource to compare on this path: `begin_fulfillment` loads the already-scheduled `SettlementResource` from the row rather than trusting one supplied by the caller.
 
 Either check rejects a retry whose stored values differ as a conflict; it does not silently return the existing assignment for a shape the caller no longer means.
 
@@ -201,97 +189,57 @@ Either check rejects a retry whose stored values differ as a conflict; it does n
 - **WHEN** `begin_fulfillment` is retried for the same `capacity_reservation_id` with a different `fulfillment_request`
 - **THEN** it reports a fulfillment conflict rather than returning the first fulfillment's result
 
+#### Scenario: Equivalent retry after provider acknowledgement
+
+- **WHEN** an equivalent `begin_fulfillment` retry finds provider metadata already acknowledged
+- **THEN** it returns the existing fulfillment without dispatching again
+
+#### Scenario: Dispatch fails after durable acceptance
+
+- **WHEN** provider dispatch fails after the acceptance transaction commits
+- **THEN** the fulfillment remains accepted in `dispatch_pending` and the accepted fulfillment view is returned for recovery
+
+Provider submission acknowledgement is a second short transaction. Identical metadata is idempotent; conflicting provider identity is rejected without rewriting the stored value. The gap between provider submission and acknowledgement is recovered by redispatching the persisted prepared operation with the same deterministic idempotency key.
+
 A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id`, denormalized `fulfillment_id`, and an optional domain-specific `domain_resource_ref`. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
 
 There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.
-
-### Requirement: Pull-based fulfillment result and live credentials
-
-The authenticated result query MUST return the durable fulfillment identity, aggregate state, ordered provisioned-resource outputs, failure details, and a monotonic non-secret `credential_generation`. A non-owner receives not found. Non-active results contain no credentials and do not invoke a provider credential operation.
-
-For an active fulfillment, the service MUST claim credential rotation durably before releasing the database lock and calling the exact domain provider. A concurrent caller MUST NOT rotate the same generation. A provider that issues credentials rotates them for the claimed generation, stores any provider-job material only as private transient data, atomically consumes and deletes that data, and returns credentials only in memory. The service advances `credential_generation` only after successful rotation and never persists returned credentials in the fulfillment aggregate, provisioned-resource rows, provider metadata, prepared commands, logs, or errors. A provider whose access model issues no server credential returns no credential payload and does not advance the generation.
-
-#### Scenario: Active result is read twice
-
-- **WHEN** an owning storefront reads an active credential-issuing fulfillment result twice
-- **THEN** each successful read returns newly rotated credentials with a strictly greater `credential_generation`
-- **AND** neither credential payload remains in fulfillment or provider-job persistence
-
-#### Scenario: Credential rotation fails
-
-- **WHEN** live credential rotation fails before delivery
-- **THEN** the result query fails as temporarily unavailable, the durable claim is released or expires, and `credential_generation` remains unchanged
-
-### Requirement: Provisioning-owned whole-fulfillment teardown
-
-The authenticated teardown command MUST address one owned `fulfillment_id`. It prepares and persists immutable provider teardown input with `teardown_dispatch_pending` before any provider call. Provisioning-owned recovery workers exclusively submit and poll teardown, persist `tearing_down`, `teardown_failed`, or `torn_down`, and mark all child outputs torn down. Physical capacity MUST remain held until the provider reports successful teardown; only then may the worker idempotently release the owning capacity reservation before committing terminal fulfillment state. Lease expiry and explicit lease termination MUST first consult fulfillment ownership. A settlement-backed reservation starts or resumes durable fulfillment teardown and MUST NOT submit or poll the legacy executor release path in parallel.
-
-#### Scenario: Teardown request is repeated
-
-- **WHEN** the owner repeats teardown while it is pending, in progress, or complete
-- **THEN** the service returns the existing whole-fulfillment teardown state without preparing a different command
-
-#### Scenario: Provider teardown is not successful
-
-- **WHEN** provider teardown is pending, unknown, or failed
-- **THEN** physical capacity remains unavailable to scheduling and recovery retains or retries the durable teardown operation
 
 Prepared provider create/teardown input is captured as a `VersionedEnvelope`-typed payload on the aggregate, frozen before the transaction that marks the corresponding dispatch-pending state commits, so a recovery retry dispatches from what was accepted rather than a live re-read of pool or provider configuration.
 
 Repository callers provide validated canonical `SettlementRequirement` and `VersionedEnvelope` models. Persistence serializes their JSON-compatible model form and uses structural equality; it does not accept arbitrary dictionaries as an equivalence boundary or infer equivalence among unvalidated representations.
 
-Fulfillment acceptance freezes prepared create input before entering `dispatch_pending`. The generic lifecycle transition operation cannot replace it. Prepared teardown input may be written only on the transition to `teardown_dispatch_pending` and is immutable afterward. Lifecycle transitions may otherwise update provider and teardown metadata and failure reason/message fields. Aggregate identity, scheduled-resource identity, market, scheduling requirements, fulfillment identity/request, recovery leases, timestamps, and unknown fields are not writable through lifecycle updates. Unsupported updates are rejected before state or in-memory row mutation.
+The generic lifecycle transition operation may update only prepared create/teardown operation payloads, provider and teardown metadata, and failure reason/message fields. Aggregate identity, scheduled-resource identity, market, scheduling requirements, fulfillment identity/request, lifecycle state, recovery leases, timestamps, and unknown fields are not writable through lifecycle updates. Unsupported updates are rejected before state or in-memory row mutation.
 
-The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Scheduling acquires that same writer boundary before aggregate creation; databases with row-lock support serialize through the locked Capacity Reservation.
+The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Aggregate creation remains protected by the `capacity_reservation_id` primary key; an observed uniqueness race is resolved by re-reading the winning row and applying the ordinary equivalence rule.
 
-Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository MUST reserve SQLite's single-writer slot before selecting and updating a bounded claim batch, so independently running service workers cannot commit overlapping live claims. Workers commit claims before external calls, release database locks during provider dispatch/status reads, reclaim expired claims, and schedule failed or still-pending work with bounded exponential backoff and jitter. Deterministic provider command identities make a retry after uncertain acknowledgement observe the same underlying command.
-
-Operator status exposes safe recovery counters and durable metrics for live or expired claims, scheduled retries and retry age, provider failures, and non-terminal aggregate age. Structured recovery errors identify lifecycle correlation, provider route, operation, and attempt count only; they exclude credentials and private ownership data.
-
-#### Scenario: Concurrent recovery workers claim pending work
-
-- **WHEN** independently running SQLite workers attempt to claim the same pending command
-- **THEN** their claim transactions serialize and at most one worker commits a live claim for that aggregate
-
-#### Scenario: External provider call is slow
-
-- **WHEN** a claimed recovery command invokes its provider
-- **THEN** no database transaction or SQLite writer lock remains open during that external call
+Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository exposes only a single-worker SQLite selection primitive at this layer. The provisioning-owned recovery workflow defines duplicate-dispatch prevention and any concurrent acquisition semantics.
 
 #### Scenario: Expired claim is reclaimed
 
 - **WHEN** a claimed row's claim has expired and no other claim has replaced it
 - **THEN** a subsequent claim attempt may claim it again
 
-#### Scenario: Operator diagnoses stuck recovery
-
-- **WHEN** an operator reads system status while claims or retries are outstanding
-- **THEN** status reports safe counts and ages without authority credentials, raw provider metadata, or owner principals
-
 ### Requirement: Provider contract
 
-A `FulfillmentProvider` implements synchronous side-effect-free `prepare_create` and `prepare_teardown` operations plus asynchronous `dispatch_create`, `dispatch_teardown`, and `get_status` operations. Preparation MUST return a validated `VersionedEnvelope` containing the complete immutable provider command. The service persists that envelope and its pending lifecycle state in one transaction before dispatch. Dispatch MUST interpret only the supplied envelope and MUST NOT reread mutable pool or host configuration.
+A `FulfillmentProvider` separates pure synchronous preparation from asynchronous side effects:
 
-Create and teardown dispatch MUST be idempotent for equivalent retries. Ansible dispatch uses deterministic contract identities derived from the capacity reservation, action kind, and prepared-command schema version; reuse with different normalized command parameters fails rather than returning an unrelated job. Provider routing uses the selected resource's exact `(provider, resource_kind)` pair. The canonical Ansible routes are `("ansible", "compute.gpu")` for VM fulfillment and `("ansible", "bare_metal")` for bare-metal fulfillment; neither route may substitute for the other. Provider metadata is opaque to generic orchestration and contains only normalized, serializable operational state needed for later status or teardown. A successful dispatch MAY also return domain resource references, which the service persists as `ProvisionedResource` rows without interpreting provider-specific metadata keys. Credentials and sensitive access material should be referenced or delivered through a dedicated secure channel rather than assumed to be generic metadata.
+- `prepare_create(capacity_reservation_id, request, resource, pool_config) -> VersionedEnvelope`;
+- `dispatch_create(prepared) -> FulfillmentResult`;
+- `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
+- `dispatch_teardown(prepared) -> FulfillmentResult`;
+- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`.
 
-Dry-run validation MUST use the same preparation path as acceptance while discarding the prepared envelope without persistence or dispatch. Validation errors MUST be represented as structured issues and mapped to typed failures for execution.
+Preparation receives the durable `capacity_reservation_id` explicitly plus caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently or derive the reservation identity from the storefront payload. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
 
-`ProviderRegistry` MUST resolve a provider using the selected resource's exact `(provider, resource_kind)` pair so independently owned domain adapters may use the same infrastructure mechanism without interpreting one another's requests. Duplicate exact pairs fail composition. A provider-only registration is an explicit compatibility fallback: an exact pair takes precedence, but a scoped registration is never inferred for a provider-only lookup or a different resource kind. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
+Prepared operations are immutable and persisted before dispatch. Dispatch commands use deterministic reservation-scoped idempotency keys. Provider metadata is normalized and validated by the concrete adapter before it crosses the shared persistence boundary. Credentials and sensitive access material use a dedicated secure channel rather than generic metadata.
 
-#### Scenario: Same infrastructure provider serves two resource kinds
-
-- **WHEN** VM and bare-metal adapters both register the `ansible` provider identity for their own resource kinds
-- **THEN** fulfillment dispatches to the exact domain-owned provider for the selected resource kind
+`ProviderRegistry` maps a provider identity to exactly one provider instance. Duplicate provider identities fail composition. Provider registration remains separate from executor-kind registration; neither namespace implies the other.
 
 #### Scenario: Unknown provider
 
-- **WHEN** a selected resource names an unregistered provider and resource-kind pair
-- **THEN** validation and execution report `provider_not_found` without falling through to a provider registered for another resource kind
-
-#### Scenario: Pool configuration changes after acceptance
-
-- **WHEN** pool configuration changes after a create command has been prepared and persisted
-- **THEN** first dispatch and every recovery retry use the persisted prepared envelope without reading the changed configuration
+- **WHEN** a selected resource names an unregistered provider
+- **THEN** validation and execution report `provider_not_found` without falling through to another provider
 
 #### Scenario: Equivalent create retry
 
@@ -327,15 +275,6 @@ This contract applies to prepared provider inputs, provider metadata snapshots, 
 - **WHEN** a generic envelope is parameterized with a typed payload model and required payload fields are missing
 - **THEN** validation fails before dispatch or persistence
 
-### Requirement: Secret-safe diagnostics and errors
-
-Fulfillment request logging, provider process logging, persisted job errors, recovery diagnostics, and public exception payloads MUST exclude credentials, authorization material, private keys, secret-bearing provider variables, and prepared secret values. Raw Ansible stdout/stderr is retained only through the centralized redaction boundary; it is not emitted directly by the process runner. Public errors expose stable categories and safe generic detail rather than echoing invalid or provider-supplied values.
-
-#### Scenario: Provider output contains credentials
-
-- **WHEN** provider output or an exception contains a password, token, authorization value, or private key
-- **THEN** logs and persisted/public error detail redact or replace that value before it crosses the provider boundary
-
 ### Requirement: Stable error taxonomy
 
 Generic orchestration MUST distinguish stable categories including:
@@ -355,38 +294,6 @@ Concrete provider errors may carry additional diagnostics but MUST map into thes
 
 - **WHEN** a provider-specific create, status, or teardown operation fails
 - **THEN** the shared boundary maps it to a stable generic category while retaining safe diagnostics
-
-### Requirement: Durable storefront fulfillment orchestration
-
-After negotiation accepts capacity, a storefront MUST persist the trusted configured `site_id`, capacity reservation, canonical schedule and begin requests, selected settlement resource, provisioning `fulfillment_id`, remote lifecycle state, and non-secret result generation before advancing each remote step. URLs and credentials MUST NOT be persisted as routing authority. Scheduling, reservation commit, fulfillment acceptance, status, result, and teardown MUST route only to that persisted site; post-reservation broadcast fallback is prohibited.
-
-A restart-safe worker MUST resume scheduling, commit, acceptance, status polling, result application, and commercial fulfillment from the persisted phase. Provisioning credentials MAY be retained only in the storefront's buyer-facing credential store under buyer authorization; the orchestration row stores no credential payload. Provisioning `fulfillment_id` and chain `fulfillment_uid` remain distinct identities.
-
-#### Scenario: Storefront restarts after scheduling
-
-- **WHEN** the storefront restarts after persisting a selected resource but before fulfillment acceptance
-- **THEN** recovery commits and accepts against the same configured site and immutable request without broadcasting or selecting another resource
-
-#### Scenario: Result is already applied
-
-- **WHEN** recovery resumes a workflow whose result generation and buyer-facing access were committed
-- **THEN** it does not read and rotate provisioning credentials again before advancing commercial settlement
-
-### Requirement: Historical VM fulfillment backfill
-
-Provisioning migration MUST normalize historical host and capacity membership into the default resource pool before atomically creating teardown-capable fulfillment aggregates for every active or releasing VM reservation. VM-owned compilation converts validated historical executor coordinates and the accepted Ansible configuration into immutable versioned teardown input; generic migration code MUST NOT import VM models. Historical create input and create-job identity MAY be absent. Backfilled provider metadata MUST be explicitly discriminated from strict native metadata.
-
-A releasing reservation requires one matching, pollable teardown job. Missing or conflicting host, target, debit, resource, pool, provider configuration, or teardown-job identity MUST fail the entire migration and its completion marker. Released and other terminal historical reservations are not backfilled.
-
-#### Scenario: Active historical VM has no create job
-
-- **WHEN** an active VM has unambiguous host, target, capacity, and provider data but no retained create-job identity
-- **THEN** migration persists an active backfilled aggregate and immutable teardown command without inventing historical create input
-
-#### Scenario: One historical VM is ambiguous
-
-- **WHEN** any candidate active or releasing VM cannot be mapped unambiguously
-- **THEN** no candidate aggregate, output, reservation assignment, or migration marker is committed
 
 ### Requirement: Packaging and typing
 
@@ -412,8 +319,13 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
 - Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_repository.py`.
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
-- Public lifecycle routes, clients, ownership, and persisted Ansible commands: `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`.
-- Recovery claims, restart/backoff, teardown convergence, diagnostics, and capacity release: `provisioning/compute/service/tests/unit/services/test_fulfillment_recovery.py`.
-- Acceptance, pull results, live credential generation, and teardown preparation: `provisioning/compute/service/tests/unit/services/test_fulfillment_service.py`.
-- Durable storefront site routing, restart recovery, and credential result application: `domains/vms/storefront/tests/unit/test_fulfillment_reconciler.py` and `core/storefront/tests/unit/test_fulfillment_workflow_store.py`.
 - Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`.
+
+### Requirement: Fulfillment validation
+
+The fulfillment validation endpoint accepts the same reservation, market, and fulfillment-request signature as acceptance. It uses the same internal preparation path to load the already-scheduled aggregate, selected resource, current pool configuration, and provider, but runs in a read-only session without reserving SQLite's writer slot and performs no lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
+
+#### Scenario: Validation succeeds without acceptance
+
+- **WHEN** a valid fulfillment request is submitted to the validation endpoint
+- **THEN** preparation validation succeeds and the aggregate remains in its prior state with no prepared operation persisted

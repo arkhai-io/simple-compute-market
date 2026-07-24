@@ -24,14 +24,9 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementRepository,
     SqlAlchemySchedulingUnitOfWork,
+    FulfillmentOrchestrator,
+    SqlAlchemyFulfillmentUnitOfWork,
 )
-from compute_provisioning_service.services.fulfillment_recovery import (
-    FulfillmentRecoveryService,
-)
-from compute_provisioning_service.services.fulfillment_release import (
-    FulfillmentReleaseBridge,
-)
-from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
 
@@ -62,17 +57,12 @@ def _vm_bundle(runtime, site_authority, resource_pool_service):
     return runtime.adapter_bundle(site_authority, resource_pool_service)
 
 
-def _bare_metal_bundle(runtime, site_authority, resource_pool_service):
-    return runtime.adapter_bundle(site_authority, resource_pool_service)
+def _bare_metal_bundle(runtime, site_authority):
+    return runtime.adapter_bundle(site_authority)
 
 
-def _system_service(
-    runtime, lease_lifecycle_service, fulfillment_recovery_service
-):
-    return runtime.system_service(
-        lease_lifecycle_service=lease_lifecycle_service,
-        fulfillment_diagnostics=fulfillment_recovery_service.diagnostics,
-    )
+def _system_service(runtime, lease_lifecycle_service):
+    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
@@ -99,12 +89,7 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg,
-    site_authority,
-    release_dispatcher,
-    job_service,
-    lifecycle_event_sink,
-    fulfillment_release,
+    cfg, site_authority, release_dispatcher, job_service, lifecycle_event_sink
 ):
     return LeaseLifecycleService(
         cfg,
@@ -117,7 +102,6 @@ def _make_lease_lifecycle(
                 cfg, reservation, sink=lifecycle_event_sink
             )
         ),
-        fulfillment_release=fulfillment_release,
     )
 
 
@@ -225,16 +209,20 @@ class Container(containers.DeclarativeContainer):
 
     physical_settlement_scheduler = providers.Singleton(
         PhysicalSettlementScheduler,
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        session_factory=session_factory,
         # PhysicalSettlementScheduler does not silently default
         # resource_kind to "compute.gpu" -- the VM composition root
         # supplies it explicitly here to keep existing scheduling behavior
         # unchanged.
         default_resource_kind="compute.gpu",
+        repository=settlement_repository,
         unit_of_work=scheduling_unit_of_work,
     )
 
     # ------------------------------------------------------------------
-    # FulfillmentService takes an already-selected SettlementResource as
+    # Fulfillment orchestration takes an already-selected SettlementResource as
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
     ansible_fulfillment_provider = providers.Singleton(
@@ -289,7 +277,6 @@ class Container(containers.DeclarativeContainer):
         _bare_metal_bundle,
         runtime=bare_metal_runtime,
         site_authority=site_authority,
-        resource_pool_service=resource_pool_service,
     )
 
     composed_adapters = providers.Singleton(
@@ -315,26 +302,17 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
+    fulfillment_unit_of_work = providers.Singleton(
+        SqlAlchemyFulfillmentUnitOfWork,
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+        repository=settlement_repository,
+    )
+
     fulfillment_service = providers.Singleton(
-        FulfillmentService,
+        FulfillmentOrchestrator,
         provider_registry=provider_registry,
-        session_factory=session_factory,
-        repository=settlement_repository,
-    )
-
-    fulfillment_release = providers.Singleton(
-        FulfillmentReleaseBridge,
-        session_factory=session_factory,
-        repository=settlement_repository,
-        fulfillment_service=fulfillment_service,
-    )
-
-    fulfillment_recovery_service = providers.Singleton(
-        FulfillmentRecoveryService,
-        provider_registry=provider_registry,
-        session_factory=session_factory,
-        repository=settlement_repository,
-        capacity_ledger_service=capacity_ledger_service,
+        unit_of_work=fulfillment_unit_of_work,
     )
 
     lifecycle_event_sink = providers.Singleton(
@@ -349,7 +327,6 @@ class Container(containers.DeclarativeContainer):
         release_dispatcher=release_dispatcher,
         job_service=job_service,
         lifecycle_event_sink=lifecycle_event_sink,
-        fulfillment_release=fulfillment_release,
     )
 
     lease_watchdog = providers.Singleton(
@@ -362,7 +339,6 @@ class Container(containers.DeclarativeContainer):
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
-        fulfillment_recovery_service=fulfillment_recovery_service,
     )
 
 
@@ -395,6 +371,5 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
-resolved_fulfillment_service: "FulfillmentService | None" = None
-resolved_fulfillment_recovery_service: "FulfillmentRecoveryService | None" = None
+resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

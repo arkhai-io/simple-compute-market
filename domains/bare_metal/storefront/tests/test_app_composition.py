@@ -58,7 +58,6 @@ def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
         "/api/v1/admin/pause",
         "/api/v1/admin/resume",
         "/api/v1/system/status",
-        "/api/v1/system/sites",
         "/health",
     } <= paths
     assert not any("fulfillment" in path or "provision" in path for path in paths)

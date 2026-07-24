@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-kits dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-bare-metal dist-vms dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-kits dist-apicredits-service dist-apicredits-storefront dist-apicredits-buyer dist-apicredits-middleware dist-apicredits-sample-app dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-buyer dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 .PHONY: dist-apicredits-domain
 
 # ---------------------------------------------------------------------------
@@ -485,43 +485,11 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse: ## Resolve locked third-party wheels for offline review/test runs.
-	@mkdir -p .snapshot
-	@set -eu; \
-	OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.zip"; \
-	TMPDIR="$$(mktemp -d)"; \
-	trap 'rm -rf "$$TMPDIR"' EXIT HUP INT TERM; \
-	echo "Creating $$OUTFILE ..."; \
-	mkdir -p "$$TMPDIR/wheelhouse" "$$TMPDIR/manifests"; \
-	find . -name uv.lock -not -path './.venv/*' -not -path './.snapshot/*' -print | sort > "$$TMPDIR/locks.txt"; \
-	INDEX=0; \
-	while IFS= read -r LOCKFILE; do \
-		[ -n "$$LOCKFILE" ] || continue; \
-		INDEX=$$((INDEX + 1)); \
-		PROJECT_DIR="$$(dirname "$$LOCKFILE")"; \
-		MANIFEST="$$TMPDIR/manifests/requirements-$$INDEX.txt"; \
-		uv export --project "$$PROJECT_DIR" --frozen --all-groups --no-hashes \
-			--no-emit-project --no-emit-workspace --no-emit-local > "$$MANIFEST"; \
-		PYTHON_SPEC="$$(sed -n 's/^requires-python = "//; s/"$$//; p' "$$LOCKFILE" | head -1)"; \
-		PYTHON_VERSION="$$(printf '%s\n' "$$PYTHON_SPEC" | sed -n 's/.*>= *\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"; \
-		[ -n "$$PYTHON_VERSION" ] || PYTHON_VERSION="$$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"; \
-		set --; \
-		if [ -f "$$PROJECT_DIR/pyproject.toml" ]; then \
-			for INDEX_URL in $$(python3 -c 'import sys, tomllib; data=tomllib.load(open(sys.argv[1], "rb")); print(" ".join(item["url"] for item in data.get("tool", {}).get("uv", {}).get("index", []) if item.get("url")))' "$$PROJECT_DIR/pyproject.toml"); do \
-				set -- "$$@" --extra-index-url "$$INDEX_URL"; \
-			done; \
-		fi; \
-		python3 -m pip download --disable-pip-version-check --no-deps --ignore-requires-python \
-			--python-version "$$PYTHON_VERSION" --find-links "$(CURDIR)/.dist" "$$@" \
-			--dest "$$TMPDIR/wheelhouse" -r "$$MANIFEST"; \
-	done < "$$TMPDIR/locks.txt"; \
-	cp "$$TMPDIR/locks.txt" "$$TMPDIR/manifests/locks.txt"; \
-	printf '%s\n' \
-		'This wheelhouse contains third-party dependencies exported independently from every repository uv.lock.' \
-		'Independent exports permit different projects to pin different versions of the same package.' \
-		'Build repository-owned wheels with make dist, then use both .dist and this wheelhouse as find-links sources.' \
-		> "$$TMPDIR/README_WHEELHOUSE.md"; \
-	rm -f "$$OUTFILE"; \
-	( cd "$$TMPDIR" && zip -qr "$$OUTFILE" wheelhouse manifests README_WHEELHOUSE.md ); \
-	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
-	echo "Done: $$OUTFILE ($$SIZE)"
+review-wheelhouse: dist-clean dist ## Bundle scoped locked development dependencies without running tests.
+	@bash ./scripts/package-review-wheelhouse.sh "$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.tar.gz"
+
+review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJECTS, REVIEW_SCOPE_FILE, or BASE_REF.
+	@args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^}"; \
+	if [ -n "$${REVIEW_PROJECTS:-}" ]; then args="$$args --projects $$REVIEW_PROJECTS"; \
+	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
+	$(CURDIR)/scripts/resolve-review-scope.py $$args

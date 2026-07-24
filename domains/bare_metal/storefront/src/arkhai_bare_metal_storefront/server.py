@@ -27,13 +27,8 @@ def _runtime_lifespan(
 ):
     @asynccontextmanager
     async def lifespan(app: Any):
-        runtime = factory()
-        app.state.runtime = runtime
-        await runtime.start()
-        try:
-            yield
-        finally:
-            await runtime.close()
+        app.state.runtime = factory()
+        yield
 
     return lifespan
 

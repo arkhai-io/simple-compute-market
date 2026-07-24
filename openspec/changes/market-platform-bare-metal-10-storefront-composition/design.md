@@ -65,11 +65,7 @@ Reusing VM-shaped settle models was rejected because they accept settlement-time
 
 ### Treat selected-site routing as trusted storefront state
 
-Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. The initial process boundary reads `BARE_METAL_STOREFRONT_SITES_JSON` as an array of exact `{site_id, authority_url, admin_key}` objects. Site IDs are unique and restricted to stable identifier characters; authority URLs must be absolute HTTP(S) URLs without embedded credentials, query strings, or fragments; credentials must be non-empty. Invalid configured entries fail startup. An absent value keeps the truthful pre-fulfillment mode available. Runtime bindings are immutable and diagnostics expose only site IDs plus authority/credential presence booleans—not URLs or secret values.
-
-The composition builds one shared `RemoteCapacityClient` per binding, uses schema-opaque core `ProjectionCache` instances for each site's independently versioned resource-pool and capacity-bucket families, and places those clients behind `AggregateCapacityClient` for pre-reservation placement. Startup loads complete generations before serving; one background poll loop checks every site/family independently. A failed version or snapshot check retains that site's last complete generation as stale and cannot erase another site's generation. The resource-pool generation's `bare_metal.v1` publication views are validated through bare-metal projection carriers with the configured site ID injected as provenance.
-
-Capacity placement selects one site before reservation. Storefront migration `bare-metal-storefront-0004-agreement-site-routing` records the negotiation, selected configured `site_id`, returned `capacity_reservation_id`, and reserved resource identity as one immutable correlation; it stores no URL or credential. Equivalent retries return that route without reserving again, conflicting local reuse fails, and restart recovery resolves the current trusted client by persisted site ID. Reservation commit and later lifecycle writes use that exact client rather than probing or falling back across sites.
+Operator configuration binds stable `site_id` values to provisioning authority URLs and credentials. Capacity placement selects one site before reservation; the resulting reservation/fulfillment state retains that trusted site binding. Fulfillment, polling, and teardown route through that binding rather than a process-global provisioning URL.
 
 For bare-metal publication, the trusted site producer exposes an opt-in complete per-resource projection. `physical_resource_id` is the Site authority's Physical Resource identity; `physical_host_id` is the stable cross-mode accounting identity; `machine_id` is executor-local. None may be inferred from another. The same projection generation carries authoritative per-resource availability, allocation mode, supported access methods, capacity dimensions, and explicitly allowlisted capabilities. Anonymous aggregate capacity buckets remain the fungible publication path and are not joined heuristically to resource identities.
 
@@ -94,18 +90,6 @@ Deployment rendering must prove that disabling either storefront does not leave 
 ### Use pull reconciliation as the baseline
 
 The composition will use POOLS-7 scheduling, fulfillment status, result, and teardown calls. Push delivery is optional acceleration and is not required to complete a bare-metal agreement. This keeps correctness independent of reverse reachability.
-
-### POOLS-7 public-contract reconciliation — 2026-07-23
-
-The integrated POOLS-7 Sections 3–4 now provide the internal durable foundation: `SettlementRecord` persistence, immutable prepared-operation carriers, durable fairness cursors, `PhysicalSettlementScheduler.schedule_resource(PhysicalSettlementRequest)`, and one transaction across reservation validation, candidate selection, capacity assignment/rebind, cursor advancement, and settlement creation. The compute composition resolves that scheduler through one narrow scheduling unit of work, and focused production-container tests prove commit and rollback behavior.
-
-Those capabilities are not yet a storefront-consumable contract. The compute HTTP application exposes capacity, pool, executor-action, job, credential, and lease routes, but no public `schedule_resource`, `begin_fulfillment`, `get_fulfillment_status`, `get_fulfillment_result`, or fulfillment teardown route/client. POOLS-7 Sections 6–8 and 10 remain incomplete, including provider preparation/dispatch recovery and pull result security. The existing direct executor-action routes are the legacy path POOLS-7 intends to replace and MUST NOT be used to claim task 4 fulfillment.
-
-Therefore task 4.1 remains blocked rather than being marked reconciled against a guessed wire contract. Bare-metal tasks 4.2–4.6 begin only after POOLS-7 publishes and tests those request/response, authorization, idempotency, and teardown contracts. Trusted multi-site projection, pre-reservation placement, and durable selected-site routing from Section 3 remain valid prerequisites and do not duplicate POOLS-7 repositories or workers.
-
-### POOLS-7 completion reconciliation — 2026-07-24
-
-POOLS-7 is complete and archived. The compute provisioning client now exposes authenticated scheduling, fulfillment acceptance, status/result pull, and whole-fulfillment teardown; recovery workers own durable provider dispatch and convergence. Bare-metal Section 4 is unblocked and must consume those public contracts through the persisted selected-site binding without copying provisioning repositories, workers, or provider execution into the storefront.
 
 ## Risks / Trade-offs
 

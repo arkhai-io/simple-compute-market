@@ -27,7 +27,7 @@ Every provisioning host MUST reference an existing resource pool; existing hosts
 #### Scenario: Existing schema is migrated
 
 - **WHEN** the resource-pool migration runs against a database containing hosts
-- **THEN** it creates the default pool before adding the non-null foreign key and assigns every existing host and historical host-backed capacity record to `default`
+- **THEN** it creates the default pool before adding the non-null foreign key and assigns every existing host to `default`
 
 #### Scenario: Host names an unknown pool
 
@@ -112,3 +112,13 @@ Disabling a Resource Pool is a draining action. It blocks new Capacity Settlemen
 Resource-pool management owns administrative routing metadata: pool identity, enabled state, policy tags, provider kind, provider-specific configuration, and host/resource membership. It does not own fulfillment-provider protocols or settlement-resource assignment.
 
 The higher-layer [fulfillment capability](../fulfillment/spec.md) reads enabled pool and resource information when evaluating candidates. Disabling a pool prevents new scheduling assignments while preserving existing reservations, assignments, fulfillment records, and active workloads. `market_resource_pools` must not import `market_fulfillment`, including for type-only annotations.
+
+
+### Requirement: Session-scoped pool reads
+
+Resource-pool management exposes a session-scoped pool lookup that loads provider configuration using the caller's open database session. Fulfillment uses this operation while freezing prepared provider input so the pool snapshot and aggregate write share one transaction.
+
+#### Scenario: Pool configuration is frozen with acceptance
+
+- **WHEN** fulfillment prepares provider input inside its acceptance transaction
+- **THEN** the pool and provider configuration are read through the same caller-owned session before the prepared operation is persisted

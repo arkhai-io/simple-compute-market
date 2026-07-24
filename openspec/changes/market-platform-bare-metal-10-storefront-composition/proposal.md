@@ -35,7 +35,7 @@ None.
 ## Dependencies and Related Changes
 
 - Archived Market Platform domain and compute extraction changes provide the common contracts and deployable compute service.
-- The archived `pools-7-storefront-fulfillment-cutover` change provides the durable selected-site scheduling, fulfillment, result, recovery, and teardown contracts consumed here.
+- `pools-7-storefront-fulfillment-cutover` owns the durable selected-site fulfillment path. Composition and protocol work may begin earlier, but production cutover and final lifecycle evidence depend on its public scheduling, fulfillment, result, and teardown contracts.
 - This change owns the bare-metal-specific per-resource projection producer/consumer contract needed for publication. POOLS-8 continues to own generic durable projection consumption, commercial mapping, and advisory listing hints.
 - `market-platform-compute-40-multi-domain-proof` follows this change and POOLS-7 to prove VM and bare-metal storefronts across shared provisioning authorities.
 - `provisioning-result-push-delivery` owns authenticated reverse delivery and is not required for the pull-based lifecycle baseline.

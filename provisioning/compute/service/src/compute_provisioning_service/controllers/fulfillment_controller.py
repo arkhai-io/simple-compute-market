@@ -1,291 +1,98 @@
-"""Authenticated domain-neutral scheduling and fulfillment routes."""
+"""Durable fulfillment acceptance and side-effect-free validation endpoints."""
 
-from __future__ import annotations
+from typing import Any
 
-from typing import cast
-
-from compute_provisioning.contracts import (
-    FulfillmentAcceptanceView,
-    FulfillmentBeginRequest,
-    FulfillmentCredentialView,
-    FulfillmentDryRunView,
-    FulfillmentResultView,
-    FulfillmentScheduleRequest,
-    FulfillmentStatusView,
-    FulfillmentValidationIssueView,
-    ProvisionedResourceView,
-    SettlementResourceView,
-)
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi_utils.cbv import cbv
-from market_fulfillment import (
-    CapacityReservationExpiredError,
-    FulfillmentConflictError,
-    FulfillmentRequestInvalidError,
-    FulfillmentStatusFailedError,
-    NoEligibleSettlementResourceError,
-    PhysicalSettlementRequest,
-    PhysicalSettlementScheduler,
-    ProviderConfigInvalidError,
-    ProviderNotFoundError,
-    ProviderUnavailableError,
-    SettlementEntityNotFoundError,
-    SettlementRequestMismatchError,
-    VersionedEnvelope,
-)
-from market_site.ledger import CapacityLedgerService
+from pydantic import BaseModel
 
 from compute_provisioning_service import container as _container_module
-from compute_provisioning_service.services.fulfillment_service import FulfillmentService
+from market_fulfillment import (
+    FulfillmentConflictError,
+    FulfillmentOrchestrator,
+    ProviderConfigInvalidError,
+    ProviderNotFoundError,
+    SettlementEntityNotFoundError,
+    VersionedEnvelope,
+)
 
-router = APIRouter(tags=["fulfillment"])
+router = APIRouter(prefix="/fulfillment", tags=["fulfillment"])
 
 
-def _fulfillment_not_found(fulfillment_id: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail=f"fulfillment {fulfillment_id!r} not found",
-    )
+class FulfillmentRequestBody(BaseModel):
+    capacity_reservation_id: str
+    market: str
+    fulfillment_request: VersionedEnvelope[Any]
 
 
-def _not_found(reservation_id: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail=f"capacity reservation {reservation_id!r} not found",
-    )
+class FulfillmentAcceptanceResponse(BaseModel):
+    fulfillment_id: str
+    capacity_reservation_id: str
+    state: str
+
+
+class FulfillmentValidationResponse(BaseModel):
+    valid: bool
+    issues: list[dict[str, Any]]
 
 
 @cbv(router)
 class FulfillmentController:
     def __init__(
         self,
-        scheduler: PhysicalSettlementScheduler = Depends(
-            lambda: _container_module.resolved_physical_settlement_scheduler,
-        ),
-        capacity_ledger: CapacityLedgerService = Depends(
-            lambda: _container_module.resolved_capacity_ledger_service,
-        ),
-        fulfillment_service: FulfillmentService = Depends(
-            lambda: _container_module.resolved_fulfillment_service,
+        service: FulfillmentOrchestrator = Depends(
+            lambda: _container_module.resolved_fulfillment_service
         ),
     ) -> None:
-        self._scheduler = cast(PhysicalSettlementScheduler, scheduler)
-        self._capacity_ledger = cast(CapacityLedgerService, capacity_ledger)
-        self._fulfillment_service = cast(FulfillmentService, fulfillment_service)
+        self._service = service
 
-    @router.post("/fulfillment/schedules", response_model=SettlementResourceView)
-    def schedule_resource(
-        self,
-        body: FulfillmentScheduleRequest,
-        request: Request,
-    ) -> SettlementResourceView:
-        principal = str(request.state.storefront_principal)
-        if self._capacity_ledger.reservation_owner_principal(
+    @router.post("/validate", response_model=FulfillmentValidationResponse)
+    def validate(self, body: FulfillmentRequestBody) -> FulfillmentValidationResponse:
+        result = self._service.validate_fulfillment(
             body.capacity_reservation_id,
-        ) != principal:
-            raise _not_found(body.capacity_reservation_id)
-        try:
-            selected = self._scheduler.schedule_resource(
-                PhysicalSettlementRequest(
-                    capacity_reservation_id=body.capacity_reservation_id,
-                    market=body.market,
-                    requirements=body.requirements,
-                    resource_id=body.resource_id,
-                ),
-            )
-        except SettlementEntityNotFoundError as exc:
-            raise _not_found(body.capacity_reservation_id) from exc
-        except (
-            CapacityReservationExpiredError,
-            SettlementRequestMismatchError,
-        ) as exc:
-            raise HTTPException(
-                status_code=409, detail="capacity reservation cannot be scheduled"
-            ) from exc
-        except NoEligibleSettlementResourceError as exc:
-            raise HTTPException(
-                status_code=422, detail="no eligible settlement resource"
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="invalid schedule request") from exc
-        return SettlementResourceView(
-            capacity_reservation_id=body.capacity_reservation_id,
-            settlement_resource_id=selected.settlement_resource_id,
-            pool_id=selected.pool_id,
-            resource_kind=selected.resource_kind,
-            provider=selected.provider,
-            attributes=selected.attributes,
+            body.market,
+            body.fulfillment_request,
+        )
+        return FulfillmentValidationResponse(
+            valid=result.valid,
+            issues=[issue.__dict__ for issue in result.issues],
         )
 
-    @staticmethod
-    def _envelope(body: FulfillmentBeginRequest) -> VersionedEnvelope:
-        return VersionedEnvelope.model_validate(
-            body.fulfillment_request.model_dump(mode="json")
-        )
-
-    @router.post("/fulfillments", response_model=FulfillmentAcceptanceView)
-    async def begin_fulfillment(
+    @router.post("/begin", response_model=FulfillmentAcceptanceResponse)
+    async def begin(
         self,
-        body: FulfillmentBeginRequest,
-        request: Request,
-    ) -> FulfillmentAcceptanceView:
+        body: FulfillmentRequestBody,
+    ) -> FulfillmentAcceptanceResponse:
         try:
-            accepted = await self._fulfillment_service.begin_fulfillment(
-                capacity_reservation_id=body.capacity_reservation_id,
-                market=body.market,
-                fulfillment_request=self._envelope(body),
-                owner_principal=str(request.state.storefront_principal),
+            result = await self._service.begin_fulfillment(
+                body.capacity_reservation_id,
+                body.market,
+                body.fulfillment_request,
             )
-        except SettlementEntityNotFoundError as exc:
-            raise _not_found(body.capacity_reservation_id) from exc
-        except (FulfillmentConflictError, SettlementRequestMismatchError) as exc:
+        except (SettlementEntityNotFoundError, LookupError) as exc:
             raise HTTPException(
-                status_code=409, detail="fulfillment request conflicts with durable state"
+                status_code=404,
+                detail={"code": "fulfillment_not_found", "message": "The scheduled fulfillment resource was not found."},
             ) from exc
-        except (
-            FulfillmentRequestInvalidError,
-            ProviderConfigInvalidError,
-            ProviderNotFoundError,
-            ValueError,
-        ) as exc:
-            raise HTTPException(status_code=422, detail="invalid fulfillment request") from exc
-        return FulfillmentAcceptanceView(
-            capacity_reservation_id=accepted.capacity_reservation_id,
-            fulfillment_id=accepted.fulfillment_id,
-            state=accepted.state,
-        )
-
-    @router.get(
-        "/fulfillments/{fulfillment_id}/status",
-        response_model=FulfillmentStatusView,
-    )
-    def get_fulfillment_status(
-        self,
-        fulfillment_id: str,
-        request: Request,
-    ) -> FulfillmentStatusView:
-        try:
-            status = self._fulfillment_service.get_status(
-                fulfillment_id=fulfillment_id,
-                owner_principal=str(request.state.storefront_principal),
-            )
-        except SettlementEntityNotFoundError as exc:
-            raise _fulfillment_not_found(fulfillment_id) from exc
-        return FulfillmentStatusView(
-            fulfillment_id=status.fulfillment_id,
-            capacity_reservation_id=status.capacity_reservation_id,
-            state=status.state,
-            failure_reason=status.failure_reason,
-            failure_message=status.failure_message,
-        )
-
-    @router.get(
-        "/fulfillments/{fulfillment_id}/result",
-        response_model=FulfillmentResultView,
-    )
-    async def get_fulfillment_result(
-        self,
-        fulfillment_id: str,
-        request: Request,
-    ) -> FulfillmentResultView:
-        try:
-            result = await self._fulfillment_service.get_result(
-                fulfillment_id=fulfillment_id,
-                owner_principal=str(request.state.storefront_principal),
-            )
-        except SettlementEntityNotFoundError as exc:
-            raise _fulfillment_not_found(fulfillment_id) from exc
-        except (
-            FulfillmentStatusFailedError,
-            ProviderNotFoundError,
-            ProviderUnavailableError,
-        ) as exc:
+        except ProviderConfigInvalidError as exc:
             raise HTTPException(
-                status_code=503, detail="fulfillment credentials temporarily unavailable"
+                status_code=422,
+                detail={"code": "provider_config_invalid", "message": "The fulfillment provider configuration is invalid."},
             ) from exc
-        return FulfillmentResultView(
-            fulfillment_id=result.fulfillment_id,
-            capacity_reservation_id=result.capacity_reservation_id,
-            state=result.state,
-            provisioned_resources=[
-                ProvisionedResourceView(
-                    provisioned_resource_id=item.provisioned_resource_id,
-                    domain_resource_ref=item.domain_resource_ref,
-                    status=item.status,
-                )
-                for item in result.provisioned_resources
-            ],
-            failure_reason=result.failure_reason,
-            failure_message=result.failure_message,
-            credential_generation=result.credential_generation,
-            credentials=[
-                FulfillmentCredentialView(
-                    kind=item.kind,
-                    schema_version=item.schema_version,
-                    payload=item.payload,
-                )
-                for item in result.credentials
-            ],
-        )
-
-    @router.post(
-        "/fulfillments/{fulfillment_id}/teardown",
-        response_model=FulfillmentAcceptanceView,
-    )
-    async def begin_fulfillment_teardown(
-        self,
-        fulfillment_id: str,
-        request: Request,
-    ) -> FulfillmentAcceptanceView:
-        try:
-            accepted = await self._fulfillment_service.begin_teardown(
-                fulfillment_id=fulfillment_id,
-                owner_principal=str(request.state.storefront_principal),
-            )
-        except SettlementEntityNotFoundError as exc:
-            raise _fulfillment_not_found(fulfillment_id) from exc
-        except FulfillmentConflictError as exc:
+        except (FulfillmentConflictError, ValueError) as exc:
             raise HTTPException(
-                status_code=409, detail="fulfillment cannot be torn down in its current state"
+                status_code=409,
+                detail={"code": "fulfillment_conflict", "message": "The request conflicts with the durable fulfillment state."},
             ) from exc
-        except (ProviderConfigInvalidError, FulfillmentRequestInvalidError) as exc:
-            raise HTTPException(status_code=422, detail="invalid teardown request") from exc
-        except (ProviderNotFoundError, ProviderUnavailableError) as exc:
+        except ProviderNotFoundError as exc:
             raise HTTPException(
-                status_code=503, detail="teardown provider temporarily unavailable"
+                status_code=500,
+                detail={
+                    "code": "fulfillment_provider_unavailable",
+                    "message": "The configured fulfillment provider is unavailable.",
+                },
             ) from exc
-        return FulfillmentAcceptanceView(
-            capacity_reservation_id=accepted.capacity_reservation_id,
-            fulfillment_id=accepted.fulfillment_id,
-            state=accepted.state,
-        )
-
-    @router.post("/fulfillments/dry-run", response_model=FulfillmentDryRunView)
-    def dry_run_fulfillment(
-        self,
-        body: FulfillmentBeginRequest,
-        request: Request,
-    ) -> FulfillmentDryRunView:
-        try:
-            validation = self._fulfillment_service.validate_create(
-                capacity_reservation_id=body.capacity_reservation_id,
-                market=body.market,
-                fulfillment_request=self._envelope(body),
-                owner_principal=str(request.state.storefront_principal),
-            )
-        except SettlementEntityNotFoundError as exc:
-            raise _not_found(body.capacity_reservation_id) from exc
-        return FulfillmentDryRunView(
-            valid=validation.valid,
-            issues=[
-                FulfillmentValidationIssueView(
-                    code=issue.code,
-                    message=issue.message,
-                    field=issue.field,
-                )
-                for issue in validation.issues
-            ],
-        )
+        return FulfillmentAcceptanceResponse(**result.__dict__)
 
     @classmethod
     def make_router(cls) -> APIRouter:

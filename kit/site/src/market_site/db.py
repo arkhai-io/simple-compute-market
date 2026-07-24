@@ -112,12 +112,6 @@ class CapacityReservation(Base):
     __tablename__ = "capacity_reservations"
 
     capacity_reservation_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    owner_principal = Column(
-        String,
-        nullable=False,
-        default="legacy-admin",
-        index=True,
-    )
     # Null until scheduling persists a concrete assignment. The initial
     # capacity-accounting choice is private to CapacityReservationDebit.
     settlement_resource_id = Column(String, nullable=True, index=True)

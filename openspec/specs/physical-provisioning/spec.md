@@ -13,8 +13,8 @@ Market-managed VM and bare-metal leases MUST attach executor kind, target, and e
 - **WHEN** a caller registers a lease for a committed allocation and bare-metal machine
 - **THEN** the allocation records the `bare_metal` executor kind, machine target, and physical-host reference
 
-### Requirement: Provider-owned fulfillment lifecycle
-Settlement-backed release MUST resolve the durable fulfillment aggregate and dispatch teardown through its exact provider/resource-kind route. It MUST NOT invoke an executor-kind VM release fallback. Executor-kind release remains available only for domain lifecycles, such as bare metal, that explicitly register a release delegate outside settlement fulfillment.
+### Requirement: Executor-dispatched lifecycle
+Market-managed release MUST dispatch by executor kind; direct VM host administration endpoints MAY remain separate operator surfaces.
 
 #### Scenario: Bare-metal allocation is released
 - **WHEN** its lease lifecycle invokes release
@@ -27,15 +27,15 @@ Provisioning operations MUST expose durable job identity and terminal status whi
 - **WHEN** the worker completes or fails the action
 - **THEN** the job status exposes a terminal result or error linked to the allocation/deal
 
-### Requirement: Fulfillment-backed lease release
-Lease expiry and explicit termination MUST first consult fulfillment ownership. A settlement-backed reservation starts or resumes durable whole-fulfillment teardown; capacity is released only after provider success. Failed teardown remains observable and retryable. A reservation with no fulfillment aggregate fails closed when no domain release delegate is registered.
+### Requirement: Allocation-backed lease release
+Lease expiry MUST invoke the configured executor release delegate before capacity is reported released; failed release MUST remain observable and operator-repairable.
 
 #### Scenario: Teardown fails
 - **WHEN** the release delegate returns a failure
 - **THEN** capacity remains unavailable, the lease enters `release_failed`, and retry/force-release controls remain available
 
 ### Requirement: Site-backed release lifecycle
-Compute lease lifecycle MUST use an injected site-authority port and MUST NOT report capacity released until fulfillment/provider teardown or an explicitly registered domain release succeeds, or an operator performs an explicit force-release action.
+Compute lease lifecycle MUST use an injected site-authority port and MUST NOT report capacity released until the selected executor release succeeds or an operator performs an explicit force-release action.
 
 #### Scenario: Executor release succeeds
 - **WHEN** a lease expires and its registered executor completes teardown or reclaim
@@ -100,7 +100,7 @@ Cross-domain compute orchestration, including mechanism-neutral fulfillment coor
 
 ### Requirement: Validated executor registration
 
-Service composition MUST reject duplicate executor/action kinds, duplicate exact fulfillment-provider `(provider, resource_kind)` pairs, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle. VM and bare-metal adapters MAY both register `ansible`; their canonical scoped routes are `("ansible", "compute.gpu")` and `("ansible", "bare_metal")`, respectively, and cross-kind fallback is prohibited.
+Service composition MUST reject duplicate executor/action kinds, duplicate fulfillment-provider identities, and incomplete adapter bundles before accepting traffic. Executor and provider registries MUST remain separate authority dimensions: registering or resolving a provider does not claim, infer, or override an executor kind. Provider fulfillment and executor dispatch remain separate paths unless composition explicitly joins them through a supported lifecycle.
 
 #### Scenario: Two adapters claim one executor kind
 
@@ -148,13 +148,12 @@ After callers and deployments migrate, generic provisioning service and client p
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
-- Multidimensional durable scheduling eligibility and transaction behavior: `kit/fulfillment/tests/unit/test_scheduler.py` and `provisioning/compute/service/tests/unit/test_scheduling_composition.py`.
+- Multidimensional scheduling eligibility, including secondary-dimension rejection and legacy GPU-only requests: `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py`.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
-- Fulfillment-owned VM teardown, capacity retention, and final release: `provisioning/compute/service/tests/unit/services/test_fulfillment_recovery.py` and `test_fulfillment_release.py`; domain release and force-repair behavior: `integration/test_bare_metal_leases_api.py` and `test_leases_api.py`.
+- Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
-- Authenticated lifecycle route/client coverage and persisted provider snapshots: `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`.
 
-The compute service exposes versioned authenticated schedule, dry-run, begin, status, result, and whole-fulfillment teardown routes and matching client methods. Credential-bound principals own reservations and fulfillments; valid non-owners receive not found. `SettlementRecord` is the durable aggregate. Prepared commands commit before claimed recovery dispatch, exact `(provider, resource_kind)` routing selects the domain adapter, and periodic bounded claims converge create and teardown without storefront availability. Status/result use authenticated pull reads; active VM credentials rotate live and are not persisted in the aggregate.
+`PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Process-local state is not a durable mechanism-neutral recovery guarantee.
 
 ## Capacity settlement lifecycle
 

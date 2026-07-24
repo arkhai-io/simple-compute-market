@@ -89,7 +89,6 @@ class AnsibleJobService:
         job_queue,
         *,
         contract: ExecutorActionEnvelope | None = None,
-        credentials_private: bool = False,
     ) -> JobSubmitResponse:
         """Persist and enqueue a job, deduplicating versioned contract commands."""
         max_retries = (
@@ -110,16 +109,6 @@ class AnsibleJobService:
                     idempotency_key=contract.idempotency_key,
                 )
                 if existing is not None:
-                    self._require_equivalent_contract_job(
-                        existing,
-                        contract=contract,
-                        raw_params=raw_params,
-                    )
-                    if (
-                        existing.status == JobStatus.queued.value
-                        and existing.next_retry_at is None
-                    ):
-                        await job_queue.enqueue(existing.id)
                     return JobSubmitResponse(job_id=existing.id, status=existing.status)
             job = AnsibleJob(
                 id=job_id,
@@ -135,7 +124,6 @@ class AnsibleJobService:
                 executor_kind=contract.executor_kind if contract else params.executor_kind,
                 action_kind=contract.action_kind if contract else params.executor_action,
                 idempotency_key=contract.idempotency_key if contract else None,
-                credentials_private=credentials_private,
             )
             db.add(job)
             try:
@@ -153,17 +141,7 @@ class AnsibleJobService:
                 )
                 if existing is None:
                     raise
-                self._require_equivalent_contract_job(
-                    existing,
-                    contract=contract,
-                    raw_params=raw_params,
-                )
                 job_id = existing.id
-                if (
-                    existing.status == JobStatus.queued.value
-                    and existing.next_retry_at is None
-                ):
-                    await job_queue.enqueue(existing.id)
                 return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
         if created:
@@ -272,25 +250,6 @@ class AnsibleJobService:
                 raise LookupError(f"Job {job_id} not found")
             return self._to_status_response(job)
 
-    async def wait_for_terminal_job(
-        self,
-        job_id: str,
-        *,
-        timeout_seconds: float = 120,
-        poll_interval_seconds: float = 0.1,
-    ) -> JobStatusResponse:
-        """Wait for a persisted job to reach a terminal state."""
-        async with asyncio.timeout(timeout_seconds):
-            while True:
-                job = self.get_job(job_id)
-                if job.status in {
-                    JobStatus.succeeded.value,
-                    JobStatus.failed.value,
-                    JobStatus.cancelled.value,
-                }:
-                    return job
-                await asyncio.sleep(poll_interval_seconds)
-
     def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
         """Built-in variable keys that would be emitted for these params.
 
@@ -310,9 +269,7 @@ class AnsibleJobService:
             if not job.contract_version:
                 raise LookupError(f"Job {job_id} is not a contract job")
             credentials = (
-                []
-                if job.credentials_private
-                else db.query(Credential)
+                db.query(Credential)
                 .filter(Credential.job_id == job_id)
                 .all()
             )
@@ -356,7 +313,7 @@ class AnsibleJobService:
                 .filter(AnsibleJob.id == job_id)
                 .one_or_none()
             )
-            if not job or job.credentials_private:
+            if not job:
                 raise LookupError(f"Job {job_id} not found")
 
             creds = (
@@ -366,34 +323,17 @@ class AnsibleJobService:
             )
             return CredentialListResponse(
                 job_id=job_id,
-                credentials=[self._credential_response(c) for c in creds],
+                credentials=[
+                    CredentialResponse(
+                        role=c.role,
+                        password=c.password,
+                        ssh_commands=c.ssh_commands,
+                        ssh_key_path_host=c.ssh_key_path_host,
+                        key_type=c.key_type,
+                    )
+                    for c in creds
+                ],
             )
-
-    def consume_private_credentials(self, job_id: str) -> CredentialListResponse:
-        """Atomically read and delete credentials for one private job."""
-        with self._session_factory() as db:
-            job = db.query(AnsibleJob).filter(AnsibleJob.id == job_id).one_or_none()
-            if job is None or not job.credentials_private:
-                raise LookupError(f"Private job {job_id} not found")
-            creds = db.query(Credential).filter(Credential.job_id == job_id).all()
-            response = CredentialListResponse(
-                job_id=job_id,
-                credentials=[self._credential_response(c) for c in creds],
-            )
-            for credential in creds:
-                db.delete(credential)
-            db.commit()
-            return response
-
-    @staticmethod
-    def _credential_response(credential: Credential) -> CredentialResponse:
-        return CredentialResponse(
-            role=credential.role,
-            password=credential.password,
-            ssh_commands=credential.ssh_commands,
-            ssh_key_path_host=credential.ssh_key_path_host,
-            key_type=credential.key_type,
-        )
 
     def get_logs(self, job_id: str) -> JobLogsResponse:
         """Return raw Ansible logs for a job."""
@@ -454,23 +394,6 @@ class AnsibleJobService:
         }
 
     @staticmethod
-    def _require_equivalent_contract_job(
-        existing: AnsibleJob,
-        *,
-        contract: ExecutorActionEnvelope,
-        raw_params: dict,
-    ) -> None:
-        if not (
-            existing.contract_version == contract.contract_version
-            and existing.deal_ref == contract.deal_ref
-            and existing.executor_kind == contract.executor_kind
-            and existing.params == raw_params
-        ):
-            raise ValueError(
-                "idempotency key already belongs to a different executor command"
-            )
-
-    @staticmethod
     def _contract_job(
         db: Session,
         *,
@@ -512,29 +435,11 @@ class AnsibleJobService:
                 logger.warning("Job %s not found", job_id)
                 return
 
-            if job.status != JobStatus.queued.value:
-                return
             # Respect scheduled retry delay: if the job's next_retry_at is in
             # the future just return; the retry scheduler (run_retry_scheduler)
             # re-enqueues it once the delay elapses.
             if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
                 return
-            claimed = (
-                db.query(AnsibleJob)
-                .filter(
-                    AnsibleJob.id == job_id,
-                    AnsibleJob.status == JobStatus.queued.value,
-                )
-                .update(
-                    {AnsibleJob.status: JobStatus.running.value},
-                    synchronize_session=False,
-                )
-            )
-            db.commit()
-            if claimed != 1:
-                return
-            db.expire_all()
-            job = db.query(AnsibleJob).filter(AnsibleJob.id == job_id).one()
 
             logger.info(
                 "Processing job %s (attempt %d/%d)",
@@ -543,6 +448,7 @@ class AnsibleJobService:
                 job.max_retries + 1,
             )
 
+            self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
             vars_path = self._ansible.build_vars_file(params)
 
@@ -634,7 +540,7 @@ class AnsibleJobService:
                     "\n\nSTDERR:\n" + exc.stderr if exc.stderr else ""
                 )
                 logs = self._redact_logs(logs)
-                error_message = self._redact_logs(str(exc))
+                error_message = str(exc)
 
                 should_retry = (
                     job.retry_count < job.max_retries
@@ -680,8 +586,7 @@ class AnsibleJobService:
                     logger.error("Job %s failed permanently: %s", job_id, error_message)
 
         except Exception as exc:
-            safe_error = self._redact_logs(str(exc))
-            logger.exception("Unexpected error processing job %s: %s", job_id, safe_error)
+            logger.exception("Unexpected error processing job %s: %s", job_id, exc)
             try:
                 # The error may have come from a failed flush/commit (e.g. an
                 # IntegrityError while storing credentials), which leaves the
@@ -699,7 +604,7 @@ class AnsibleJobService:
                         db,
                         job,
                         status=JobStatus.failed.value,
-                        error=f"Internal error: {safe_error}",
+                        error=f"Internal error: {exc}",
                     )
             except Exception:
                 logger.exception(
@@ -821,21 +726,15 @@ class AnsibleJobService:
     def _redact_logs(self, logs: str) -> str:
         if not logs:
             return logs
-        secret_key = (
-            r"password|passphrase|secret|token|api_key|admin_key|"
-            r"private_key|ssh_key|ssh_key_path_host|authorization"
-        )
         redacted = re.sub(
-            rf'("(?:{secret_key})"\s*:\s*)"[^"]*"',
+            r'("(?:password|ssh_key_path_host)":\s*)"[^"]*"',
             r'\1"[REDACTED]"',
             logs,
-            flags=re.IGNORECASE,
         )
         redacted = re.sub(
-            rf"((?:{secret_key})\s*[:=]\s*)(?!\[REDACTED\])[^\s,]+",
+            r"(password:\s*)(?!\[REDACTED\]).+",
             r"\1[REDACTED]",
             redacted,
-            flags=re.IGNORECASE,
         )
         redacted = re.sub(r"-i\s+\S+\.ssh/\S+", "-i [REDACTED]", redacted)
         redacted = re.sub(r"sshpass\s+-p\s+\S+", "sshpass -p [REDACTED]", redacted)

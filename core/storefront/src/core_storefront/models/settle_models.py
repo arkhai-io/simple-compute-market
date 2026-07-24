@@ -78,8 +78,10 @@ class VerifyEscrowResponse(BaseModel):
 class EvaluateSettleRequest(BaseModel):
     """Body for POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
-    Caller supplies listing context — the endpoint builds canonical schedule
-    and fulfillment requests without selecting a host or writing state.
+    Caller supplies listing context — the endpoint resolves a host from
+    inventory and builds the provisioning job spec. No chain reads, no DB
+    writes (read-only inventory lookup). Used by e2e stage 8a to test
+    doWork in isolation.
     """
     listing_id: str = Field(description="Listing ID — used to extract compute attributes for host matching")
     ssh_public_key: str = Field(default="", description="SSH public key to inject into the VM")
@@ -90,8 +92,9 @@ class EvaluateSettleResponse(BaseModel):
     """Response for POST /api/v1/admin/settle/{escrow_uid}/evaluate."""
     would_submit: bool
     escrow_uid: str
-    schedule_request: dict[str, Any] | None = None
-    begin_request: dict[str, Any] | None = None
+    vm_host: str | None = None
+    vm_target: str | None = None
+    required_attributes: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
 
 

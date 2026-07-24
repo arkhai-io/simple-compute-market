@@ -17,9 +17,6 @@ from .negotiation import default_seller_round_hook
 from .negotiation_service import BareMetalNegotiationService
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_service import BareMetalSettlementService
-from .site_capacity import BareMetalSiteCapacity
-from .site_config import TrustedSiteBindings, parse_trusted_site_bindings
-from .site_routing import AgreementSiteRouter
 from .sqlite_client import SQLiteClient
 
 
@@ -31,30 +28,10 @@ class BareMetalStorefrontRuntime:
     domain: MarketDomainContract
     seller_id: str
     admin_key: str | None = None
-    sites: TrustedSiteBindings = field(default_factory=TrustedSiteBindings)
-    site_capacity: BareMetalSiteCapacity | None = None
-    projection_poll_interval: float = 5.0
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     escrow_verifier: Callable[..., Awaitable[None]] = verify_escrow_for_settlement
-
-    async def start(self) -> None:
-        if self.site_capacity is not None:
-            await self.site_capacity.start(self.projection_poll_interval)
-
-    async def close(self) -> None:
-        if self.site_capacity is not None:
-            await self.site_capacity.close()
-
-    def site_router(self) -> AgreementSiteRouter:
-        if self.site_capacity is None:
-            raise RuntimeError("trusted site capacity is not configured")
-        return AgreementSiteRouter(
-            db=self.db,
-            sites=self.sites,
-            capacity=self.site_capacity,
-        )
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
@@ -91,12 +68,7 @@ class BareMetalStorefrontRuntime:
             "api": "ok",
             "database": "ok",
             "commercial_settlement": "ok" if self.chain_clients else "unavailable",
-            "site_configuration": "ok" if self.sites.bindings else "unavailable",
-            "site_projection": (
-                self.site_capacity.projection_health()
-                if self.site_capacity is not None
-                else "unavailable"
-            ),
+            "site_projection": "unavailable",
             "fulfillment": "unavailable",
         }
         try:
@@ -120,20 +92,10 @@ def build_runtime_from_environment(
     *,
     domain: MarketDomainContract | None = None,
 ) -> BareMetalStorefrontRuntime:
-    """Build the runtime and fail startup on malformed trusted site bindings."""
+    """Build the minimal runtime; trusted site bindings are composed later."""
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
     )
-    sites = parse_trusted_site_bindings(
-        os.environ.get("BARE_METAL_STOREFRONT_SITES_JSON"),
-    )
-    poll_interval = float(
-        os.environ.get("BARE_METAL_STOREFRONT_PROJECTION_POLL_INTERVAL", "5"),
-    )
-    if poll_interval <= 0:
-        raise ValueError(
-            "BARE_METAL_STOREFRONT_PROJECTION_POLL_INTERVAL must be positive",
-        )
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(
             os.environ.get(
@@ -145,11 +107,4 @@ def build_runtime_from_environment(
         domain=selected_domain,
         seller_id=os.environ.get("BARE_METAL_STOREFRONT_SELLER_ID", ""),
         admin_key=os.environ.get("BARE_METAL_STOREFRONT_ADMIN_KEY") or None,
-        sites=sites,
-        site_capacity=(
-            BareMetalSiteCapacity.from_bindings(sites)
-            if sites.bindings
-            else None
-        ),
-        projection_poll_interval=poll_interval,
     )

@@ -14,7 +14,7 @@ Adaptations, both required by the fulfillment contract migration:
 
 from __future__ import annotations
 
-from typing import Any, cast
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -30,8 +30,6 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
-    SettlementRepository,
-    SqlAlchemySchedulingUnitOfWork,
 )
 from market_resource_pools import PoolCreate, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
@@ -59,15 +57,14 @@ def services():
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
-    pools = ResourcePoolService(
-        factory,
-        cast(Any, {"ansible": _Handler()}),
-    )
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
     # This test suite's claims are VM-flavored ("gpu_count"); opt into
     # that alias explicitly the same way the VM composition root does
     # (kit/site's own default is domain-neutral -- see ledger.py).
     ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
-    scheduler = _scheduler(pools, ledger)
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory, default_resource_kind="compute.gpu"
+    )
     return pools, ledger, scheduler
 
 
@@ -93,27 +90,6 @@ def _reserve(ledger, agreement="agreement-1", **deal):
     result = ledger.reserve(claim={"gpu_count": 1}, deal_ref=ref)
     assert result is not None
     return result["capacity_reservation_id"]
-
-
-def _scheduler(
-    pools,
-    ledger,
-    *,
-    default_resource_kind="compute.gpu",
-    repository=None,
-    unit_of_work=None,
-):
-    repository = repository or SettlementRepository()
-    unit_of_work = unit_of_work or SqlAlchemySchedulingUnitOfWork(
-        ledger._session_factory,
-        pools,
-        ledger,
-        repository,
-    )
-    return PhysicalSettlementScheduler(
-        unit_of_work=unit_of_work,
-        default_resource_kind=default_resource_kind,
-    )
 
 
 def _request(capacity_reservation_id: str, **kwargs):
@@ -153,52 +129,6 @@ def test_retry_is_idempotent_and_does_not_rerun_policy(services):
     first = scheduler.schedule_resource(_request(capacity_reservation_id))
     second = scheduler.schedule_resource(_request(capacity_reservation_id))
     assert first == second
-
-
-def test_same_resource_schedule_persists_site_assignment_marker(services):
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    _resource(ledger, "r1", "pool-a")
-    capacity_reservation_id = _reserve(ledger)
-
-    selected = scheduler.schedule_resource(_request(capacity_reservation_id))
-    reservation = ledger.get_reservation(
-        capacity_reservation_id=capacity_reservation_id,
-    )
-
-    assert selected.settlement_resource_id == "r1"
-    assert reservation is not None
-    assert reservation["settlement_resource_id"] == "r1"
-
-
-def test_exclusive_reservation_does_not_conflict_with_itself(services):
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    ledger.register_resource(
-        resource_id="bare-metal-1",
-        resource_type="bare_metal",
-        total_units=1,
-        pool_id="pool-a",
-        attributes={
-            "physical_host_id": "host-1",
-            "allocation_mode": "exclusive",
-        },
-    )
-    reserved = ledger.reserve(
-        claim={"resource_type": "bare_metal", "units": 1},
-        deal_ref={"market": "bare_metal"},
-    )
-    assert reserved is not None
-
-    selected = scheduler.schedule_resource(
-        PhysicalSettlementRequest(
-            capacity_reservation_id=reserved["capacity_reservation_id"],
-            market="bare_metal",
-            requirements={"resource_kind": "bare_metal"},
-        ),
-    )
-
-    assert selected.settlement_resource_id == "bare-metal-1"
 
 
 def test_round_robin_is_deterministic_across_pools(services):
@@ -258,7 +188,7 @@ def test_disabling_pool_does_not_depend_on_existing_assignment(services):
 
 def test_missing_resource_kind_raises_when_no_default_configured(services):
     pools, ledger, _ = services
-    scheduler = _scheduler(pools, ledger, default_resource_kind=None)
+    scheduler = PhysicalSettlementScheduler(pools, ledger, session_factory=ledger._session_factory)  # no default_resource_kind
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a")
     capacity_reservation_id = _reserve(ledger)
@@ -394,31 +324,6 @@ def test_schedule_request_narrower_than_reservation_is_permitted(services):
     assert resource.settlement_resource_id == "r1"
 
 
-def test_narrow_request_does_not_select_destination_that_cannot_hold_full_debit(services):
-    pools, ledger, scheduler = services
-    _pool(pools, "pool-a")
-    _resource_with_capacity(
-        ledger,
-        "a-narrow-only",
-        "pool-a",
-        capacity={"gpu_count": 2},
-    )
-    _resource_with_capacity(
-        ledger,
-        "b-full-reservation",
-        "pool-a",
-        capacity={"gpu_count": 4},
-    )
-    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4})
-
-    resource = scheduler.schedule_resource(_request(
-        capacity_reservation_id,
-        requirements={"dimensions": {"gpu_count": 2}},
-    ))
-
-    assert resource.settlement_resource_id == "b-full-reservation"
-
-
 def test_schedule_request_equal_to_reservation_is_permitted(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
@@ -479,7 +384,10 @@ def test_cursor_persists_across_a_fresh_scheduler_instance(services):
     first = scheduler.schedule_resource(_request(first_id))
     assert first.pool_id == "pool-a"
 
-    fresh_scheduler = _scheduler(pools, ledger)
+    fresh_scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+    )
     second_id = _reserve(ledger, agreement="agreement-2")
     second = fresh_scheduler.schedule_resource(_request(second_id))
     assert second.pool_id == "pool-b"
@@ -514,7 +422,12 @@ def test_stale_persisted_cursor_recovers_deterministically(services):
         )
         db.commit()
 
-    fresh_scheduler = _scheduler(pools, ledger, repository=repository)
+    fresh_scheduler = PhysicalSettlementScheduler(
+        pools,
+        ledger,
+        session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+    )
     reservation_id = _reserve(ledger, agreement="stale-cursor")
     selected = fresh_scheduler.schedule_resource(_request(reservation_id))
 
@@ -622,9 +535,9 @@ def test_failed_schedule_leaves_no_partial_cursor_or_settlement_state(services):
     _resource(ledger, "r1", "pool-a", units=10)
     capacity_reservation_id = _reserve(ledger)
 
-    failing_scheduler = _scheduler(
-        pools,
-        ledger,
+    failing_scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
         repository=_ExplodingRepository(),
     )
     with pytest.raises(RuntimeError):
@@ -657,10 +570,7 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
     SiteBase.metadata.create_all(bind=engine)
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
-    pools = ResourcePoolService(
-        factory,
-        cast(Any, {"ansible": _Handler()}),
-    )
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
     ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
@@ -709,8 +619,8 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
         factory, pools, ledger, transaction_type=PausingTransaction
     )
     scheduler = PhysicalSettlementScheduler(
-        unit_of_work=uow,
-        default_resource_kind="compute.gpu",
+        pools, ledger, session_factory=factory,
+        default_resource_kind="compute.gpu", unit_of_work=uow,
     )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -725,254 +635,3 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
 
     assert second_transaction_opened.is_set()
     assert [first.pool_id, second.pool_id] == ["pool-a", "pool-b"]
-
-
-def test_independent_session_rollback_restores_first_fairness_turn(tmp_path):
-    """A blocked follower observes none of a failed writer's flushed state."""
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-
-    from market_fulfillment import (
-        SqlAlchemySchedulingTransaction,
-        SqlAlchemySchedulingUnitOfWork,
-    )
-
-    database = tmp_path / "rollback-scheduling.db"
-    engine = create_engine(
-        f"sqlite:///{database}",
-        connect_args={"check_same_thread": False, "timeout": 5},
-    )
-    PoolsBase.metadata.create_all(bind=engine)
-    SiteBase.metadata.create_all(bind=engine)
-    FulfillmentBase.metadata.create_all(bind=engine)
-    factory = sessionmaker(bind=engine)
-    pools = ResourcePoolService(
-        factory,
-        cast(Any, {"ansible": _Handler()}),
-    )
-    ledger = CapacityLedgerService(
-        factory,
-        unit_claim_keys=("units", "gpu_count"),
-    )
-    repository = SettlementRepository()
-    _pool(pools, "pool-a")
-    _pool(pools, "pool-b")
-    _resource(ledger, "b1", "pool-b", units=10)
-    failed_id = _reserve(ledger, agreement="rollback-writer")
-    _resource(ledger, "a1", "pool-a", units=10)
-    follower_id = _reserve(ledger, agreement="rollback-follower")
-
-    writer_mutated = Event()
-    release_writer = Event()
-    follower_attempted = Event()
-    follower_entered = Event()
-
-    class FailingTransaction(SqlAlchemySchedulingTransaction):
-        def schedule_assignment(self, **kwargs):
-            result = super().schedule_assignment(**kwargs)
-            if kwargs["capacity_reservation_id"] == failed_id:
-                self.db.flush()
-                writer_mutated.set()
-                assert release_writer.wait(timeout=5)
-                raise RuntimeError("controlled scheduling rollback")
-            return result
-
-    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
-        def transaction(self):
-            if writer_mutated.is_set():
-                follower_attempted.set()
-            context = super().transaction()
-
-            class _ObservedContext:
-                def __enter__(self):
-                    transaction = context.__enter__()
-                    if follower_attempted.is_set():
-                        follower_entered.set()
-                    return transaction
-
-                def __exit__(self, *args):
-                    return context.__exit__(*args)
-
-            return _ObservedContext()
-
-    uow = ObservedUnitOfWork(
-        factory,
-        pools,
-        ledger,
-        repository,
-        transaction_type=FailingTransaction,
-    )
-    scheduler = PhysicalSettlementScheduler(
-        unit_of_work=uow,
-        default_resource_kind="compute.gpu",
-    )
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        failed_future = executor.submit(
-            scheduler.schedule_resource,
-            _request(failed_id),
-        )
-        assert writer_mutated.wait(timeout=5)
-        follower_future = executor.submit(
-            scheduler.schedule_resource,
-            _request(follower_id),
-        )
-        assert follower_attempted.wait(timeout=5)
-        assert not follower_entered.is_set()
-        release_writer.set()
-        with pytest.raises(RuntimeError, match="controlled scheduling rollback"):
-            failed_future.result(timeout=5)
-        follower = follower_future.result(timeout=5)
-
-    assert follower_entered.is_set()
-    assert (follower.pool_id, follower.settlement_resource_id) == (
-        "pool-a",
-        "a1",
-    )
-    assert ledger.get_reservation_backing_resource_id(failed_id) == "b1"
-    failed_reservation = ledger.get_reservation(
-        capacity_reservation_id=failed_id,
-    )
-    assert failed_reservation is not None
-    assert failed_reservation["settlement_resource_id"] is None
-    with factory() as db:
-        assert repository.get(db, failed_id) is None
-        assert repository.get(db, follower_id) is not None
-        cursor = repository.get_cursor_in_session(db, "compute.gpu")
-        assert cursor.last_pool_id == "pool-a"
-        assert cursor.last_resource_by_pool == {"pool-a": "a1"}
-
-
-def test_independent_sessions_serialize_distinct_resource_kind_cursors(tmp_path):
-    """SQLite serializes writers while each resource kind keeps its own turn."""
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-
-    from market_fulfillment import (
-        SqlAlchemySchedulingTransaction,
-        SqlAlchemySchedulingUnitOfWork,
-    )
-
-    database = tmp_path / "resource-kind-scheduling.db"
-    engine = create_engine(
-        f"sqlite:///{database}",
-        connect_args={"check_same_thread": False, "timeout": 5},
-    )
-    PoolsBase.metadata.create_all(bind=engine)
-    SiteBase.metadata.create_all(bind=engine)
-    FulfillmentBase.metadata.create_all(bind=engine)
-    factory = sessionmaker(bind=engine)
-    pools = ResourcePoolService(
-        factory,
-        cast(Any, {"ansible": _Handler()}),
-    )
-    ledger = CapacityLedgerService(
-        factory,
-        unit_claim_keys=("units", "gpu_count"),
-    )
-    repository = SettlementRepository()
-    _pool(pools, "pool-a")
-    _pool(pools, "pool-b")
-    _resource(ledger, "gpu-a1", "pool-a", units=10)
-    _resource(ledger, "gpu-b1", "pool-b", units=10)
-    ledger.register_resource(
-        resource_id="bm-a1",
-        resource_type="bare_metal",
-        total_units=1,
-        pool_id="pool-a",
-    )
-    ledger.register_resource(
-        resource_id="bm-b1",
-        resource_type="bare_metal",
-        total_units=1,
-        pool_id="pool-b",
-    )
-    gpu_id = _reserve(ledger, agreement="gpu-writer")
-    bare_metal_reservation = ledger.reserve(
-        claim={"resource_type": "bare_metal", "units": 1},
-        deal_ref={"market": "bare_metal"},
-    )
-    assert bare_metal_reservation is not None
-    bare_metal_id = bare_metal_reservation["capacity_reservation_id"]
-
-    gpu_mutated = Event()
-    release_gpu = Event()
-    bare_metal_attempted = Event()
-    bare_metal_entered = Event()
-
-    class PausingTransaction(SqlAlchemySchedulingTransaction):
-        def schedule_assignment(self, **kwargs):
-            result = super().schedule_assignment(**kwargs)
-            if kwargs["capacity_reservation_id"] == gpu_id:
-                self.db.flush()
-                gpu_mutated.set()
-                assert release_gpu.wait(timeout=5)
-            return result
-
-    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
-        def transaction(self):
-            if gpu_mutated.is_set():
-                bare_metal_attempted.set()
-            context = super().transaction()
-
-            class _ObservedContext:
-                def __enter__(self):
-                    transaction = context.__enter__()
-                    if bare_metal_attempted.is_set():
-                        bare_metal_entered.set()
-                    return transaction
-
-                def __exit__(self, *args):
-                    return context.__exit__(*args)
-
-            return _ObservedContext()
-
-    uow = ObservedUnitOfWork(
-        factory,
-        pools,
-        ledger,
-        repository,
-        transaction_type=PausingTransaction,
-    )
-    scheduler = PhysicalSettlementScheduler(
-        unit_of_work=uow,
-        default_resource_kind="compute.gpu",
-    )
-    bare_metal_request = PhysicalSettlementRequest(
-        capacity_reservation_id=bare_metal_id,
-        market="bare_metal",
-        requirements={"resource_kind": "bare_metal"},
-    )
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        gpu_future = executor.submit(
-            scheduler.schedule_resource,
-            _request(gpu_id),
-        )
-        assert gpu_mutated.wait(timeout=5)
-        bare_metal_future = executor.submit(
-            scheduler.schedule_resource,
-            bare_metal_request,
-        )
-        assert bare_metal_attempted.wait(timeout=5)
-        assert not bare_metal_entered.is_set()
-        release_gpu.set()
-        gpu = gpu_future.result(timeout=5)
-        bare_metal = bare_metal_future.result(timeout=5)
-
-    assert bare_metal_entered.is_set()
-    assert (gpu.pool_id, gpu.settlement_resource_id) == (
-        "pool-a",
-        "gpu-a1",
-    )
-    assert (bare_metal.pool_id, bare_metal.settlement_resource_id) == (
-        "pool-a",
-        "bm-a1",
-    )
-    with factory() as db:
-        gpu_cursor = repository.get_cursor_in_session(db, "compute.gpu")
-        bare_metal_cursor = repository.get_cursor_in_session(db, "bare_metal")
-        assert gpu_cursor.last_resource_by_pool == {"pool-a": "gpu-a1"}
-        assert bare_metal_cursor.last_resource_by_pool == {
-            "pool-a": "bm-a1",
-        }
