@@ -302,7 +302,7 @@ design.
 - [x] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
 - [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
 - [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
-- [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.
+- [x] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.
 
 ## Section 1 documentation-system retrofit
 
