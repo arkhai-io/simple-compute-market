@@ -195,11 +195,12 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `fulfillment_id` | Durable post-acceptance fulfillment aggregate |
 | `settlement_resource_id` | Selected underlying supply resource |
 | `provisioned_resource_id` | One provider-created output; one fulfillment may create several |
-| `result_id` | One durable settlement/fulfillment result |
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
+| `pool_id` | Globally unique pool identity with explicit site ownership where required |
+
+Fulfillment results are read-time projections over the aggregate and its outputs; there is no durable result record or current `result_id` persistence boundary.
 
 `site_id` is owned at the storefront aggregation boundary and bound to a configured provisioning connection. Provisioning-local capacity persistence is already scoped by its database authority and does not duplicate that storefront-owned identity on every pool, resource, or reservation row. Counterparties cannot self-assert the routing identity used by the storefront.
-| `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
 Commercial agreement identity does not cross the generic provisioning boundary merely for correlation. Storefronts retain commercial context and translate it into fulfillment requirements. The capacity reservation is the generic physical-lifecycle identity.
 
@@ -258,7 +259,7 @@ FulfillmentProvider.prepare_create(...)
         ↓
 Durable dispatch_pending command
         ↓
-post-commit dispatch + periodic claimed recovery
+periodic claimed dispatch and recovery
         ↓
 Provider status + zero or more Provisioned Resources
         ↓
@@ -266,6 +267,10 @@ status / teardown / durable results
 ```
 
 The storefront persists a restart-safe workflow before scheduling: trusted configured `site_id`, reservation identity, canonical schedule/begin requests, selected resource, provisioning fulfillment identity, remote state, and non-secret result generation. Every post-reservation call routes only to that site; URLs and credentials remain configuration, and provisioning `fulfillment_id` remains distinct from chain `fulfillment_uid`. The workflow worker resumes after restart and does not reread a result once its credential generation and buyer-facing access state are committed.
+
+`schedule_resource` validates and locks the reservation, reads candidates and enabled pools, selects and advances the fairness cursor, optionally rebinds the capacity debit, and creates the settlement assignment in one SQLite `BEGIN IMMEDIATE` commit/rollback boundary.
+
+Status and result are authenticated storefront-to-provisioner reads over durable state. Credential-bound ownership is retained from reservation through fulfillment; valid non-owners receive not found. Active VM result reads rotate credentials live, delete transient job credential material, and advance only the non-secret generation after successful delivery. The aggregate never stores raw credentials. Pull is the correctness path; reverse result push is not part of the current authority flow.
 
 Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Preparation snapshots a versioned command before acceptance commits; dispatch and recovery use only that snapshot. Periodic workers claim bounded batches under SQLite's single-writer boundary, commit the claim before provider calls, and use expiring leases plus bounded backoff to resume work after process or provider failure. Pull-based result reads project durable lifecycle/output state directly. Active credential issuance uses a separate expiring aggregate claim; the domain provider rotates credentials, consumes and deletes private transient job material, and returns it only in the authenticated response before the service advances the non-secret generation. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 

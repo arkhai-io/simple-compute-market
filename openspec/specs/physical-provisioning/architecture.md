@@ -24,7 +24,7 @@ Adapters register executor actions and FulfillmentProviders explicitly. Duplicat
 
 A persisted job gives accepted work a durable identity, status, request snapshot, result, and diagnostic history. The in-process queue is only the execution mechanism. It does not become the database, retry authority, or provider policy engine.
 
-This distinction makes accepted work observable while avoiding false recovery promises. A process restart does not by itself prove that every queued or running action is safely resumed; recovery must be explicit where required.
+The fulfillment aggregate supplies that explicit recovery boundary. Claimed workers resume persisted create and teardown commands after restart. Contract retries re-enqueue a matching persisted queued Ansible job after uncertain enqueue acknowledgement, while an atomic queued-to-running transition prevents duplicate queue entries from executing the same job concurrently.
 
 ## Selected-resource execution
 
@@ -34,13 +34,13 @@ Operational inventory is authoritative service state, not a checked-in Ansible i
 
 ## Proof-driven release
 
-Lease expiry or early termination dispatches teardown through the recorded executor identity. The site authority releases capacity only after teardown succeeds. Failure retains the reservation and records a retryable release state. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+Lease expiry or early termination first resolves fulfillment ownership. Settlement-backed VM work dispatches teardown through the recorded provider/resource-kind route; no VM executor-release fallback is registered. Explicitly registered domain release delegates remain available for non-fulfillment lifecycles such as bare metal. The site authority releases capacity only after teardown succeeds. Failure retains the reservation and records a retryable release state. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
 
 Readiness checks use local service dependencies. Slower outbound provider or storefront diagnostics belong to operator surfaces so an external failure does not unnecessarily make a healthy API/worker process unready.
 
 ## Current limits
 
-The compute service does not yet provide a durable generic fulfillment recovery aggregate, infer provider-to-executor linkage, or establish universal multi-storefront event routing. Optional notification adapters are delivery mechanisms, not ownership authorities.
+Provider and executor identities remain deliberately independent; the service does not infer linkage between them. Fulfillment results use authenticated storefront pull. Optional notifications are delivery mechanisms rather than ownership authorities, and authenticated durable result push remains outside the current lifecycle.
 
 ## Related contracts
 

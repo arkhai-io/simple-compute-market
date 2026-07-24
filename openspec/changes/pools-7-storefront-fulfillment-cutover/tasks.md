@@ -234,9 +234,9 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 - [x] 6.4 Validate and persist versioned prepared input in the same transaction that accepts a pending provider command.
 - [x] 6.5 Submit Ansible create/teardown through `ExecutorActionEnvelope` or the equivalent contract-deduplication path using deterministic action/version keys.
 - [x] 6.6 Persist provider job identity and normalized provider metadata without exposing VM-specific job state as the cross-domain lifecycle contract.
-- [ ] 6.7 Add tests for equivalent/conflicting retries, pool-config mutation after acceptance, duplicate submission races, and create/teardown command deduplication.
+- [x] 6.7 Add tests for equivalent/conflicting retries, pool-config mutation after acceptance, duplicate submission races, and create/teardown command deduplication.
 - [x] 6.8 Expose provider preparation through a public side-effect-free dry-run endpoint that uses the same validation path as `begin_fulfillment` without persisting or dispatching work.
-- [ ] 6.9 Add integration coverage that reads persisted prepared Ansible create and teardown inputs and verifies `vm_host`, `vm_target`, every VM create field, provider configuration snapshot, and exact teardown identity.
+- [x] 6.9 Add integration coverage that reads persisted prepared Ansible create and teardown inputs and verifies `vm_host`, `vm_target`, every VM create field, provider configuration snapshot, and exact teardown identity.
 
 ## 7. Add provisioning-owned recovery and lifecycle convergence
 
@@ -247,7 +247,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 - [x] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
 - [x] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
 - [x] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
-- [ ] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
+- [x] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
 
 ## 8. Implement pull-based fulfillment status and result queries
 
@@ -277,8 +277,8 @@ design.
 - [x] 9.3 Persist `capacity_reservation_id`, selected settlement resource, and returned `fulfillment_id` in storefront workflow state so negotiation and fulfillment resume after restart.
 - [x] 9.4 Poll `get_fulfillment_status`/`get_fulfillment_result` (pull-based, per section 8) at appropriate points in the storefront's workflow and deliver/retain buyer-facing credential state according to the storefront's security model.
 - [x] 9.5 Map VM-domain job/provider states to the shared fulfillment lifecycle invariant without leaking raw VM job status cross-domain.
-- [ ] 9.6 Remove `create_vm_and_wait_with_credentials` and ordinary storefront polling/direct executor dispatch after all callers are migrated; tombstone deleted paths where repository workflow requires it.
-- [ ] 9.7 Add storefront restart, duplicate result, site-routing, negotiation-resume, and end-to-end credential-delivery tests.
+- [x] 9.6 Remove `create_vm_and_wait_with_credentials` and ordinary storefront polling/direct executor dispatch after all callers are migrated; tombstone deleted paths where repository workflow requires it.
+- [x] 9.7 Add storefront restart, duplicate result, site-routing, negotiation-resume, and end-to-end credential-delivery tests.
 
 ## 10. Cut over teardown and physical-resource reclamation
 
@@ -286,22 +286,22 @@ design.
 - [x] 10.2 Resolve the backfilled or native fulfillment aggregate, prepare versioned teardown input, and persist teardown-pending state before provider submission.
 - [x] 10.3 Drive teardown submission, retry, status convergence, final resource reclamation, and capacity release entirely from provisioning-owned watchdog handlers.
 - [x] 10.4 Do not return physical capacity to scheduling until teardown succeeds or an explicit operator recovery action resolves the resource.
-- [ ] 10.5 Replace the old `VmReleaseExecutor` direct path once backfilled and new fulfillments use settlement teardown; remove the legacy fallback rather than retaining a cutover marker.
-- [ ] 10.6 Add idempotent repeated teardown, partial failure, restart, lost submission acknowledgement, backfilled VM, and final capacity-release tests.
+- [x] 10.5 Replace the old `VmReleaseExecutor` direct path once backfilled and new fulfillments use settlement teardown; remove the legacy fallback rather than retaining a cutover marker.
+- [x] 10.6 Add idempotent repeated teardown, partial failure, restart, lost submission acknowledgement, backfilled VM, and final capacity-release tests.
 
 ## 11. Remove obsolete schema and compatibility paths
 
-- [ ] 11.1 Remove superseded `allocation_id`, `SiteAllocation`, direct-host storefront placement, process-local settlement maps/locks, and obsolete executor/provider fields after migrations and callers are complete.
+- [x] 11.1 Remove superseded `allocation_id`, `SiteAllocation`, direct-host storefront placement, process-local settlement maps/locks, and obsolete executor/provider fields after migrations and callers are complete.
 - [x] 11.2 Fix `most_available`'s claim-blindness bug (it accepts a `claim` parameter but never filters by it) and keep `fill_first`/`most_available` as pure pre-reservation site-selection policy — they have never performed host-level physical placement, only ordered which site to attempt first, so there is no placement logic to remove. Per `design.md`'s "Site fallback after POOLS-4": site fallback/ranking is meaningful only before a capacity reservation exists; once one exists it is owned by exactly one site with no fallback. Do not delete or restructure these policies beyond the claim-blindness fix.
-- [ ] 11.3 Update the extracted compute service composition, package dependencies, wheel/reinit targets, Docker image, and deployment configuration for `kit/fulfillment` and its watchdog workers; register VM/Ansible behavior through `domains/vms/provisioning/adapter`.
-- [ ] 11.4 Ensure logs, traces, exception payloads, and request logging redact credentials and prepared secret material.
+- [x] 11.3 Update the extracted compute service composition, package dependencies, wheel/reinit targets, Docker image, and deployment configuration for `kit/fulfillment` and its watchdog workers; register VM/Ansible behavior through `domains/vms/provisioning/adapter`.
+- [x] 11.4 Ensure logs, traces, exception payloads, and request logging redact credentials and prepared secret material.
 - [ ] 11.5 Run repository-wide import, typing, migration, unit, integration, and end-to-end suites and fix all renamed-contract consumers.
 
 ## 12. Documentation and specification closure
 
-- [ ] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
-- [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
-- [ ] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
+- [x] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
+- [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
+- [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation.
 
 ## Section 1 documentation-system retrofit

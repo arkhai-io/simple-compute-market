@@ -36,11 +36,13 @@ Opaque identifiers keep routing and commercial meaning out of shared carriers. `
 
 Provider-specific payloads cross persistence or package boundaries in versioned envelopes. A non-empty kind and positive schema version select an explicit validator. Unknown versions fail rather than inheriting today's provider assumptions.
 
-## Durable aggregate and current lifecycle limit
+## Durable aggregate and lifecycle convergence
 
 The provisioning database owns one Settlement Record aggregate per Capacity Reservation, its provisioned-resource children, immutable versioned prepared operations, and durable fairness cursors. SQLite scheduling reserves the single writer slot before reading mutable scheduling state; databases with row-lock support lock the reservation. This makes capacity reassignment, assignment persistence, and cursor advancement one rollback-safe unit.
 
-Persistence does not yet imply a complete public fulfillment lifecycle. Provider dispatch recovery workers, status/result query APIs, credential refresh, teardown convergence, and storefront cutover remain separate composition work. The implemented scheduling baseline is deterministic two-level round-robin with multidimensional eligibility; more advanced fairness is not implied.
+The public lifecycle is credential-owned and versioned: schedule and dry-run remain separate from acceptance; claimed workers exclusively dispatch immutable create/teardown commands and converge status without holding database locks during provider calls. Pull-based status and result reads reconstruct durable state on demand. VM credentials rotate at result-read time, transient credential rows are consumed, and only a monotonic generation remains durable.
+
+Storefronts persist the trusted owning site and immutable lifecycle requests before remote calls. Their reconciler resumes after restart and never broadcasts after reservation. Whole-fulfillment teardown remains provisioning-owned and releases physical capacity only after provider success. Authenticated result push is not a current correctness path; pull is authoritative.
 
 ## Related contracts
 

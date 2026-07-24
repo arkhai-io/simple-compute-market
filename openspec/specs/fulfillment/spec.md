@@ -291,7 +291,7 @@ Dry-run validation MUST use the same preparation path as acceptance while discar
 #### Scenario: Pool configuration changes after acceptance
 
 - **WHEN** pool configuration changes after a create command has been prepared and persisted
-- **THEN** initial dispatch and every recovery retry use the persisted prepared envelope without reading the changed configuration
+- **THEN** first dispatch and every recovery retry use the persisted prepared envelope without reading the changed configuration
 
 #### Scenario: Equivalent create retry
 
@@ -326,6 +326,15 @@ This contract applies to prepared provider inputs, provider metadata snapshots, 
 
 - **WHEN** a generic envelope is parameterized with a typed payload model and required payload fields are missing
 - **THEN** validation fails before dispatch or persistence
+
+### Requirement: Secret-safe diagnostics and errors
+
+Fulfillment request logging, provider process logging, persisted job errors, recovery diagnostics, and public exception payloads MUST exclude credentials, authorization material, private keys, secret-bearing provider variables, and prepared secret values. Raw Ansible stdout/stderr is retained only through the centralized redaction boundary; it is not emitted directly by the process runner. Public errors expose stable categories and safe generic detail rather than echoing invalid or provider-supplied values.
+
+#### Scenario: Provider output contains credentials
+
+- **WHEN** provider output or an exception contains a password, token, authorization value, or private key
+- **THEN** logs and persisted/public error detail redact or replace that value before it crosses the provider boundary
 
 ### Requirement: Stable error taxonomy
 
@@ -403,4 +412,8 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
 - Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_repository.py`.
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
+- Public lifecycle routes, clients, ownership, and persisted Ansible commands: `provisioning/compute/service/tests/integration/test_provisioning_client_endpoint_coverage.py`.
+- Recovery claims, restart/backoff, teardown convergence, diagnostics, and capacity release: `provisioning/compute/service/tests/unit/services/test_fulfillment_recovery.py`.
+- Acceptance, pull results, live credential generation, and teardown preparation: `provisioning/compute/service/tests/unit/services/test_fulfillment_service.py`.
+- Durable storefront site routing, restart recovery, and credential result application: `domains/vms/storefront/tests/unit/test_fulfillment_reconciler.py` and `core/storefront/tests/unit/test_fulfillment_workflow_store.py`.
 - Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`.

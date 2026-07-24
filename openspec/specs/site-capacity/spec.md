@@ -78,7 +78,7 @@ Each capacity reservation MUST persist the opaque authenticated storefront princ
 - **THEN** the reservation is owned by the stable legacy administrative principal and ownership survives restart
 
 ### Requirement: Reservation lifecycle
-Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
+Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable `capacity_reservation_id`, support expiry of uncommitted holds, and be idempotent for retries.
 
 #### Scenario: Two buyers reserve the same final unit
 - **WHEN** concurrent requests race at one site
