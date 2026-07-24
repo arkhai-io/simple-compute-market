@@ -22,7 +22,7 @@ Scheduling starts from an admitted Capacity Reservation. It enumerates enabled p
 
 An explicit-resource request is an additional constraint, not an authorization bypass. The named resource must still exist, belong to an eligible enabled pool, and satisfy every requested dimension. Deterministic candidate ordering and policy state make the current two-level round-robin policy reproducible.
 
-Selection creates a binding. Retrying an equivalent request returns the existing assignment where the process-local lifecycle can prove equivalence; a conflicting request is rejected rather than silently moving the reservation.
+Selection creates a binding. Retrying an equivalent request returns the existing assignment, durably recorded on the settlement aggregate so equivalence survives a process restart; a conflicting request is rejected rather than silently moving the reservation.
 
 ## Provider boundary
 
@@ -36,11 +36,13 @@ Opaque identifiers keep routing and commercial meaning out of shared carriers. `
 
 Provider-specific payloads cross persistence or package boundaries in versioned envelopes. A non-empty kind and positive schema version select an explicit validator. Unknown versions fail rather than inheriting today's provider assumptions.
 
-## Current persistence limit
+## Durable persistence and recovery
 
-Scheduler assignments, policy cursors, and generic fulfillment registry entries are process-local. The architecture does not claim restart-safe or distributed assignment idempotency, cross-replica fairness, or a durable generic Settlement Record aggregate. Those guarantees require explicit persistence and concurrency design.
+One `SettlementRecord` aggregate exists per `capacity_reservation_id`, covering the entire physical settlement lifecycle: scheduling, fulfillment acceptance, provider dispatch, provider-status convergence, and teardown all read and write the same durable row, not separate process-local structures. `schedule_resource` and `begin_fulfillment` retries are idempotent against this row rather than in-memory state, and survive a process restart. The two-level round-robin scheduling cursor is likewise a durable row (`SchedulingCursor`), not process-local policy state.
 
-The implemented baseline is deterministic two-level round-robin with multidimensional eligibility. More advanced fairness policy is not implied by the request or carrier abstractions.
+Recovery from a stuck or interrupted provider operation is provisioning-owned: a periodic convergence worker claims eligible rows under SQLite's single-writer contract (a short, self-contained write-reservation transaction, not portable row locking or a distributed multi-replica protocol), performs provider I/O outside any open transaction, and applies the outcome only while it still holds the claim. See [the fulfillment spec](spec.md#fulfillment-convergence-worker) and [durable settlement persistence](spec.md#durable-settlement-persistence) for the normative contract this section summarizes.
+
+The implemented scheduling baseline remains deterministic two-level round-robin with multidimensional eligibility; more advanced fairness policy is not implied by the request or carrier abstractions.
 
 ## Related contracts
 

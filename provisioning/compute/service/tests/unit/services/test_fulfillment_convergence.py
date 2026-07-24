@@ -1,6 +1,6 @@
 """Tests for FulfillmentConvergenceWatchdog: dispatch/converge handler
 success and failure paths, and the stale-claim discard guarantee
-_with_owned_record provides. See tasks.md 6.3.3.
+_with_owned_record provides.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from market_fulfillment import (
 )
 from market_fulfillment.db import Base
 from market_fulfillment.envelopes import envelope
+from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
@@ -213,7 +214,7 @@ async def test_converge_creates_success_persists_resource_and_transitions_to_act
 async def test_converge_creates_fails_terminally_on_invalid_resource_metadata(
     session_factory, repo
 ):
-    """Task 6.3.5: ProviderConfigInvalidError from resolve_provisioned_resources
+    """ProviderConfigInvalidError from resolve_provisioned_resources
     is a non-recoverable failed transition, not an indefinite retry."""
 
     _accepted_row(repo, session_factory)
@@ -461,12 +462,12 @@ async def test_stale_claim_outcome_is_discarded_not_applied(session_factory, rep
 
 
 # ----------------------------------------------------------------------
-# Task 6.4: restart, worker-death, and transient-failure recovery proofs
+# Restart, worker-death, and transient-failure recovery proofs
 # ----------------------------------------------------------------------
 
 
 async def test_worker_death_leaves_a_reclaimable_row_not_a_stuck_one(session_factory, repo):
-    """6.4.1: commit a claim and never apply an outcome -- the same shape a
+    """Commit a claim and never apply an outcome -- the same shape a
     crash between claim and provider call produces. No operator
     intervention should be required for recovery."""
 
@@ -511,7 +512,7 @@ async def test_worker_death_leaves_a_reclaimable_row_not_a_stuck_one(session_fac
 
 
 async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_state(tmp_path):
-    """6.4.2: a fresh FulfillmentConvergenceWatchdog/session against the
+    """A fresh FulfillmentConvergenceWatchdog/session against the
     same file-backed database resumes purely from durable SettlementRecord
     state -- no dependency on the previous instance's in-memory state."""
 
@@ -595,31 +596,47 @@ async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_sta
 async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_terminal_state(
     session_factory, repo
 ):
-    """6.4.3: a provider exception leaves the row retryable with growing
-    backoff, verified via attempt_count and claim_expires_at across
-    repeated claims -- never transitioning to a terminal state on its own."""
+    """Exercises the actual
+    watchdog dispatch path against a failing provider (not just the claim
+    primitive in isolation), and checks real deltas against a baseline
+    captured immediately before each claim -- not just that later
+    timestamps are larger, which wall-clock drift alone could satisfy even
+    with a broken (constant) lease length."""
 
     _accepted_row(repo, session_factory)
     backoff = Backoff(initial_seconds=1.0, multiplier=2.0, max_seconds=60.0, jitter_fraction=0.0)
+    failing_provider = _StubProvider(dispatch_create_error=RuntimeError("still down"))
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": failing_provider}),
+        settings=_settings(
+            fulfillment_convergence_backoff_initial_seconds=1.0,
+            fulfillment_convergence_backoff_multiplier=2.0,
+            fulfillment_convergence_backoff_max_seconds=60.0,
+            fulfillment_convergence_backoff_jitter_fraction=0.0,
+        ),
+    )
 
-    expiries: list[datetime] = []
-    for _ in range(3):
+    expected_deltas = [1.0, 2.0, 4.0]
+    for expected_delta in expected_deltas:
         with session_factory() as db:
-            claimed = repo.claim_pending(
-                db,
-                states=[SettlementRecordState.dispatch_pending.value],
-                limit=10,
-                lease_seconds=backoff.delay_seconds,
-                worker_id="retrying-worker",
-                now=datetime.now(timezone.utc) - timedelta(hours=1),
-            )
-            assert len(claimed) == 1
-            expiries.append(claimed[0].claim_expires_at)
-            repo.clear_claim(db, "cr-1", worker_id="retrying-worker")
+            record = repo.get(db, "cr-1")
+            record.claim_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
             db.commit()
-            # clear_claim only clears ownership; force the row eligible for
-            # the next simulated attempt by re-expiring it, same as a real
-            # failed dispatch leaving it claimed until lease lapse would.
+
+        baseline = datetime.now(timezone.utc).replace(tzinfo=None)
+        await watchdog.dispatch_pending_creates()
+
+        with session_factory() as db:
+            record = repo.get(db, "cr-1")
+            assert record.state == SettlementRecordState.dispatch_pending.value
+            actual_delta = (record.claim_expires_at - baseline).total_seconds()
+            # Real wall-clock time elapsed during the call too, so allow a
+            # small tolerance rather than requiring an exact match.
+            assert abs(actual_delta - expected_delta) < 0.5, (
+                f"expected ~{expected_delta}s lease, got {actual_delta}s"
+            )
 
     with session_factory() as db:
         record = repo.get(db, "cr-1")
@@ -627,12 +644,9 @@ async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_termi
         # Still not terminal -- no attempt-count ceiling exists.
         assert record.state == SettlementRecordState.dispatch_pending.value
 
-    # Backoff grew across attempts (1s, 2s, 4s from a fixed `now`).
-    assert expiries[0] < expiries[1] < expiries[2]
-
 
 # ----------------------------------------------------------------------
-# Task 6.7: backoff/jitter determinism and eventual convergence
+# Backoff/jitter determinism and eventual convergence
 # ----------------------------------------------------------------------
 
 
@@ -671,7 +685,7 @@ def test_backoff_random_source_is_injectable_for_deterministic_tests():
 async def test_eventual_convergence_after_repeated_failures_then_success(
     session_factory, repo
 ):
-    """Task 6.7: a row that fails N times then succeeds reaches its
+    """A row that fails N times then succeeds reaches its
     terminal state -- no row is left permanently stuck absent an explicit
     terminal provider result."""
 
@@ -734,3 +748,160 @@ async def test_eventual_convergence_after_repeated_failures_then_success(
         record = repo.get(db, "cr-1")
         assert record.state == SettlementRecordState.active.value
         assert record.claimed_by is None
+
+
+# ----------------------------------------------------------------------
+# Concurrent reclaim vs. outcome application (code review finding)
+# ----------------------------------------------------------------------
+
+
+def test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome(tmp_path):
+    """A worker whose lease has already lapsed must not be able to commit
+    its outcome on top of a row another worker has since legitimately
+    reclaimed. This was a real, empirically-confirmed gap: a plain SELECT
+    does not open a SQLite-level transaction on its own (pysqlite only
+    begins one before a DML statement), so checking ownership before
+    acquiring the write reservation left a window where a stale worker's
+    write proceeded uncontested after the real owner had already moved on.
+    _with_owned_record now acquires the write reservation before reading."""
+
+    import threading
+
+    database = tmp_path / "reclaim_race.db"
+    engine = create_engine(
+        f"sqlite:///{database}", connect_args={"check_same_thread": False, "timeout": 2}
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    repo = SettlementRepository()
+
+    with factory() as db:
+        repo.schedule(
+            db, capacity_reservation_id="cr-1", market="vms",
+            scheduling_requirements=_requirement(), resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db, capacity_reservation_id="cr-1", market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    with factory() as db:
+        repo.claim_pending(
+            db, states=[SettlementRecordState.dispatch_pending.value],
+            limit=10, lease_seconds=1, worker_id="worker-a", now=long_ago,
+        )
+
+    a_read_done = threading.Event()
+    b_done = threading.Event()
+    results: dict = {}
+
+    def worker_a() -> None:
+        watchdog = FulfillmentConvergenceWatchdog(
+            session_factory=factory,
+            repository=repo,
+            provider_registry=ProviderRegistry({"ansible": _StubProvider()}),
+            settings=_settings(),
+            worker_id="worker-a",
+        )
+        # Replicate _with_owned_record's shape with an injected pause
+        # between acquiring the write reservation and completing, so
+        # worker B has a real window to attempt a reclaim.
+        with factory() as db:
+            begin_sqlite_write_transaction(db)
+            record = repo.get(db, "cr-1")
+            results["a_owned_at_read"] = record.claimed_by == "worker-a"
+            a_read_done.set()
+            b_done.wait(timeout=5)
+            try:
+                repo.transition(
+                    db, "cr-1", SettlementRecordState.dispatching.value,
+                    provider_metadata={"job": "from-worker-a"},
+                )
+                repo.clear_claim(db, "cr-1", worker_id="worker-a")
+                db.commit()
+                results["a_outcome"] = "committed"
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                results["a_outcome"] = type(exc).__name__
+
+    def worker_b() -> None:
+        a_read_done.wait(timeout=5)
+        try:
+            with factory() as db:
+                claimed = repo.claim_pending(
+                    db, states=[SettlementRecordState.dispatch_pending.value],
+                    limit=10, lease_seconds=3600, worker_id="worker-b",
+                )
+                results["b_claimed"] = len(claimed) == 1
+        except Exception:  # noqa: BLE001
+            results["b_claimed"] = False
+        finally:
+            b_done.set()
+
+    t_a = threading.Thread(target=worker_a)
+    t_b = threading.Thread(target=worker_b)
+    t_a.start()
+    t_b.start()
+    t_a.join(timeout=10)
+    t_b.join(timeout=10)
+
+    # The two outcomes are mutually exclusive: either B's reclaim succeeded
+    # (and A's stale outcome must NOT also have been committed on top of
+    # it), or A's outcome committed cleanly (and B's reclaim, contending
+    # for the same write reservation, did not silently succeed too).
+    if results.get("b_claimed"):
+        with factory() as db:
+            final = repo.get(db, "cr-1")
+            assert final.claimed_by == "worker-b"
+            assert final.provider_metadata != {"job": "from-worker-a"}
+    else:
+        assert results.get("a_outcome") == "committed"
+        with factory() as db:
+            final = repo.get(db, "cr-1")
+            assert final.provider_metadata == {"job": "from-worker-a"}
+            assert final.claimed_by is None
+
+
+async def test_requeue_teardown_failures_makes_teardown_failed_retryable(
+    session_factory, repo
+):
+    """Code review finding: teardown_failed was documented as retryable
+    (db.py's state comment, spec.md) but no handler ever claimed it.
+    requeue_teardown_failures + dispatch_pending_teardowns together close
+    that gap within one cycle."""
+
+    _active_row_ready_for_teardown(repo, session_factory)
+    with session_factory() as db:
+        repo.transition(
+            db, "cr-1", SettlementRecordState.tearing_down.value,
+            teardown_provider_metadata={"teardown_job": "1"},
+        )
+        repo.transition(
+            db, "cr-1", SettlementRecordState.teardown_failed.value,
+            failure_reason="provider_reported_teardown_failure",
+        )
+        db.commit()
+
+    provider = _StubProvider(
+        dispatch_teardown_result=FulfillmentResult(provider_metadata={"teardown_job": "2"})
+    )
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({"ansible": provider}),
+        settings=_settings(),
+    )
+
+    await watchdog.requeue_teardown_failures()
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.teardown_dispatch_pending.value
+        assert record.claimed_by is None
+
+    await watchdog.dispatch_pending_teardowns()
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.tearing_down.value
+        assert record.teardown_provider_metadata == {"teardown_job": "2"}

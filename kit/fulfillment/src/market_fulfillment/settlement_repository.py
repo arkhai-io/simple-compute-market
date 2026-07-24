@@ -323,10 +323,10 @@ class SettlementRepository:
             return provisioned
         except IntegrityError:
             # A concurrent caller won the unique-constraint race between our
-            # existence check and our insert (task 6.3.4's backstop doing
-            # its job). Re-read and return the winning row rather than
-            # raising -- add_provisioned_resource stays idempotent under
-            # genuine concurrency, not just under sequential retries.
+            # existence check and our insert. Re-read and return the
+            # winning row rather than raising -- add_provisioned_resource
+            # stays idempotent under genuine concurrency, not just under
+            # sequential retries.
             existing = (
                 db.query(ProvisionedResource)
                 .filter(
@@ -530,7 +530,8 @@ class SettlementRepository:
         """Operator-facing snapshot of recovery health, one query per field.
 
         Reports, per non-terminal recovery-relevant state: total row count,
-        currently-claimed count, and expired-but-unclaimed count (a
+        currently-claimed count, and expired-claim count -- rows still
+        showing a claimant but whose lease has lapsed (a
         transient query result surfaced for trend-watching, not itself an
         error condition -- a nonzero value briefly is expected between
         expiry and the next claim cycle). Also reports the oldest
@@ -563,7 +564,7 @@ class SettlementRepository:
             per_state[state.value] = {
                 "total": total,
                 "claimed": claimed,
-                "expired_unclaimed": expired,
+                "expired_claims": expired,
             }
 
         non_terminal_query = db.query(SettlementRecord).filter(

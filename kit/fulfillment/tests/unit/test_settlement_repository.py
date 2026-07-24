@@ -757,7 +757,7 @@ def test_recovery_diagnostics_reports_per_state_counts_and_ages(session_factory,
         state = diagnostics["per_state"][SettlementRecordState.dispatch_pending.value]
         assert state["total"] == 2
         assert state["claimed"] == 1
-        assert state["expired_unclaimed"] == 1
+        assert state["expired_claims"] == 1
         assert diagnostics["max_attempt_count"] == 1
         assert diagnostics["oldest_non_terminal_row_age_seconds"] > 0
         assert diagnostics["terminal_failed_count"] == 0

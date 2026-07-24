@@ -7,6 +7,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from sqlalchemy.exc import OperationalError
+
 from market_fulfillment import (
     Backoff,
     ProviderOperationState,
@@ -15,6 +17,7 @@ from market_fulfillment import (
     VersionedEnvelope,
 )
 from market_fulfillment.provider import ProviderConfigInvalidError
+from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +34,13 @@ class _DispatchPlan:
 class FulfillmentConvergenceWatchdog:
     """Claim durable work, perform provider I/O, and commit guarded outcomes."""
 
-    def __init__(self, *, session_factory, repository, provider_registry, settings) -> None:
+    def __init__(self, *, session_factory, repository, provider_registry, settings,
+                 worker_id: str | None = None) -> None:
         self._session_factory = session_factory
         self._repository = repository
         self._providers = provider_registry
         self._settings = settings
-        self._worker_id = f"fulfillment-watchdog:{uuid.uuid4()}"
+        self._worker_id = worker_id or f"fulfillment-watchdog:{uuid.uuid4()}"
         self._limit = int(getattr(settings, "fulfillment_convergence_batch_size", 50))
         self._backoff = Backoff(
             initial_seconds=float(
@@ -74,16 +78,44 @@ class FulfillmentConvergenceWatchdog:
                 await asyncio.sleep(interval)
 
     async def run_cycle(self) -> None:
+        await self.requeue_teardown_failures()
         await self.dispatch_pending_creates()
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
         self._log_diagnostics()
 
+    async def requeue_teardown_failures(self) -> None:
+        """Move retryable ``teardown_failed`` rows back to
+        ``teardown_dispatch_pending`` so ``dispatch_pending_teardowns``
+        picks them up on this or a later cycle.
+
+        ``teardown_failed`` is documented (``openspec/specs/fulfillment/spec.md``,
+        and the corresponding state comment in ``db.py``) as not terminal --
+        recovery may retry teardown. That documentation was correct in
+        intent but nothing actually performed the retry: no handler ever
+        claimed ``teardown_failed`` rows. The transition table only allows
+        ``teardown_failed -> teardown_dispatch_pending`` (not directly to
+        ``tearing_down``), so this is a distinct requeue step, not an
+        additional source state on ``dispatch_pending_teardowns``.
+        """
+        for record in self._claim(SettlementRecordState.teardown_failed):
+            self._apply_transition(
+                record.capacity_reservation_id,
+                SettlementRecordState.teardown_failed.value,
+                SettlementRecordState.teardown_dispatch_pending.value,
+            )
+
     def _log_diagnostics(self) -> None:
-        with self._session_factory() as db:
-            diagnostics = self._repository.recovery_diagnostics(db)
-        logger.info("[FULFILLMENT_CONVERGENCE] diagnostics: %s", diagnostics)
+        try:
+            with self._session_factory() as db:
+                diagnostics = self._repository.recovery_diagnostics(db)
+            logger.info("[FULFILLMENT_CONVERGENCE] diagnostics: %s", diagnostics)
+        except Exception:  # noqa: BLE001
+            # Observability must not make lifecycle progress appear to
+            # fail: the four operational passes above already completed
+            # for this cycle by the time this runs.
+            logger.exception("[FULFILLMENT_CONVERGENCE] diagnostics query failed")
 
     async def dispatch_pending_creates(self) -> None:
         await self._dispatch_claimed_records(
@@ -116,15 +148,31 @@ class FulfillmentConvergenceWatchdog:
             await self._converge_teardown_record(record)
 
     def _claim(self, state: SettlementRecordState):
-        """Claim one bounded batch in its own short write transaction."""
+        """Claim one bounded batch in its own short write transaction.
+
+        A lock-contention error here means another worker's outcome
+        application is mid-transaction (holding the write reservation
+        _with_owned_record now acquires up front) -- expected, occasional
+        contention under the fix that closed the stale-outcome race, not a
+        cycle-aborting failure. Treated the same as "no eligible rows this
+        attempt": the next cycle tries again.
+        """
         with self._session_factory() as db:
-            return self._repository.claim_pending(
-                db,
-                states=(state.value,),
-                limit=self._limit,
-                lease_seconds=self._backoff.delay_seconds,
-                worker_id=self._worker_id,
-            )
+            try:
+                return self._repository.claim_pending(
+                    db,
+                    states=(state.value,),
+                    limit=self._limit,
+                    lease_seconds=self._backoff.delay_seconds,
+                    worker_id=self._worker_id,
+                )
+            except OperationalError:
+                logger.debug(
+                    "[FULFILLMENT_CONVERGENCE] claim contended for state=%s, "
+                    "deferring to next cycle",
+                    state.value,
+                )
+                return []
 
     async def _dispatch_claimed_records(self, plan: _DispatchPlan) -> None:
         for record in self._claim(plan.source_state):
@@ -302,8 +350,22 @@ class FulfillmentConvergenceWatchdog:
         expected_state: str,
         apply: Callable[[Any], None],
     ) -> bool:
-        """Apply one outcome only while this worker still owns the claim."""
+        """Apply one outcome only while this worker still owns the claim.
+
+        Acquires SQLite's write reservation (BEGIN IMMEDIATE) before reading
+        and checking ownership, not after: a plain SELECT does not open a
+        SQLite-level transaction on its own (pysqlite only begins one before
+        a DML statement), so checking ownership first and writing later
+        left a real, empirically-confirmed gap -- a worker whose lease had
+        already been reclaimed by another worker could still commit its
+        stale outcome on top of the new owner's claim, silently clearing it.
+        Reserving the write lock first closes that gap: once reserved, no
+        other worker's claim_pending() can commit a reclaim until this
+        transaction resolves, so the ownership check and the writes that
+        follow it observe a consistent view.
+        """
         with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
             record = self._repository.get(db, reservation_id)
             if (
                 record is None
