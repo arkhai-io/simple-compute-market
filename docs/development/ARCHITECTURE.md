@@ -344,3 +344,7 @@ Database-concurrency tests use independent sessions and connections against the 
 ### Durable fulfillment acceptance
 
 The fulfillment kit owns provider-neutral acceptance orchestration. It loads an already-selected settlement resource, freezes provider-specific prepared input and pool configuration in one transaction, dispatches after commit, and acknowledges provider metadata in a second transaction. Domain adapters own provider-specific payloads and metadata interpretation. Provisioning composition supplies the database unit of work and concrete providers; storefront code does not import provider-specific types.
+
+### Atomic workload-lifecycle cutovers
+
+A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.

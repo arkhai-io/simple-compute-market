@@ -56,3 +56,7 @@ The implemented scheduling baseline remains deterministic two-level round-robin 
 Fulfillment acceptance freezes provider input before side effects. One transaction serializes acceptance, loads the selected resource and provider configuration, prepares the provider-specific envelope, and persists it with `dispatch_pending`. Dispatch happens after commit. A second short transaction records normalized provider metadata and advances the aggregate to `dispatching`. The acknowledgement gap is intentional: recovery redispatches the immutable envelope with the same executor idempotency key, allowing the provider to return the original job.
 
 Shared orchestration never interprets Ansible fields. Teardown receives a provider-neutral settlement-result view, while the Ansible adapter validates its own metadata and derives the exact target it created.
+
+## Atomic legacy-lease cutover
+
+Active workloads and provider-operation identities are financially and operationally significant, while unused pre-release reservation rows are not authoritative. The cutover therefore joins reservation and resource-pool data around the legacy lease population, validates the complete population before writing, and commits all generated settlement aggregates and provisioned-resource rows in one transaction. Ambiguity is handled by aborting the cutover rather than by speculative repair.

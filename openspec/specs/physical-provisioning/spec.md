@@ -168,3 +168,7 @@ The [fulfillment specification](../fulfillment/spec.md) owns provider-neutral se
 The compute provisioner may compose both a fulfillment-provider registry and an executor registry, but they remain distinct namespaces. Scheduling selects a `SettlementResource`; provider execution acts on that resource; executor dispatch performs domain-specific infrastructure actions. No one registration implicitly selects another.
 
 Generic compute service modules may import `market_fulfillment`. `market_fulfillment` must not import the deployed compute service or VM/bare-metal adapters.
+
+### Requirement: VM lease migration uses current provider contracts
+
+When an existing VM lease is represented in the fulfillment aggregate, the selected resource SHALL resolve through the current host and resource-pool configuration. The VM target SHALL be derived from the consistent legacy VM/executor target fields, and known create or teardown job identifiers SHALL be retained in provider metadata. Any prepared teardown operation SHALL be produced by the current VM Ansible provider's `prepare_teardown` contract using the snapshotted pool configuration rather than by constructing provider payload JSON independently.

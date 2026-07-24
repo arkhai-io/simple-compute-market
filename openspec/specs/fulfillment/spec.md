@@ -334,3 +334,15 @@ The fulfillment validation endpoint accepts the same reservation, market, and fu
 
 - **WHEN** a valid fulfillment request is submitted to the validation endpoint
 - **THEN** preparation validation succeeds and the aggregate remains in its prior state with no prepared operation persisted
+
+### Requirement: Existing lease continuity during fulfillment cutover
+
+A database cutover that converts legacy VM leases into fulfillment aggregates SHALL enumerate nonterminal legacy leases as the authoritative candidate set and SHALL preserve every known in-flight provider operation.
+
+- A legacy `provisioning` lease with a known create job becomes `dispatching` and continues observing that job.
+- An active lease becomes `active` with its provisioned VM recorded as a `ProvisionedResource`.
+- A releasing lease becomes `tearing_down` when a teardown job is already known, otherwise `teardown_dispatch_pending`.
+- A failed release becomes `teardown_failed`.
+- Terminal or expired legacy leases do not create fulfillment aggregates.
+
+The cutover SHALL NOT submit a replacement create operation merely because an existing provider job cannot be identified. A known failed job may subsequently follow the provider's normal retry behavior. Equivalent target rows make the cutover idempotent; conflicting rows cause the cutover to fail without overwriting them.

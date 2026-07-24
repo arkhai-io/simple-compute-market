@@ -7,7 +7,9 @@ persisted service databases across image upgrades.
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -242,6 +244,165 @@ def _migrate_multidimensional_capacity(engine: Engine) -> None:
     _add_column_if_missing(engine, "site_resources", "capacity", "JSON")
     _add_column_if_missing(engine, "site_allocations", "dimensions", "JSON")
     _add_column_if_missing(engine, "capacity_events", "dimensions", "JSON")
+
+
+
+def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
+    """Atomically preserve nonterminal VM leases in the fulfillment aggregate.
+
+    A tracked provider job is authoritative during cutover.  The migration
+    never substitutes a new create operation when an existing create job
+    cannot be identified, because that could provision a duplicate VM.
+    """
+    if not _table_exists(engine, "vm_leases"):
+        return
+
+    from market_fulfillment.db import Base as FulfillmentBase
+    from market_fulfillment.provider import SettlementResult
+    from market_fulfillment.settlement_types import SettlementResource
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
+
+    FulfillmentBase.metadata.create_all(engine)
+
+    class _PreparationOnlyJobService:
+        @staticmethod
+        def reserved_var_keys(params):
+            # Teardown preparation only needs collision detection.  These are
+            # the built-in variables emitted for a vm_remove operation.
+            return frozenset({"vm_host", "vm_action", "vm_target", "escrow_uid"})
+
+    provider = AnsibleFulfillmentProvider(
+        job_service=_PreparationOnlyJobService(),
+        job_queue_provider=lambda: None,
+    )
+
+    with engine.begin() as connection:
+        rows = connection.execute(text(
+            """
+            SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
+                   vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
+                   vl.vm_remove_job_id, cr.capacity_reservation_id,
+                   cr.executor_target, h.pool_id, rp.provider,
+                   apc.playbook_path, apc.inventory_group, apc.extra_vars
+            FROM vm_leases vl
+            LEFT JOIN capacity_reservations cr
+              ON cr.capacity_reservation_id = vl.allocation_id
+            LEFT JOIN hosts h ON h.name = vl.vm_host
+            LEFT JOIN resource_pools rp ON rp.id = h.pool_id
+            LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
+            WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
+            ORDER BY vl.id
+            """
+        )).mappings().all()
+
+        seen_reservations: set[str] = set()
+        seen_targets: set[str] = set()
+        candidates = []
+        for row in rows:
+            reservation_id = row["capacity_reservation_id"] or row["allocation_id"]
+            if not reservation_id:
+                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no reservation identity")
+            if reservation_id in seen_reservations:
+                raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
+            seen_reservations.add(reservation_id)
+            if not row["vm_host"] or not row["pool_id"] or row["provider"] != "ansible":
+                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no unique usable Ansible host/pool")
+            if not row["playbook_path"] or not row["inventory_group"]:
+                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no usable Ansible pool configuration")
+            target = row["vm_target"] or row["executor_target"]
+            if row["vm_target"] and row["executor_target"] and row["vm_target"] != row["executor_target"]:
+                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has conflicting VM targets")
+            status = row["status"]
+            if status == "provisioning" and not row["create_job_id"]:
+                raise SchemaDriftError(f"provisioning VM lease {row['lease_id']} has no tracked create job")
+            if status != "provisioning" and not target:
+                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no VM target")
+            if target and target in seen_targets:
+                raise SchemaDriftError(f"duplicate legacy VM target {target}")
+            if target:
+                seen_targets.add(target)
+            state = {
+                "provisioning": "dispatching",
+                "leased": "active",
+                "release_failed": "teardown_failed",
+            }.get(status)
+            if status == "releasing":
+                state = "tearing_down" if row["vm_remove_job_id"] else "teardown_dispatch_pending"
+            candidates.append((row, reservation_id, target, state))
+
+        for row, reservation_id, target, state in candidates:
+            existing = connection.execute(text(
+                "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider "
+                "FROM settlement_records WHERE capacity_reservation_id=:id"
+            ), {"id": reservation_id}).mappings().one_or_none()
+            if existing:
+                expected = (state, row["vm_host"], row["pool_id"], "ansible")
+                actual = (existing["state"], existing["settlement_resource_id"], existing["pool_id"], existing["provider"])
+                if actual != expected:
+                    raise SchemaDriftError(f"conflicting settlement aggregate for reservation {reservation_id}")
+                continue
+
+            fulfillment_id = str(uuid.uuid4())
+            metadata = {
+                "create_job_id": row["create_job_id"],
+                "current_job_id": row["create_job_id"],
+                "vm_host": row["vm_host"],
+                "vm_target": target or "",
+                "operation": "create",
+            }
+            teardown_metadata = None
+            if row["vm_remove_job_id"]:
+                teardown_metadata = {
+                    "create_job_id": row["create_job_id"],
+                    "current_job_id": row["vm_remove_job_id"],
+                    "vm_host": row["vm_host"],
+                    "vm_target": target or "",
+                    "operation": "teardown",
+                }
+            prepared_teardown = None
+            if target:
+                extra_vars = row["extra_vars"] or {}
+                if isinstance(extra_vars, str):
+                    extra_vars = json.loads(extra_vars)
+                resource = SettlementResource(
+                    settlement_resource_id=row["vm_host"], pool_id=row["pool_id"],
+                    resource_kind="vm", provider="ansible",
+                    attributes={"vm_host": row["vm_host"]},
+                )
+                result = SettlementResult(
+                    capacity_reservation_id=reservation_id, fulfillment_id=fulfillment_id,
+                    resource=resource, provisioned_resources=({"domain_resource_ref": target},),
+                    provider_metadata=metadata,
+                )
+                envelope = provider.prepare_teardown(result, {
+                    "playbook_path": row["playbook_path"],
+                    "inventory_group": row["inventory_group"],
+                    "extra_vars": extra_vars,
+                })
+                prepared_teardown = envelope.model_dump(mode="json")
+
+            connection.execute(text(
+                """INSERT INTO settlement_records (
+                    capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
+                    settlement_resource_id, pool_id, provider, resource_attributes,
+                    prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
+                ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,'ansible',:attributes,
+                          :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
+            ), {
+                "rid": reservation_id, "fid": fulfillment_id,
+                "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": row["vm_host"],
+                "pool_id": row["pool_id"], "attributes": json.dumps({"vm_host": row["vm_host"]}),
+                "prepared_teardown": json.dumps(prepared_teardown) if prepared_teardown is not None else None, "metadata": json.dumps(metadata),
+                "teardown_metadata": json.dumps(teardown_metadata) if teardown_metadata is not None else None, "state": state,
+            })
+            if target:
+                connection.execute(text(
+                    """INSERT INTO provisioned_resources
+                    (provisioned_resource_id, capacity_reservation_id, fulfillment_id, domain_resource_ref, status)
+                    VALUES (:id,:rid,:fid,:target,'active')"""
+                ), {"id": str(uuid.uuid4()), "rid": reservation_id, "fid": fulfillment_id, "target": target})
 
 
 def _migrate_drop_vm_leases_table(engine: Engine) -> None:
@@ -578,15 +739,19 @@ _MIGRATIONS: tuple[Migration, ...] = (
         _migrate_resource_pools_and_hosts_pool_id,
     ),
     Migration(
-        "20260718_001_drop_vm_leases_table",
-        _migrate_drop_vm_leases_table,
-    ),
-    Migration(
         "20260720_001_multidimensional_capacity",
         _migrate_multidimensional_capacity,
     ),
     Migration(
         "20260722_001_pools7_capacity_model_cutover",
         _migrate_capacity_model_cutover,
+    ),
+    Migration(
+        "20260724_001_legacy_vm_leases_to_fulfillment",
+        _migrate_legacy_vm_leases_to_fulfillment,
+    ),
+    Migration(
+        "20260724_002_drop_vm_leases_table",
+        _migrate_drop_vm_leases_table,
     ),
 )

@@ -47,3 +47,7 @@ The compute service does not yet provide a durable generic fulfillment recovery 
 - [Fulfillment](../fulfillment/spec.md)
 - [Site capacity](../site-capacity/spec.md)
 - [Resource-pool management](../resource-pool-management/spec.md)
+
+## Preserving provider operations across schema cutover
+
+A provider job identifier is the durable correlation point for an in-flight Ansible run. Losing that correlation does not prove that creation failed or never occurred, so migration cannot safely compensate by launching another create playbook. The adapter remains the owner of provider metadata interpretation and teardown-envelope construction during both normal operation and cutover.
