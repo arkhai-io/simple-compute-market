@@ -222,6 +222,20 @@ def _start_claims_engine() -> None:
 
 
 
+def _start_fulfillment_reconciler() -> None:
+    from market_storefront.services.fulfillment_reconciler import (
+        fulfillment_reconciler_loop,
+    )
+
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="fulfillment_reconciler",
+            task_factory=fulfillment_reconciler_loop,
+        ),
+        logger=logger,
+    )
+
+
 def _start_capacity_events_poller() -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
@@ -286,6 +300,10 @@ async def _startup_tasks() -> None:
             StorefrontStartupStep(
                 "capacity_events_poller",
                 _start_capacity_events_poller,
+            ),
+            StorefrontStartupStep(
+                "fulfillment_reconciler",
+                _start_fulfillment_reconciler,
             ),
         ),
         logger=logger,

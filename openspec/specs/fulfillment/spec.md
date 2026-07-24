@@ -340,6 +340,22 @@ Concrete provider errors may carry additional diagnostics but MUST map into thes
 - **WHEN** a provider-specific create, status, or teardown operation fails
 - **THEN** the shared boundary maps it to a stable generic category while retaining safe diagnostics
 
+### Requirement: Durable storefront fulfillment orchestration
+
+After negotiation accepts capacity, a storefront MUST persist the trusted configured `site_id`, capacity reservation, canonical schedule and begin requests, selected settlement resource, provisioning `fulfillment_id`, remote lifecycle state, and non-secret result generation before advancing each remote step. URLs and credentials MUST NOT be persisted as routing authority. Scheduling, reservation commit, fulfillment acceptance, status, result, and teardown MUST route only to that persisted site; post-reservation broadcast fallback is prohibited.
+
+A restart-safe worker MUST resume scheduling, commit, acceptance, status polling, result application, and commercial fulfillment from the persisted phase. Provisioning credentials MAY be retained only in the storefront's buyer-facing credential store under buyer authorization; the orchestration row stores no credential payload. Provisioning `fulfillment_id` and chain `fulfillment_uid` remain distinct identities.
+
+#### Scenario: Storefront restarts after scheduling
+
+- **WHEN** the storefront restarts after persisting a selected resource but before fulfillment acceptance
+- **THEN** recovery commits and accepts against the same configured site and immutable request without broadcasting or selecting another resource
+
+#### Scenario: Result is already applied
+
+- **WHEN** recovery resumes a workflow whose result generation and buyer-facing access were committed
+- **THEN** it does not read and rotate provisioning credentials again before advancing commercial settlement
+
 ### Requirement: Historical VM fulfillment backfill
 
 Provisioning migration MUST normalize historical host and capacity membership into the default resource pool before atomically creating teardown-capable fulfillment aggregates for every active or releasing VM reservation. VM-owned compilation converts validated historical executor coordinates and the accepted Ansible configuration into immutable versioned teardown input; generic migration code MUST NOT import VM models. Historical create input and create-job identity MAY be absent. Backfilled provider metadata MUST be explicitly discriminated from strict native metadata.

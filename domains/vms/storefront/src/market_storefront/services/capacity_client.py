@@ -61,7 +61,12 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
     sites: dict[str, str] = {}
     raw_sites = getattr(cap, "sites", None)
     if raw_sites:
-        for name, url in dict(raw_sites).items():
+        for name, raw_value in dict(raw_sites).items():
+            if isinstance(raw_value, str):
+                url = raw_value
+            else:
+                value = dict(raw_value)
+                url = str(value.get("url") or value.get("base_url") or "")
             url = str(url or "").strip()
             if url:
                 sites[str(name)] = url.rstrip("/")
@@ -185,7 +190,20 @@ def _aggregate_for(
     admin_key: str,
     placement_name: str,
 ) -> AggregateCapacityClient:
-    key = (tuple(sorted(sites.items())), admin_key, placement_name)
+    from market_storefront.services.provisioning_sites import (
+        configured_provisioning_sites,
+    )
+
+    trusted_bindings = configured_provisioning_sites()
+    site_keys = {
+        name: (
+            trusted_bindings[name].admin_key
+            if name in trusted_bindings
+            else admin_key
+        )
+        for name in sites
+    }
+    key = (tuple(sorted(sites.items())), tuple(sorted(site_keys.items())), placement_name)
     if _aggregate_state["key"] == key:
         return _aggregate_state["client"]
     placement = PLACEMENT_POLICIES.get(placement_name)
@@ -197,7 +215,7 @@ def _aggregate_for(
         placement = fill_first
     aggregate = AggregateCapacityClient(
         {
-            name: RemoteCapacityClient(url, admin_key)
+            name: RemoteCapacityClient(url, site_keys[name])
             for name, url in sites.items()
         },
         placement=placement,

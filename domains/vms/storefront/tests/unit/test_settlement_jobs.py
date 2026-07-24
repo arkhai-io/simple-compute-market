@@ -178,6 +178,13 @@ async def _seed_negotiation(
         conn.commit()
     finally:
         conn.close()
+    await client.save_capacity_hold(
+        negotiation_id=neg_id,
+        listing_id=our_listing_id,
+        capacity_reservation_id=f"reservation-{neg_id}",
+        site_id="default",
+        payload={"capacity_reservation_id": f"reservation-{neg_id}", "site": "default"},
+    )
 
 
 async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord-1") -> None:
@@ -188,7 +195,7 @@ async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord
                                    offer_resource, max_duration_seconds,
                                    seller, accepted_escrows)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
-                       '{}', 3600, 'http://seller:8001',
+                       '{"resource_type":"compute.gpu","gpu_model":"H200","pool_id":"default","gpu_count":1,"vcpu_count":2,"ram_gb":4,"disk_gb":40}', 3600, 'http://seller:8001',
                        '[{"chain_name": "anvil", "escrow_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]')""",
             (listing_id,),
         )
@@ -261,10 +268,10 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
     await _seed_seller_order(client)
     await _seed_negotiation(client)
 
-    # Prevent the background task from doing real work during the test.
+    # Prevent the immediate reconciliation optimization from doing remote work.
     # Bypass on-chain escrow verification — covered in test_escrow_verification.py.
     with patch(
-        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        "market_storefront.services.fulfillment_reconciler.StorefrontFulfillmentReconciler.run_once",
         new=AsyncMock(),
     ), patch(
         "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
@@ -330,7 +337,7 @@ async def test_start_is_idempotent_by_escrow_uid(client):
     await _seed_negotiation(client)
 
     with patch(
-        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        "market_storefront.services.fulfillment_reconciler.StorefrontFulfillmentReconciler.run_once",
         new=AsyncMock(),
     ), patch(
         "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",

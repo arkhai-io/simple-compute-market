@@ -199,7 +199,7 @@ The site authority reclaims capacity from a reservation in exactly three interna
 - **THEN** the configured `SettlementAbandonmentHook`, if any, is called for the affected `capacity_reservation_id` regardless of whether a settlement assignment exists for it
 
 ### Requirement: Site identity ownership boundary
-Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection. A remote counterparty MUST NOT self-assert that identity in capacity payloads.
+Provisioning-owned site-capacity persistence MUST NOT redundantly store storefront-owned `site_id` on pools, resources, or reservations. The storefront aggregation boundary assigns the trusted site identity associated with a configured provisioning connection and persists it with reservation correlation before post-reservation lifecycle calls. A remote counterparty MUST NOT self-assert that identity in capacity payloads. Once reserved, commit, scheduling, fulfillment, result, and teardown route only to that persisted configured site without broadcast fallback.
 
 #### Scenario: Capacity payload attempts to assert site identity
 - **WHEN** a provisioning endpoint returns or accepts a payload containing a caller-selected `site_id`

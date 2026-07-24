@@ -189,6 +189,35 @@ async def start_settlement_job(
             "using proposal chain.", proposal_chain, chain_name,
         )
 
+    existing = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
+    if existing is not None:
+        logger.info(
+            "[SETTLE_JOB] Job already exists for escrow %s: status=%s",
+            escrow_uid,
+            existing.get("status"),
+        )
+        return existing
+
+    hold = await sqlite_client.load_capacity_hold(negotiation_id=negotiation_id)
+    if not hold or not hold.get("capacity_reservation_id"):
+        raise ValueError(
+            "Settlement requires the durable capacity hold accepted during negotiation"
+        )
+    site_id = hold.get("site_id")
+    if not site_id:
+        raise ValueError(
+            "Settlement capacity hold has no trusted owning site identity"
+        )
+    from market_storefront.services.fulfillment_requests import (
+        build_vm_fulfillment_requests,
+    )
+
+    schedule_request, begin_request = build_vm_fulfillment_requests(
+        capacity_reservation_id=str(hold["capacity_reservation_id"]),
+        order=our_order_dict,
+        ssh_public_key=provision.ssh_public_key,
+    )
+
     inserted = await sqlite_client.insert_escrow(
         escrow_uid=escrow_uid,
         negotiation_id=negotiation_id,
@@ -206,33 +235,27 @@ async def start_settlement_job(
         )
         return existing or {}
 
-    # Claim context for the deal-servicing engine: re-materialize the
-    # plan's payment obligation from the pinned proposal (deterministic,
-    # same derivation as the negotiated settlement_plan artifact).
-    from market_storefront.services.claims_runtime import derive_claim_obligation
+    created = await sqlite_client.create_fulfillment_workflow(
+        escrow_uid=escrow_uid,
+        site_id=str(site_id),
+        capacity_reservation_id=str(hold["capacity_reservation_id"]),
+        schedule_request=schedule_request.model_dump(mode="json"),
+        begin_request=begin_request.model_dump(mode="json"),
+    )
+    if not created:
+        raise RuntimeError(
+            f"Could not persist fulfillment workflow for escrow {escrow_uid!r}"
+        )
+    await sqlite_client.delete_capacity_hold(negotiation_id=negotiation_id)
 
-    claim_obligation = derive_claim_obligation(
-        proposal=proposal,
-        agreed_amount=int(thread["agreed_price"]),
-        duration_seconds=provision.duration_seconds,
-        chain_config_paths={
-            name: cfg.alkahest_address_config_path for name, cfg in CHAINS.items()
-        },
+    from market_storefront.services.fulfillment_reconciler import (
+        StorefrontFulfillmentReconciler,
     )
 
+    # Immediate progress is a latency optimization only. The startup worker
+    # owns correctness after this durable workflow commit.
     asyncio.create_task(
-        _run_settlement_job_bg(
-            escrow_uid=escrow_uid,
-            provision=provision,
-            listing_id=our_listing_id,
-            order_dict=our_order_dict,
-            sqlite_client=sqlite_client,
-            alkahest_client=alkahest_client,
-            negotiation_id=negotiation_id,
-            claim_obligation=claim_obligation,
-            claim_chain_name=proposal_chain or chain_name,
-            claim_escrow_address=escrow_address,
-        )
+        StorefrontFulfillmentReconciler(sqlite_client=sqlite_client).run_once()
     )
 
     return {

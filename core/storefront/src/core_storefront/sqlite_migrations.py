@@ -447,6 +447,47 @@ def _migrate_listing_resource_timestamps(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_storefront_fulfillment_workflows(conn: sqlite3.Connection) -> None:
+    """Persist trusted site routing and restart-safe fulfillment progress."""
+    _add_column_if_missing(conn, "capacity_holds", "site_id", "TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storefront_fulfillments (
+          escrow_uid TEXT PRIMARY KEY,
+          site_id TEXT NOT NULL,
+          capacity_reservation_id TEXT NOT NULL UNIQUE,
+          phase TEXT NOT NULL,
+          schedule_request TEXT NOT NULL,
+          settlement_resource TEXT,
+          begin_request TEXT NOT NULL,
+          fulfillment_id TEXT UNIQUE,
+          remote_state TEXT,
+          provisioned_resources TEXT NOT NULL DEFAULT '[]',
+          failure_reason TEXT,
+          failure_message TEXT,
+          credential_generation INTEGER NOT NULL DEFAULT 0
+            CHECK (credential_generation >= 0),
+          next_reconcile_unix REAL,
+          reconcile_attempts INTEGER NOT NULL DEFAULT 0,
+          last_reconcile_error TEXT,
+          claimed_by TEXT,
+          claim_expires_unix REAL,
+          created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+          FOREIGN KEY (escrow_uid) REFERENCES escrows(escrow_uid)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_storefront_fulfillments_due "
+        "ON storefront_fulfillments(phase, next_reconcile_unix)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_storefront_fulfillments_claim "
+        "ON storefront_fulfillments(claim_expires_unix)"
+    )
+
+
 def _migrate_capacity_holds_reservation_id(conn: sqlite3.Connection) -> None:
     """Rename ``capacity_holds.allocation_id`` to ``capacity_holds.
     capacity_reservation_id``.
@@ -481,5 +522,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260722_001_capacity_holds_reservation_id",
         _migrate_capacity_holds_reservation_id,
+    ),
+    Migration(
+        "20260724_001_storefront_fulfillment_workflows",
+        _migrate_storefront_fulfillment_workflows,
     ),
 )

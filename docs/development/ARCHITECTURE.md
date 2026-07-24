@@ -239,7 +239,7 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 
 1. The storefront reads snapshots for listing and policy decisions.
 2. Accepted terms create a TTL soft hold where required.
-3. Settlement commits or recreates the reservation before physical execution.
+3. Settlement schedules and commits the accepted reservation at its persisted owning site before physical execution.
 4. Fulfillment runs against the committed reservation.
 5. Lease expiry or early termination invokes physical teardown before capacity release.
 
@@ -264,6 +264,8 @@ Provider status + zero or more Provisioned Resources
         ↓
 status / teardown / durable results
 ```
+
+The storefront persists a restart-safe workflow before scheduling: trusted configured `site_id`, reservation identity, canonical schedule/begin requests, selected resource, provisioning fulfillment identity, remote state, and non-secret result generation. Every post-reservation call routes only to that site; URLs and credentials remain configuration, and provisioning `fulfillment_id` remains distinct from chain `fulfillment_uid`. The workflow worker resumes after restart and does not reread a result once its credential generation and buyer-facing access state are committed.
 
 Scheduling and provider execution are separate. The scheduler selects and binds a resource. The provider may validate the selected resource but must not choose a substitute. Preparation snapshots a versioned command before acceptance commits; dispatch and recovery use only that snapshot. Periodic workers claim bounded batches under SQLite's single-writer boundary, commit the claim before provider calls, and use expiring leases plus bounded backoff to resume work after process or provider failure. Pull-based result reads project durable lifecycle/output state directly. Active credential issuance uses a separate expiring aggregate claim; the domain provider rotates credentials, consumes and deletes private transient job material, and returns it only in the authenticated response before the service advances the non-secret generation. Retries for the same reservation and equivalent request return the existing assignment or operation result; conflicting retries are rejected.
 
