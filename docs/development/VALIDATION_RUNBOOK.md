@@ -36,7 +36,10 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
   - Bob `/api/v1/system/status` has `registry: ok`, `registry_auth: ok`,
     populated `agent_id`, `chain_id: 31337`, and `resource_count >= 1`.
   - Provisioning `/api/v1/system/status` has `storefront: ok`,
-    `storefront_auth: ok`, and `lease_watchdog: running`.
+    `storefront_auth: ok`, and `lease_watchdog: running`. Its
+    `fulfillment_recovery` object reports sweep/claim/provider-failure counters,
+    live and expired claims, retry age, and non-terminal lifecycle age. It must
+    not contain credentials, provider metadata, or owner principals.
 
 ## Optional Local Automation
 
