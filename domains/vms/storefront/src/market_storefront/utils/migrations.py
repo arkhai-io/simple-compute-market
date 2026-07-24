@@ -251,7 +251,10 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
         for row in pool_rows:
             row_attrs = _resource_attrs(row[4])
             try:
-                gpu_count = int(row[2] if row[2] is not None else row_attrs.get("gpu_count", 1))
+                raw_gpu_count = (
+                    row[2] if row[2] is not None else row_attrs.get("gpu_count", 1)
+                )
+                gpu_count = int(str(raw_gpu_count))
             except (TypeError, ValueError):
                 gpu_count = 0
             total += max(gpu_count, 0)

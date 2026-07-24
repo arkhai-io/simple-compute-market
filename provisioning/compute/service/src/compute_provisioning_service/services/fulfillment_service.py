@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -352,6 +353,7 @@ class FulfillmentService:
             _validate_payload(fulfillment_request)
 
             was_accepted = record.fulfillment_id is not None
+            prepared: VersionedEnvelope[Any]
             if was_accepted:
                 if record.prepared_create_operation is None:
                     raise FulfillmentConflictError(
@@ -403,7 +405,7 @@ class FulfillmentService:
                 resource.provider, resource.resource_kind
             )
             if record.state == SettlementRecordState.active.value:
-                prepared = (
+                prepared: VersionedEnvelope[Any] = (
                     VersionedEnvelope.model_validate(
                         record.prepared_teardown_operation
                     )

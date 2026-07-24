@@ -32,8 +32,8 @@ class _ClaimedCommand:
     state: str
     provider: str
     resource: SettlementResource
-    prepared_create: VersionedEnvelope | None
-    prepared_teardown: VersionedEnvelope | None
+    prepared_create: VersionedEnvelope[Any] | None
+    prepared_teardown: VersionedEnvelope[Any] | None
     provider_metadata: dict
     teardown_provider_metadata: dict
     owner_principal: str
@@ -49,12 +49,12 @@ def _command(record: SettlementRecord) -> _ClaimedCommand:
         provider=str(record.provider),
         attributes=dict(record.resource_attributes or {}),
     )
-    prepared = (
+    prepared: VersionedEnvelope[Any] | None = (
         VersionedEnvelope.model_validate(record.prepared_create_operation)
         if record.prepared_create_operation is not None
         else None
     )
-    prepared_teardown = (
+    prepared_teardown: VersionedEnvelope[Any] | None = (
         VersionedEnvelope.model_validate(record.prepared_teardown_operation)
         if record.prepared_teardown_operation is not None
         else None
