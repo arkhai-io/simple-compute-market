@@ -63,7 +63,9 @@ class VmProvisioningRuntime:
             readiness_check=self.readiness,
         )
 
-    def system_service(self, *, lease_lifecycle_service):
+    def system_service(
+        self, *, lease_lifecycle_service, fulfillment_diagnostics=None
+    ):
         from vm_provisioning_adapter.services.system_service import SystemService
 
         return SystemService(
@@ -73,6 +75,7 @@ class VmProvisioningRuntime:
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
+            fulfillment_diagnostics=fulfillment_diagnostics,
         )
 
 

@@ -246,7 +246,7 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 - [x] 7.2 Add separate handlers for create submission recovery, create status convergence, teardown submission recovery, teardown status convergence, and abandonment reconciliation.
 - [x] 7.3 Persist normalized fulfillment and teardown terminal states plus provisioned-resource outputs independently of storefront availability.
 - [x] 7.4 Ensure pending and in-progress records recover after process restart, transient provider failure, and worker death.
-- [ ] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
+- [x] 7.5 Add metrics and structured operator diagnostics for stuck claims, retry age, provider failures, and non-terminal lifecycle age.
 - [ ] 7.6 Add crash-window, restart, multi-replica, backoff, and eventual-convergence tests.
 
 ## 8. Implement pull-based fulfillment status and result queries

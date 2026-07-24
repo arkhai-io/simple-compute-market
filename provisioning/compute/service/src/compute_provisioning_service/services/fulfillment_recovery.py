@@ -98,6 +98,10 @@ class FulfillmentRecoveryService:
         self._batch_size = batch_size
         self._poll_interval_seconds = poll_interval_seconds
         self._jitter = jitter
+        self._sweeps = 0
+        self._claimed_total = 0
+        self._provider_failures = 0
+        self._last_sweep_at: datetime | None = None
 
     def _claim(self) -> list[_ClaimedCommand]:
         with self._session_factory() as db:
@@ -185,6 +189,7 @@ class FulfillmentRecoveryService:
                     SettlementRecordState.active.value,
                 )
             else:
+                self._provider_failures += 1
                 self._repository.transition(
                     db,
                     command.capacity_reservation_id,
@@ -266,6 +271,7 @@ class FulfillmentRecoveryService:
                     SettlementRecordState.torn_down.value,
                 )
             else:
+                self._provider_failures += 1
                 self._repository.transition(
                     db,
                     command.capacity_reservation_id,
@@ -280,8 +286,69 @@ class FulfillmentRecoveryService:
             )
             db.commit()
 
+    def diagnostics(self) -> dict[str, object]:
+        """Return safe counters and durable claim/lifecycle age metrics."""
+        now = datetime.now(timezone.utc)
+        terminal = {
+            SettlementRecordState.active.value,
+            SettlementRecordState.failed.value,
+            SettlementRecordState.torn_down.value,
+            SettlementRecordState.abandoned.value,
+        }
+        with self._session_factory() as db:
+            all_rows = db.query(SettlementRecord).all()
+        rows = [row for row in all_rows if row.state not in terminal]
+        live_claims = 0
+        stuck_claims = 0
+        retrying = 0
+        oldest_age = 0.0
+        oldest_retry_age = 0.0
+        for row in rows:
+            created = row.created_at
+            if created is not None:
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                oldest_age = max(oldest_age, (now - created).total_seconds())
+        for row in all_rows:
+            expires = row.claim_expires_at
+            if expires is not None and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if row.claimed_by is not None:
+                if expires is not None and expires <= now:
+                    stuck_claims += 1
+                else:
+                    live_claims += 1
+            elif expires is not None and expires > now:
+                retrying += 1
+                updated = row.updated_at
+                if updated is not None:
+                    if updated.tzinfo is None:
+                        updated = updated.replace(tzinfo=timezone.utc)
+                    oldest_retry_age = max(
+                        oldest_retry_age, (now - updated).total_seconds()
+                    )
+        return {
+            "sweeps": self._sweeps,
+            "claimed_total": self._claimed_total,
+            "provider_failures": self._provider_failures,
+            "last_sweep_at": (
+                self._last_sweep_at.isoformat()
+                if self._last_sweep_at is not None
+                else None
+            ),
+            "live_claims": live_claims,
+            "stuck_claims": stuck_claims,
+            "retrying": retrying,
+            "nonterminal": len(rows),
+            "oldest_nonterminal_seconds": max(oldest_age, 0.0),
+            "oldest_retry_seconds": max(oldest_retry_age, 0.0),
+        }
+
     async def run_once(self) -> int:
+        self._sweeps += 1
+        self._last_sweep_at = datetime.now(timezone.utc)
         commands = self._claim()
+        self._claimed_total += len(commands)
         for command in commands:
             try:
                 if command.state == SettlementRecordState.dispatch_pending.value:
@@ -296,9 +363,16 @@ class FulfillmentRecoveryService:
                 else:
                     await self._recover_teardown_status(command)
             except Exception:
+                self._provider_failures += 1
                 logger.exception(
-                    "fulfillment recovery failed for %s",
-                    command.capacity_reservation_id,
+                    "fulfillment recovery provider call failed",
+                    extra={
+                        "capacity_reservation_id": command.capacity_reservation_id,
+                        "fulfillment_operation": command.state,
+                        "provider": command.provider,
+                        "resource_kind": command.resource.resource_kind,
+                        "attempt_count": command.attempt_count,
+                    },
                 )
                 try:
                     self._clear(command, retry=True)

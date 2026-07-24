@@ -182,6 +182,7 @@ class SystemService:
         session_factory: "Optional[sessionmaker[Session]]" = None,
         job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
         lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
+        fulfillment_diagnostics: "Optional[Callable[[], dict[str, object]]]" = None,
     ) -> None:
         self._ansible = ansible_service
         self._settings = settings
@@ -189,6 +190,7 @@ class SystemService:
         self._session_factory = session_factory
         self._job_queue_provider = job_queue_provider
         self._lease_lifecycle_service = lease_lifecycle_service
+        self._fulfillment_diagnostics = fulfillment_diagnostics
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -393,7 +395,16 @@ class SystemService:
             return value == "ok"
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
-        return {"status": "ok" if all_ok else "degraded", "checks": checks}
+        recovery = (
+            self._fulfillment_diagnostics()
+            if self._fulfillment_diagnostics is not None
+            else {"status": "disabled"}
+        )
+        return {
+            "status": "ok" if all_ok else "degraded",
+            "checks": checks,
+            "fulfillment_recovery": recovery,
+        }
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""
         if self._lease_lifecycle_service is None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -214,3 +216,23 @@ async def test_teardown_recovery_releases_capacity_only_after_provider_success(
             db, "reservation-1"
         )
         assert {item.status for item in resources} == {"torn_down"}
+
+
+def test_recovery_diagnostics_report_safe_claim_and_lifecycle_metrics(
+    recovery, session_factory
+):
+    with session_factory() as db:
+        record = db.get(SettlementRecord, "reservation-1")
+        record.claimed_by = "dead-worker"
+        record.claim_expires_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        record.attempt_count = 3
+        db.commit()
+
+    diagnostics = recovery.diagnostics()
+
+    assert diagnostics["stuck_claims"] == 1
+    assert diagnostics["live_claims"] == 0
+    assert diagnostics["nonterminal"] == 1
+    assert diagnostics["oldest_nonterminal_seconds"] >= 0
+    assert "owner_principal" not in diagnostics
+    assert "provider_metadata" not in diagnostics

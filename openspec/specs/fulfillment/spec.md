@@ -246,6 +246,8 @@ The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQ
 
 Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository MUST reserve SQLite's single-writer slot before selecting and updating a bounded claim batch, so independently running service workers cannot commit overlapping live claims. Workers commit claims before external calls, release database locks during provider dispatch/status reads, reclaim expired claims, and schedule failed or still-pending work with bounded exponential backoff and jitter. Deterministic provider command identities make a retry after uncertain acknowledgement observe the same underlying command.
 
+Operator status exposes safe recovery counters and durable metrics for live or expired claims, scheduled retries and retry age, provider failures, and non-terminal aggregate age. Structured recovery errors identify lifecycle correlation, provider route, operation, and attempt count only; they exclude credentials and private ownership data.
+
 #### Scenario: Concurrent recovery workers claim pending work
 
 - **WHEN** independently running SQLite workers attempt to claim the same pending command
@@ -260,6 +262,11 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 
 - **WHEN** a claimed row's claim has expired and no other claim has replaced it
 - **THEN** a subsequent claim attempt may claim it again
+
+#### Scenario: Operator diagnoses stuck recovery
+
+- **WHEN** an operator reads system status while claims or retries are outstanding
+- **THEN** status reports safe counts and ages without authority credentials, raw provider metadata, or owner principals
 
 ### Requirement: Provider contract
 

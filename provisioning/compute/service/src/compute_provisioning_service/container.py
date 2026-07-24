@@ -66,8 +66,13 @@ def _bare_metal_bundle(runtime, site_authority, resource_pool_service):
     return runtime.adapter_bundle(site_authority, resource_pool_service)
 
 
-def _system_service(runtime, lease_lifecycle_service):
-    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
+def _system_service(
+    runtime, lease_lifecycle_service, fulfillment_recovery_service
+):
+    return runtime.system_service(
+        lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_diagnostics=fulfillment_recovery_service.diagnostics,
+    )
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
@@ -357,6 +362,7 @@ class Container(containers.DeclarativeContainer):
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_recovery_service=fulfillment_recovery_service,
     )
 
 
