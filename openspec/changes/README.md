@@ -11,15 +11,14 @@ Statuses here describe readiness, not merely whether a checklist exists:
 ## Market Platform compute campaign
 
 ```text
-market-platform-bare-metal-10 ──┐
-                                ├──► market-platform-compute-40
-POOLS-7 durable lifecycle ──────┘
+market-platform-bare-metal-10 ──► market-platform-compute-40
+archived POOLS-7 lifecycle ─────►
 ```
 
 | Order | Change | Status | Acceptance boundary |
 |---|---|---|---|
-| 1 | [`market-platform-bare-metal-10-storefront-composition`](market-platform-bare-metal-10-storefront-composition/) | active; production fulfillment tasks depend on POOLS-7 | Complete independently deployable bare-metal seller composition with one domain contract per process and trusted multi-site bindings |
-| 2 | [`market-platform-compute-40-multi-domain-proof`](market-platform-compute-40-multi-domain-proof/) | blocked on bare-metal-10 and POOLS-7 | Deterministic 2×2 VM/bare-metal storefront-to-provisioner lifecycle proof with strict executor and selected-site identity |
+| 1 | [`market-platform-bare-metal-10-storefront-composition`](market-platform-bare-metal-10-storefront-composition/) | active; POOLS-7 prerequisite satisfied | Complete independently deployable bare-metal seller composition with one domain contract per process and trusted multi-site bindings |
+| 2 | [`market-platform-compute-40-multi-domain-proof`](market-platform-compute-40-multi-domain-proof/) | blocked on bare-metal-10 | Deterministic 2×2 VM/bare-metal storefront-to-provisioner lifecycle proof with strict executor and selected-site identity |
 
 Compute-40 uses pull reconciliation as the correctness baseline. Reverse result delivery is a POOLS follow-on and does not block the proof.
 
@@ -29,7 +28,7 @@ Compute-40 uses pull reconciliation as the correctness baseline. Reverse result 
 archived POOLS-1…6 foundations
               │
               ▼
-POOLS-7 durable fulfillment cutover
+archived POOLS-7 durable fulfillment cutover
       ├──► POOLS-8 projection consumption and hints
       ├──► fair scheduling policy
       └──► result push delivery
@@ -37,9 +36,9 @@ POOLS-7 durable fulfillment cutover
 
 | Change | Status | Relationship |
 |---|---|---|
-| [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | active; 72 prerequisite tasks completed | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
+| [`pools-7-storefront-fulfillment-cutover`](archive/2026-07-24-pools-7-storefront-fulfillment-cutover/) | archived | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
 | [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | active; may overlap after identity decisions | Persists already-produced projections, maps them into commercial publication/claims, and adds advisory domain-owned hints |
-| [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | blocked/design-gated | Simulation/decisions may proceed; production policy waits for POOLS-7 transactional assignment state and a selected fairness subject |
+| [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated | POOLS-7 transactional assignment state is available; production policy still requires a selected fairness subject |
 | [`provisioning-result-push-delivery`](provisioning-result-push-delivery/) | deferred follow-on | Adds authenticated push delivery, a durable outbox, and receiver deduplication over POOLS-7's existing durable fulfillment/result persistence; it does not redesign result ownership or lifecycle state |
 
 `add-host-capacity-filters` was archived as superseded by site admission and fulfillment scheduling.

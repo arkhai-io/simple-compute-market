@@ -11,7 +11,7 @@ The repository now has shared domain contracts, an extracted compute service, co
 - Verify each provisioner concurrently loads VM and bare-metal adapters without provider/executor conflation.
 - Exercise VM-shareable and bare-metal-exclusive claims against one Physical Resource within an authority and reject conflicts before executor work.
 - Use pull-based status/result reconciliation as the correctness baseline; authenticated reverse delivery remains a separate follow-on.
-- State: **Blocked on `pools-7-storefront-fulfillment-cutover` and `market-platform-bare-metal-10-storefront-composition`; already-landed prerequisite evidence is recorded in `tasks.md`.**
+- State: **Blocked on `market-platform-bare-metal-10-storefront-composition`; `pools-7-storefront-fulfillment-cutover` is complete and archived.**
 
 ## Capabilities
 

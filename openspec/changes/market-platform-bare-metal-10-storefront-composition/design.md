@@ -103,6 +103,10 @@ Those capabilities are not yet a storefront-consumable contract. The compute HTT
 
 Therefore task 4.1 remains blocked rather than being marked reconciled against a guessed wire contract. Bare-metal tasks 4.2–4.6 begin only after POOLS-7 publishes and tests those request/response, authorization, idempotency, and teardown contracts. Trusted multi-site projection, pre-reservation placement, and durable selected-site routing from Section 3 remain valid prerequisites and do not duplicate POOLS-7 repositories or workers.
 
+### POOLS-7 completion reconciliation — 2026-07-24
+
+POOLS-7 is complete and archived. The compute provisioning client now exposes authenticated scheduling, fulfillment acceptance, status/result pull, and whole-fulfillment teardown; recovery workers own durable provider dispatch and convergence. Bare-metal Section 4 is unblocked and must consume those public contracts through the persisted selected-site binding without copying provisioning repositories, workers, or provider execution into the storefront.
+
 ## Risks / Trade-offs
 
 - **[POOLS-7 APIs change while composition work proceeds]** → Keep site routing and fulfillment behind injected ports; bind production wiring only after the POOLS-7 public contract is accepted.
