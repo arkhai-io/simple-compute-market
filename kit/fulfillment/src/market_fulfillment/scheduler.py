@@ -23,7 +23,7 @@ from market_resource_pools import ResourcePoolService
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 
-from .repository import SettlementRepository
+from .settlement_repository import SettlementRepository
 from .scheduling_persistence import SchedulingUnitOfWork, SqlAlchemySchedulingUnitOfWork
 from .round_robin_policy import DeterministicRoundRobinPolicy
 from .scheduling import SchedulingCursorState, SettlementSchedulingPolicy

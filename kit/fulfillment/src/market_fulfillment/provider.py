@@ -51,6 +51,19 @@ class FulfillmentProvider(ABC):
     @abstractmethod
     async def dispatch_teardown(self, prepared:VersionedEnvelope[Any]) -> FulfillmentResult: ...
     @abstractmethod
+    def resolve_provisioned_resources(self, provider_metadata:dict[str,Any]) -> tuple[str, ...]:
+        """Return domain resource references for a confirmed-successful create.
+
+        Pure and synchronous -- no I/O. Called by create-status convergence
+        exactly once, only after ``get_status`` reports ``succeeded``, never
+        earlier: a ``ProvisionedResource`` row must never represent a
+        resource whose creation might still fail. Decodes whatever
+        adapter-owned metadata shape this provider persisted at dispatch
+        acknowledgement time; shared orchestration does not interpret the
+        contents, only the returned tuple of opaque reference strings.
+        """
+        ...
+    @abstractmethod
     async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
 
 class FulfillmentError(Exception): pass

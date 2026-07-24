@@ -7,6 +7,7 @@ provider-specific translation and infrastructure behavior.
 See ``openspec/specs/fulfillment/spec.md``.
 """
 
+from .backoff import Backoff
 from .db import (
     Base as FulfillmentBase,
     ProvisionedResource,
@@ -41,7 +42,7 @@ from .provider import (
     ProviderStatus,
     ProviderUnavailableError,
 )
-from .repository import SettlementRepository, begin_sqlite_write_transaction
+from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator
 from .fulfillment_persistence import (
     FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
@@ -70,6 +71,7 @@ from .settlement_types import (
 from .transitions import InvalidSettlementTransitionError, validate_transition
 
 __all__ = [
+    "Backoff",
     "CapacityReservationExpiredError",
     "begin_sqlite_write_transaction",
     "FulfillmentBase",

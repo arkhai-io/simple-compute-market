@@ -132,3 +132,5 @@ storefront_url = ""
 # lease-watchdog callback to the storefront, and gates every inbound request
 # (the storefront presents it as X-Admin-Key). Empty = auth disabled (dev only).
 storefront_admin_key = ""
+
+# Durable fulfillment recovery and provider convergence.

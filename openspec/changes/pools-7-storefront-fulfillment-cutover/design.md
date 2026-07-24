@@ -2310,3 +2310,13 @@ composes `FulfillmentConvergenceWatchdog` as the asyncio timer.
 | `resolve_provisioned_resources` contract and call timing (item 6) | `openspec/specs/fulfillment/spec.md`; `FulfillmentProvider` protocol docstring |
 | Watchdog composition and naming (items 2, 8) | `docs/development/ARCHITECTURE.md` (service composition) |
 
+
+
+## Section 6 implementation promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| SQLite recovery claims serialize through short `BEGIN IMMEDIATE` transactions and expire durably | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Provider calls occur outside database transactions and outcomes are applied only by the current claim owner | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Provisioned-resource identities are resolved only after confirmed create success and teardown updates existing rows | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown` |
+| The compute provisioning service composes one fulfillment convergence watchdog | `docs/development/ARCHITECTURE.md#runtime-service-map` |

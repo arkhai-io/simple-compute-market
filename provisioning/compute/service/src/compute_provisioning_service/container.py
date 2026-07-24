@@ -19,6 +19,7 @@ from compute_provisioning_service.composition import compose_adapter_bundles
 from compute_provisioning_service.services.compute_contract_service import ComputeContractService
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
+from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
 from market_fulfillment import (
     PhysicalSettlementScheduler,
@@ -335,6 +336,14 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
+    fulfillment_convergence_watchdog = providers.Singleton(
+        FulfillmentConvergenceWatchdog,
+        session_factory=session_factory,
+        repository=settlement_repository,
+        provider_registry=provider_registry,
+        settings=config,
+    )
+
     system_service = providers.Singleton(
         _system_service,
         runtime=vm_runtime,
@@ -364,6 +373,7 @@ resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
+resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
 resolved_bare_metal_lease_service: Any | None = None
 resolved_bare_metal_operations_service: Any | None = None

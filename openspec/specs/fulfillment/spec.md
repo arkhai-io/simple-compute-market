@@ -25,7 +25,7 @@ It does not own:
 - resource-pool CRUD or provider configuration persistence;
 - VM, bare-metal, Kubernetes, storage, or other provider-specific request/result vocabulary;
 - executor job queues or lease-watchdog policy;
-- the periodic multi-replica recovery sweep that consumes recovery claims (see "Durable settlement persistence").
+- the provisioning-owned recovery sweep that consumes durable recovery claims (see "Durable settlement persistence").
 
 ## Ownership
 
@@ -166,6 +166,10 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 - **WHEN** a provider cannot use the selected resource
 - **THEN** it reports validation or execution failure and does not choose a replacement resource
 
+## Fulfillment convergence worker
+
+The compute provisioning composition runs a periodic fulfillment convergence worker alongside its other lifecycle workers. Each pass claims a bounded batch in a short SQLite write transaction, closes that transaction before provider I/O, and applies the provider outcome in a second transaction only while the same worker still owns the claim and the aggregate remains in the expected source state. Create dispatch, create-status convergence, teardown dispatch, and teardown-status convergence are independently callable passes so recovery behavior can be tested and operated without coupling all work to one monolithic cycle.
+
 ## Durable settlement persistence
 
 One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
@@ -201,7 +205,7 @@ Either check rejects a retry whose stored values differ as a conflict; it does n
 
 Provider submission acknowledgement is a second short transaction. Identical metadata is idempotent; conflicting provider identity is rejected without rewriting the stored value. The gap between provider submission and acknowledgement is recovered by redispatching the persisted prepared operation with the same deterministic idempotency key.
 
-A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id`, denormalized `fulfillment_id`, and an optional domain-specific `domain_resource_ref`. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
+A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id`, denormalized `fulfillment_id`, and an optional domain-specific `domain_resource_ref`. Resource identities are resolved from validated provider metadata only after the provider reports create success; replay is idempotent for the same fulfillment and domain resource reference. Confirmed teardown updates those existing rows rather than resolving or creating resource identities again. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
 
 There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.
 
@@ -213,7 +217,7 @@ The generic lifecycle transition operation may update only prepared create/teard
 
 The compute provisioning service uses SQLite. Fulfillment acceptance reserves SQLite's single writer slot with an immediate write transaction before reading and updating the aggregate, so concurrent acceptance attempts serialize and observe one durable `fulfillment_id`. This is a database-wide SQLite writer guarantee, not PostgreSQL-style row locking. Aggregate creation remains protected by the `capacity_reservation_id` primary key; an observed uniqueness race is resolved by re-reading the winning row and applying the ordinary equivalence rule.
 
-Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. The repository exposes only a single-worker SQLite selection primitive at this layer. The provisioning-owned recovery workflow defines duplicate-dispatch prevention and any concurrent acquisition semantics.
+Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live directly on the aggregate row rather than in a separate claims table: one aggregate has at most one pending provider operation at a time, so a separate table would only add a join with no independent-claiming benefit. Recovery acquisition uses a short `BEGIN IMMEDIATE` transaction that selects eligible unclaimed or expired rows, assigns the worker and expiry, increments the attempt count, and commits before provider I/O. SQLite's single-writer reservation serializes concurrent claim attempts; this is not represented as portable row locking or a distributed multi-replica protocol. Provider calls run without an open database transaction. A second short transaction applies an outcome only when the expected lifecycle state and current claim owner still match, preventing a worker whose lease was reclaimed from writing a stale result or clearing another worker's claim.
 
 #### Scenario: Expired claim is reclaimed
 
@@ -228,7 +232,8 @@ A `FulfillmentProvider` separates pure synchronous preparation from asynchronous
 - `dispatch_create(prepared) -> FulfillmentResult`;
 - `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
 - `dispatch_teardown(prepared) -> FulfillmentResult`;
-- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`.
+- `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`;
+- `resolve_provisioned_resources(provider_metadata) -> tuple[str, ...]`.
 
 Preparation receives the durable `capacity_reservation_id` explicitly plus caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently or derive the reservation identity from the storefront payload. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
 

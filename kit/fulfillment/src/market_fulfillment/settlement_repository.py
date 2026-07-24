@@ -12,7 +12,7 @@ assignment in one transaction. See
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from typing import Callable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -302,6 +302,14 @@ class SettlementRepository:
                 f"capacity_reservation_id={capacity_reservation_id!r} has no accepted "
                 "fulfillment to attach a provisioned resource to"
             )
+        existing = (
+            db.query(ProvisionedResource)
+            .filter(ProvisionedResource.capacity_reservation_id == capacity_reservation_id)
+            .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
+            .one_or_none()
+        )
+        if existing is not None:
+            return existing
         provisioned = ProvisionedResource(
             capacity_reservation_id=capacity_reservation_id,
             fulfillment_id=record.fulfillment_id,
@@ -418,3 +426,109 @@ class SettlementRepository:
             record.attempt_count = (record.attempt_count or 0) + 1
         db.flush()
         return candidates
+
+    def claim_pending(
+        self,
+        db: Session,
+        *,
+        states: Sequence[str],
+        limit: int,
+        lease_seconds: int | Callable[[int], float],
+        worker_id: str,
+        now: datetime | None = None,
+    ) -> list[SettlementRecord]:
+        """Claim pending rows for recovery in one short, self-contained transaction.
+
+        Opens and commits its own
+        ``BEGIN IMMEDIATE``-guarded transaction rather than depending on a
+        caller-supplied open transaction, so the writer slot is released
+        before any provider call happens. SQLite has no
+        ``SELECT ... FOR UPDATE SKIP LOCKED``; under SQLite's single-writer
+        contract it is unnecessary, since this transaction already
+        serializes against any other concurrent claim attempt. This is
+        concurrent-claim-safe defense-in-depth (overlapping asyncio tasks
+        within one watchdog cycle, a brief overlap during pod replacement,
+        or a second instance run for diagnosis) — not a distributed
+        multi-replica protocol. See
+        ``openspec/specs/fulfillment/spec.md#durable-settlement-persistence``.
+
+        ``lease_seconds`` is either a flat lease length applied to every
+        claimed row, or a callable receiving each row's own
+        (already-incremented) ``attempt_count`` and returning that row's
+        lease length — the mechanism ``FulfillmentConvergenceWatchdog``
+        uses (via ``market_fulfillment.backoff.Backoff.delay_seconds``) to
+        make a claimed-but-not-yet-due row's ``claim_expires_at`` reflect
+        exponential backoff with jitter rather than a fixed lease.
+
+        The caller must pass a session dedicated to this call; it is
+        committed here and should not be reused for the subsequent
+        provider call.
+        """
+
+        begin_sqlite_write_transaction(db)
+        now = now or datetime.now(timezone.utc)
+        candidates = (
+            db.query(SettlementRecord)
+            .filter(SettlementRecord.state.in_(list(states)))
+            .filter(
+                (SettlementRecord.claimed_by.is_(None))
+                | (SettlementRecord.claim_expires_at <= now)
+            )
+            .order_by(SettlementRecord.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        for record in candidates:
+            record.claimed_by = worker_id
+            record.attempt_count = (record.attempt_count or 0) + 1
+            lease = (
+                lease_seconds(record.attempt_count)
+                if callable(lease_seconds)
+                else lease_seconds
+            )
+            record.claim_expires_at = now + timedelta(seconds=lease)
+        db.commit()
+        for record in candidates:
+            db.refresh(record)
+            db.expunge(record)
+        return candidates
+
+    def clear_claim(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        worker_id: str,
+    ) -> None:
+        """Release a claim once a handler has finished acting on the row.
+
+        A no-op if the row is no longer claimed by ``worker_id`` — e.g. a
+        slow worker whose lease has since lapsed and been reclaimed by
+        another worker must not clear that worker's claim out from under it.
+        """
+
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.claimed_by != worker_id:
+            return
+        record.claimed_by = None
+        record.claim_expires_at = None
+        db.flush()
+
+    def mark_provisioned_resources_torn_down(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        status: str = "torn_down",
+    ) -> None:
+        """Update existing ``ProvisionedResource`` rows on confirmed teardown.
+
+        Does not create new rows — teardown convergence updates what create
+        convergence already persisted via ``add_provisioned_resource``;
+        resource identity is not re-resolved at teardown time.
+        """
+
+        db.query(ProvisionedResource).filter(
+            ProvisionedResource.capacity_reservation_id == capacity_reservation_id
+        ).update({"status": status})
+        db.flush()

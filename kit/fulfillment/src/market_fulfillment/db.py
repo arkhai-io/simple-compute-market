@@ -105,9 +105,9 @@ class SettlementRecord(Base):
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
 
-    # Multi-replica recovery-claim boundary. One aggregate has at most one
-    # pending provider operation at a time, so these live on the row itself
-    # rather than in a separate claims table.
+    # Recovery-claim boundary for SQLite single-writer coordination. One
+    # aggregate has at most one pending provider operation at a time, so
+    # these fields live on the row rather than in a separate claims table.
     claimed_by = Column(String, nullable=True)
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)

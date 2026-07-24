@@ -69,6 +69,9 @@ class FakeProvider(FulfillmentProvider):
     async def get_status(self, capacity_reservation_id, resource, provider_metadata):
         return ProviderStatus(state=ProviderOperationState.succeeded)
 
+    def resolve_provisioned_resources(self, provider_metadata):
+        return ()
+
 
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(

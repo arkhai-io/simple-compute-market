@@ -84,7 +84,8 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "fulfillment_persistence.py": {"market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),
         "db.py": {"sqlalchemy"},
-        "repository.py": {"sqlalchemy"},
+        "settlement_repository.py": {"sqlalchemy"},
+        "backoff.py": set(),
     }
     violations = []
     for source_path in package_root.glob("*.py"):
@@ -98,7 +99,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
             top_level = module_name.split(".")[0]
             is_local = module_name.startswith(".") or top_level == "market_fulfillment"
             is_stdlib_or_typing = top_level in {
-                "__future__", "abc", "contextlib", "dataclasses", "datetime", "decimal", "enum", "logging", "threading", "typing",
+                "__future__", "abc", "contextlib", "dataclasses", "datetime", "decimal", "enum", "logging", "random", "threading", "typing",
             }
             if is_local or is_stdlib_or_typing:
                 continue
