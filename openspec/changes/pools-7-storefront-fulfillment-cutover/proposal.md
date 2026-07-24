@@ -117,6 +117,16 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
   it was not a behavioral prerequisite, but was selected to land first, so
   this plan now targets the extracted service and adapter paths.
 
+## Section 7 cutover boundary
+
+Section 7 is a pre-release, all-or-nothing migration of legacy VM leases into
+the durable fulfillment lifecycle. Existing hosts and site capacity are already
+covered by Section 2 migrations. The migration joins legacy leases to supporting
+capacity-reservation and resource-pool data, preserves every known active create
+or teardown Ansible operation, and aborts rather than speculatively replaying a
+create operation whose prior job identity cannot be established. POOLS-only
+reservation states were never shipped and do not require compatibility handling.
+
 ## Non-Goals
 
 - Anything `pools-4` already covers (claim-shape change itself).

@@ -1977,74 +1977,121 @@ migration executes. Section 8 (pull-based status/result queries) is
 independent of this reordering — it only reads whatever is in the aggregate,
 backfilled or not — and keeps its position and number.
 
-## Section 7 (migrate existing hosts and active leases) — status and remaining open questions
+## Section 7 (migrate existing hosts and active leases) — resolved design decisions (discuss phase, resolved 2026-07-24)
 
-Renumbered from Section 5 per the resequencing decision above. One finding
-from the original discuss pass is resolved below as a correction; the
-remaining questions are recorded but explicitly **not resolved this
-session** — deferred to a future discuss-phase pass on this section, per
-this session's direction.
+Renumbered from Section 5 per the resequencing decision above. Section 7 is a
+pre-release cutover, not a compatibility migration from a previously shipped
+resource-pool reservation model. No POOLS capacity reservations or POOLS-only
+states such as `unmanaged` exist on production clients before this release.
+The safety-critical historical data is the legacy VM lease and its tracked
+Ansible create or teardown operation. Losing an unused reservation is an
+inconvenience; losing an active lease or provider job can orphan infrastructure,
+duplicate provisioning, prevent teardown, breach service-quality commitments,
+and create financial exposure.
 
-### Resolved: task 7.1 (originally 5.1) was stale, not pending work
+### Existing host and capacity migration is already complete
 
-"Create the default resource pool and migrate all existing hosts and
-pool-membership/resource-capacity records before fulfillment backfill" reads
-as new work, but `_migrate_resource_pools_and_hosts_pool_id` (creates the
-`default` `ResourcePool` + `AnsiblePoolConfig`, backfills `hosts.pool_id`) and
-`_migrate_capacity_model_cutover` (`_migrate_site_resources_pool_id`,
-`_migrate_capacity_buckets_and_current_debits`, `_migrate_retire_site_resources`)
-already run today and already backfill every pre-existing host into the
-default pool, every `site_resources` row into a `CapacityBucket`, and every
-reservation with a `resource_id` into a `CapacityReservationDebit` —
-unconditional on reservation state, so this already covers `reserved`,
-`leased`, `releasing`, `released`, everything. `tasks.md` task 7.1 has been
-corrected to state this as the current fact and closed; the section's real,
-unstarted scope begins at 7.2 — backfilling a `SettlementRecord` for
-pre-existing reservations, which Section 2 did not do.
+Section 2's migrations already create the `default` resource pool and its
+`AnsiblePoolConfig`, backfill every existing host into that pool, migrate site
+resource capacity into capacity buckets, and create current reservation debits.
+Task 7.1 remains closed. Section 7 begins with fulfillment backfill for legacy
+VM leases that may be nonterminal when an administrator upgrades.
 
-### Open, deferred: reservation-state-to-`SettlementRecordState` mapping (task 7.2)
+### Candidate enumeration joins leases and reservations
 
-`ReservationState` has nine values; "active or releasing" is not itself one
-of them, and a concrete per-state mapping is needed before 7.2 can be
-planned as concrete subtasks. Candidate mapping, **not accepted or rejected
-this session — revisit when this section is next discussed**:
+The migration enumerates nonterminal legacy VM lease rows and joins them to
+capacity reservations and migrated resource-pool data. The lease is the
+authoritative source for deciding which workloads and provider operations must
+survive the cutover. A matching capacity reservation supplies the durable
+`capacity_reservation_id` and related capacity context when available. Because
+POOLS has not shipped, unmatched new-style reservations need not be preserved
+and must never override or obscure a legacy lease. Every relevant legacy lease
+must either produce one unambiguous fulfillment aggregate or abort the entire
+migration.
 
-- `reserved` — no `SettlementRecord` at all (nothing scheduled or dispatched
-  yet; post-cutover this reservation goes through `schedule_resource` fresh
-  like any new one).
-- `provisioning` — candidate: `dispatching`.
-- `leased` — candidate: `active`.
-- `releasing` — candidate: `teardown_dispatch_pending` (no
-  `vm_remove_job_id` yet) or `tearing_down` (one exists).
-- `release_failed` — candidate: `teardown_failed`.
-- `unmanaged` — genuinely unresolved: give it a `SettlementRecord` (in what
-  state?) so an operator can act on it through the new tooling, or exclude
-  it entirely as a pre-cutover-only admin concern?
-- `provisioning_failed`, `released`, `force_released` — candidate: skip
-  (terminal; matches the proposal's existing "skip terminal/expired
-  historical allocations" language), but should be stated explicitly.
+### Historical lease-state mapping
 
-### Open, deferred: what "cannot be mapped unambiguously" means, concretely (task 7.5)
+Only historical VM lease states that can exist before this release require a
+backfill policy:
 
-The proposal says the migration "fails visibly when an active reservation
-cannot be mapped unambiguously." Candidate concrete failure conditions,
-**not accepted or rejected this session**:
+- `provisioning` maps to `dispatching`. The migrated record continues observing
+  the known Ansible create job and never falls back to `dispatch_pending`.
+- `leased` maps to `active` and receives a `ProvisionedResource`.
+- `releasing` with a teardown job identifier maps to `tearing_down`.
+- `releasing` without a teardown job identifier maps to
+  `teardown_dispatch_pending`; the current provider contract prepares the
+  teardown operation before recovery submits it.
+- `release_failed` maps to `teardown_failed`.
+- terminal or expired historical leases are skipped.
 
-1. A `leased`/`releasing`/`release_failed` row with no `vm_host`, or with
-   both `vm_target` and `executor_target` null. (`VmReleaseExecutor.submit_release`
-   silently no-ops on this today; should the migration instead treat it as a
-   visible failure rather than reproducing that same silent swallow?)
-2. A `resource_id` that cannot resolve to a `CapacityBucket`/`pool_id` (would
-   only happen if Section 2's own backfill missed a row — re-validate this
-   invariant during migration, or trust Section 2's own tests and skip the
-   check?).
-3. A resolvable `pool_id` with no `AnsiblePoolConfig` row (provider identity
-   cannot be determined — hard failure, or per-row skip with a warning?).
+States introduced only by POOLS do not need migration behavior because they
+were never shipped.
 
-These three open items (the `unmanaged` mapping, and questions 2–3 above)
-remain unresolved and are recorded here per `AGENTS.md`'s discuss-phase rule,
-so Section 7 planning does not proceed from an assumed answer until they are
-revisited.
+### Create-operation replay safety
+
+Retrying a known failed create operation through the provider's normal recovery
+behavior is valid. Submitting a new create operation merely because migration
+cannot identify or reconstruct the existing Ansible operation is unsafe: the
+original operation may still be running or may already have created the VM.
+Therefore a historical `provisioning` lease requires a usable existing create
+job identifier and maps to `dispatching`; a missing or ambiguous job reference
+aborts migration rather than triggering speculative create dispatch.
+
+### Minimal fail-loud validation; no migration repair workflow
+
+Section 7 adds straightforward defense-in-depth assertions, not automated error
+recovery. A candidate aborts the migration when it lacks the information needed
+to preserve lifecycle ownership safely, including: no selected host; no unique
+resource-pool resolution or usable VM Ansible provider configuration; no usable
+VM target for an active or releasing lease; disagreement between populated
+`vm_target` and `executor_target`; no create job for `provisioning`; no teardown
+job for a row represented as already `tearing_down`; or a conflicting existing
+settlement/provisioned-resource row. Equivalent target rows are accepted for
+idempotent reruns. Conflicting rows are never overwritten. The migration does
+not attempt to repair, reconcile, or redispatch ambiguous work.
+
+### Aggregate shape and provider preparation
+
+Migrated and native aggregates have the same runtime meaning. No origin or
+`backfilled` field is added, and production code does not branch on migration
+provenance. Missing historical create request/prepared-create data is permitted
+according to lifecycle state: `dispatching` retains sufficient provider metadata
+to observe the known create job, while `active` and teardown states need not
+retain an unavailable original create request.
+
+For active and teardown-related leases, the migration derives the canonical
+`ProvisionedResource` from the validated VM target. It constructs the
+provider-neutral settlement result, resolves the migrated pool configuration,
+and calls the current VM provider's `prepare_teardown` contract to persist the
+versioned teardown envelope. Existing create and teardown job identifiers are
+preserved in their respective provider metadata so convergence observes known
+work instead of submitting duplicates.
+
+### Whole-migration atomicity and reruns
+
+The database migration is all-or-nothing. It enumerates, joins, derives, and
+validates the complete candidate set before exposing any Section 7 writes, then
+inserts the settlement and provisioned-resource rows in one transaction. Any
+unsafe candidate or conflict rolls back every Section 7 write. A rerun accepts
+missing rows or exactly equivalent rows, rejects conflicting rows, and never
+updates an existing aggregate merely to force it to match. No partially migrated
+lease population may remain visible after failure.
+
+### Permanent documentation destinations
+
+During implementation, promote the durable current-state rules as follows:
+
+- fulfillment lifecycle continuity, known-job observation, state-based input
+  requirements, and idempotent aggregate semantics to
+  `openspec/specs/fulfillment/spec.md`;
+- the rationale for lease/provider-operation continuity, migration atomicity,
+  and no speculative create fallback to
+  `openspec/specs/fulfillment/architecture.md`;
+- the repository-wide cutover transaction and authority rule (legacy lease
+  continuity takes precedence over unused pre-release reservation data) to
+  `docs/development/ARCHITECTURE.md`; and
+- VM/Ansible-specific target derivation and teardown-envelope preparation to the
+  permanent physical-provisioning specification and architecture companion.
 
 ## Section 5 (fulfillment acceptance and provider preparation) — resolved design decisions (discuss phase, resolved 2026-07-23)
 
