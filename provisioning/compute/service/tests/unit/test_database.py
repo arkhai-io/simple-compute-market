@@ -440,7 +440,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260722_001_pools7_capacity_model_cutover'"
+                "'20260724_002_drop_vm_leases_table'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

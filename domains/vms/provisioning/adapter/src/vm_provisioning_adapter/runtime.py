@@ -24,6 +24,26 @@ from vm_provisioning_adapter.services.job_service import AnsibleJobService
 from vm_provisioning_adapter.services.vm_operations_service import VmOperationsService
 
 
+def prepare_historical_vm_teardown(settlement_result: Any, pool_config: dict[str, Any]):
+    """Prepare a teardown envelope for an existing VM during schema cutover.
+
+    This keeps migration code on the adapter's stable public boundary while
+    using the same provider validation and envelope contract as normal runtime
+    teardown dispatch.
+    """
+
+    class _PreparationOnlyJobService:
+        @staticmethod
+        def reserved_var_keys(params):
+            return frozenset({"vm_host", "vm_action", "vm_target", "escrow_uid"})
+
+    provider = AnsibleFulfillmentProvider(
+        job_service=_PreparationOnlyJobService(),
+        job_queue_provider=lambda: None,
+    )
+    return provider.prepare_teardown(settlement_result, pool_config)
+
+
 @dataclass
 class VmProvisioningRuntime:
     config: Any

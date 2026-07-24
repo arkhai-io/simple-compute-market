@@ -260,23 +260,10 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     from market_fulfillment.db import Base as FulfillmentBase
     from market_fulfillment.provider import SettlementResult
     from market_fulfillment.settlement_types import SettlementResource
-    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-        AnsibleFulfillmentProvider,
-    )
+    from vm_provisioning_adapter.runtime import prepare_historical_vm_teardown
 
     FulfillmentBase.metadata.create_all(engine)
 
-    class _PreparationOnlyJobService:
-        @staticmethod
-        def reserved_var_keys(params):
-            # Teardown preparation only needs collision detection.  These are
-            # the built-in variables emitted for a vm_remove operation.
-            return frozenset({"vm_host", "vm_action", "vm_target", "escrow_uid"})
-
-    provider = AnsibleFulfillmentProvider(
-        job_service=_PreparationOnlyJobService(),
-        job_queue_provider=lambda: None,
-    )
 
     with engine.begin() as connection:
         rows = connection.execute(text(
@@ -376,7 +363,7 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
                     resource=resource, provisioned_resources=({"domain_resource_ref": target},),
                     provider_metadata=metadata,
                 )
-                envelope = provider.prepare_teardown(result, {
+                envelope = prepare_historical_vm_teardown(result, {
                     "playbook_path": row["playbook_path"],
                     "inventory_group": row["inventory_group"],
                     "extra_vars": extra_vars,
