@@ -316,9 +316,28 @@ class SettlementRepository:
             domain_resource_ref=domain_resource_ref,
             status=status,
         )
-        db.add(provisioned)
-        db.flush()
-        return provisioned
+        try:
+            with db.begin_nested():
+                db.add(provisioned)
+                db.flush()
+            return provisioned
+        except IntegrityError:
+            # A concurrent caller won the unique-constraint race between our
+            # existence check and our insert (task 6.3.4's backstop doing
+            # its job). Re-read and return the winning row rather than
+            # raising -- add_provisioned_resource stays idempotent under
+            # genuine concurrency, not just under sequential retries.
+            existing = (
+                db.query(ProvisionedResource)
+                .filter(
+                    ProvisionedResource.capacity_reservation_id == capacity_reservation_id
+                )
+                .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
+                .one_or_none()
+            )
+            if existing is not None:
+                return existing
+            raise
 
     # ------------------------------------------------------------------
     # Scheduling fairness cursor
@@ -389,43 +408,6 @@ class SettlementRepository:
     # ------------------------------------------------------------------
     # Recovery claims
     # ------------------------------------------------------------------
-
-    def select_pending_for_single_worker(
-        self,
-        db: Session,
-        *,
-        states: Sequence[str],
-        limit: int,
-        lease_seconds: int,
-        worker_id: str,
-        now: datetime | None = None,
-    ) -> list[SettlementRecord]:
-        """Lease pending rows for one SQLite recovery worker.
-
-        This helper records the durable lease shape and supports a deployment
-        with exactly one recovery worker. It is not a concurrent worker-claim protocol; the provisioning-owned
-        recovery workflow owns duplicate-dispatch prevention when multiple
-        workers are enabled.
-        """
-
-        now = now or datetime.now(timezone.utc)
-        candidates = (
-            db.query(SettlementRecord)
-            .filter(SettlementRecord.state.in_(list(states)))
-            .filter(
-                (SettlementRecord.claimed_by.is_(None))
-                | (SettlementRecord.claim_expires_at <= now)
-            )
-            .order_by(SettlementRecord.created_at.asc())
-            .limit(limit)
-            .all()
-        )
-        for record in candidates:
-            record.claimed_by = worker_id
-            record.claim_expires_at = now + timedelta(seconds=lease_seconds)
-            record.attempt_count = (record.attempt_count or 0) + 1
-        db.flush()
-        return candidates
 
     def claim_pending(
         self,
@@ -532,3 +514,90 @@ class SettlementRepository:
             ProvisionedResource.capacity_reservation_id == capacity_reservation_id
         ).update({"status": status})
         db.flush()
+
+    # ------------------------------------------------------------------
+    # Recovery diagnostics
+    # ------------------------------------------------------------------
+
+    _RECOVERY_STATES = (
+        SettlementRecordState.dispatch_pending,
+        SettlementRecordState.dispatching,
+        SettlementRecordState.teardown_dispatch_pending,
+        SettlementRecordState.tearing_down,
+    )
+
+    def recovery_diagnostics(self, db: Session, *, now: datetime | None = None) -> dict:
+        """Operator-facing snapshot of recovery health, one query per field.
+
+        Reports, per non-terminal recovery-relevant state: total row count,
+        currently-claimed count, and expired-but-unclaimed count (a
+        transient query result surfaced for trend-watching, not itself an
+        error condition -- a nonzero value briefly is expected between
+        expiry and the next claim cycle). Also reports the oldest
+        non-terminal row's age from ``created_at``, the max ``attempt_count``
+        across non-terminal rows, and terminal `failed`/`teardown_failed`
+        counts. Deliberately does not report a history of transient
+        per-attempt provider-call failures -- the schema stores only the
+        aggregate's current state and latest failure, not a durable event
+        log; that remains out of scope for this method, covered instead by
+        ``attempt_count`` and retry age.
+        """
+
+        now = now or datetime.now(timezone.utc)
+        non_terminal_states = [s.value for s in self._RECOVERY_STATES]
+
+        per_state: dict[str, dict[str, int]] = {}
+        for state in self._RECOVERY_STATES:
+            base_query = db.query(SettlementRecord).filter(
+                SettlementRecord.state == state.value
+            )
+            total = base_query.count()
+            claimed = base_query.filter(
+                SettlementRecord.claimed_by.isnot(None),
+                SettlementRecord.claim_expires_at > now,
+            ).count()
+            expired = base_query.filter(
+                SettlementRecord.claimed_by.isnot(None),
+                SettlementRecord.claim_expires_at <= now,
+            ).count()
+            per_state[state.value] = {
+                "total": total,
+                "claimed": claimed,
+                "expired_unclaimed": expired,
+            }
+
+        non_terminal_query = db.query(SettlementRecord).filter(
+            SettlementRecord.state.in_(non_terminal_states)
+        )
+        oldest = (
+            non_terminal_query.order_by(SettlementRecord.created_at.asc())
+            .first()
+        )
+        oldest_age_seconds = None
+        if oldest is not None:
+            oldest_created_at = oldest.created_at
+            # SQLite round-trips DateTime columns as naive regardless of
+            # what was written (the same characteristic claim_pending's
+            # tests already account for) -- normalize both sides to naive
+            # before subtracting rather than assuming either's awareness.
+            comparison_now = now.replace(tzinfo=None) if now.tzinfo else now
+            if oldest_created_at.tzinfo:
+                oldest_created_at = oldest_created_at.replace(tzinfo=None)
+            oldest_age_seconds = (comparison_now - oldest_created_at).total_seconds()
+        max_attempt_count = db.query(
+            SettlementRecord.attempt_count
+        ).filter(SettlementRecord.state.in_(non_terminal_states)).order_by(
+            SettlementRecord.attempt_count.desc()
+        ).limit(1).scalar()
+
+        return {
+            "per_state": per_state,
+            "oldest_non_terminal_row_age_seconds": oldest_age_seconds,
+            "max_attempt_count": max_attempt_count or 0,
+            "terminal_failed_count": db.query(SettlementRecord)
+            .filter(SettlementRecord.state == SettlementRecordState.failed.value)
+            .count(),
+            "terminal_teardown_failed_count": db.query(SettlementRecord)
+            .filter(SettlementRecord.state == SettlementRecordState.teardown_failed.value)
+            .count(),
+        }

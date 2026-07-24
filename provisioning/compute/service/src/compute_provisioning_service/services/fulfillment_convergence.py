@@ -14,6 +14,7 @@ from market_fulfillment import (
     SettlementResource,
     VersionedEnvelope,
 )
+from market_fulfillment.provider import ProviderConfigInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,18 @@ class FulfillmentConvergenceWatchdog:
         self._worker_id = f"fulfillment-watchdog:{uuid.uuid4()}"
         self._limit = int(getattr(settings, "fulfillment_convergence_batch_size", 50))
         self._backoff = Backoff(
-            initial_seconds=float(getattr(settings, "retry_backoff_initial_seconds", 60)),
-            multiplier=float(getattr(settings, "retry_backoff_multiplier", 2.0)),
-            max_seconds=float(getattr(settings, "retry_backoff_max_seconds", 3600)),
-            jitter_fraction=float(getattr(settings, "retry_backoff_jitter_fraction", 0.1)),
+            initial_seconds=float(
+                getattr(settings, "fulfillment_convergence_backoff_initial_seconds", 5.0)
+            ),
+            multiplier=float(
+                getattr(settings, "fulfillment_convergence_backoff_multiplier", 2.0)
+            ),
+            max_seconds=float(
+                getattr(settings, "fulfillment_convergence_backoff_max_seconds", 300.0)
+            ),
+            jitter_fraction=float(
+                getattr(settings, "fulfillment_convergence_backoff_jitter_fraction", 0.1)
+            ),
         )
 
     async def run(self) -> None:
@@ -69,6 +78,12 @@ class FulfillmentConvergenceWatchdog:
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
+        self._log_diagnostics()
+
+    def _log_diagnostics(self) -> None:
+        with self._session_factory() as db:
+            diagnostics = self._repository.recovery_diagnostics(db)
+        logger.info("[FULFILLMENT_CONVERGENCE] diagnostics: %s", diagnostics)
 
     async def dispatch_pending_creates(self) -> None:
         await self._dispatch_claimed_records(
@@ -136,9 +151,31 @@ class FulfillmentConvergenceWatchdog:
                 return
             if status.state is ProviderOperationState.succeeded:
                 provider = self._providers.require(record.provider)
-                refs = provider.resolve_provisioned_resources(
-                    dict(record.provider_metadata or {})
-                )
+                try:
+                    refs = provider.resolve_provisioned_resources(
+                        dict(record.provider_metadata or {})
+                    )
+                except ProviderConfigInvalidError as exc:
+                    # The provider reported success but persisted metadata
+                    # cannot be resolved to a resource identity. This is not
+                    # retryable: the metadata that failed to resolve is
+                    # already durable and will not change on the next cycle,
+                    # so falling through to the general retry path below
+                    # would back off forever behind diagnostics
+                    # indistinguishable from a healthy in-progress row,
+                    # never actually converging. Applied directly, not via
+                    # _apply_provider_failure, since this is a distinct
+                    # failure category from a provider-reported failure --
+                    # ours, not the provider's -- and needs its own
+                    # failure_reason for operator diagnostics.
+                    self._apply_transition(
+                        record.capacity_reservation_id,
+                        SettlementRecordState.dispatching.value,
+                        SettlementRecordState.failed.value,
+                        failure_reason="invalid_provisioned_resource_metadata",
+                        failure_message=str(exc),
+                    )
+                    return
                 self._apply_create_success(record.capacity_reservation_id, refs)
                 return
             if status.state is ProviderOperationState.failed:

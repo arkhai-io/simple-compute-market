@@ -133,4 +133,13 @@ storefront_url = ""
 # (the storefront presents it as X-Admin-Key). Empty = auth disabled (dev only).
 storefront_admin_key = ""
 
-# Durable fulfillment recovery and provider convergence.
+# Durable fulfillment recovery and provider convergence. Defaults for these
+# live in config/config.yml, not here -- see that file's comment header.
+# Documented here for discoverability only:
+#   fulfillment_convergence_watchdog_enabled
+#   fulfillment_convergence_watchdog_poll_interval_seconds
+#   fulfillment_convergence_batch_size
+#   fulfillment_convergence_backoff_initial_seconds
+#   fulfillment_convergence_backoff_multiplier
+#   fulfillment_convergence_backoff_max_seconds
+#   fulfillment_convergence_backoff_jitter_fraction
