@@ -275,7 +275,7 @@ The current round-robin scheduling policy is deterministic for the same candidat
 
 ### Release
 
-Physical release is proof-driven. The lifecycle invokes the selected provider or executor teardown. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
+Physical release is proof-driven. Lease expiry and explicit termination first resolve durable fulfillment ownership. Settlement-backed reservations start or resume provisioning-owned provider teardown and never run the legacy executor release path in parallel; only reservations outside fulfillment use a directly registered executor release hook. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
 
 ## Deployment topology
 

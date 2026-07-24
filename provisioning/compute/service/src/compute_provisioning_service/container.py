@@ -28,6 +28,9 @@ from market_fulfillment import (
 from compute_provisioning_service.services.fulfillment_recovery import (
     FulfillmentRecoveryService,
 )
+from compute_provisioning_service.services.fulfillment_release import (
+    FulfillmentReleaseBridge,
+)
 from compute_provisioning_service.services.fulfillment_service import FulfillmentService
 
 DEFAULT_EXECUTOR_KIND = "vm"
@@ -91,7 +94,12 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg, site_authority, release_dispatcher, job_service, lifecycle_event_sink
+    cfg,
+    site_authority,
+    release_dispatcher,
+    job_service,
+    lifecycle_event_sink,
+    fulfillment_release,
 ):
     return LeaseLifecycleService(
         cfg,
@@ -104,6 +112,7 @@ def _make_lease_lifecycle(
                 cfg, reservation, sink=lifecycle_event_sink
             )
         ),
+        fulfillment_release=fulfillment_release,
     )
 
 
@@ -308,6 +317,13 @@ class Container(containers.DeclarativeContainer):
         repository=settlement_repository,
     )
 
+    fulfillment_release = providers.Singleton(
+        FulfillmentReleaseBridge,
+        session_factory=session_factory,
+        repository=settlement_repository,
+        fulfillment_service=fulfillment_service,
+    )
+
     fulfillment_recovery_service = providers.Singleton(
         FulfillmentRecoveryService,
         provider_registry=provider_registry,
@@ -328,6 +344,7 @@ class Container(containers.DeclarativeContainer):
         release_dispatcher=release_dispatcher,
         job_service=job_service,
         lifecycle_event_sink=lifecycle_event_sink,
+        fulfillment_release=fulfillment_release,
     )
 
     lease_watchdog = providers.Singleton(

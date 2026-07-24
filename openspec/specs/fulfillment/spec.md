@@ -224,7 +224,7 @@ For an active fulfillment, the service MUST claim credential rotation durably be
 
 ### Requirement: Provisioning-owned whole-fulfillment teardown
 
-The authenticated teardown command MUST address one owned `fulfillment_id`. It prepares and persists immutable provider teardown input with `teardown_dispatch_pending` before any provider call. Provisioning-owned recovery workers exclusively submit and poll teardown, persist `tearing_down`, `teardown_failed`, or `torn_down`, and mark all child outputs torn down. Physical capacity MUST remain held until the provider reports successful teardown; only then may the worker idempotently release the owning capacity reservation before committing terminal fulfillment state.
+The authenticated teardown command MUST address one owned `fulfillment_id`. It prepares and persists immutable provider teardown input with `teardown_dispatch_pending` before any provider call. Provisioning-owned recovery workers exclusively submit and poll teardown, persist `tearing_down`, `teardown_failed`, or `torn_down`, and mark all child outputs torn down. Physical capacity MUST remain held until the provider reports successful teardown; only then may the worker idempotently release the owning capacity reservation before committing terminal fulfillment state. Lease expiry and explicit lease termination MUST first consult fulfillment ownership. A settlement-backed reservation starts or resumes durable fulfillment teardown and MUST NOT submit or poll the legacy executor release path in parallel.
 
 #### Scenario: Teardown request is repeated
 
