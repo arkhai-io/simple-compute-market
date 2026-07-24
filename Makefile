@@ -66,12 +66,12 @@ dist-compute-provisioning: ## Build arkhai-compute-provisioning wheel into .dist
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-provisioning-adapters: dist-compute-provisioning dist-bare-metal dist-provisioning-operator-client ## Build VM and bare-metal provisioning adapter wheels.
+dist-provisioning-adapters: dist-kits dist-compute-provisioning dist-bare-metal dist-provisioning-operator-client ## Build VM and bare-metal provisioning adapter wheels.
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 	cd domains/bare_metal/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 
-dist-compute-provisioning-service: dist-compute-provisioning dist-provisioning-adapters ## Build the extracted compute service wheel.
+dist-compute-provisioning-service: dist-kits dist-compute-provisioning dist-provisioning-adapters ## Build the extracted compute service wheel.
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
@@ -216,7 +216,7 @@ build-dev: build build-dev-env build-test-image
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
 # consume via --find-links. Skips `build-registry` (sellers point at
 # someone else's registry).
-build-seller: init-prerequisites dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
+build-seller: init-prerequisites dist-kits dist-storefront-client dist-identity dist-core dist-arkhai-core-storefront dist-alkahest dist-config dist-bare-metal dist-storefront dist-policy dist-provisioning-operator-client dist-compute-provisioning dist-provisioning-adapters dist-compute-provisioning-service dist-registry-client ## Build only what a seller needs: storefront + provisioning images.
 	$(MAKE) -j2 build-storefront build-provisioning
 
 # Same as build-seller, but the provisioning image's in-container appuser

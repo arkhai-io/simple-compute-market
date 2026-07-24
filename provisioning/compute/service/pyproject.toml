@@ -57,11 +57,3 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",
 ]
-
-[tool.uv.sources]
-arkhai-compute-provisioning = { path = "..", editable = true }
-arkhai-core-storefront-client = { path = "../../../core/storefront-client", editable = true }
-arkhai-bare-metal = { path = "../../../domains/bare_metal", editable = true }
-arkhai-bare-metal-provisioning-adapter = { path = "../../../domains/bare_metal/provisioning/adapter", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../../../domains/vms/provisioning/client", editable = true }
-arkhai-vms-provisioning-adapter = { path = "../../../domains/vms/provisioning/adapter", editable = true }
