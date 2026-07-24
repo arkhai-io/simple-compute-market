@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, Settlem
 from .envelopes import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
+from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
 from .settlement_types import (
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
@@ -526,79 +527,96 @@ class SettlementRepository:
         SettlementRecordState.tearing_down,
     )
 
-    def recovery_diagnostics(self, db: Session, *, now: datetime | None = None) -> dict:
-        """Operator-facing snapshot of recovery health, one query per field.
+    def recovery_diagnostics(
+        self, db: Session, *, now: datetime | None = None
+    ) -> RecoveryDiagnostics:
+        """Return one typed snapshot of recovery health.
 
-        Reports, per non-terminal recovery-relevant state: total row count,
-        currently-claimed count, and expired-claim count -- rows still
-        showing a claimant but whose lease has lapsed (a
-        transient query result surfaced for trend-watching, not itself an
-        error condition -- a nonzero value briefly is expected between
-        expiry and the next claim cycle). Also reports the oldest
-        non-terminal row's age from ``created_at``, the max ``attempt_count``
-        across non-terminal rows, and terminal `failed`/`teardown_failed`
-        counts. Deliberately does not report a history of transient
-        per-attempt provider-call failures -- the schema stores only the
-        aggregate's current state and latest failure, not a durable event
-        log; that remains out of scope for this method, covered instead by
-        ``attempt_count`` and retry age.
+        Recovery age and attempt metrics are calculated independently for
+        each non-terminal lifecycle state. The query also distinguishes
+        active leases from expired claims eligible for reclamation.
         """
 
         now = now or datetime.now(timezone.utc)
-        non_terminal_states = [s.value for s in self._RECOVERY_STATES]
+        state_values = [state.value for state in self._RECOVERY_STATES]
 
-        per_state: dict[str, dict[str, int]] = {}
-        for state in self._RECOVERY_STATES:
-            base_query = db.query(SettlementRecord).filter(
-                SettlementRecord.state == state.value
+        active_claim = case(
+            (
+                SettlementRecord.claimed_by.isnot(None)
+                & (SettlementRecord.claim_expires_at > now),
+                1,
+            ),
+            else_=0,
+        )
+        expired_claim = case(
+            (
+                SettlementRecord.claimed_by.isnot(None)
+                & (SettlementRecord.claim_expires_at <= now),
+                1,
+            ),
+            else_=0,
+        )
+        rows = (
+            db.query(
+                SettlementRecord.state,
+                func.count(SettlementRecord.capacity_reservation_id),
+                func.sum(active_claim),
+                func.sum(expired_claim),
+                func.min(SettlementRecord.created_at),
+                func.max(SettlementRecord.attempt_count),
             )
-            total = base_query.count()
-            claimed = base_query.filter(
-                SettlementRecord.claimed_by.isnot(None),
-                SettlementRecord.claim_expires_at > now,
-            ).count()
-            expired = base_query.filter(
-                SettlementRecord.claimed_by.isnot(None),
-                SettlementRecord.claim_expires_at <= now,
-            ).count()
-            per_state[state.value] = {
-                "total": total,
-                "claimed": claimed,
-                "expired_claims": expired,
-            }
-
-        non_terminal_query = db.query(SettlementRecord).filter(
-            SettlementRecord.state.in_(non_terminal_states)
+            .filter(SettlementRecord.state.in_(state_values))
+            .group_by(SettlementRecord.state)
+            .all()
         )
-        oldest = (
-            non_terminal_query.order_by(SettlementRecord.created_at.asc())
-            .first()
-        )
-        oldest_age_seconds = None
-        if oldest is not None:
-            oldest_created_at = oldest.created_at
-            # SQLite round-trips DateTime columns as naive regardless of
-            # what was written (the same characteristic claim_pending's
-            # tests already account for) -- normalize both sides to naive
-            # before subtracting rather than assuming either's awareness.
-            comparison_now = now.replace(tzinfo=None) if now.tzinfo else now
-            if oldest_created_at.tzinfo:
-                oldest_created_at = oldest_created_at.replace(tzinfo=None)
-            oldest_age_seconds = (comparison_now - oldest_created_at).total_seconds()
-        max_attempt_count = db.query(
-            SettlementRecord.attempt_count
-        ).filter(SettlementRecord.state.in_(non_terminal_states)).order_by(
-            SettlementRecord.attempt_count.desc()
-        ).limit(1).scalar()
 
-        return {
-            "per_state": per_state,
-            "oldest_non_terminal_row_age_seconds": oldest_age_seconds,
-            "max_attempt_count": max_attempt_count or 0,
-            "terminal_failed_count": db.query(SettlementRecord)
-            .filter(SettlementRecord.state == SettlementRecordState.failed.value)
-            .count(),
-            "terminal_teardown_failed_count": db.query(SettlementRecord)
-            .filter(SettlementRecord.state == SettlementRecordState.teardown_failed.value)
-            .count(),
+        per_state = {
+            state.value: RecoveryStateDiagnostics(
+                total=0,
+                actively_claimed=0,
+                expired_claims=0,
+                oldest_row_age_seconds=None,
+                max_attempt_count=0,
+            )
+            for state in self._RECOVERY_STATES
         }
+        for state, total, actively_claimed, expired_claims, oldest, max_attempts in rows:
+            per_state[state] = RecoveryStateDiagnostics(
+                total=int(total or 0),
+                actively_claimed=int(actively_claimed or 0),
+                expired_claims=int(expired_claims or 0),
+                oldest_row_age_seconds=self._row_age_seconds(now, oldest),
+                max_attempt_count=int(max_attempts or 0),
+            )
+
+        failure_counts = dict(
+            db.query(SettlementRecord.state, func.count(SettlementRecord.capacity_reservation_id))
+            .filter(
+                SettlementRecord.state.in_(
+                    (
+                        SettlementRecordState.failed.value,
+                        SettlementRecordState.teardown_failed.value,
+                    )
+                )
+            )
+            .group_by(SettlementRecord.state)
+            .all()
+        )
+        return RecoveryDiagnostics(
+            per_state=per_state,
+            failed_count=int(failure_counts.get(SettlementRecordState.failed.value, 0)),
+            teardown_failed_count=int(
+                failure_counts.get(SettlementRecordState.teardown_failed.value, 0)
+            ),
+        )
+
+    @staticmethod
+    def _row_age_seconds(now: datetime, created_at: datetime | None) -> float | None:
+        if created_at is None:
+            return None
+        comparison_now = now.replace(tzinfo=None) if now.tzinfo else now
+        comparison_created_at = (
+            created_at.replace(tzinfo=None) if created_at.tzinfo else created_at
+        )
+        return (comparison_now - comparison_created_at).total_seconds()
+

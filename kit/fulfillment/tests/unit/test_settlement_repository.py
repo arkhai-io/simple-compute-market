@@ -754,14 +754,19 @@ def test_recovery_diagnostics_reports_per_state_counts_and_ages(session_factory,
 
     with session_factory() as db:
         diagnostics = repo.recovery_diagnostics(db)
-        state = diagnostics["per_state"][SettlementRecordState.dispatch_pending.value]
-        assert state["total"] == 2
-        assert state["claimed"] == 1
-        assert state["expired_claims"] == 1
-        assert diagnostics["max_attempt_count"] == 1
-        assert diagnostics["oldest_non_terminal_row_age_seconds"] > 0
-        assert diagnostics["terminal_failed_count"] == 0
-        assert diagnostics["terminal_teardown_failed_count"] == 0
+        state = diagnostics.per_state[SettlementRecordState.dispatch_pending.value]
+        assert state.total == 2
+        assert state.actively_claimed == 1
+        assert state.expired_claims == 1
+        assert state.max_attempt_count == 1
+        assert state.oldest_row_age_seconds is not None
+        assert state.oldest_row_age_seconds > 0
+        empty_state = diagnostics.per_state[SettlementRecordState.tearing_down.value]
+        assert empty_state.total == 0
+        assert empty_state.oldest_row_age_seconds is None
+        assert empty_state.max_attempt_count == 0
+        assert diagnostics.failed_count == 0
+        assert diagnostics.teardown_failed_count == 0
 
 
 def test_recovery_diagnostics_counts_terminal_failures(session_factory, repo):
@@ -795,8 +800,12 @@ def test_recovery_diagnostics_counts_terminal_failures(session_factory, repo):
 
     with session_factory() as db:
         diagnostics = repo.recovery_diagnostics(db)
-        assert diagnostics["terminal_failed_count"] == 1
-        assert diagnostics["per_state"][SettlementRecordState.dispatch_pending.value]["total"] == 0
+        assert diagnostics.failed_count == 1
+        assert diagnostics.teardown_failed_count == 0
+        assert (
+            diagnostics.per_state[SettlementRecordState.dispatch_pending.value].total
+            == 0
+        )
 
 
 def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):

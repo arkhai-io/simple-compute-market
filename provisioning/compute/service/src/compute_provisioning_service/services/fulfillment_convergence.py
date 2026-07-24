@@ -110,7 +110,13 @@ class FulfillmentConvergenceWatchdog:
         try:
             with self._session_factory() as db:
                 diagnostics = self._repository.recovery_diagnostics(db)
-            logger.info("[FULFILLMENT_CONVERGENCE] diagnostics: %s", diagnostics)
+            logger.info(
+                "[FULFILLMENT_CONVERGENCE] recovery diagnostics",
+                extra={
+                    "event": "fulfillment_recovery_diagnostics",
+                    "recovery_diagnostics": diagnostics.as_log_fields(),
+                },
+            )
         except Exception:  # noqa: BLE001
             # Observability must not make lifecycle progress appear to
             # fail: the four operational passes above already completed

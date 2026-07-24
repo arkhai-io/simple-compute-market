@@ -23,6 +23,7 @@ from .ids import (
     new_result_id,
     new_settlement_resource_id,
 )
+from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
 from .provider import (
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
@@ -99,6 +100,8 @@ __all__ = [
     "ProviderRegistry",
     "ProviderStatus",
     "ProviderUnavailableError",
+    "RecoveryDiagnostics",
+    "RecoveryStateDiagnostics",
     "ProvisionedResource",
     "DeterministicRoundRobinPolicy",
     "MissingResourceKindError",

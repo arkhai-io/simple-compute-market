@@ -86,6 +86,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "db.py": {"sqlalchemy"},
         "settlement_repository.py": {"sqlalchemy"},
         "backoff.py": set(),
+        "recovery_diagnostics.py": set(),
     }
     violations = []
     for source_path in package_root.glob("*.py"):

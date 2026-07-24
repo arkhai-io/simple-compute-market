@@ -905,3 +905,82 @@ async def test_requeue_teardown_failures_makes_teardown_failed_retryable(
         record = repo.get(db, "cr-1")
         assert record.state == SettlementRecordState.tearing_down.value
         assert record.teardown_provider_metadata == {"teardown_job": "2"}
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_emits_one_structured_diagnostics_event_for_multiple_rows(
+    session_factory, repo, caplog
+):
+    for reservation_id in ("cr-log-1", "cr-log-2"):
+        with session_factory() as db:
+            repo.schedule(
+                db,
+                capacity_reservation_id=reservation_id,
+                market="vms",
+                scheduling_requirements=_requirement(),
+                resource=_resource(),
+            )
+            repo.accept_fulfillment(
+                db,
+                capacity_reservation_id=reservation_id,
+                market="vms",
+                fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+            )
+            db.commit()
+
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({}),
+        settings=_settings(),
+    )
+
+    caplog.set_level("INFO")
+    await watchdog.run_cycle()
+
+    events = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "fulfillment_recovery_diagnostics"
+    ]
+    assert len(events) == 1
+    payload = events[0].recovery_diagnostics
+    assert set(payload["per_state"]) == {
+        state.value
+        for state in (
+            SettlementRecordState.dispatch_pending,
+            SettlementRecordState.dispatching,
+            SettlementRecordState.teardown_dispatch_pending,
+            SettlementRecordState.tearing_down,
+        )
+    }
+    assert payload["failed_count"] == 0
+    assert payload["teardown_failed_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
+    session_factory, repo, caplog
+):
+    watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=repo,
+        provider_registry=ProviderRegistry({}),
+        settings=_settings(),
+    )
+
+    caplog.set_level("INFO")
+    await watchdog.run_cycle()
+
+    events = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "fulfillment_recovery_diagnostics"
+    ]
+    assert len(events) == 1
+    payload = events[0].recovery_diagnostics
+    assert all(state["total"] == 0 for state in payload["per_state"].values())
+    assert all(
+        state["oldest_row_age_seconds"] is None
+        for state in payload["per_state"].values()
+    )

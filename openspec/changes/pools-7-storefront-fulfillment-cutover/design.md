@@ -2300,6 +2300,18 @@ promotion, per item 1). `kit/fulfillment` gains the claim primitive (item
 3) and the domain-neutral convergence functions; `compute_provisioning_service`
 composes `FulfillmentConvergenceWatchdog` as the asyncio timer.
 
+### Recovery diagnostics contract — resolved (2026-07-24)
+
+Recovery diagnostics use immutable typed results rather than nested dictionaries.
+Oldest-row age and maximum attempt count are calculated independently for each
+non-terminal recovery lifecycle state, matching the existing per-state row and
+claim counts; there are no global oldest-age or maximum-attempt fields. Every
+recovery state is present in each snapshot, including zero-valued states, so the
+operator-facing schema remains stable. The repository obtains the snapshot with
+one grouped aggregate query for recovery states and one grouped aggregate query
+for failure-state counts. The convergence worker emits exactly one structured
+diagnostics event after each completed cycle and never one event per row.
+
 ### Section 6 permanent-documentation impact (for the design-promotion record)
 
 | Decision | Destination |
@@ -2325,7 +2337,7 @@ composes `FulfillmentConvergenceWatchdog` as the asyncio timer.
 | Claim-lease backoff and executor job-resubmission backoff are deliberately separate settings namespaces | `provisioning/compute/service/src/compute_provisioning_service/config/config.yml` (comment); no spec.md change needed, this is operational configuration, not subsystem behavior |
 | Abandonment reconciliation was evaluated and intentionally not built as a periodic handler — `SettlementAbandonmentHook` (Section 4) already closes the case synchronously | No new spec.md text needed: Section 4's promotion already documents the hook firing unconditionally from every capacity-reclaiming path. This row exists so the "why isn't there a fifth handler" question has a recorded answer rather than looking like an oversight. |
 | No attempt-count ceiling anywhere in recovery; a fresh worker instance resumes purely from durable claim state after a restart | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` |
-| Per-cycle (not per-row) recovery diagnostics: row counts, claimed/expired counts, oldest non-terminal row age, max attempt count, terminal failure counts, per lifecycle state | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `SettlementRepository.recovery_diagnostics` |
+| Per-cycle recovery diagnostics use typed stable results; total, active-claim, expired-claim, oldest-row-age, and maximum-attempt metrics are calculated per recovery lifecycle state, with separate failure-state counts, and exactly one structured event is emitted per completed cycle | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `market_fulfillment.recovery_diagnostics`; `SettlementRepository.recovery_diagnostics` |
 | **(2026-07-24, external code review)** Outcome-application ownership must be checked under an acquired SQLite write reservation, not a plain read — a plain SELECT does not open a SQLite-level transaction on its own, so the original check-then-write sequence left a real, empirically-confirmed gap where a worker whose lease had already been reclaimed could still commit a stale outcome on top of the new owner's claim | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `FulfillmentConvergenceWatchdog._with_owned_record` |
 | **(2026-07-24, external code review)** `teardown_failed` needed an actual periodic requeue-to-`teardown_dispatch_pending` step; the state comment and spec text documenting it as retryable predated any handler that actually performed the retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `FulfillmentConvergenceWatchdog.requeue_teardown_failures` |
 | **(2026-07-24, external code review)** `openspec/specs/fulfillment/architecture.md` still described scheduler assignments and the fulfillment registry as process-local with no durable Settlement Record — stale since Section 3, never corrected during that section's own promotion pass | `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |
