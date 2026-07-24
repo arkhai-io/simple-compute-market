@@ -85,7 +85,6 @@ def test_vm_bundle_scopes_ansible_provider_to_compute_gpu():
     provider = FakeProvider()
     bundle = build_vm_adapter_bundle(
         compute_adapter=FakeAdapter("vm"),
-        release_executor=FakeReleaseExecutor(),
         fulfillment_provider=provider,
     )
 
@@ -114,7 +113,6 @@ def test_vm_and_bare_metal_ansible_routes_coexist_without_fallback():
         [
             build_vm_adapter_bundle(
                 compute_adapter=FakeAdapter("vm"),
-                release_executor=FakeReleaseExecutor(),
                 fulfillment_provider=vm_provider,
             ),
             build_bare_metal_adapter_bundle(

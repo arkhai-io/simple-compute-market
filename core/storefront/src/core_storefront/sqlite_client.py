@@ -996,6 +996,72 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
+    async def apply_fulfillment_result(
+        self,
+        *,
+        escrow_uid: str,
+        connection_details: str,
+        tenant_credentials: str | None,
+        remote_state: str,
+        provisioned_resources: list[dict[str, Any]],
+        failure_reason: str | None,
+        failure_message: str | None,
+        credential_generation: int,
+    ) -> None:
+        """Atomically apply buyer access and its non-secret workflow generation."""
+        def _apply() -> None:
+            conn = sqlite3.connect(self.db_path, timeout=30)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT credential_generation FROM storefront_fulfillments "
+                    "WHERE escrow_uid = ?",
+                    (escrow_uid,),
+                ).fetchone()
+                if current is None:
+                    raise LookupError(f"fulfillment workflow {escrow_uid!r} is missing")
+                if int(credential_generation) <= int(current[0]):
+                    raise ValueError("credential_generation must advance")
+                now = datetime.now().isoformat()
+                conn.execute(
+                    """
+                    UPDATE escrows
+                    SET connection_details = ?, tenant_credentials = ?,
+                        updated_at = ?
+                    WHERE escrow_uid = ?
+                    """,
+                    (connection_details, tenant_credentials, now, escrow_uid),
+                )
+                conn.execute(
+                    """
+                    UPDATE storefront_fulfillments
+                    SET phase = 'result_applied', remote_state = ?,
+                        provisioned_resources = ?, failure_reason = ?,
+                        failure_message = ?, credential_generation = ?,
+                        next_reconcile_unix = NULL,
+                        last_reconcile_error = NULL, claimed_by = NULL,
+                        claim_expires_unix = NULL,
+                        updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    WHERE escrow_uid = ?
+                    """,
+                    (
+                        remote_state,
+                        json.dumps(provisioned_resources, sort_keys=True),
+                        failure_reason,
+                        failure_message,
+                        int(credential_generation),
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_apply)
+
     async def claim_due_fulfillment_workflows(
         self,
         *,

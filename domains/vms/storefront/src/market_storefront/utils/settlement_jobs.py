@@ -12,8 +12,8 @@ Status lifecycle:
     provisioning  → ready   (on successful fulfill + attestation)
     provisioning  → failed  (on provisioning error)
 
-The background task is an asyncio.create_task; all it does is call the
-existing fulfill_compute_obligation and then patch the row on result.
+A durable storefront workflow and periodic reconciler own progress after the
+initial request returns.
 """
 
 from __future__ import annotations
@@ -263,92 +263,6 @@ async def start_settlement_job(
         "negotiation_id": negotiation_id,
         "status": "provisioning",
     }
-
-
-async def _run_settlement_job_bg(
-    *,
-    escrow_uid: str,
-    provision: VmProvisionTerms,
-    listing_id: str,
-    order_dict: dict[str, Any],
-    sqlite_client: Any,
-    alkahest_client: Any,
-    negotiation_id: str | None = None,
-    claim_obligation: dict[str, Any] | None = None,
-    claim_chain_name: str | None = None,
-    claim_escrow_address: str | None = None,
-) -> None:
-    """Background coroutine: run fulfillment, patch the job row."""
-    from market_storefront.domain_runtime import get_market_domain_contract
-    from market_storefront.utils.config import settings
-
-    fulfillment = get_market_domain_contract().fulfillment
-    assert fulfillment is not None
-
-    try:
-        result = await fulfillment.fulfill(
-            client=alkahest_client,
-            escrow_uid=escrow_uid,
-            ssh_public_key=provision.ssh_public_key,
-            order=order_dict,
-            duration_seconds=provision.duration_seconds,
-            start_utc=provision.start_utc,
-            listing_id=listing_id,
-            negotiation_id=negotiation_id,
-        )
-    except Exception as exc:
-        logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)
-        await sqlite_client.update_escrow(
-            escrow_uid=escrow_uid,
-            status="failed",
-            reason=f"provisioning_error: {exc}",
-        )
-        return
-
-    status = (result or {}).get("status")
-    if status == "fulfilled":
-        await sqlite_client.update_escrow(
-            escrow_uid=escrow_uid,
-            status="ready",
-            fulfillment_uid=result.get("fulfillment_uid"),
-            connection_details=result.get("connection_details"),
-            tenant_credentials=json.dumps(result.get("tenant_credentials"))
-                if result.get("tenant_credentials") is not None else None,
-        )
-        logger.info("[SETTLE_JOB] Escrow %s provisioning complete", escrow_uid)
-        # Hand the fulfilled deal to the claims engine: arbitration (when
-        # the demand needs it) and collection are its job from here.
-        if alkahest_client is not None:
-            from market_storefront.services.claims_runtime import submit_claim
-
-            try:
-                await submit_claim(
-                    sqlite_client=sqlite_client,
-                    escrow_uid=escrow_uid,
-                    fulfillment_uid=result.get("fulfillment_uid"),
-                    negotiation_id=negotiation_id,
-                    listing_id=listing_id,
-                    obligation=claim_obligation,
-                    chain_name=claim_chain_name,
-                    escrow_address=claim_escrow_address,
-                )
-            except Exception:
-                logger.exception(
-                    "[SETTLE_JOB] claim submission failed for %s — "
-                    "collection will not happen until resubmitted",
-                    escrow_uid,
-                )
-    else:
-        reason = (result or {}).get("message") or f"status={status!r}"
-        await sqlite_client.update_escrow(
-            escrow_uid=escrow_uid,
-            status="failed",
-            reason=reason,
-        )
-        logger.warning(
-            "[SETTLE_JOB] Escrow %s provisioning did not succeed: %s",
-            escrow_uid, reason,
-        )
 
 
 def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:

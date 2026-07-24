@@ -13,6 +13,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from compute_provisioning import ExecutorActionEnvelope
+from compute_provisioning_service.db.models import Base
 
 from arkhai_bare_metal import (
     NODE_GRANT_ACCESS_ACTION,
@@ -540,3 +546,66 @@ def test_private_credentials_are_hidden_and_consumed_atomically():
     assert consumed.credentials[0].password == "transient-password"
     with sessions() as db:
         assert db.query(Credential).filter_by(job_id="private-job").count() == 0
+
+
+class _Queue:
+    def __init__(self, *, fail=False):
+        self.fail = fail
+        self.enqueued = []
+
+    async def enqueue(self, job_id):
+        if self.fail:
+            raise RuntimeError("enqueue acknowledgement lost")
+        self.enqueued.append(job_id)
+
+
+@pytest.mark.asyncio
+async def test_contract_retry_reenqueues_persisted_queued_job_after_lost_ack():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    service = _make_service()
+    service._session_factory = sessionmaker(bind=engine)
+    params = AnsibleJobParams(
+        vm_host="kvm1", vm_action="create", vm_target="vm-1"
+    )
+    contract = ExecutorActionEnvelope(
+        capacity_reservation_id="reservation-1",
+        deal_ref={},
+        executor_kind="vm",
+        action_kind="fulfillment_create",
+        idempotency_key="reservation-1:fulfillment_create:v1",
+        parameters=__import__("dataclasses").asdict(params),
+    )
+
+    with pytest.raises(RuntimeError, match="acknowledgement lost"):
+        await service.submit(params, _Queue(fail=True), contract=contract)
+
+    retry_queue = _Queue()
+    retried = await service.submit(params, retry_queue, contract=contract)
+
+    assert retry_queue.enqueued == [retried.job_id]
+    with service._session_factory() as db:
+        from compute_provisioning_service.db.models import AnsibleJob
+        assert db.query(AnsibleJob).count() == 1
+
+
+def test_redaction_covers_structured_and_cli_secret_material():
+    service = _make_service()
+    raw = (
+        '{"admin_key":"top-secret","private_key":"pem-secret",'
+        '"authorization":"Bearer abc"} '
+        'api_key=cli-secret token: yaml-secret sshpass -p shell-secret'
+    )
+
+    redacted = service._redact_logs(raw)
+
+    for secret in (
+        "top-secret", "pem-secret", "Bearer abc", "cli-secret",
+        "yaml-secret", "shell-secret",
+    ):
+        assert secret not in redacted
+    assert redacted.count("[REDACTED]") >= 6

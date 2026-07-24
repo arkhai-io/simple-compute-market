@@ -195,7 +195,7 @@ class FulfillmentRecoveryService:
                     command.capacity_reservation_id,
                     SettlementRecordState.failed.value,
                     failure_reason="provider_failed",
-                    failure_message=status.detail,
+                    failure_message="provider create operation failed",
                 )
             self._repository.clear_claim(
                 db,
@@ -277,7 +277,7 @@ class FulfillmentRecoveryService:
                     command.capacity_reservation_id,
                     SettlementRecordState.teardown_failed.value,
                     failure_reason="teardown_provider_failed",
-                    failure_message=status.detail,
+                    failure_message="provider teardown operation failed",
                 )
             self._repository.clear_claim(
                 db,

@@ -180,16 +180,12 @@ class StorefrontFulfillmentReconciler:
             ],
             "access": credential_payloads,
         }
-        await self._db.update_escrow(
+        await self._db.apply_fulfillment_result(
             escrow_uid=workflow["escrow_uid"],
             connection_details=json.dumps(connection),
             tenant_credentials=(
                 json.dumps(credential_payloads) if credential_payloads else None
             ),
-        )
-        await self._advance(
-            workflow,
-            phase="result_applied",
             remote_state=result.state,
             provisioned_resources=[
                 item.model_dump(mode="json") for item in result.provisioned_resources

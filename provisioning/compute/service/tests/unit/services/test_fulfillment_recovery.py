@@ -236,3 +236,62 @@ def test_recovery_diagnostics_report_safe_claim_and_lifecycle_metrics(
     assert diagnostics["oldest_nonterminal_seconds"] >= 0
     assert "owner_principal" not in diagnostics
     assert "provider_metadata" not in diagnostics
+
+
+@pytest.mark.asyncio
+async def test_failed_teardown_restarts_retries_and_releases_capacity_once(
+    recovery, provider, session_factory
+):
+    await recovery.run_once()
+    provider.status = ProviderStatus(state=ProviderOperationState.succeeded)
+    await recovery.run_once()
+    with session_factory() as db:
+        SettlementRepository().transition(
+            db,
+            "reservation-1",
+            SettlementRecordState.teardown_dispatch_pending.value,
+            prepared_teardown_operation={
+                "kind": "fake.teardown",
+                "schema_version": 1,
+                "payload": {},
+            },
+        )
+        db.commit()
+
+    ledger = _Ledger()
+    first_worker = FulfillmentRecoveryService(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        capacity_ledger_service=ledger,
+        worker_id="first-teardown-worker",
+        jitter=lambda low, high: low,
+    )
+    await first_worker.run_once()
+    provider.status = ProviderStatus(
+        state=ProviderOperationState.failed, detail="temporary teardown failure"
+    )
+    await first_worker.run_once()
+    with session_factory() as db:
+        assert db.get(SettlementRecord, "reservation-1").state == (
+            SettlementRecordState.teardown_failed.value
+        )
+    assert ledger.releases == []
+
+    restarted = FulfillmentRecoveryService(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=ProviderRegistry({("ansible", "vm"): provider}),
+        capacity_ledger_service=ledger,
+        worker_id="restarted-teardown-worker",
+        jitter=lambda low, high: low,
+    )
+    await restarted.run_once()
+    provider.status = ProviderStatus(state=ProviderOperationState.succeeded)
+    await restarted.run_once()
+
+    assert len(ledger.releases) == 1
+    with session_factory() as db:
+        assert db.get(SettlementRecord, "reservation-1").state == (
+            SettlementRecordState.torn_down.value
+        )

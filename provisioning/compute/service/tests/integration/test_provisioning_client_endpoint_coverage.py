@@ -18,10 +18,15 @@ from compute_provisioning import (
 )
 from compute_provisioning_service import container as _container_module
 from httpx import ASGITransport
-from market_fulfillment import SettlementRecord
+from market_fulfillment import (
+    SettlementRecord,
+    SettlementRecordState,
+    SettlementRepository,
+)
 from market_resource_pools import PoolCreate
 import pytest
 
+from vm_provisioning_operator.client import ProvisioningError
 from vm_provisioning_operator.models import CreateVmRequest, HostCreate
 
 
@@ -132,12 +137,63 @@ class TestFulfillmentClientEndpointCoverage:
 
         assert dry_run.valid
         assert accepted.fulfillment_id == repeated.fulfillment_id
-        assert accepted.state == "dispatching"
+        assert accepted.state == "dispatch_pending"
         assert status.fulfillment_id == accepted.fulfillment_id
         assert status.capacity_reservation_id == capacity_reservation_id
         assert result.fulfillment_id == accepted.fulfillment_id
         assert result.credential_generation == 0
         assert result.credentials == []
+
+        with session_factory() as db:
+            record = db.get(SettlementRecord, capacity_reservation_id)
+            prepared_create = record.prepared_create_operation
+            params = prepared_create["payload"]["job_params"]
+            assert prepared_create["kind"] == "ansible.vm.create"
+            assert params["vm_host"] == HOST
+            assert params["vm_target"] == "vm-reservation-1"
+            assert params["vm_ram"] == 4096
+            assert params["vm_vcpus"] == 2
+            assert params["vm_disk_size"] == "40G"
+            assert params["ssh_pubkey"] == "ssh-ed25519 AAAA"
+            assert params["playbook_path"]
+            assert params["provider_extra_vars"] == {}
+            repository = SettlementRepository()
+            repository.transition(
+                db,
+                capacity_reservation_id,
+                SettlementRecordState.dispatching.value,
+                provider_metadata={
+                    "create_job_id": "create-job-1",
+                    "current_job_id": "create-job-1",
+                    "vm_host": HOST,
+                    "vm_target": "vm-reservation-1",
+                    "teardown_job_id": None,
+                    "operation": "create",
+                },
+            )
+            repository.transition(
+                db, capacity_reservation_id, SettlementRecordState.active.value
+            )
+            db.commit()
+
+        async with ComputeProvisioningClient(
+            "http://test", transport=ASGITransport(app=app)
+        ) as client:
+            teardown = await client.begin_fulfillment_teardown(
+                accepted.fulfillment_id
+            )
+        assert teardown.state == "teardown_dispatch_pending"
+        with session_factory() as db:
+            record = db.get(SettlementRecord, capacity_reservation_id)
+            prepared_teardown = record.prepared_teardown_operation
+            teardown_params = prepared_teardown["payload"]["job_params"]
+            assert prepared_teardown["kind"] == "ansible.vm.teardown"
+            assert teardown_params["vm_action"] == "vm_remove"
+            assert teardown_params["vm_host"] == HOST
+            assert teardown_params["vm_target"] == "vm-reservation-1"
+            assert prepared_teardown["payload"]["contract"]["idempotency_key"] == (
+                f"{capacity_reservation_id}:fulfillment_teardown:v1"
+            )
 
 
 class TestVmClientEndpointCoverage:
@@ -268,7 +324,6 @@ class TestLeaseClientEndpointCoverage:
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
         )
 
-        terminated = await client.terminate_lease(lease["id"], reason="client coverage")
-
-        assert terminated["id"] == lease["id"]
-        assert terminated["status"] == "releasing"
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.terminate_lease(lease["id"], reason="client coverage")
+        assert exc_info.value.status_code == 409

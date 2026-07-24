@@ -149,23 +149,21 @@ class TestGetLease:
 
 
 class TestCheckLeasesEndpoint:
-    async def test_check_leases_releases_expired_ledger_lease(self, client_and_queue):
-        """The on-demand cycle releases an expired lease in the ledger and
-        emits the capacity event (deal notification is best-effort and the
-        test storefront is unreachable — that must not block the release)."""
+    async def test_legacy_vm_lease_without_fulfillment_stays_held(self, client_and_queue):
+        """VM release has no direct fallback after fulfillment cutover."""
         client, _ = client_and_queue
         lease = await _register(
             client, "escrow-expired-1", lease_end_utc=_past_dt(),
         )
 
         result = await client.check_leases()
-        assert result.get("released", 0) >= 1
+        assert result.get("release_failed", 0) == 1
 
         ledger = _container_module.resolved_capacity_ledger_service
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "released"
+        assert reservation["state"] == "release_failed"
         events, _ = ledger.events_after(0)
-        assert events[-1]["kind"] == "released"
+        assert events[-1]["kind"] != "released"
 
 
 class TestUpdateLease:
@@ -233,22 +231,18 @@ class TestUpdateLease:
             await client.update_lease("no-such-lease", lease_end_utc=_future_dt())
         assert exc_info.value.status_code == 404
 
-    async def test_patch_backdated_lease_end_triggers_watchdog(self, client_and_queue):
-        """Setting lease_end_utc to the past causes the next watchdog cycle
-        to submit a vm_remove job (or, with no job_service wired, release
-        directly in test mode)."""
+    async def test_patch_backdated_legacy_vm_lease_fails_closed(self, client_and_queue):
+        """A lease without a fulfillment aggregate has no VM release fallback."""
         client, _ = client_and_queue
         lease = await _register(client, "escrow-patch-backdate")
 
         await client.update_lease(lease["id"], lease_end_utc=_past_dt())
         result = await client.check_leases()
 
-        assert result.get("released", 0) + result.get("checked", 0) >= 1
+        assert result.get("release_failed", 0) == 1
         ledger = _container_module.resolved_capacity_ledger_service
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] in ("released", "releasing")
-        if reservation["state"] == "releasing":
-            assert reservation["release_job_id"] == reservation["vm_remove_job_id"]
+        assert reservation["state"] == "release_failed"
 
 
 class TestReleaseOversight:
@@ -303,7 +297,7 @@ class TestReleaseOversight:
 
 
 class TestAdminLeaseRepair:
-    async def test_retry_release_moves_release_failed_back_to_releasing(self, client_and_queue):
+    async def test_legacy_vm_retry_has_no_direct_release_fallback(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _register(client, "escrow-retry-release", lease_end_utc=_past_dt())
         ledger = _container_module.resolved_capacity_ledger_service
@@ -314,12 +308,11 @@ class TestAdminLeaseRepair:
             failure_message="cleanup script missing",
         )
 
-        retried = await client.retry_lease_release(lease["id"], reason="operator retry")
-
-        assert retried["status"] == "releasing"
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.retry_lease_release(lease["id"], reason="operator retry")
+        assert exc_info.value.status_code == 409
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
-        assert reservation["state"] == "releasing"
-        assert reservation["vm_remove_job_id"] == "direct-release"
+        assert reservation["state"] == "release_failed"
 
     async def test_retry_release_non_failed_returns_409(self, client_and_queue):
         client, _ = client_and_queue

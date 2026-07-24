@@ -61,7 +61,8 @@ async def _seed_listing(
         offer_resource={
             "resource_id": resource_id or f"res-{listing_id}",
             "gpu_model": "H200", "gpu_count": 1, "sla": 99.0,
-            "region": "California, US",
+            "region": "California, US", "vcpu_count": 2,
+            "ram_gb": 4, "disk_gb": 40,
         },
         accepted_escrows=[{
             "chain_name": "anvil",
@@ -186,8 +187,8 @@ class TestEvaluateSettle:
             )
         assert "404" in str(exc_info.value)
 
-    async def test_known_listing_no_inventory_returns_would_submit_false(self, admin_client):
-        """Known listing but empty inventory → would_submit=False with reason."""
+    async def test_known_listing_builds_requests_without_inventory(self, admin_client):
+        """Dry-run request construction does not perform physical placement."""
         c, db = admin_client
         await _seed_listing(db, "settle-eval-no-inv")
         from tests.fake_site import FakeSite, site_capacity
@@ -200,10 +201,10 @@ class TestEvaluateSettle:
                 duration_seconds=3600,
             )
         assert isinstance(result, dict)
-        # No inventory registered → no host matches
-        assert result.get("would_submit") is False
+        assert result.get("would_submit") is True
         assert result.get("escrow_uid") == "eval-escrow-1"
-        assert result.get("reason")  # explains no matching host
+        assert result.get("schedule_request")
+        assert result.get("begin_request")
 
     async def test_response_contains_escrow_uid(self, admin_client):
         """escrow_uid is always echoed back."""
@@ -288,5 +289,7 @@ class TestEvaluateSettle:
         assert result.get("would_submit") is True, (
             f"Expected would_submit=True with matching inventory. reason={result.get('reason')!r}"
         )
-        assert result.get("vm_host") == "host-match"
-        assert result.get("vm_target")  # non-empty generated target name
+        assert result.get("schedule_request")["resource_id"] == "r-eval-match"
+        assert result.get("begin_request")["fulfillment_request"]["payload"][
+            "vm_target"
+        ] == "admin-dry-run"

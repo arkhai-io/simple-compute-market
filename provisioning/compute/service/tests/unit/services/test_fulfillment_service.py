@@ -135,6 +135,17 @@ def service(session_factory, provider) -> FulfillmentService:
     )
 
 
+def _activate(db, reservation_id: str = "reservation-1") -> None:
+    repository = SettlementRepository()
+    repository.transition(
+        db,
+        reservation_id,
+        SettlementRecordState.dispatching.value,
+        provider_metadata={"job_id": "create-1"},
+    )
+    repository.transition(db, reservation_id, SettlementRecordState.active.value)
+
+
 def _request(payload: dict | None = None) -> VersionedEnvelope:
     return VersionedEnvelope(
         kind="vms.fulfillment",
@@ -147,15 +158,6 @@ def _request(payload: dict | None = None) -> VersionedEnvelope:
 async def test_acceptance_commits_prepared_input_before_dispatch(
     service, provider, session_factory
 ):
-    def assert_pending_is_visible() -> None:
-        with session_factory() as db:
-            record = db.get(SettlementRecord, "reservation-1")
-            assert record is not None
-            assert record.fulfillment_id is not None
-            assert record.state == SettlementRecordState.dispatch_pending.value
-            assert record.prepared_create_operation["kind"] == "fake.create"
-
-    provider.on_dispatch = assert_pending_is_visible
     accepted = await service.begin_fulfillment(
         capacity_reservation_id="reservation-1",
         market="vms",
@@ -163,12 +165,14 @@ async def test_acceptance_commits_prepared_input_before_dispatch(
         owner_principal="seller-a",
     )
 
-    assert accepted.state == SettlementRecordState.dispatching.value
+    assert accepted.state == SettlementRecordState.dispatch_pending.value
     assert provider.prepare_calls == 1
-    assert provider.dispatch_calls == 1
+    assert provider.dispatch_calls == 0
     with session_factory() as db:
         record = db.get(SettlementRecord, "reservation-1")
-        assert record.provider_metadata == {"job_id": "job-1"}
+        assert record.fulfillment_id is not None
+        assert record.prepared_create_operation["kind"] == "fake.create"
+        assert record.provider_metadata == {}
 
 
 @pytest.mark.asyncio
@@ -190,7 +194,7 @@ async def test_equivalent_retry_reuses_identity_without_repreparing_or_redispatc
 
     assert second.fulfillment_id == first.fulfillment_id
     assert provider.prepare_calls == 1
-    assert provider.dispatch_calls == 1
+    assert provider.dispatch_calls == 0
 
 
 @pytest.mark.asyncio
@@ -210,7 +214,7 @@ async def test_conflicting_retry_is_rejected_before_provider_dispatch(service, p
             owner_principal="seller-a",
         )
     assert provider.prepare_calls == 1
-    assert provider.dispatch_calls == 1
+    assert provider.dispatch_calls == 0
 
 
 @pytest.mark.asyncio
@@ -267,7 +271,7 @@ async def test_equivalent_retry_survives_service_reconstruction(
         owner_principal="seller-a",
     )
     assert second.fulfillment_id == first.fulfillment_id
-    assert provider.dispatch_calls == 1
+    assert provider.dispatch_calls == 0
 
 
 @pytest.mark.asyncio
@@ -290,7 +294,7 @@ async def test_status_reads_durable_state_and_hides_other_owner(
         fulfillment_id=accepted.fulfillment_id,
         owner_principal="seller-a",
     )
-    assert status.state == SettlementRecordState.dispatching.value
+    assert status.state == SettlementRecordState.dispatch_pending.value
     with pytest.raises(SettlementEntityNotFoundError):
         reconstructed.get_status(
             fulfillment_id=accepted.fulfillment_id,
@@ -326,11 +330,7 @@ async def test_result_rotates_live_credentials_and_persists_only_generation(
         owner_principal="seller-a",
     )
     with session_factory() as db:
-        SettlementRepository().transition(
-            db,
-            "reservation-1",
-            SettlementRecordState.active.value,
-        )
+        _activate(db)
         SettlementRepository().add_provisioned_resource(
             db,
             capacity_reservation_id="reservation-1",
@@ -401,9 +401,7 @@ async def test_failed_credential_rotation_does_not_advance_generation(
         owner_principal="seller-a",
     )
     with session_factory() as db:
-        SettlementRepository().transition(
-            db, "reservation-1", SettlementRecordState.active.value
-        )
+        _activate(db)
         db.commit()
     provider.fail_credentials = True
 
@@ -429,9 +427,7 @@ async def test_teardown_prepares_before_dispatch_and_is_idempotent(
         owner_principal="seller-a",
     )
     with session_factory() as db:
-        SettlementRepository().transition(
-            db, "reservation-1", SettlementRecordState.active.value
-        )
+        _activate(db)
         db.commit()
 
     teardown = await service.begin_teardown(

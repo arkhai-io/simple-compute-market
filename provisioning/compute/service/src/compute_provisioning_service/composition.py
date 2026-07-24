@@ -22,7 +22,7 @@ class ExecutorAdapterContribution:
 
     adapter: ExecutorAdapter
     action_kinds: frozenset[str]
-    release_executor: ExecutorReleasePort
+    release_executor: ExecutorReleasePort | None = None
 
 
 @dataclass(frozen=True)
@@ -72,10 +72,12 @@ def _validate_executor(bundle_name: str, contribution: ExecutorAdapterContributi
                 f"adapter bundle {bundle_name!r} executor {executor_kind!r} "
                 f"is missing required hook {hook!r}"
             )
-    if not callable(getattr(contribution.release_executor, "submit_release", None)):
+    if contribution.release_executor is not None and not callable(
+        getattr(contribution.release_executor, "submit_release", None)
+    ):
         raise ValueError(
             f"adapter bundle {bundle_name!r} executor {executor_kind!r} "
-            "is missing required release hook 'submit_release'"
+            "has an invalid release hook"
         )
     return executor_kind
 
@@ -152,7 +154,8 @@ def compose_adapter_bundles(
                     )
                 action_owners[key] = bundle_name
             adapters.append(contribution.adapter)
-            release_executors[executor_kind] = contribution.release_executor
+            if contribution.release_executor is not None:
+                release_executors[executor_kind] = contribution.release_executor
 
         for contributed_key, provider in bundle.fulfillment_providers.items():
             provider_key = _normalize_provider_key(bundle_name, contributed_key)

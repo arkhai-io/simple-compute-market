@@ -146,7 +146,9 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         try:
             requirements = VmFulfillmentRequirements.model_validate(request.requirements)
         except Exception as exc:
-            raise ProviderConfigInvalidError(f"invalid VM fulfillment requirements: {exc}") from exc
+            raise ProviderConfigInvalidError(
+                "invalid VM fulfillment requirements"
+            ) from exc
         return requirements
 
     def _build_create_params(self, request: PhysicalSettlementRequest, resource: SettlementResource) -> tuple[AnsibleJobParams, VmFulfillmentRequirements]:
@@ -269,7 +271,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
-            raise FulfillmentCreateFailedError(str(exc)) from exc
+            raise FulfillmentCreateFailedError("VM provider create failed") from exc
         metadata = AnsibleFulfillmentMetadata(
             create_job_id=response.job_id,
             current_job_id=response.job_id,
@@ -337,7 +339,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
-            raise FulfillmentTeardownFailedError(str(exc)) from exc
+            raise FulfillmentTeardownFailedError("VM provider teardown failed") from exc
         updated = metadata.model_copy(update={
             "teardown_job_id": response.job_id,
             "current_job_id": response.job_id,
@@ -383,12 +385,13 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         except Exception as exc:  # noqa: BLE001
             # Anything else is unexpected and must not be silently folded
             # into "unknown" — surface it.
-            raise FulfillmentStatusFailedError(str(exc)) from exc
+            raise FulfillmentStatusFailedError("VM provider status failed") from exc
 
         state = _JOB_STATUS_TO_OPERATION_STATE.get(
             job.status, ProviderOperationState.unknown
         )
-        return ProviderStatus(state=state, detail=job.error)
+        detail = "provider job failed" if state is ProviderOperationState.failed else None
+        return ProviderStatus(state=state, detail=detail)
 
     async def get_live_credentials(
         self,
@@ -434,14 +437,12 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             )
             job = await self._job_service.wait_for_terminal_job(response.job_id)
             if job.status != "succeeded":
-                raise FulfillmentStatusFailedError(
-                    job.error or "credential rotation failed"
-                )
+                raise FulfillmentStatusFailedError("credential rotation failed")
             consumed = self._job_service.consume_private_credentials(response.job_id)
         except FulfillmentStatusFailedError:
             raise
         except Exception as exc:
-            raise FulfillmentStatusFailedError(str(exc)) from exc
+            raise FulfillmentStatusFailedError("credential rotation failed") from exc
         credentials = tuple(
             LiveCredential(
                 kind="vm.access.v1",

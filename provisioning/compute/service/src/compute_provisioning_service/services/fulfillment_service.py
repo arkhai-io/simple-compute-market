@@ -377,36 +377,7 @@ class FulfillmentService:
             )
             fulfillment_id = str(accepted.fulfillment_id)
             accepted_state = str(accepted.state)
-            should_dispatch = accepted_state == SettlementRecordState.dispatch_pending.value
             db.commit()
-
-        if should_dispatch:
-            try:
-                result = await provider.dispatch_create(prepared)
-            except Exception:
-                # Acceptance remains durable and the recovery worker retries the
-                # exact persisted command. The HTTP acceptance call is therefore
-                # not made ambiguous by a transient post-commit dispatch failure.
-                logger.exception(
-                    "initial fulfillment dispatch failed for %s",
-                    capacity_reservation_id,
-                )
-            else:
-                with self._session_factory() as db:
-                    updated = self._repository.transition(
-                        db,
-                        capacity_reservation_id,
-                        SettlementRecordState.dispatching.value,
-                        provider_metadata=dict(result.provider_metadata),
-                    )
-                    for domain_resource_ref in result.provisioned_resource_refs:
-                        self._repository.add_provisioned_resource(
-                            db,
-                            capacity_reservation_id=capacity_reservation_id,
-                            domain_resource_ref=domain_resource_ref,
-                        )
-                    accepted_state = str(updated.state)
-                    db.commit()
 
         return FulfillmentAcceptance(
             capacity_reservation_id=capacity_reservation_id,

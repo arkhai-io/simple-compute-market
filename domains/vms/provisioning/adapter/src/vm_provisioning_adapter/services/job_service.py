@@ -115,6 +115,11 @@ class AnsibleJobService:
                         contract=contract,
                         raw_params=raw_params,
                     )
+                    if (
+                        existing.status == JobStatus.queued.value
+                        and existing.next_retry_at is None
+                    ):
+                        await job_queue.enqueue(existing.id)
                     return JobSubmitResponse(job_id=existing.id, status=existing.status)
             job = AnsibleJob(
                 id=job_id,
@@ -154,6 +159,11 @@ class AnsibleJobService:
                     raw_params=raw_params,
                 )
                 job_id = existing.id
+                if (
+                    existing.status == JobStatus.queued.value
+                    and existing.next_retry_at is None
+                ):
+                    await job_queue.enqueue(existing.id)
                 return JobSubmitResponse(job_id=existing.id, status=existing.status)
 
         if created:
@@ -502,11 +512,29 @@ class AnsibleJobService:
                 logger.warning("Job %s not found", job_id)
                 return
 
+            if job.status != JobStatus.queued.value:
+                return
             # Respect scheduled retry delay: if the job's next_retry_at is in
             # the future just return; the retry scheduler (run_retry_scheduler)
             # re-enqueues it once the delay elapses.
             if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
                 return
+            claimed = (
+                db.query(AnsibleJob)
+                .filter(
+                    AnsibleJob.id == job_id,
+                    AnsibleJob.status == JobStatus.queued.value,
+                )
+                .update(
+                    {AnsibleJob.status: JobStatus.running.value},
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            if claimed != 1:
+                return
+            db.expire_all()
+            job = db.query(AnsibleJob).filter(AnsibleJob.id == job_id).one()
 
             logger.info(
                 "Processing job %s (attempt %d/%d)",
@@ -515,7 +543,6 @@ class AnsibleJobService:
                 job.max_retries + 1,
             )
 
-            self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
             vars_path = self._ansible.build_vars_file(params)
 
@@ -607,7 +634,7 @@ class AnsibleJobService:
                     "\n\nSTDERR:\n" + exc.stderr if exc.stderr else ""
                 )
                 logs = self._redact_logs(logs)
-                error_message = str(exc)
+                error_message = self._redact_logs(str(exc))
 
                 should_retry = (
                     job.retry_count < job.max_retries
@@ -653,7 +680,8 @@ class AnsibleJobService:
                     logger.error("Job %s failed permanently: %s", job_id, error_message)
 
         except Exception as exc:
-            logger.exception("Unexpected error processing job %s: %s", job_id, exc)
+            safe_error = self._redact_logs(str(exc))
+            logger.exception("Unexpected error processing job %s: %s", job_id, safe_error)
             try:
                 # The error may have come from a failed flush/commit (e.g. an
                 # IntegrityError while storing credentials), which leaves the
@@ -671,7 +699,7 @@ class AnsibleJobService:
                         db,
                         job,
                         status=JobStatus.failed.value,
-                        error=f"Internal error: {exc}",
+                        error=f"Internal error: {safe_error}",
                     )
             except Exception:
                 logger.exception(
@@ -793,15 +821,21 @@ class AnsibleJobService:
     def _redact_logs(self, logs: str) -> str:
         if not logs:
             return logs
-        redacted = re.sub(
-            r'("(?:password|ssh_key_path_host)":\s*)"[^"]*"',
-            r'\1"[REDACTED]"',
-            logs,
+        secret_key = (
+            r"password|passphrase|secret|token|api_key|admin_key|"
+            r"private_key|ssh_key|ssh_key_path_host|authorization"
         )
         redacted = re.sub(
-            r"(password:\s*)(?!\[REDACTED\]).+",
+            rf'("(?:{secret_key})"\s*:\s*)"[^"]*"',
+            r'\1"[REDACTED]"',
+            logs,
+            flags=re.IGNORECASE,
+        )
+        redacted = re.sub(
+            rf"((?:{secret_key})\s*[:=]\s*)(?!\[REDACTED\])[^\s,]+",
             r"\1[REDACTED]",
             redacted,
+            flags=re.IGNORECASE,
         )
         redacted = re.sub(r"-i\s+\S+\.ssh/\S+", "-i [REDACTED]", redacted)
         redacted = re.sub(r"sshpass\s+-p\s+\S+", "sshpass -p [REDACTED]", redacted)

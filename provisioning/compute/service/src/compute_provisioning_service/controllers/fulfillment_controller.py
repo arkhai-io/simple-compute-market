@@ -99,11 +99,15 @@ class FulfillmentController:
             CapacityReservationExpiredError,
             SettlementRequestMismatchError,
         ) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=409, detail="capacity reservation cannot be scheduled"
+            ) from exc
         except NoEligibleSettlementResourceError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=422, detail="no eligible settlement resource"
+            ) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail="invalid schedule request") from exc
         return SettlementResourceView(
             capacity_reservation_id=body.capacity_reservation_id,
             settlement_resource_id=selected.settlement_resource_id,
@@ -135,14 +139,16 @@ class FulfillmentController:
         except SettlementEntityNotFoundError as exc:
             raise _not_found(body.capacity_reservation_id) from exc
         except (FulfillmentConflictError, SettlementRequestMismatchError) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=409, detail="fulfillment request conflicts with durable state"
+            ) from exc
         except (
             FulfillmentRequestInvalidError,
             ProviderConfigInvalidError,
             ProviderNotFoundError,
             ValueError,
         ) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail="invalid fulfillment request") from exc
         return FulfillmentAcceptanceView(
             capacity_reservation_id=accepted.capacity_reservation_id,
             fulfillment_id=accepted.fulfillment_id,
@@ -194,7 +200,9 @@ class FulfillmentController:
             ProviderNotFoundError,
             ProviderUnavailableError,
         ) as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=503, detail="fulfillment credentials temporarily unavailable"
+            ) from exc
         return FulfillmentResultView(
             fulfillment_id=result.fulfillment_id,
             capacity_reservation_id=result.capacity_reservation_id,
@@ -237,11 +245,15 @@ class FulfillmentController:
         except SettlementEntityNotFoundError as exc:
             raise _fulfillment_not_found(fulfillment_id) from exc
         except FulfillmentConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=409, detail="fulfillment cannot be torn down in its current state"
+            ) from exc
         except (ProviderConfigInvalidError, FulfillmentRequestInvalidError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail="invalid teardown request") from exc
         except (ProviderNotFoundError, ProviderUnavailableError) as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=503, detail="teardown provider temporarily unavailable"
+            ) from exc
         return FulfillmentAcceptanceView(
             capacity_reservation_id=accepted.capacity_reservation_id,
             fulfillment_id=accepted.fulfillment_id,

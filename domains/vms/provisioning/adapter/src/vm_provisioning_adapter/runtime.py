@@ -11,7 +11,6 @@ from vm_provisioning_adapter.fulfillment_backfill import (
     compile_legacy_vm_fulfillment_backfill,
 )
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
-from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -54,10 +53,6 @@ class VmProvisioningRuntime:
             compute_adapter=VmComputeAdapter(
                 site_authority,
                 self.vm_operations_service,
-            ),
-            release_executor=VmReleaseExecutor(
-                job_service=self.job_service,
-                job_queue_provider=self.job_queue_provider,
             ),
             fulfillment_provider=self.fulfillment_provider(resource_pool_service),
             readiness_check=self.readiness,

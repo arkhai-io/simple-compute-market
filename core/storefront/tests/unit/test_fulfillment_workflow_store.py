@@ -1,6 +1,8 @@
 import asyncio
 import sqlite3
 
+import pytest
+
 from core_storefront.sqlite_client import SQLiteClient
 
 
@@ -123,3 +125,44 @@ def test_chain_and_provisioning_fulfillment_ids_remain_distinct(tmp_path):
 
     assert escrow["fulfillment_uid"] == "chain-attestation-1"
     assert workflow["fulfillment_id"] == "provisioning-fulfillment-1"
+
+
+def test_result_and_buyer_access_commit_atomically(tmp_path):
+    client = _client(tmp_path)
+    _insert_escrow(client)
+    assert _run(client.create_fulfillment_workflow(
+        escrow_uid="escrow-1",
+        site_id="site-a",
+        capacity_reservation_id="reservation-1",
+        schedule_request={},
+        begin_request={},
+    ))
+
+    _run(client.apply_fulfillment_result(
+        escrow_uid="escrow-1",
+        connection_details='{"access":"new"}',
+        tenant_credentials='[{"password":"new"}]',
+        remote_state="active",
+        provisioned_resources=[],
+        failure_reason=None,
+        failure_message=None,
+        credential_generation=1,
+    ))
+    with pytest.raises(ValueError, match="must advance"):
+        _run(client.apply_fulfillment_result(
+            escrow_uid="escrow-1",
+            connection_details='{"access":"stale"}',
+            tenant_credentials='[{"password":"stale"}]',
+            remote_state="active",
+            provisioned_resources=[],
+            failure_reason=None,
+            failure_message=None,
+            credential_generation=1,
+        ))
+
+    escrow = _run(client.load_escrow(escrow_uid="escrow-1"))
+    workflow = _run(client.load_fulfillment_workflow(escrow_uid="escrow-1"))
+    assert "new" in escrow["tenant_credentials"]
+    assert "stale" not in escrow["tenant_credentials"]
+    assert workflow["phase"] == "result_applied"
+    assert workflow["credential_generation"] == 1

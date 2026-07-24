@@ -8,7 +8,6 @@ from compute_provisioning_service import (
 )
 
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
-from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.routers import vm_router_mounts
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
@@ -18,7 +17,6 @@ from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
 def build_vm_adapter_bundle(
     *,
     compute_adapter: VmComputeAdapter,
-    release_executor: VmReleaseExecutor,
     fulfillment_provider: AnsibleFulfillmentProvider,
     readiness_check=None,
 ) -> ExecutorAdapterBundle:
@@ -29,7 +27,6 @@ def build_vm_adapter_bundle(
             ExecutorAdapterContribution(
                 adapter=compute_adapter,
                 action_kinds=frozenset({"create"}),
-                release_executor=release_executor,
             ),
         ),
         fulfillment_providers={

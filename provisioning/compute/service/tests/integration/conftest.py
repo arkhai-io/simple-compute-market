@@ -416,7 +416,7 @@ async def client_and_queue(
     )
 
     from compute_provisioning.release import ExecutorReleaseDispatcher
-    from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+    VM_EXECUTOR_KIND = "vm"
     from bare_metal_provisioning_adapter.release import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
@@ -426,7 +426,6 @@ async def client_and_queue(
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
                 release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
             ),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
         },
         default_executor_kind=VM_EXECUTOR_KIND,
     )

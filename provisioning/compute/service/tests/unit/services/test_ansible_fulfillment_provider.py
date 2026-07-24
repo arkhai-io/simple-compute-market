@@ -209,7 +209,7 @@ class TestGetStatus:
             )
             status = await provider.get_status("alloc-1", _resource(), {"job_id": "job-1"})
             assert status.state is ProviderOperationState.failed
-            assert status.detail == "boom"
+            assert status.detail == "provider job failed"
 
     async def test_missing_job_lookup_error_maps_to_unknown(self, provider, job_service):
         job_service.get_job = MagicMock(side_effect=LookupError("job-1 not found"))

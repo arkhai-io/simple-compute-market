@@ -230,7 +230,7 @@ class BareMetalAnsibleFulfillmentProvider(FulfillmentProvider):
             )
         except Exception as exc:
             raise ProviderConfigInvalidError(
-                f"invalid bare-metal fulfillment request: {exc}"
+                "invalid bare-metal fulfillment request"
             ) from exc
         params, machine_id, physical_host_id = self._params(
             capacity_reservation_id=capacity_reservation_id,
@@ -262,7 +262,9 @@ class BareMetalAnsibleFulfillmentProvider(FulfillmentProvider):
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
-            raise FulfillmentCreateFailedError(str(exc)) from exc
+            raise FulfillmentCreateFailedError(
+                "bare-metal provider create failed"
+            ) from exc
         state = BareMetalFulfillmentMetadata(
             create_job_id=response.job_id,
             current_job_id=response.job_id,
@@ -318,7 +320,9 @@ class BareMetalAnsibleFulfillmentProvider(FulfillmentProvider):
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
-            raise FulfillmentTeardownFailedError(str(exc)) from exc
+            raise FulfillmentTeardownFailedError(
+                "bare-metal provider teardown failed"
+            ) from exc
         updated = metadata.model_copy(
             update={
                 "teardown_job_id": response.job_id,
@@ -344,8 +348,15 @@ class BareMetalAnsibleFulfillmentProvider(FulfillmentProvider):
                 detail=f"job {metadata.current_job_id} not found",
             )
         except Exception as exc:
-            raise FulfillmentStatusFailedError(str(exc)) from exc
+            raise FulfillmentStatusFailedError(
+                "bare-metal provider status failed"
+            ) from exc
+        state = _JOB_STATES.get(job.status, ProviderOperationState.unknown)
         return ProviderStatus(
-            state=_JOB_STATES.get(job.status, ProviderOperationState.unknown),
-            detail=job.error,
+            state=state,
+            detail=(
+                "provider job failed"
+                if state is ProviderOperationState.failed
+                else None
+            ),
         )
