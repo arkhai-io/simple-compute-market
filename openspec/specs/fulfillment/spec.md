@@ -340,6 +340,22 @@ Concrete provider errors may carry additional diagnostics but MUST map into thes
 - **WHEN** a provider-specific create, status, or teardown operation fails
 - **THEN** the shared boundary maps it to a stable generic category while retaining safe diagnostics
 
+### Requirement: Historical VM fulfillment backfill
+
+Provisioning migration MUST normalize historical host and capacity membership into the default resource pool before atomically creating teardown-capable fulfillment aggregates for every active or releasing VM reservation. VM-owned compilation converts validated historical executor coordinates and the accepted Ansible configuration into immutable versioned teardown input; generic migration code MUST NOT import VM models. Historical create input and create-job identity MAY be absent. Backfilled provider metadata MUST be explicitly discriminated from strict native metadata.
+
+A releasing reservation requires one matching, pollable teardown job. Missing or conflicting host, target, debit, resource, pool, provider configuration, or teardown-job identity MUST fail the entire migration and its completion marker. Released and other terminal historical reservations are not backfilled.
+
+#### Scenario: Active historical VM has no create job
+
+- **WHEN** an active VM has unambiguous host, target, capacity, and provider data but no retained create-job identity
+- **THEN** migration persists an active backfilled aggregate and immutable teardown command without inventing historical create input
+
+#### Scenario: One historical VM is ambiguous
+
+- **WHEN** any candidate active or releasing VM cannot be mapped unambiguously
+- **THEN** no candidate aggregate, output, reservation assignment, or migration marker is committed
+
 ### Requirement: Packaging and typing
 
 The distribution MUST include `market_fulfillment/py.typed`. Consumers install it from the repository `.dist` wheel during local development and builds. Touched projects MUST NOT add editable relative sibling sources for internal kit dependencies.

@@ -1,3 +1,9 @@
+## Approved legacy-cutover decisions — 2026-07-24
+
+The active-VM migration normalizes historical hosts and capacity records into the operator-created default pool before fulfillment backfill. Generic compute migration code receives a VM-owned pure backfill compiler through composition; it does not import VM adapter models. Native provider metadata remains strict, while a separate validated backfilled metadata shape permits an absent historical create-job identity. A releasing reservation is migrated only when its teardown coordinates and referenced provider job are pollable and unambiguous; otherwise the entire migration, including its completion marker, fails atomically.
+
+The VM storefront persists only the trusted configured `site_id` alongside reservation and fulfillment correlation. URLs and credentials remain operator configuration. Scheduling, acceptance, status, result, and teardown resolve that persisted site directly and never broadcast after reservation. The chain `fulfillment_uid` remains distinct from provisioning's `fulfillment_id`. Storefront workflow persistence retains canonical request/result state needed for restart reconciliation but no provisioning credential payload; buyer-facing credential retention continues under the storefront's existing security boundary and must remain buyer-authorized.
+
 ## Rebaseline — 2026-07-22
 
 Sections 1–2 of `tasks.md` have landed, including the shared fulfillment package, capacity-model cutover, feasibility predicate, projection producer endpoints, and in-memory storefront projection caches. References below that describe those pieces as future design are retained as rationale; remaining implementation starts with durable Settlement Record/fulfillment persistence and tasks 3–12. POOLS-8 has been narrowed to durable projection consumption, commercial mapping, and listing hints rather than rebuilding producer/cache mechanics.
@@ -1376,6 +1382,7 @@ This record maps accepted durable decisions to current-state documentation. It i
 | Periodic SQLite recovery workers claim bounded non-overlapping batches under the single-writer boundary, release locks before provider calls, reclaim expired leases, and back off failed work | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `docs/development/ARCHITECTURE.md#fulfillment` |
 | Pull-based results project durable state at read time; active credential issuance uses a durable non-overlapping claim, provider-owned live rotation, transient private job material, deletion after consumption, and generation advancement only after success | `openspec/specs/fulfillment/spec.md#requirement-pull-based-fulfillment-result-and-live-credentials`; `docs/development/ARCHITECTURE.md#fulfillment` |
 | Whole-fulfillment teardown persists immutable pending input at the authenticated command boundary; recovery exclusively dispatches/converges it and releases capacity only after provider success | `openspec/specs/fulfillment/spec.md#requirement-provisioning-owned-whole-fulfillment-teardown`; `docs/development/ARCHITECTURE.md#release` |
+| Historical VM leases normalize into the default pool and are compiled by the VM adapter into teardown-capable explicitly backfilled aggregates in one fail-fast migration transaction | `openspec/specs/fulfillment/spec.md#requirement-historical-vm-fulfillment-backfill`; `openspec/specs/resource-pool-management/spec.md#requirement-explicit-valid-host-membership` |
 
 ### Section 2 projection naming and capacity aggregation decisions (2026-07-22)
 

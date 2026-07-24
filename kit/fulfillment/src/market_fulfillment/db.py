@@ -20,6 +20,7 @@ import enum
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     ForeignKeyConstraint,
@@ -120,6 +121,9 @@ class SettlementRecord(Base):
     failure_message = Column(Text, nullable=True)
     credential_generation = Column(
         Integer, nullable=False, default=0, server_default="0"
+    )
+    backfilled = Column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
 
     # Multi-replica recovery-claim boundary. One aggregate has at most one

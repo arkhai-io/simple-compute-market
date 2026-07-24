@@ -7,6 +7,11 @@ provider-specific translation and infrastructure behavior.
 See ``openspec/specs/fulfillment/spec.md``.
 """
 
+from .backfill import (
+    LegacyFulfillmentBackfillCompiler,
+    LegacyFulfillmentBackfillDraft,
+    LegacyFulfillmentBackfillInput,
+)
 from .db import (
     Base as FulfillmentBase,
     ProvisionedResource,
@@ -78,6 +83,9 @@ __all__ = [
     "FulfillmentResult",
     "FulfillmentStatusFailedError",
     "LiveCredential",
+    "LegacyFulfillmentBackfillCompiler",
+    "LegacyFulfillmentBackfillDraft",
+    "LegacyFulfillmentBackfillInput",
     "LiveCredentialResult",
     "FulfillmentTeardownFailedError",
     "FulfillmentValidationIssue",

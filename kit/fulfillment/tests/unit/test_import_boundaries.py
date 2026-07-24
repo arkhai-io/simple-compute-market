@@ -74,6 +74,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
     allowed_external_by_module = {
         "__init__.py": set(),  # only imports its own siblings
         "ids.py": {"uuid6"},
+        "backfill.py": set(),
         "settlement_types.py": {"pydantic"},
         "scheduling.py": set(),
         "round_robin_policy.py": set(),

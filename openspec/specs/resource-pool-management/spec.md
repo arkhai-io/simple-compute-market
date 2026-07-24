@@ -27,7 +27,7 @@ Every provisioning host MUST reference an existing resource pool; existing hosts
 #### Scenario: Existing schema is migrated
 
 - **WHEN** the resource-pool migration runs against a database containing hosts
-- **THEN** it creates the default pool before adding the non-null foreign key and assigns every existing host to `default`
+- **THEN** it creates the default pool before adding the non-null foreign key and assigns every existing host and historical host-backed capacity record to `default`
 
 #### Scenario: Host names an unknown pool
 

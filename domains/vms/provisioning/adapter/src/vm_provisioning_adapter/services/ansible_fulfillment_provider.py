@@ -13,7 +13,12 @@ from market_fulfillment import (
     VersionedEnvelope,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
+from vm_provisioning_adapter.fulfillment_backfill import compile_vm_teardown_operation
+from vm_provisioning_adapter.models.fulfillment_model import (
+    AnsibleFulfillmentMetadata,
+    VmFulfillmentRequirements,
+    validate_ansible_fulfillment_metadata,
+)
 from market_fulfillment import (
     FulfillmentCreateFailedError,
     FulfillmentProvider,
@@ -300,34 +305,17 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         resource: SettlementResource,
         provider_metadata: dict[str, Any],
     ) -> VersionedEnvelope:
-        metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        metadata = validate_ansible_fulfillment_metadata(provider_metadata)
         pool_config = self._validate_resource(resource)
-        base_params = AnsibleJobParams(
-            vm_host=metadata.vm_host,
-            vm_action="vm_remove",
-            vm_target=metadata.vm_target,
-            escrow_uid=capacity_reservation_id,
-            playbook_path=pool_config.playbook_path,
-        )
-        self._validate_extra_vars(base_params, pool_config.extra_vars)
-        params = dataclasses.replace(
-            base_params,
-            provider_extra_vars=pool_config.extra_vars,
-        )
-        contract = self._contract(
-            capacity_reservation_id=capacity_reservation_id,
-            action_kind="fulfillment_teardown",
-            params=params,
-        )
-        return VersionedEnvelope(
-            kind="ansible.vm.teardown",
-            schema_version=1,
-            payload={
-                "job_params": dataclasses.asdict(params),
-                "contract": contract.model_dump(mode="json"),
-                "create_metadata": metadata.model_dump(mode="json"),
-            },
-        )
+        try:
+            return compile_vm_teardown_operation(
+                capacity_reservation_id=capacity_reservation_id,
+                metadata=metadata,
+                playbook_path=pool_config.playbook_path,
+                provider_extra_vars=pool_config.extra_vars,
+            )
+        except ValueError as exc:
+            raise ProviderConfigInvalidError(str(exc)) from exc
 
     async def dispatch_teardown(
         self,
@@ -338,7 +326,7 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 prepared,
                 expected_kind="ansible.vm.teardown",
             )
-            metadata = AnsibleFulfillmentMetadata.model_validate(
+            metadata = validate_ansible_fulfillment_metadata(
                 payload["create_metadata"]
             )
             response = await self._job_service.submit(
@@ -412,13 +400,14 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
     ) -> LiveCredentialResult:
         """Rotate and consume VM credentials without storing them in fulfillment."""
         del resource
-        metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        metadata = validate_ansible_fulfillment_metadata(provider_metadata)
         # Create-job credentials are private compatibility material. A result
         # read always rotates, so the original values must never be delivered.
-        try:
-            self._job_service.consume_private_credentials(metadata.create_job_id)
-        except LookupError:
-            pass
+        if metadata.create_job_id is not None:
+            try:
+                self._job_service.consume_private_credentials(metadata.create_job_id)
+            except LookupError:
+                pass
         params = AnsibleJobParams(
             vm_host=metadata.vm_host,
             vm_action="reset_password",

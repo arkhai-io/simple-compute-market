@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
+from vm_provisioning_adapter.fulfillment_backfill import (
+    compile_legacy_vm_fulfillment_backfill,
+)
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
 from vm_provisioning_adapter.release import VmReleaseExecutor
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (

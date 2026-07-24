@@ -432,10 +432,16 @@ class FulfillmentService:
                 resource.provider, resource.resource_kind
             )
             if record.state == SettlementRecordState.active.value:
-                prepared = provider.prepare_teardown(
-                    str(record.capacity_reservation_id),
-                    resource,
-                    dict(record.provider_metadata or {}),
+                prepared = (
+                    VersionedEnvelope.model_validate(
+                        record.prepared_teardown_operation
+                    )
+                    if record.prepared_teardown_operation is not None
+                    else provider.prepare_teardown(
+                        str(record.capacity_reservation_id),
+                        resource,
+                        dict(record.provider_metadata or {}),
+                    )
                 )
                 record = self._repository.transition(
                     db,

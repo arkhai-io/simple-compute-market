@@ -211,13 +211,13 @@ Section 4 is complete. Atomic scheduling is mediated by the narrow scheduling un
 
 ## 5. Migrate existing hosts and active leases
 
-- [ ] 5.1 Create the default resource pool and migrate all existing hosts and pool-membership/resource-capacity records before fulfillment backfill.
-- [ ] 5.2 Backfill a settlement/fulfillment aggregate for every active or releasing VM capacity reservation.
-- [ ] 5.3 Derive selected resource, Ansible provider identity, domain resource reference, and versioned teardown input from existing `vm_host`, `vm_target`/`executor_target`, executor identity, and lease data.
-- [ ] 5.4 Mark migrated aggregates as backfilled and allow historical create input to be absent for already-active VMs.
-- [ ] 5.5 Fail migration visibly when an active reservation cannot be mapped unambiguously; do not create partial teardown records.
-- [ ] 5.6 Skip terminal/expired historical allocations unless another retention requirement applies.
-- [ ] 5.7 Add migration tests covering active, releasing, expired, ambiguous, duplicate, and rollback cases.
+- [x] 5.1 Create the default resource pool and migrate all existing hosts and pool-membership/resource-capacity records before fulfillment backfill.
+- [x] 5.2 Backfill a settlement/fulfillment aggregate for every active or releasing VM capacity reservation.
+- [x] 5.3 Derive selected resource, Ansible provider identity, domain resource reference, and versioned teardown input from existing `vm_host`, `vm_target`/`executor_target`, executor identity, and lease data.
+- [x] 5.4 Mark migrated aggregates as backfilled and allow historical create input to be absent for already-active VMs.
+- [x] 5.5 Fail migration visibly when an active reservation cannot be mapped unambiguously; do not create partial teardown records.
+- [x] 5.6 Skip terminal/expired historical allocations unless another retention requirement applies.
+- [x] 5.7 Add migration tests covering active, releasing, expired, ambiguous, duplicate, and rollback cases.
 
 ## 6. Implement fulfillment acceptance and provider preparation
 

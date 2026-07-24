@@ -1,6 +1,7 @@
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
+from market_fulfillment import LegacyFulfillmentBackfillCompiler
 
 from compute_provisioning_service.db.migrations import apply_schema_migrations
 from compute_provisioning_service.db.models import Base
@@ -49,6 +50,7 @@ def run_migrations(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
+    fulfillment_backfill_compiler: LegacyFulfillmentBackfillCompiler | None = None,
 ) -> None:
     """Create all tables and apply versioned migrations.
 
@@ -85,5 +87,6 @@ def run_migrations(
         engine,
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
+        fulfillment_backfill_compiler=fulfillment_backfill_compiler,
     )
     SiteBase.metadata.create_all(bind=engine)

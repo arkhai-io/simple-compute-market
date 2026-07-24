@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from market_fulfillment import (
     PhysicalSettlementRequest,
@@ -346,3 +347,40 @@ async def test_live_credentials_rotate_with_generation_and_consume_private_rows(
     assert job_service.consume_private_credentials.call_args_list[-1].args == (
         "rotation-job",
     )
+
+
+def test_backfilled_metadata_without_create_job_prepares_frozen_teardown(provider):
+    prepared = provider.prepare_teardown(
+        "reservation-legacy",
+        _resource(),
+        {
+            "backfilled": True,
+            "create_job_id": None,
+            "vm_host": "kvm1",
+            "vm_target": "vm-legacy",
+            "teardown_job_id": None,
+            "current_job_id": None,
+            "operation": "create",
+        },
+    )
+
+    assert prepared.kind == "ansible.vm.teardown"
+    assert prepared.payload["job_params"]["vm_action"] == "vm_remove"
+    assert prepared.payload["job_params"]["vm_target"] == "vm-legacy"
+    assert prepared.payload["contract"]["idempotency_key"] == (
+        "reservation-legacy:fulfillment_teardown:v1"
+    )
+
+
+def test_native_metadata_still_requires_create_job(provider):
+    with pytest.raises(ValidationError):
+        provider.prepare_teardown(
+            "reservation-native",
+            _resource(),
+            {
+                "vm_host": "kvm1",
+                "vm_target": "vm-native",
+                "current_job_id": "job-1",
+                "operation": "create",
+            },
+        )

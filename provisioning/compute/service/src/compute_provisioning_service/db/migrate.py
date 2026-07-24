@@ -22,6 +22,7 @@ import logging
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, run_migrations
+from vm_provisioning_adapter.runtime import compile_legacy_vm_fulfillment_backfill
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -37,6 +38,7 @@ def main() -> None:
         engine,
         default_playbook_path=str(settings.resolved_playbook_path),
         default_inventory_group=str(settings.default_pool_inventory_group),
+        fulfillment_backfill_compiler=compile_legacy_vm_fulfillment_backfill,
     )
     logger.info("Migrations applied successfully.")
 

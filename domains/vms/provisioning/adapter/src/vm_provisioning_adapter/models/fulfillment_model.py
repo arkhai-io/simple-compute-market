@@ -1,4 +1,6 @@
 """VM-domain fulfillment request and provider metadata models."""
+from typing import Any, Literal, Mapping, TypeAlias
+
 from pydantic import BaseModel, Field
 
 class VmFulfillmentRequirements(BaseModel):
@@ -17,8 +19,33 @@ class VmFulfillmentRequirements(BaseModel):
 
 class AnsibleFulfillmentMetadata(BaseModel):
     create_job_id: str
-    vm_host: str
-    vm_target: str
+    vm_host: str = Field(min_length=1)
+    vm_target: str = Field(min_length=1)
     teardown_job_id: str | None = None
     current_job_id: str
-    operation: str
+    operation: Literal["create", "teardown"]
+
+
+class BackfilledAnsibleFulfillmentMetadata(BaseModel):
+    """Provider coordinates reconstructed from an existing VM lease."""
+
+    backfilled: Literal[True] = True
+    create_job_id: str | None = None
+    vm_host: str = Field(min_length=1)
+    vm_target: str = Field(min_length=1)
+    teardown_job_id: str | None = None
+    current_job_id: str | None = None
+    operation: Literal["create", "teardown"]
+
+
+AnyAnsibleFulfillmentMetadata: TypeAlias = (
+    AnsibleFulfillmentMetadata | BackfilledAnsibleFulfillmentMetadata
+)
+
+
+def validate_ansible_fulfillment_metadata(
+    value: Mapping[str, Any],
+) -> AnyAnsibleFulfillmentMetadata:
+    if value.get("backfilled") is True:
+        return BackfilledAnsibleFulfillmentMetadata.model_validate(value)
+    return AnsibleFulfillmentMetadata.model_validate(value)
