@@ -228,6 +228,10 @@ def db_engine():
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # Durable fulfillment tables (settlement_records, provisioned_resources,
+    # scheduling_cursors) ride market_fulfillment's own metadata.
+    from market_fulfillment.db import Base as FulfillmentBase
+    FulfillmentBase.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
@@ -477,6 +481,27 @@ async def client_and_queue(
         lease_lifecycle_service=lease_lifecycle_service,
     )
 
+    from market_fulfillment import (
+        FulfillmentOrchestrator,
+        ProviderRegistry,
+        SqlAlchemyFulfillmentUnitOfWork,
+    )
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
+    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+    )
+    fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+    )
+    fulfillment_service = FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        unit_of_work=fulfillment_unit_of_work,
+    )
+
     # Override container providers
     app.container.vm_runtime.override(vm_runtime)
     app.container.ansible_service.override(fake_ansible)
@@ -492,6 +517,7 @@ async def client_and_queue(
     app.container.resource_pool_service.override(resource_pool_service)
     app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
     app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
+    app.container.fulfillment_service.override(fulfillment_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -510,6 +536,7 @@ async def client_and_queue(
     _container_module.resolved_capacity_reservation_watchdog = (
         capacity_reservation_watchdog
     )
+    _container_module.resolved_fulfillment_service = fulfillment_service
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
@@ -580,6 +607,7 @@ async def client_and_queue(
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
+    app.container.fulfillment_service.reset_override()
 
 
 @pytest_asyncio.fixture

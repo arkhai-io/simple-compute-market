@@ -39,7 +39,6 @@ class VmProvisioningRuntime:
     def fulfillment_provider(self, resource_pool_service):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
-            resource_pool_service=resource_pool_service,
             job_queue_provider=self.job_queue_provider,
         )
 

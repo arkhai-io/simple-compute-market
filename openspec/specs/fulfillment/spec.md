@@ -224,13 +224,13 @@ Recovery-lease fields (a claim owner, a claim expiry, and an attempt count) live
 
 A `FulfillmentProvider` separates pure synchronous preparation from asynchronous side effects:
 
-- `prepare_create(request, resource, pool_config) -> VersionedEnvelope`;
+- `prepare_create(capacity_reservation_id, request, resource, pool_config) -> VersionedEnvelope`;
 - `dispatch_create(prepared) -> FulfillmentResult`;
 - `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
 - `dispatch_teardown(prepared) -> FulfillmentResult`;
 - `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`.
 
-Preparation receives caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
+Preparation receives the durable `capacity_reservation_id` explicitly plus caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently or derive the reservation identity from the storefront payload. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
 
 Prepared operations are immutable and persisted before dispatch. Dispatch commands use deterministic reservation-scoped idempotency keys. Provider metadata is normalized and validated by the concrete adapter before it crosses the shared persistence boundary. Credentials and sensitive access material use a dedicated secure channel rather than generic metadata.
 
@@ -323,7 +323,7 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 
 ### Requirement: Fulfillment validation
 
-The fulfillment validation endpoint accepts the same reservation, market, and fulfillment-request signature as acceptance. It loads the already-scheduled aggregate, selected resource, current pool configuration, provider, and preparation path, but performs no lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
+The fulfillment validation endpoint accepts the same reservation, market, and fulfillment-request signature as acceptance. It uses the same internal preparation path to load the already-scheduled aggregate, selected resource, current pool configuration, and provider, but runs in a read-only session without reserving SQLite's writer slot and performs no lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
 
 #### Scenario: Validation succeeds without acceptance
 

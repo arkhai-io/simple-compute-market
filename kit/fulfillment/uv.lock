@@ -65,27 +65,27 @@ dev = [{ name = "pytest", specifier = ">=8.3.4,<9.0.0" }]
 [[package]]
 name = "arkhai-kit-resource-pools"
 version = "0.1.0"
-source = { registry = "/home/mjonas/simple-compute-market/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "/home/mjonas/simple-compute-market/.dist/arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
 version = "0.2.0"
-source = { registry = "/home/mjonas/simple-compute-market/.dist" }
+source = { registry = "../../.dist" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "/home/mjonas/simple-compute-market/.dist/arkhai_kit_site-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -2089,11 +2089,11 @@ Today's in-memory orchestrator (`compute_provisioning_service/services/fulfillme
 
 `begin_fulfillment` durably accepts the operation before provider dispatch. Once the acceptance transaction commits, a recoverable provider-dispatch or acknowledgement failure does not make the operation rejected: the aggregate remains accepted in `dispatch_pending`, the caller receives the durable provider-neutral acceptance view, and provisioning-owned recovery may safely retry the persisted prepared operation. Errors that occur before durable acceptance, including an unscheduled reservation, market/request conflict, unknown provider, or invalid preparation input, fail the call without creating an accepted fulfillment.
 
-Successful provider submission is acknowledged in a second short transaction. That transaction stores normalized provider metadata and transitions `dispatch_pending` to `submitted`. Repeating the acknowledgement with structurally equivalent normalized metadata is idempotent; a conflicting provider job identity is a lifecycle conflict and never overwrites the existing acknowledgement. The crash window between provider submission and this acknowledgement is intentional: deterministic executor idempotency allows recovery to redispatch and rediscover the same provider job.
+Successful provider submission is acknowledged in a second short transaction. That transaction stores normalized provider metadata and transitions `dispatch_pending` to `dispatching`. Repeating the acknowledgement with structurally equivalent normalized metadata is idempotent; a conflicting provider job identity is a lifecycle conflict and never overwrites the existing acknowledgement. The crash window between provider submission and this acknowledgement is intentional: deterministic executor idempotency allows recovery to redispatch and rediscover the same provider job.
 
 #### Equivalent retries are state-sensitive
 
-Repository equivalence is necessary but does not by itself authorize dispatch. The acceptance result distinguishes whether the row is newly accepted and whether dispatch remains required. A newly accepted aggregate dispatches. An equivalent retry in `dispatch_pending` without acknowledged provider metadata redispatches the persisted prepared operation. An equivalent retry in `submitted` or any later lifecycle state returns the existing fulfillment without invoking the provider. Conflicting reuse fails before dispatch.
+Repository equivalence is necessary but does not by itself authorize dispatch. The acceptance result distinguishes whether the row is newly accepted and whether dispatch remains required. A newly accepted aggregate dispatches. An equivalent retry in `dispatch_pending` without acknowledged provider metadata redispatches the persisted prepared operation. An equivalent retry in `dispatching` or any later lifecycle state returns the existing fulfillment without invoking the provider. Conflicting reuse fails before dispatch.
 
 #### Dry-run mirrors the real acceptance signature and calculable path
 
@@ -2127,14 +2127,38 @@ Shared fulfillment orchestration does not know Ansible job IDs, targets, playboo
 | The durable fulfillment orchestrator lives in `kit/fulfillment`, alongside `PhysicalSettlementScheduler` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
 | `deal_ref` remains on legacy contract classes until Section 9/11 retire their callers | `openspec/changes/pools-7-storefront-fulfillment-cutover/tasks.md` (Section 11 scope; not a permanent-doc statement until removed) |
 
+## Section 5 task 5.10 — integration coverage found and fixed a real transaction bug (2026-07-24)
 
-## Section 5 design promotion record
+Writing integration coverage against a real SQLite-backed `FulfillmentUnitOfWork`
+(`provisioning/compute/service/tests/integration/test_fulfillment_api.py`) surfaced
+that every real call to `begin_fulfillment` failed with
+`sqlite3.OperationalError: cannot start a transaction within a transaction`.
+`SqlAlchemyFulfillmentUnitOfWork.transaction()` (`fulfillment_persistence.py`) called
+`begin_sqlite_write_transaction(db)` itself, and `SettlementRepository.accept_fulfillment`
+(called via `tx.accept()`, always the first operation inside every real `transaction()`
+usage) also calls it internally — a guaranteed double `BEGIN IMMEDIATE` on one session.
+This was invisible in every test that existed before 5.10 because `test_fulfillment.py`
+and `test_fulfillment_persistence.py` exercise the orchestrator and transaction logic
+exclusively against `FakeTransaction`/`MagicMock` sessions, never a real one.
 
-| Accepted decision | Permanent location |
-|---|---|
-| Session-scoped provider configuration read | `openspec/specs/resource-pool-management/spec.md#requirement-session-scoped-pool-reads` |
-| Pure prepare / async dispatch provider contract | `openspec/specs/fulfillment/spec.md#requirement-provider-contract` |
-| Durable acceptance, state-sensitive retries, and two-transaction acknowledgement | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement` |
-| Provider-neutral settlement-result handoff and adapter-owned metadata | `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement` |
-| Side-effect-free dry-run parity | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-validation` |
-| Repository composition boundary | `docs/development/ARCHITECTURE.md#durable-fulfillment-acceptance` |
+**Resolved:** the unit of work no longer reserves the writer slot itself; it relies on
+`tx.accept()` to do so, since `accept_fulfillment` must keep that guarantee regardless
+(it is independently tested and called standalone, without a unit of work, in
+`kit/fulfillment/tests/unit/test_repository.py`). This is the opposite division of
+responsibility from `SchedulingUnitOfWork` (where the unit of work owns the write-lock
+and the wrapped persistence methods do not); the two subsystems settled on this
+transaction-ownership boundary at different points, and now that the fulfillment path
+has real test coverage exercising it, the difference is intentional and documented in
+`fulfillment_persistence.py` rather than a latent inconsistency.
+
+Two supporting gaps in the integration test harness itself were also fixed as
+prerequisites, not scope creep: `tests/integration/conftest.py`'s `db_engine` fixture
+never created the fulfillment schema at all (no fulfillment-backed integration test
+could have run in this suite before), and `client_and_queue` never composed or
+overrode `resolved_fulfillment_service`, so `FulfillmentController` had nothing to
+resolve. Both now mirror the existing `physical_settlement_scheduler` pattern.
+
+Tasks 5.4 and 5.5's text also had a stale `"submitted"` state name (corrected
+everywhere else in this document and in the permanent spec on 2026-07-23, but missed
+in two places in `tasks.md` itself); corrected to `"dispatching"`, the actual
+`SettlementRecordState` value, to match.

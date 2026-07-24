@@ -28,7 +28,6 @@ def _request() -> VersionedEnvelope[dict]:
         kind="vm.fulfillment.request",
         schema_version=1,
         payload={
-            "capacity_reservation_id": "alloc-1",
             "vm_target": "vm-alloc-1",
             "vm_ram": 4096,
             "vm_vcpus": 2,
@@ -98,7 +97,7 @@ def provider(job_service):
 
 class TestCreate:
     async def test_prepare_is_side_effect_free_and_dispatch_submits(self, provider, job_service):
-        prepared = provider.prepare_create(_request(), _resource(), _pool_config())
+        prepared = provider.prepare_create(capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config=_pool_config())
         job_service.submit.assert_not_awaited()
 
         result = await provider.dispatch_create(prepared)
@@ -109,9 +108,10 @@ class TestCreate:
 
     async def test_prepare_snapshots_pool_config_into_job_params(self, provider, job_service):
         prepared = provider.prepare_create(
-            _request(),
-            _resource(),
-            _pool_config(
+            capacity_reservation_id="alloc-1",
+            request=_request(),
+            resource=_resource(),
+            pool_config=_pool_config(
                 playbook_path="playbooks/custom.yaml",
                 extra_vars={"region": "eu"},
             ),
@@ -124,7 +124,7 @@ class TestCreate:
 
     def test_missing_playbook_path_raises_provider_config_invalid(self, provider):
         with pytest.raises(ProviderConfigInvalidError):
-            provider.prepare_create(_request(), _resource(), {"extra_vars": {}})
+            provider.prepare_create(capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config={"extra_vars": {}})
 
 
 class TestTeardown:
@@ -178,17 +178,19 @@ class TestExtraVarsCollision:
     def test_create_rejects_collision_on_a_named_builtin(self, provider):
         with pytest.raises(ProviderConfigInvalidError, match="vm_host"):
             provider.prepare_create(
-                _request(),
-                _resource(),
-                _pool_config(extra_vars={"vm_host": "hijacked"}),
+                capacity_reservation_id="alloc-1",
+                request=_request(),
+                resource=_resource(),
+                pool_config=_pool_config(extra_vars={"vm_host": "hijacked"}),
             )
 
     def test_create_rejects_collision_on_a_dynamically_derived_builtin(self, provider):
         with pytest.raises(ProviderConfigInvalidError, match="executor_kind"):
             provider.prepare_create(
-                _request(),
-                _resource(),
-                _pool_config(extra_vars={"executor_kind": "hijacked"}),
+                capacity_reservation_id="alloc-1",
+                request=_request(),
+                resource=_resource(),
+                pool_config=_pool_config(extra_vars={"executor_kind": "hijacked"}),
             )
 
     def test_teardown_rejects_collision_too(self, provider):
@@ -200,9 +202,10 @@ class TestExtraVarsCollision:
 
     async def test_non_colliding_extra_var_reaches_dispatch(self, provider, job_service):
         prepared = provider.prepare_create(
-            _request(),
-            _resource(),
-            _pool_config(extra_vars={"region": "eu"}),
+            capacity_reservation_id="alloc-1",
+            request=_request(),
+            resource=_resource(),
+            pool_config=_pool_config(extra_vars={"region": "eu"}),
         )
         await provider.dispatch_create(prepared)
         submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
@@ -219,3 +222,35 @@ class TestExtraVarsCollision:
             ansible_service._build_vm_vars(
                 dataclasses.replace(params, provider_extra_vars={"executor_kind": "x"})
             )
+
+
+class TestPreparedEnvelope:
+    async def test_dispatch_rejects_malformed_typed_parameters(self, provider):
+        malformed = VersionedEnvelope(
+            kind="vm.ansible.create.v1",
+            schema_version=1,
+            payload={
+                "capacity_reservation_id": "alloc-1",
+                "action": "create",
+                "parameters": {"vm_action": "create"},
+            },
+        )
+
+        with pytest.raises(ProviderConfigInvalidError):
+            await provider.dispatch_create(malformed)
+
+    async def test_executor_contract_uses_empty_deal_ref_and_deterministic_key(
+        self, provider, job_service
+    ):
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1",
+            request=_request(),
+            resource=_resource(),
+            pool_config=_pool_config(),
+        )
+
+        await provider.dispatch_create(prepared)
+
+        contract = job_service.submit.await_args.kwargs["contract"]
+        assert contract.deal_ref == {}
+        assert contract.idempotency_key == "alloc-1:create"

@@ -1,0 +1,85 @@
+"""Tests for fulfillment transaction idempotency and session ownership."""
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from market_fulfillment import (
+    FulfillmentConflictError,
+    SettlementRecordState,
+    VersionedEnvelope,
+)
+from market_fulfillment.fulfillment_persistence import SqlAlchemyFulfillmentTransaction
+
+
+def _record(**overrides):
+    values = {
+        "state": SettlementRecordState.dispatch_pending.value,
+        "provider_metadata": {},
+        "prepared_create_operation": None,
+        "fulfillment_id": "fulfillment-1",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_get_pool_uses_callers_session():
+    db = MagicMock()
+    pool_service = MagicMock()
+    pool_service.get_pool_in_session.return_value = object()
+    tx = SqlAlchemyFulfillmentTransaction(db, pool_service, MagicMock())
+
+    result = tx.get_pool("pool-1")
+
+    pool_service.get_pool_in_session.assert_called_once_with(db, "pool-1")
+    assert result is pool_service.get_pool_in_session.return_value
+
+
+def test_identical_prepared_operation_is_idempotent():
+    prepared = VersionedEnvelope(kind="test", schema_version=1, payload={"x": 1})
+    record = _record(prepared_create_operation=prepared.model_dump(mode="json"))
+    repository = MagicMock()
+    repository.get.return_value = record
+    db = MagicMock()
+    tx = SqlAlchemyFulfillmentTransaction(db, MagicMock(), repository)
+
+    assert tx.persist_prepared_create("reservation-1", prepared) is record
+
+
+def test_conflicting_prepared_operation_is_rejected():
+    record = _record(
+        prepared_create_operation={"kind": "test", "schema_version": 1, "payload": {"x": 1}}
+    )
+    repository = MagicMock()
+    repository.get.return_value = record
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(FulfillmentConflictError):
+        tx.persist_prepared_create(
+            "reservation-1",
+            VersionedEnvelope(kind="test", schema_version=1, payload={"x": 2}),
+        )
+
+
+def test_identical_acknowledgement_in_dispatching_state_is_idempotent():
+    record = _record(
+        state=SettlementRecordState.dispatching.value,
+        provider_metadata={"job_id": "job-1"},
+    )
+    repository = MagicMock()
+    repository.get.return_value = record
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    assert tx.acknowledge_create("reservation-1", {"job_id": "job-1"}) is record
+    repository.transition.assert_not_called()
+
+
+def test_conflicting_acknowledgement_is_rejected():
+    record = _record(provider_metadata={"job_id": "job-1"})
+    repository = MagicMock()
+    repository.get.return_value = record
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(FulfillmentConflictError):
+        tx.acknowledge_create("reservation-1", {"job_id": "job-2"})

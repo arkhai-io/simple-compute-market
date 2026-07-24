@@ -54,7 +54,7 @@ class FakeReleaseExecutor:
 
 
 class FakeProvider(FulfillmentProvider):
-    def prepare_create(self, request, resource, pool_config):
+    def prepare_create(self, *, capacity_reservation_id, request, resource, pool_config):
         return VersionedEnvelope(kind="fake.create", schema_version=1, payload={})
 
     async def dispatch_create(self, prepared):
