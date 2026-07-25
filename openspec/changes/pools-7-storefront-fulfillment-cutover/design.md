@@ -1207,13 +1207,23 @@ only the transport is:**
   push design, just triggered by the storefront's request instead of a
   background worker's schedule. This preserves "raw credentials MUST NOT
   be persisted" without needing an outbox at all.
-- **`credential_generation` still matters, for a different reason.**
-  Originally it prevented a stale push retry from clobbering a newer
-  credential set the storefront already received. In a pull model there's
-  no retry race to prevent, but a client that cached an earlier response
-  still benefits from knowing whether its cached credentials are stale
-  relative to a later rotation — `credential_generation` in the response
-  serves that purpose instead.
+- **`credential_generation` is dropped from this section's scope, not
+  carried forward.** (Revised 2026-07-25.) The original rationale assumed
+  a rotation source to detect staleness against. There isn't one: VM
+  tenant credentials are created once at provisioning time and never
+  rotated by this codebase — rotation, if it ever happens, is a
+  site-administrator, out-of-band action against the host, invisible to
+  the provisioning service. Since `get_fulfillment_result` always fetches
+  live and never caches, every response is authoritative at read time by
+  construction, so there is no cross-call credential staleness for a
+  generation counter to detect here. Shipping the field anyway (e.g. as a
+  constant) would overclaim a capability this system doesn't have and
+  invite a caller to build staleness logic against a signal that never
+  changes. If `provisioning-result-push-delivery` still needs a
+  `credential_generation` concept for its own retry-race problem (a stale
+  push overwriting a newer one — a real problem pull doesn't have), it
+  defines and justifies that field itself against its own transport, not
+  by inheriting this note.
 - **Durable, atomic result *persistence* is unaffected** — a terminal or
   otherwise reportable fulfillment transition still commits atomically
   with whatever `SettlementResult`-shaped data `get_fulfillment_result`
@@ -2596,3 +2606,91 @@ diagnostics event after each completed cycle and never one event per row.
 | **(2026-07-24, external code review)** Outcome-application ownership must be checked under an acquired SQLite write reservation, not a plain read — a plain SELECT does not open a SQLite-level transaction on its own, so the original check-then-write sequence left a real, empirically-confirmed gap where a worker whose lease had already been reclaimed could still commit a stale outcome on top of the new owner's claim | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `FulfillmentConvergenceWatchdog._with_owned_record` |
 | **(2026-07-24, external code review)** `teardown_failed` needed an actual periodic requeue-to-`teardown_dispatch_pending` step; the state comment and spec text documenting it as retryable predated any handler that actually performed the retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `FulfillmentConvergenceWatchdog.requeue_teardown_failures` |
 | **(2026-07-24, external code review)** `openspec/specs/fulfillment/architecture.md` still described scheduler assignments and the fulfillment registry as process-local with no durable Settlement Record — stale since Section 3, never corrected during that section's own promotion pass | `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |
+## Section 8 (pull-based status/result and live credentials) — resolved design decisions (discuss phase, resolved 2026-07-25)
+
+Six items, resolved in discussion before Section 8 is planned:
+
+1. **Live credential fetch is stateless — no claim, lease, or rotation
+   bookkeeping.** `dev-branch-migration-notes.md`'s candidate shape
+   (`get_live_credentials(..., credential_generation=...)` guarded by a
+   claim/lease reused from Section 6, advancing generation via
+   `complete_credential_rotation` on `rotated=True`) is rejected. A
+   claim/lease exists to protect a mutation under concurrent access; a
+   live credential read that is never cached and never coordinates a
+   rotation has nothing for a lease to protect. `get_fulfillment_result`
+   calls a new stateless `FulfillmentProvider.fetch_credentials` directly.
+
+2. **`credential_generation` is dropped from Section 8 entirely**, not
+   shipped as a placeholder constant. See the revised "`SettlementResult`
+   delivery" note above for the reasoning: there is no rotation source in
+   this codebase for it to track. It was briefly considered whether this
+   was actually about API-level (storefront↔provisioning) credentials
+   rather than VM tenant credentials, or about the `site_resource_pools`/
+   `site_capacity_buckets` capacity-and-hosts projection's own
+   revision/digest identity (Section 2) moving toward an eventual
+   push/subscription delivery model — neither reading fits the field as
+   written in the original result-contract task (a value returned inline
+   in `get_fulfillment_result`, not a separate projection or an API-auth
+   concept), so both are noted here as considered and set aside rather
+   than silently dropped. The projection-push idea itself is real future
+   work but belongs with a `site_resource_pools`/`site_capacity_buckets`
+   delivery change if one is ever proposed, not with Section 8.
+
+3. **Credential fetch is gated to `active` state only.** Every other
+   lifecycle state returns the result envelope with empty/null credential
+   and provisioned-resource-output fields and no provider call — a
+   fulfillment that hasn't produced a resource yet, or has already torn
+   one down, has no credentials a provider call could meaningfully return.
+
+4. **Live credential-fetch failure is its own stable-error-taxonomy
+   category** (`credential_fetch_failed`), distinct from create/status/
+   teardown failure. This is a different handling loop for the storefront:
+   a transient fetch failure on an otherwise-healthy `active` fulfillment
+   means "retry the read," not "the workload failed."
+
+5. **The result contract is a real versioned envelope**, `fulfillment.result.v1`,
+   per the existing "Versioned envelopes" requirement's own scope statement
+   that it applies to "settlement/fulfillment result payloads once those
+   values cross a durable or cross-domain boundary." Defining it now, not
+   deferred, so `provisioning-result-push-delivery` can reuse the same
+   shape unchanged, matching what that change's proposal already assumes.
+
+6. **Credential resolution is scoped per `ProvisionedResource`** (keyed by
+   `domain_resource_ref`), not per-fulfillment as a whole, even though
+   today's VM adapter only ever produces one `ProvisionedResource` per
+   fulfillment. Cheap to do now; avoids a breaking reshape if a future
+   domain fulfillment produces more than one resource.
+
+**Former task 8.5 (per-caller ownership enforcement) is out of scope for
+this section.** `StorefrontAuthMiddleware` gates the whole service behind
+one shared `admin_api_key` with no per-request caller identity — by its
+own docstring, "the provisioning service is an internal dependency of a
+single storefront." An ownership check has no second caller identity to
+compare against under that model. Real per-caller enforcement is deferred
+to a new prerequisite change, `add-storefront-principal-authentication`
+(proposed 2026-07-25; see its `proposal.md`/`design.md`), which gives the
+provisioning service real per-request principal identity and an
+`owner_principal` column on `SettlementRecord`. That change's candidate
+starting shape is this file's own "Flagged as new, unscoped, cross-cutting
+work: Multi-principal storefront authentication and per-record ownership"
+note above (`configured_storefront_principals`, `request.state.
+storefront_principal`, `owner_principal` column) — re-evaluated against
+its own accepted contracts before being treated as a starting point, per
+that note's own caveat. Section 8 ships task 8.5 as an existence-only
+check (reject unknown identifiers) structured so the later
+`owner_principal` comparison can replace it without reshaping the
+endpoint, and `provisioning-result-push-delivery` gains a second, direct
+dependency on `add-storefront-principal-authentication` alongside its
+existing dependency on this change.
+
+### Section 8 permanent-documentation impact (for the design-promotion record)
+
+| Decision | Destination |
+| --- | --- |
+| Provider-neutral `fetch_credentials` contract, no claim/lease/rotation bookkeeping | `openspec/specs/fulfillment/spec.md#requirement-provider-contract`; `FulfillmentProvider` protocol docstring |
+| `active`-only credential-fetch gating and non-`active` empty-envelope behavior | `openspec/specs/fulfillment/spec.md` |
+| `fulfillment.result.v1` envelope shape | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
+| `credential_fetch_failed` stable error category | `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy` |
+| Per-`ProvisionedResource` credential-resolution boundary | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
+| Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |

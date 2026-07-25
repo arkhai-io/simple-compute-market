@@ -351,13 +351,42 @@ storefront→provisioning auth direction — durable persistence (section 3)
 is unaffected; only the delivery transport differs from the original
 design.
 
-- [ ] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state; a read reflects current state on demand.
-- [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details, `credential_generation`) without persisting credentials.
-- [ ] 8.3 Fetch or refresh credentials at the moment `get_fulfillment_result` is called, transmit them only in that response over the authenticated encrypted channel, and do not persist them afterward.
-- [ ] 8.4 Add a monotonic `credential_generation` to `get_fulfillment_result` responses so a caller holding an earlier cached response can detect staleness after a rotation.
-- [ ] 8.5 Add authorization checks rejecting a query for a `fulfillment_id`/`capacity_reservation_id` the calling storefront does not own.
-- [ ] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches a terminal state, repeated queries returning consistent state, credential rotation between two queries, and querying a fulfillment owned by a different storefront.
-- [ ] 8.7 Record `provisioning-result-push-delivery` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer (not needing to be redesigned) is visible to whoever picks it up.
+**Resolved during the discuss phase (2026-07-25; see `design.md`, "Section 8
+pull-based status/result and live credentials — resolved design
+decisions").** Six items resolved there govern the subtasks below:
+credentials are fetched through a new stateless, provider-neutral
+`FulfillmentProvider.fetch_credentials` method with no claim/lease and no
+rotation bookkeeping (candidate claim/lease/rotation shape from
+`dev-branch-migration-notes.md` rejected as solving a problem this
+codebase doesn't have); `credential_generation` is dropped from scope
+entirely rather than shipped as a dead field; a live credential fetch is
+attempted only when the aggregate is `active`, never any other state;
+credential-fetch failure on an otherwise-healthy `active` fulfillment is
+its own stable-error-taxonomy category, distinct from a create/status
+failure; the result contract is a real versioned envelope
+(`fulfillment.result.v1`); and credential resolution is keyed per
+`ProvisionedResource` (via `domain_resource_ref`) even though today's VM
+adapter only ever produces one, so a second-resource-per-fulfillment
+domain does not require a breaking reshape later.
+
+Former task 8.5 (per-caller ownership enforcement) is **out of this
+section's scope** and moves to `add-storefront-principal-authentication`
+(new change, proposed 2026-07-25), which gives the provisioning service
+real per-request caller identity. `StorefrontAuthMiddleware`'s single
+shared `admin_api_key` has exactly one trusted caller by construction, so
+there is no caller identity for an ownership check to compare against
+today; see that change's `design.md` for the accepted shape. Section 8
+ships against the existing single-tenant trust model and adopts real
+per-caller enforcement once that change lands.
+
+- [ ] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state, and no provider/Ansible call of any kind; a read reflects current state on demand from the repository alone.
+- [ ] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract as a `fulfillment.result.v1` versioned envelope (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details) without persisting credentials. Non-`active` states return the envelope with empty/null credential and provisioned-resource-output fields rather than an error — the aggregate's current state and failure detail are still meaningful before or after `active`.
+- [ ] 8.3 Add `FulfillmentProvider.fetch_credentials(provider_metadata) -> CredentialSet` (new abstract method, alongside `resolve_provisioned_resources`; async, since it performs provider I/O). `get_fulfillment_result` calls it directly and unconditionally when, and only when, the aggregate is `active` — no claim, no lease, no generation-advancement side effect, since there is nothing durable being coordinated or mutated. Implement it for `AnsibleFulfillmentProvider` by decoding `current_job_id`/`vm_target` from the already-persisted `AnsibleFulfillmentMetadata` and calling the existing `job_service.get_job_credentials(job_id)` path, translated into a provider-neutral `CredentialSet`. Transmit credentials only in that response over the authenticated channel and do not persist them afterward.
+- [ ] 8.4 Add a `credential_fetch_failed` category to the stable error taxonomy (`openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy`) for a live credential-fetch failure on an `active` fulfillment, distinct from create/status/teardown failure categories, so the storefront can retry the read rather than treat it as a workload failure.
+- [ ] 8.5 Add an existence-only check rejecting a query for an unknown `fulfillment_id`/`capacity_reservation_id` (i.e., not present in this provisioning service's own database). This is not a per-caller ownership check — `StorefrontAuthMiddleware` admits exactly one trusted caller today, so there is no second caller identity to distinguish. Structure the check so `add-storefront-principal-authentication`'s later `owner_principal` comparison can replace it without reshaping the endpoint.
+- [ ] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches `active` (empty credentials/outputs, no provider call attempted), repeated queries returning consistent state, a live credential-fetch failure surfacing `credential_fetch_failed` while the aggregate state is unaffected, and query for an unknown identifier.
+- [ ] 8.7 Record `provisioning-result-push-delivery` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer and `fulfillment.result.v1` envelope (not needing to be redesigned) is visible to whoever picks it up. Also record `add-storefront-principal-authentication` as the follow-on that upgrades 8.5's existence check to real per-caller ownership enforcement.
+- [ ] 8.8 Promote this section's accepted decisions — the provider-neutral `fetch_credentials` contract, `active`-only credential fetch gating, the `fulfillment.result.v1` envelope shape, the `credential_fetch_failed` error category, and the per-`ProvisionedResource` credential-resolution boundary — into `openspec/specs/fulfillment/spec.md` and `architecture.md`, and complete this section's design-promotion record.
 
 ## 9. Cut over storefront orchestration
 
