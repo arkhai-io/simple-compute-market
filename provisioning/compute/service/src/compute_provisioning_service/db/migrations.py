@@ -250,146 +250,150 @@ def _migrate_multidimensional_capacity(engine: Engine) -> None:
 def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     """Atomically preserve nonterminal VM leases in the fulfillment aggregate.
 
-    A tracked provider job is authoritative during cutover.  The migration
-    never substitutes a new create operation when an existing create job
-    cannot be identified, because that could provision a duplicate VM.
+    A tracked provider job is authoritative during cutover. Per-candidate
+    derivation and provider-envelope preparation are delegated to
+    ``compile_legacy_vm_fulfillment_backfill``, a pure function with no
+    database session; this function owns only enumeration, cross-candidate
+    identity/target deduplication, comparison against already-persisted
+    rows, and the single atomic write.
     """
     if not _table_exists(engine, "vm_leases"):
         return
 
+    from market_fulfillment.backfill import LegacyBackfillValidationError
     from market_fulfillment.db import Base as FulfillmentBase
-    from market_fulfillment.provider import SettlementResult
-    from market_fulfillment.settlement_types import SettlementResource
-    from vm_provisioning_adapter.runtime import prepare_historical_vm_teardown
+    from vm_provisioning_adapter.legacy_backfill import (
+        LegacyVmLeaseCandidate,
+        compile_legacy_vm_fulfillment_backfill,
+    )
 
     FulfillmentBase.metadata.create_all(engine)
 
-
     with engine.begin() as connection:
-        rows = connection.execute(text(
-            """
-            SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
-                   vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
-                   vl.vm_remove_job_id, cr.capacity_reservation_id,
-                   cr.executor_target, h.pool_id, rp.provider,
-                   apc.playbook_path, apc.inventory_group, apc.extra_vars
-            FROM vm_leases vl
-            LEFT JOIN capacity_reservations cr
-              ON cr.capacity_reservation_id = vl.allocation_id
-            LEFT JOIN hosts h ON h.name = vl.vm_host
-            LEFT JOIN resource_pools rp ON rp.id = h.pool_id
-            LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
-            WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
-            ORDER BY vl.id
-            """
-        )).mappings().all()
+        _apply_legacy_vm_lease_backfill(
+            connection,
+            LegacyVmLeaseCandidate=LegacyVmLeaseCandidate,
+            compile_legacy_vm_fulfillment_backfill=compile_legacy_vm_fulfillment_backfill,
+            LegacyBackfillValidationError=LegacyBackfillValidationError,
+        )
 
-        seen_reservations: set[str] = set()
-        seen_targets: set[str] = set()
-        candidates = []
-        for row in rows:
-            reservation_id = row["capacity_reservation_id"] or row["allocation_id"]
-            if not reservation_id:
-                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no reservation identity")
-            if reservation_id in seen_reservations:
-                raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
-            seen_reservations.add(reservation_id)
-            if not row["vm_host"] or not row["pool_id"] or row["provider"] != "ansible":
-                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no unique usable Ansible host/pool")
-            if not row["playbook_path"] or not row["inventory_group"]:
-                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no usable Ansible pool configuration")
-            target = row["vm_target"] or row["executor_target"]
-            if row["vm_target"] and row["executor_target"] and row["vm_target"] != row["executor_target"]:
-                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has conflicting VM targets")
-            status = row["status"]
-            if status == "provisioning" and not row["create_job_id"]:
-                raise SchemaDriftError(f"provisioning VM lease {row['lease_id']} has no tracked create job")
-            if status != "provisioning" and not target:
-                raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no VM target")
-            if target and target in seen_targets:
-                raise SchemaDriftError(f"duplicate legacy VM target {target}")
-            if target:
-                seen_targets.add(target)
-            state = {
-                "provisioning": "dispatching",
-                "leased": "active",
-                "release_failed": "teardown_failed",
-            }.get(status)
-            if status == "releasing":
-                state = "tearing_down" if row["vm_remove_job_id"] else "teardown_dispatch_pending"
-            candidates.append((row, reservation_id, target, state))
 
-        for row, reservation_id, target, state in candidates:
-            existing = connection.execute(text(
-                "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider "
-                "FROM settlement_records WHERE capacity_reservation_id=:id"
-            ), {"id": reservation_id}).mappings().one_or_none()
-            if existing:
-                expected = (state, row["vm_host"], row["pool_id"], "ansible")
-                actual = (existing["state"], existing["settlement_resource_id"], existing["pool_id"], existing["provider"])
-                if actual != expected:
-                    raise SchemaDriftError(f"conflicting settlement aggregate for reservation {reservation_id}")
-                continue
+def _apply_legacy_vm_lease_backfill(
+    connection,
+    *,
+    LegacyVmLeaseCandidate,
+    compile_legacy_vm_fulfillment_backfill,
+    LegacyBackfillValidationError,
+) -> None:
+    """Enumerate, compile, and atomically write the legacy VM lease backfill.
 
-            fulfillment_id = str(uuid.uuid4())
-            metadata = {
-                "create_job_id": row["create_job_id"],
-                "current_job_id": row["create_job_id"],
-                "vm_host": row["vm_host"],
-                "vm_target": target or "",
-                "operation": "create",
-            }
-            teardown_metadata = None
-            if row["vm_remove_job_id"]:
-                teardown_metadata = {
-                    "create_job_id": row["create_job_id"],
-                    "current_job_id": row["vm_remove_job_id"],
-                    "vm_host": row["vm_host"],
-                    "vm_target": target or "",
-                    "operation": "teardown",
-                }
-            prepared_teardown = None
-            if target:
-                extra_vars = row["extra_vars"] or {}
-                if isinstance(extra_vars, str):
-                    extra_vars = json.loads(extra_vars)
-                resource = SettlementResource(
-                    settlement_resource_id=row["vm_host"], pool_id=row["pool_id"],
-                    resource_kind="vm", provider="ansible",
-                    attributes={"vm_host": row["vm_host"]},
+    Split from ``_migrate_legacy_vm_leases_to_fulfillment`` so tests can
+    invoke it directly against an already-open connection without going
+    through the once-per-schema-version ``apply_schema_migrations`` gate,
+    which is otherwise the only caller in normal operation and never
+    re-enters an applied migration.
+    """
+    rows = connection.execute(text(
+        """
+        SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
+               vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
+               vl.vm_remove_job_id, cr.capacity_reservation_id,
+               cr.executor_target, h.pool_id, rp.provider,
+               apc.playbook_path, apc.inventory_group, apc.extra_vars
+        FROM vm_leases vl
+        LEFT JOIN capacity_reservations cr
+          ON cr.capacity_reservation_id = vl.allocation_id
+        LEFT JOIN hosts h ON h.name = vl.vm_host
+        LEFT JOIN resource_pools rp ON rp.id = h.pool_id
+        LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
+        WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
+        ORDER BY vl.id
+        """
+    )).mappings().all()
+
+    seen_reservations: set[str] = set()
+    seen_targets: set[str] = set()
+    drafts = []
+    for row in rows:
+        reservation_id = row["capacity_reservation_id"] or row["allocation_id"]
+        if not reservation_id:
+            raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no reservation identity")
+        if reservation_id in seen_reservations:
+            raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
+        seen_reservations.add(reservation_id)
+
+        extra_vars = row["extra_vars"] or {}
+        if isinstance(extra_vars, str):
+            extra_vars = json.loads(extra_vars)
+        candidate = LegacyVmLeaseCandidate(
+            lease_id=str(row["lease_id"]),
+            capacity_reservation_id=reservation_id,
+            status=row["status"],
+            vm_host=row["vm_host"],
+            pool_id=row["pool_id"],
+            provider=row["provider"],
+            playbook_path=row["playbook_path"],
+            inventory_group=row["inventory_group"],
+            extra_vars=extra_vars,
+            vm_target=row["vm_target"],
+            executor_target=row["executor_target"],
+            create_job_id=row["create_job_id"],
+            vm_remove_job_id=row["vm_remove_job_id"],
+        )
+        try:
+            draft = compile_legacy_vm_fulfillment_backfill(
+                candidate, fulfillment_id=str(uuid.uuid4())
+            )
+        except LegacyBackfillValidationError as exc:
+            raise SchemaDriftError(str(exc)) from exc
+
+        target = draft.provisioned_resource_ref
+        if target and target in seen_targets:
+            raise SchemaDriftError(f"duplicate legacy VM target {target}")
+        if target:
+            seen_targets.add(target)
+        drafts.append(draft)
+
+    for draft in drafts:
+        existing = connection.execute(text(
+            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider "
+            "FROM settlement_records WHERE capacity_reservation_id=:id"
+        ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
+        if existing:
+            expected = (draft.state, draft.settlement_resource_id, draft.pool_id, draft.provider)
+            actual = (existing["state"], existing["settlement_resource_id"], existing["pool_id"], existing["provider"])
+            if actual != expected:
+                raise SchemaDriftError(
+                    f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
                 )
-                result = SettlementResult(
-                    capacity_reservation_id=reservation_id, fulfillment_id=fulfillment_id,
-                    resource=resource, provisioned_resources=({"domain_resource_ref": target},),
-                    provider_metadata=metadata,
-                )
-                envelope = prepare_historical_vm_teardown(result, {
-                    "playbook_path": row["playbook_path"],
-                    "inventory_group": row["inventory_group"],
-                    "extra_vars": extra_vars,
-                })
-                prepared_teardown = envelope.model_dump(mode="json")
+            continue
 
+        connection.execute(text(
+            """INSERT INTO settlement_records (
+                capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
+                settlement_resource_id, pool_id, provider, resource_attributes,
+                prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
+            ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,:provider,:attributes,
+                      :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
+        ), {
+            "rid": draft.capacity_reservation_id, "fid": draft.fulfillment_id,
+            "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": draft.settlement_resource_id,
+            "pool_id": draft.pool_id, "provider": draft.provider,
+            "attributes": json.dumps(draft.resource_attributes),
+            "prepared_teardown": json.dumps(draft.prepared_teardown_operation) if draft.prepared_teardown_operation is not None else None,
+            "metadata": json.dumps(draft.provider_metadata),
+            "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
+            "state": draft.state,
+        })
+        if draft.provisioned_resource_ref:
             connection.execute(text(
-                """INSERT INTO settlement_records (
-                    capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
-                    settlement_resource_id, pool_id, provider, resource_attributes,
-                    prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
-                ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,'ansible',:attributes,
-                          :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
+                """INSERT INTO provisioned_resources
+                (provisioned_resource_id, capacity_reservation_id, fulfillment_id, domain_resource_ref, status)
+                VALUES (:id,:rid,:fid,:target,'active')"""
             ), {
-                "rid": reservation_id, "fid": fulfillment_id,
-                "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": row["vm_host"],
-                "pool_id": row["pool_id"], "attributes": json.dumps({"vm_host": row["vm_host"]}),
-                "prepared_teardown": json.dumps(prepared_teardown) if prepared_teardown is not None else None, "metadata": json.dumps(metadata),
-                "teardown_metadata": json.dumps(teardown_metadata) if teardown_metadata is not None else None, "state": state,
+                "id": str(uuid.uuid4()), "rid": draft.capacity_reservation_id,
+                "fid": draft.fulfillment_id, "target": draft.provisioned_resource_ref,
             })
-            if target:
-                connection.execute(text(
-                    """INSERT INTO provisioned_resources
-                    (provisioned_resource_id, capacity_reservation_id, fulfillment_id, domain_resource_ref, status)
-                    VALUES (:id,:rid,:fid,:target,'active')"""
-                ), {"id": str(uuid.uuid4()), "rid": reservation_id, "fid": fulfillment_id, "target": target})
 
 
 def _migrate_drop_vm_leases_table(engine: Engine) -> None:

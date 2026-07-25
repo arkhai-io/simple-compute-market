@@ -2093,6 +2093,117 @@ During implementation, promote the durable current-state rules as follows:
 - VM/Ansible-specific target derivation and teardown-envelope preparation to the
   permanent physical-provisioning specification and architecture companion.
 
+### Section 7 code-review follow-up (discuss phase, opened 2026-07-25)
+
+External code review of the implemented Section 7 migration found the
+historical-state derivation and provider-preparation logic embedded directly
+in `_migrate_legacy_vm_leases_to_fulfillment`'s single SQL transaction, rather
+than in the "small, testable derivation layer" task 7.3 called for. The
+review also found the task 7.9 scenario matrix under-built: only the
+`leased` (active) case is exercised end-to-end; the idempotent-rerun and
+conflicting-duplicate branches are unreachable in normal operation because
+`apply_schema_migrations` tracks migration IDs and never re-invokes an
+applied migration, and the very next migration drops `vm_leases` outright.
+Re-running review's own reproduction confirms the existing test suite
+passes in full once the repository's internal packages are put on
+`PYTHONPATH` (`kit/fulfillment`, `kit/site`, `kit/resource-pools`,
+`provisioning/compute/{,service}`, the VM adapter/client, and
+`arkhai_bare_metal`) — the tasks.md note that focused execution was
+"blocked" and only `py_compile`-checked understated the available
+evidence; the code is behaviorally correct for the one scenario it
+currently covers, it is the coverage breadth that is short.
+
+**Decision: extract the compiler pattern already sketched as candidate
+material.** `dev-branch-migration-notes.md`'s "Candidate material for
+Section 7" describes a domain-neutral `LegacyFulfillmentBackfillCompiler`
+protocol plus a per-adapter `compile_legacy_vm_fulfillment_backfill`
+producing a `LegacyFulfillmentBackfillDraft` (candidate identity, target
+state, provider metadata, and an already-frozen
+`prepared_teardown_operation`). That shape is adopted, refactored onto this
+change's actual accepted contracts (`SettlementResource`/`SettlementResult`
+from `market_fulfillment.provider`, the versioned envelope from
+`market_fulfillment.envelopes`, and `AnsibleFulfillmentProvider.prepare_teardown`
+via `prepare_historical_vm_teardown`) rather than built from that file
+directly. The compiler is a pure function: raw historical row fields in,
+either a `LegacyFulfillmentBackfillDraft` or a raised validation error out,
+with no database session. `_migrate_legacy_vm_leases_to_fulfillment` keeps
+owning enumeration (the SQL join), whole-population validation-before-commit
+ordering, existing-row conflict/equivalence comparison, and the single
+atomic transaction — it stops owning state-derivation and provider-envelope
+construction.
+
+**Context, not a scope change: no POOLS-x change has shipped yet.** There
+are currently no real capacity reservations or legacy leases in any deployed
+environment for this migration to act on. This doesn't relax the
+correctness bar — the migration must be correct before any real lease ever
+reaches it, and the same compiler shape is the natural extension point for
+`domains/bare_metal` if/when that domain needs an equivalent historical
+cutover — but it does mean every Section 7 test is necessarily synthetic.
+That's the reason to enumerate the task 7.9 matrix deliberately against the
+extracted pure compiler (fast, no SQLite needed per case) rather than try to
+approximate it from production data that doesn't exist.
+
+**Task 7.10 gap:** no test currently proves a recovery/convergence worker
+(Section 6) can observe and act on rows this migration backfills. Closing
+this needs a service-level test that runs `run_migrations` against a
+populated pre-migration schema, then drives `FulfillmentConvergenceWatchdog`
+(or its repository-level claim/dispatch entry points) against the resulting
+`dispatching`/`tearing_down`/`teardown_dispatch_pending`/`teardown_failed`
+rows and asserts each is claimed and progressed the same way a
+natively-created row would be.
+
+**Deferred, not forgotten:**
+
+- The "Section 7 design-promotion record" already exists
+  (`tasks.md:405-412`) but lives in `tasks.md` rather than `design.md`,
+  unlike the Section 3/5/6 records. Section 7 code review is still open in
+  this session; relocating/finalizing the record is deferred until review
+  closes rather than done piecemeal now.
+- `proposal.md` is missing the `openspec/README.md`-mandated "Permanent
+  documentation impact" checklist. This predates this review pass and isn't
+  Section-7-specific; it's tracked as a Section 12 cleanup item for the
+  final POOLS-7 review rather than fixed here.
+
+#### Follow-up closed (2026-07-25)
+
+7.3.1/7.3.2, 7.9.1–7.9.3, and 7.10 are implemented: `market_fulfillment.backfill`
+(`LegacyFulfillmentBackfillDraft`/`LegacyBackfillValidationError`/
+`LegacyFulfillmentBackfillCompiler`) plus
+`vm_provisioning_adapter.legacy_backfill.compile_legacy_vm_fulfillment_backfill`
+now own state derivation and provider-envelope preparation as a pure
+function; `_migrate_legacy_vm_leases_to_fulfillment`/
+`_apply_legacy_vm_lease_backfill` own only enumeration, cross-candidate
+dedup, conflict comparison, and the atomic write. The full scenario matrix
+from task 7.9 is covered across
+`test_legacy_vm_fulfillment_backfill.py` (compiler-level, no engine) and
+`test_legacy_vm_lease_migration.py` (DB-level, calling
+`_apply_legacy_vm_lease_backfill` directly to reach the equivalent-rerun and
+conflicting-duplicate paths that `run_migrations`'s tracked-once gate makes
+otherwise unreachable). Task 7.10's gap closes with
+`test_fulfillment_convergence_after_legacy_backfill.py`, which runs a real
+migration then drives `FulfillmentConvergenceWatchdog` against the
+backfilled rows. The full repository test surface reachable from this
+session's environment (446 unit tests across `kit/fulfillment` and
+`provisioning/compute/service`, 490 including integration) passes with no
+regressions from the refactor.
+
+While extracting the compiler, found and closed one real gap task 7.7 had
+missed: a candidate reaching `active`/`tearing_down` state with a live
+target but no known `create_job_id` previously reached
+`AnsibleFulfillmentMetadata.model_validate` (which requires
+`create_job_id: str`) and failed with an opaque `ProviderConfigInvalidError`
+raised from deep inside the provider stack rather than a clear
+migration-level error. The compiler now rejects this explicitly. This
+tightens behavior for a case the original inline code did not test, but
+does not change the outcome for any currently-passing test — the
+transaction still fails loud and rolls back either way, only the error
+type and message improve.
+
+Tasks 7.13 (relocate the promotion record into `design.md`) and 7.14
+(`proposal.md`'s missing checklist) remain open, deferred to Section 7
+review close and the final POOLS-7 review respectively, per the plan
+above.
+
 ## Section 5 (fulfillment acceptance and provider preparation) — resolved design decisions (discuss phase, resolved 2026-07-23)
 
 Discuss phase for the new Section 5 ("Implement fulfillment acceptance and provider preparation," renumbered from 6 per the resequencing decision above) is complete. The decisions below are accepted and bind Section 5 planning.
