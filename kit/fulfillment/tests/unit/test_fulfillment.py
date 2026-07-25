@@ -97,6 +97,7 @@ class FakeUnitOfWork:
         self.transactions = list(transactions)
         self.write_entries = 0
         self.read_entries = 0
+        self.read_transaction_open = False
 
     @contextmanager
     def transaction(self):
@@ -106,7 +107,11 @@ class FakeUnitOfWork:
     @contextmanager
     def read_transaction(self):
         self.read_entries += 1
-        yield self.transactions.pop(0)
+        self.read_transaction_open = True
+        try:
+            yield self.transactions.pop(0)
+        finally:
+            self.read_transaction_open = False
 
 
 def _provider():
@@ -188,6 +193,22 @@ def test_get_fulfillment_status_reads_without_any_provider_call():
     provider.dispatch_create.assert_not_called()
 
 
+
+def test_get_fulfillment_status_repeated_reads_are_stable_and_provider_free():
+    record = _record(state=SettlementRecordState.active.value)
+    provider = _provider()
+    uow = FakeUnitOfWork(FakeTransaction(record), FakeTransaction(record))
+    orchestrator = _orchestrator(uow, provider)
+
+    first = orchestrator.get_fulfillment_status("fulfillment-1")
+    second = orchestrator.get_fulfillment_status("fulfillment-1")
+
+    assert first == second
+    assert uow.read_entries == 2
+    assert uow.write_entries == 0
+    provider.fetch_credentials.assert_not_called()
+
+
 def test_get_fulfillment_status_reports_failure_detail():
     record = _record(
         state=SettlementRecordState.failed.value,
@@ -244,6 +265,45 @@ async def test_get_fulfillment_result_active_state_includes_provisioned_resource
     provider.prepare_create.assert_not_called()
 
 
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_preserves_many_to_many_domain_associations():
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    outputs = [
+        _provisioned_resource(provisioned_resource_id="provisioned-1"),
+        _provisioned_resource(provisioned_resource_id="provisioned-2"),
+    ]
+    provider = _provider()
+    provider.fetch_credentials = AsyncMock(
+        return_value=VersionedEnvelope(
+            kind="vm.fulfillment.result.v1",
+            schema_version=1,
+            payload={
+                "credentials": [
+                    {
+                        "role": "shared-admin",
+                        "provisioned_resource_ids": ["provisioned-1", "provisioned-2"],
+                    },
+                    {
+                        "role": "tenant",
+                        "provisioned_resource_ids": ["provisioned-2"],
+                    },
+                ]
+            },
+        )
+    )
+    envelope = await _orchestrator(
+        FakeUnitOfWork(FakeTransaction(record, provisioned_resources=outputs)), provider
+    ).get_fulfillment_result("fulfillment-1")
+
+    credentials = envelope.payload["domain_result"]["payload"]["credentials"]
+    assert credentials[0]["provisioned_resource_ids"] == ["provisioned-1", "provisioned-2"]
+    assert credentials[1]["provisioned_resource_ids"] == ["provisioned-2"]
+
+
 @pytest.mark.parametrize(
     "state",
     [
@@ -273,6 +333,46 @@ async def test_get_fulfillment_result_non_active_states_have_no_outputs_and_no_p
     provider.prepare_create.assert_not_called()
     provider.dispatch_create.assert_not_called()
     provider.fetch_credentials.assert_not_called()
+
+
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_repeated_non_active_reads_are_stable_and_provider_free():
+    record = _record(state=SettlementRecordState.dispatching.value)
+    provider = _provider()
+    uow = FakeUnitOfWork(FakeTransaction(record), FakeTransaction(record))
+    orchestrator = _orchestrator(uow, provider)
+
+    first = await orchestrator.get_fulfillment_result("fulfillment-1")
+    second = await orchestrator.get_fulfillment_result("fulfillment-1")
+
+    assert first == second
+    assert uow.read_entries == 2
+    assert uow.write_entries == 0
+    provider.fetch_credentials.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_closes_read_transaction_before_provider_io():
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    uow = FakeUnitOfWork(FakeTransaction(record, provisioned_resources=[_provisioned_resource()]))
+    provider = _provider()
+
+    async def fetch_credentials(*args, **kwargs):
+        assert not uow.read_transaction_open
+        return VersionedEnvelope(
+            kind="vm.fulfillment.result.v1",
+            schema_version=1,
+            payload={"credentials": []},
+        )
+
+    provider.fetch_credentials = AsyncMock(side_effect=fetch_credentials)
+    await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    provider.fetch_credentials.assert_awaited_once()
 
 
 @pytest.mark.asyncio

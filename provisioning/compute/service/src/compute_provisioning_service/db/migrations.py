@@ -400,7 +400,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         except LegacyBackfillValidationError as exc:
             raise SchemaDriftError(str(exc)) from exc
 
-        target = draft.provisioned_resource_ref
+        target = draft.provisioned_resource_id
         if target and target in seen_targets:
             raise SchemaDriftError(f"duplicate legacy VM target {target}")
         if target:
@@ -416,7 +416,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
         if existing:
             if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
-                connection, draft.capacity_reservation_id, draft.provisioned_resource_ref
+                connection, draft.capacity_reservation_id, draft.provisioned_resource_id
             ):
                 raise SchemaDriftError(
                     f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
@@ -440,13 +440,13 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
             "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
             "state": draft.state,
         })
-        if draft.provisioned_resource_ref:
+        if draft.provisioned_resource_id:
             connection.execute(text(
                 """INSERT INTO provisioned_resources
                 (provisioned_resource_id, capacity_reservation_id, fulfillment_id, status)
                 VALUES (:id,:rid,:fid,'active')"""
             ), {
-                "id": draft.provisioned_resource_ref, "rid": draft.capacity_reservation_id,
+                "id": draft.provisioned_resource_id, "rid": draft.capacity_reservation_id,
                 "fid": draft.fulfillment_id,
             })
 

@@ -2732,7 +2732,7 @@ endpoint, and `provisioning-result-push-delivery` gains a second, direct
 dependency on `add-storefront-principal-authentication` alongside its
 existing dependency on this change.
 
-### Section 8 permanent-documentation impact (for the design-promotion record)
+### Section 8 completed design-promotion record
 
 | Decision | Destination |
 | --- | --- |
@@ -2744,7 +2744,7 @@ existing dependency on this change.
 | No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
 | Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |
 
-### Section 8 implementation (2026-07-25) — confirmed against the table above
+### Section 8 implementation confirmation (2026-07-25)
 
 All six discuss-phase decisions and the ownership-check split were implemented as recorded; each destination cell above now contains the corresponding promoted text. One correction found during implementation, not a design change: the discuss-phase text assumed `AnsibleFulfillmentProvider.fetch_credentials` would need an async HTTP call through `vm_provisioning_operator.client` to a separate adapter service. In fact `AnsibleFulfillmentProvider` and `AnsibleJobService` (which owns `get_credentials`) run in the same process/service already -- the call is a local, synchronous DB read, wrapped in an `async def` only to satisfy the provider-neutral interface (the same shape `get_status`/`get_job` already has). No design implication beyond the implementation itself; recorded here so a future reader of the discuss-phase note above isn't misled by the superseded assumption.
 

@@ -21,6 +21,7 @@ from .db import (
 )
 from .envelopes import VersionedEnvelope, envelope
 from .ids import (
+    derive_provisioned_resource_id,
     new_capacity_reservation_id,
     new_fulfillment_id,
     new_provisioned_resource_id,
@@ -150,6 +151,7 @@ __all__ = [
     "VersionedEnvelope",
     "build_fulfillment_result_envelope",
     "envelope",
+    "derive_provisioned_resource_id",
     "new_capacity_reservation_id",
     "new_fulfillment_id",
     "new_provisioned_resource_id",

@@ -56,4 +56,4 @@ class LegacyFulfillmentBackfillDraft:
     provider_metadata: dict[str, Any]
     teardown_provider_metadata: dict[str, Any] | None
     prepared_teardown_operation: dict[str, Any] | None
-    provisioned_resource_ref: str | None
+    provisioned_resource_id: str | None
