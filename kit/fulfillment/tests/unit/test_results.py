@@ -12,6 +12,11 @@ from market_fulfillment import (
 
 
 def test_build_fulfillment_result_envelope_shape():
+    domain_result = VersionedEnvelope(
+        kind="vm.fulfillment.result.v1",
+        schema_version=1,
+        payload={"credentials": []},
+    )
     payload = FulfillmentResultPayload(
         fulfillment_id="fulfillment-1",
         capacity_reservation_id="reservation-1",
@@ -19,10 +24,10 @@ def test_build_fulfillment_result_envelope_shape():
         provisioned_resources=(
             ProvisionedResourceOutput(
                 provisioned_resource_id="provisioned-1",
-                domain_resource_ref="vm-1",
                 status="active",
             ),
         ),
+        domain_result=domain_result,
     )
 
     result = build_fulfillment_result_envelope(payload)
@@ -30,9 +35,8 @@ def test_build_fulfillment_result_envelope_shape():
     assert result.kind == FULFILLMENT_RESULT_KIND
     assert result.schema_version == FULFILLMENT_RESULT_SCHEMA_VERSION
     assert result.payload["fulfillment_id"] == "fulfillment-1"
-    assert result.payload["provisioned_resources"][0]["domain_resource_ref"] == "vm-1"
-    # Never populated by this construction path yet -- no provider fetch exists.
-    assert result.payload["credentials"] == []
+    assert result.payload["provisioned_resources"][0]["provisioned_resource_id"] == "provisioned-1"
+    assert result.payload["domain_result"]["kind"] == "vm.fulfillment.result.v1"
 
 
 def test_fulfillment_result_payload_defaults_are_empty():
@@ -43,7 +47,7 @@ def test_fulfillment_result_payload_defaults_are_empty():
     )
 
     assert payload.provisioned_resources == ()
-    assert payload.credentials == ()
+    assert payload.domain_result is None
     assert payload.failure_reason is None
 
 

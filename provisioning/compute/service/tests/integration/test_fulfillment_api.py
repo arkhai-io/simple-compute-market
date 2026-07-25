@@ -500,11 +500,11 @@ class TestAcknowledgementFailureRecovery:
 
 class TestStatusAndResultQueries:
     """Integration coverage for the pull-based `GET /fulfillment/{id}/status`
-    and `GET /fulfillment/{id}/result` endpoints (Section 8), against the
-    real HTTP surface, a real SQLite-backed repository, and -- for the
-    active-state case -- a real `AnsibleFulfillmentProvider.fetch_credentials`
-    read of a `Credential` row inserted the same way the job-completion path
-    would have written one.
+    and `GET /fulfillment/{id}/result` endpoints, against the real HTTP
+    surface, a real SQLite-backed repository, and -- for the active-state
+    case -- a real `AnsibleFulfillmentProvider.fetch_credentials` read of a
+    `Credential` row inserted the same way the job-completion path would
+    have written one.
     """
 
     async def test_status_reflects_dispatching_state_after_begin(
@@ -547,7 +547,7 @@ class TestStatusAndResultQueries:
         assert body["kind"] == "fulfillment.result.v1"
         assert body["payload"]["state"] == "dispatching"
         assert body["payload"]["provisioned_resources"] == []
-        assert body["payload"]["credentials"] == []
+        assert body["payload"]["domain_result"] is None
 
     async def test_result_unknown_id_is_404(self, fulfillment: FulfillmentApi):
         resp = await fulfillment.result("no-such-fulfillment")
@@ -574,7 +574,7 @@ class TestStatusAndResultQueries:
             SettlementRepository().add_provisioned_resource(
                 db,
                 capacity_reservation_id=capacity_reservation_id,
-                domain_resource_ref="vm-result-2",
+                provisioned_resource_id="provisioned-vm-result-2",
             )
             SettlementRepository().transition(db, capacity_reservation_id, "active")
             db.commit()
@@ -583,11 +583,19 @@ class TestStatusAndResultQueries:
         assert resp.status_code == 200, resp.text
         payload = resp.json()["payload"]
         assert payload["state"] == "active"
-        assert [r["domain_resource_ref"] for r in payload["provisioned_resources"]] == [
-            "vm-result-2"
+        assert [r["provisioned_resource_id"] for r in payload["provisioned_resources"]] == [
+            "provisioned-vm-result-2"
         ]
-        roles = {c["role"] for c in payload["credentials"]}
+        domain_result = payload["domain_result"]
+        assert domain_result["kind"] == "vm.fulfillment.result.v1"
+        credentials = domain_result["payload"]["credentials"]
+        roles = {c["role"] for c in credentials}
         assert roles == {"root", "tenant"}
-        for credential in payload["credentials"]:
+        for credential in credentials:
             assert credential["password"]
             assert credential["ssh_commands"]
+            # Every credential is associated with every produced output --
+            # correct for the single-resource-per-VM-fulfillment case this
+            # adapter handles today, but not a real per-credential mapping;
+            # see AnsibleFulfillmentProvider.fetch_credentials.
+            assert credential["provisioned_resource_ids"] == ["provisioned-vm-result-2"]

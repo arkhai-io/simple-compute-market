@@ -11,6 +11,8 @@ enumeration-level and covered separately in
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from market_fulfillment.backfill import LegacyBackfillValidationError
@@ -62,7 +64,18 @@ def test_active_lease_becomes_active_with_provisioned_resource_and_teardown():
     draft = compile_legacy_vm_fulfillment_backfill(candidate, fulfillment_id="f-1")
 
     assert draft.state == "active"
-    assert draft.provisioned_resource_ref == "vm-active"
+    # provisioned_resource_ref is a fulfillment-owned opaque identity, not
+    # the raw VM target -- deterministic on (capacity_reservation_id,
+    # target) so a re-run of this compiler against the same lease always
+    # derives the same value (see legacy_backfill.py's own comment on this
+    # derivation, and why it is not keyed on fulfillment_id).
+    expected_ref = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"reservation:{candidate.capacity_reservation_id}:vm-active",
+        )
+    )
+    assert draft.provisioned_resource_ref == expected_ref
     assert draft.prepared_teardown_operation is not None
     assert draft.prepared_teardown_operation["kind"] == "vm.ansible.teardown.v1"
     assert draft.teardown_provider_metadata is None

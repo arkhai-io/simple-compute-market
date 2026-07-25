@@ -114,8 +114,8 @@ class FulfillmentController:
             ) from exc
         return FulfillmentStatusResponse(**result.__dict__)
 
-    @router.get("/{fulfillment_id}/result")
-    async def result(self, fulfillment_id: str) -> dict[str, Any]:
+    @router.get("/{fulfillment_id}/result", response_model=VersionedEnvelope[dict[str, Any]])
+    async def result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]:
         try:
             envelope = await self._service.get_fulfillment_result(fulfillment_id)
         except SettlementEntityNotFoundError as exc:
@@ -131,7 +131,7 @@ class FulfillmentController:
                     "message": "Credentials could not be fetched right now; retry the read.",
                 },
             ) from exc
-        return envelope.model_dump(mode="json")
+        return envelope
 
     @classmethod
     def make_router(cls) -> APIRouter:

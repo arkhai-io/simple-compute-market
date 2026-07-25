@@ -136,6 +136,15 @@ The VM Ansible fulfillment adapter MUST execute only against the scheduler-selec
 - **WHEN** teardown begins for an accepted VM fulfillment
 - **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
 
+### Requirement: VM fulfillment result payload
+
+`AnsibleFulfillmentProvider.fetch_credentials` (see `openspec/specs/fulfillment/spec.md#requirement-provider-contract`) returns a `vm.fulfillment.result.v1` versioned envelope, defined in `vm_provisioning_adapter/fulfillment_results.py`, nested inside the generic `fulfillment.result.v1` envelope's `domain_result` field. Its payload carries `provisioned_resources` (each output's `provisioned_resource_id` and `status`, mirroring the fulfillment-owned identity the kit already exposes) and `credentials`: a tuple of `role`, `password`, `ssh_commands`, and `provisioned_resource_ids` — the output identities that credential is associated with, expressed this way so a fulfillment with more than one provisioned resource can eventually express which credential belongs to which output rather than a single flat list. Today every VM fulfillment produces exactly one `ProvisionedResource`, so every credential's `provisioned_resource_ids` names that one output; this is a real limitation, not yet a genuine many-to-many resolution, since the adapter has no way to attribute an individual credential to a specific output when more than one exists. Credentials are sourced from `AnsibleJobService.get_credentials(job_id)` and are never persisted by this adapter or by the fulfillment kit — they exist only in the response constructed for one `get_fulfillment_result` call.
+
+#### Scenario: Result query on an active VM fulfillment includes the domain payload
+
+- **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose VM fulfillment is `active`
+- **THEN** the envelope's `domain_result` is a `vm.fulfillment.result.v1` payload whose `credentials` reflect a live `AnsibleJobService.get_credentials` read for the recorded job, and whose `provisioned_resources` mirror the fulfillment kit's own `ProvisionedResource` rows
+
 ### Requirement: Clean ownership cutover
 
 After callers and deployments migrate, generic provisioning service and client paths under the VM domain MUST be removed rather than retained as aliases or compatibility distributions.

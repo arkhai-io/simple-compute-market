@@ -321,11 +321,20 @@ class FulfillmentConvergenceWatchdog:
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
-            for ref in refs:
+            record = self._repository.get(db, reservation_id)
+            if record is None or record.fulfillment_id is None:
+                raise LookupError(reservation_id)
+            for provider_output_key in refs:
+                provisioned_resource_id = str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"fulfillment:{record.fulfillment_id}:{provider_output_key}",
+                    )
+                )
                 self._repository.add_provisioned_resource(
                     db,
                     capacity_reservation_id=reservation_id,
-                    domain_resource_ref=ref,
+                    provisioned_resource_id=provisioned_resource_id,
                 )
             self._repository.transition(
                 db, reservation_id, SettlementRecordState.active.value

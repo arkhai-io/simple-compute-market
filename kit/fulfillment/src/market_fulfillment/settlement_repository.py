@@ -294,27 +294,29 @@ class SettlementRepository:
         db: Session,
         *,
         capacity_reservation_id: str,
-        domain_resource_ref: str | None = None,
+        provisioned_resource_id: str,
         status: str = "active",
     ) -> ProvisionedResource:
+        """Persist or return one output under its stable fulfillment identity."""
+
         record = self.get(db, capacity_reservation_id)
         if record is None or record.fulfillment_id is None:
             raise SettlementEntityNotFoundError(
                 f"capacity_reservation_id={capacity_reservation_id!r} has no accepted "
                 "fulfillment to attach a provisioned resource to"
             )
-        existing = (
-            db.query(ProvisionedResource)
-            .filter(ProvisionedResource.capacity_reservation_id == capacity_reservation_id)
-            .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
-            .one_or_none()
-        )
+        existing = db.get(ProvisionedResource, provisioned_resource_id)
         if existing is not None:
+            if existing.capacity_reservation_id != capacity_reservation_id:
+                raise FulfillmentConflictError(
+                    f"provisioned_resource_id={provisioned_resource_id!r} belongs to "
+                    "another fulfillment"
+                )
             return existing
         provisioned = ProvisionedResource(
+            provisioned_resource_id=provisioned_resource_id,
             capacity_reservation_id=capacity_reservation_id,
             fulfillment_id=record.fulfillment_id,
-            domain_resource_ref=domain_resource_ref,
             status=status,
         )
         try:
@@ -323,20 +325,8 @@ class SettlementRepository:
                 db.flush()
             return provisioned
         except IntegrityError:
-            # A concurrent caller won the unique-constraint race between our
-            # existence check and our insert. Re-read and return the
-            # winning row rather than raising -- add_provisioned_resource
-            # stays idempotent under genuine concurrency, not just under
-            # sequential retries.
-            existing = (
-                db.query(ProvisionedResource)
-                .filter(
-                    ProvisionedResource.capacity_reservation_id == capacity_reservation_id
-                )
-                .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
-                .one_or_none()
-            )
-            if existing is not None:
+            existing = db.get(ProvisionedResource, provisioned_resource_id)
+            if existing is not None and existing.capacity_reservation_id == capacity_reservation_id:
                 return existing
             raise
 

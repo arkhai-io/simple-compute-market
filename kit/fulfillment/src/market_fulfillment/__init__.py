@@ -31,15 +31,12 @@ from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
 from .results import (
     FULFILLMENT_RESULT_KIND,
     FULFILLMENT_RESULT_SCHEMA_VERSION,
-    FulfillmentCredential,
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
     build_fulfillment_result_envelope,
 )
 from .provider import (
-    Credential,
     CredentialFetchFailedError,
-    CredentialSet,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentError,
@@ -56,6 +53,7 @@ from .provider import (
     ProviderOperationState,
     ProviderRegistry,
     ProviderStatus,
+    ProvisionedResourceDescriptor,
     ProviderUnavailableError,
 )
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
@@ -99,12 +97,9 @@ __all__ = [
     "FulfillmentOrchestrator",
     "FulfillmentAcceptance",
     "FulfillmentStatus",
-    "Credential",
     "CredentialFetchFailedError",
-    "CredentialSet",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
-    "FulfillmentCredential",
     "FulfillmentError",
     "FulfillmentProvider",
     "FulfillmentRequestInvalidError",
@@ -125,6 +120,7 @@ __all__ = [
     "ProviderRegistry",
     "ProviderStatus",
     "ProviderUnavailableError",
+    "ProvisionedResourceDescriptor",
     "ProvisionedResourceOutput",
     "RecoveryDiagnostics",
     "RecoveryStateDiagnostics",

@@ -10,8 +10,6 @@ import pytest
 
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
-    Credential,
-    CredentialSet,
     FulfillmentCreateFailedError,
     FulfillmentOrchestrator,
     FulfillmentResult,
@@ -122,14 +120,19 @@ def _provider():
         return_value=FulfillmentResult({"job_id": "job-1"})
     )
     provider.fetch_credentials = AsyncMock(
-        return_value=CredentialSet(
-            credentials=(
-                Credential(
-                    role="tenant",
-                    password="s3cr3t",
-                    ssh_commands={"external": "ssh tenant@host"},
-                ),
-            )
+        return_value=VersionedEnvelope(
+            kind="vm.fulfillment.result.v1",
+            schema_version=1,
+            payload={
+                "credentials": [
+                    {
+                        "role": "tenant",
+                        "password": "s3cr3t",
+                        "ssh_commands": {"external": "ssh tenant@host"},
+                        "provisioned_resource_ids": ["provisioned-1", "provisioned-2"],
+                    }
+                ]
+            },
         )
     )
     return provider
@@ -161,7 +164,6 @@ def test_validate_uses_read_transaction_and_shared_preparation_path():
 def _provisioned_resource(**overrides):
     values = {
         "provisioned_resource_id": "provisioned-1",
-        "domain_resource_ref": "vm-1",
         "status": "active",
     }
     values.update(overrides)
@@ -215,7 +217,7 @@ async def test_get_fulfillment_result_active_state_includes_provisioned_resource
         provider_metadata={"current_job_id": "job-1"},
     )
     outputs = [_provisioned_resource(), _provisioned_resource(
-        provisioned_resource_id="provisioned-2", domain_resource_ref="vm-2"
+        provisioned_resource_id="provisioned-2"
     )]
     tx = FakeTransaction(record, provisioned_resources=outputs)
     provider = _provider()
@@ -228,14 +230,17 @@ async def test_get_fulfillment_result_active_state_includes_provisioned_resource
     payload = envelope.payload
     assert payload["fulfillment_id"] == "fulfillment-1"
     assert payload["state"] == SettlementRecordState.active.value
-    assert [r["domain_resource_ref"] for r in payload["provisioned_resources"]] == [
-        "vm-1",
-        "vm-2",
+    assert [r["provisioned_resource_id"] for r in payload["provisioned_resources"]] == [
+        "provisioned-1",
+        "provisioned-2",
     ]
-    assert payload["credentials"] == [
-        {"role": "tenant", "password": "s3cr3t", "ssh_commands": {"external": "ssh tenant@host"}}
+    assert payload["domain_result"]["kind"] == "vm.fulfillment.result.v1"
+    assert payload["domain_result"]["payload"]["credentials"][0]["provisioned_resource_ids"] == [
+        "provisioned-1",
+        "provisioned-2",
     ]
-    provider.fetch_credentials.assert_called_once_with({"current_job_id": "job-1"})
+    provider.fetch_credentials.assert_called_once()
+    assert provider.fetch_credentials.call_args.args[0] == {"current_job_id": "job-1"}
     provider.prepare_create.assert_not_called()
 
 
@@ -263,7 +268,7 @@ async def test_get_fulfillment_result_non_active_states_have_no_outputs_and_no_p
     envelope = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
 
     assert envelope.payload["provisioned_resources"] == []
-    assert envelope.payload["credentials"] == []
+    assert envelope.payload["domain_result"] is None
     assert envelope.payload["state"] == state
     provider.prepare_create.assert_not_called()
     provider.dispatch_create.assert_not_called()
@@ -295,6 +300,121 @@ async def test_get_fulfillment_result_credential_fetch_failure_is_distinct_from_
 
     # The aggregate's own durable state is unaffected by a live-fetch failure.
     assert record.state == SettlementRecordState.active.value
+
+
+async def test_get_fulfillment_result_unexpected_provider_exception_is_wrapped_not_leaked():
+    """The defensive orchestration wrapper around a provider's credential
+    fetch: an unexpected exception (not the provider's own
+    CredentialFetchFailedError) still rejects the whole result as
+    credential_fetch_failed, rather than leaking a raw provider-internal
+    exception type to the caller."""
+    from market_fulfillment import CredentialFetchFailedError
+
+    record = _record(state=SettlementRecordState.active.value)
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    provider.fetch_credentials = AsyncMock(side_effect=RuntimeError("boom"))
+    uow = FakeUnitOfWork(tx)
+
+    with pytest.raises(CredentialFetchFailedError):
+        await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert record.state == SettlementRecordState.active.value
+
+
+async def test_get_fulfillment_result_active_state_performs_a_fresh_lookup_every_call():
+    """No caching: two reads of the same active fulfillment each call
+    fetch_credentials again, not just once with the second read reusing a
+    stored value."""
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    uow = FakeUnitOfWork(tx, tx)
+
+    await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+    await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert provider.fetch_credentials.call_count == 2
+
+
+async def test_get_fulfillment_result_durable_fields_are_stable_when_aggregate_unchanged():
+    """State, failure detail, and provisioned-resource outputs are read
+    straight from the durable aggregate on every call; two reads against an
+    unchanged aggregate return identical values for all of them, even though
+    the provider is free to return different domain-result content each
+    time (see the next test)."""
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    uow = FakeUnitOfWork(tx, tx)
+
+    first = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+    second = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert first.payload["state"] == second.payload["state"]
+    assert first.payload["failure_reason"] == second.payload["failure_reason"]
+    assert first.payload["provisioned_resources"] == second.payload["provisioned_resources"]
+
+
+async def test_get_fulfillment_result_credential_equality_across_reads_is_not_guaranteed():
+    """A live fetch is authoritative at read time; nothing in this contract
+    promises two reads return equal credentials, and a provider that legitimately
+    returns different content on each call (a rotated secret store, a
+    changed role set) must not be treated as an error by the read path."""
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    provider.fetch_credentials = AsyncMock(
+        side_effect=[
+            VersionedEnvelope(
+                kind="vm.fulfillment.result.v1",
+                schema_version=1,
+                payload={"credentials": [{"role": "tenant", "password": "first"}]},
+            ),
+            VersionedEnvelope(
+                kind="vm.fulfillment.result.v1",
+                schema_version=1,
+                payload={"credentials": [{"role": "tenant", "password": "second"}]},
+            ),
+        ]
+    )
+    uow = FakeUnitOfWork(tx, tx)
+
+    first = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+    second = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert first.payload["domain_result"] != second.payload["domain_result"]
+    # Divergent credential content across reads is not itself an error --
+    # both reads succeeded and returned a complete envelope.
+    assert first.payload["state"] == second.payload["state"] == "active"
+
+
+async def test_get_fulfillment_result_does_not_mutate_fulfillment_state():
+    """A result read is a pure projection: it never opens a write
+    transaction and never changes the durable aggregate, active or not."""
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    uow = FakeUnitOfWork(tx, tx)
+
+    await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+    await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert record.state == SettlementRecordState.active.value
+    assert uow.write_entries == 0
+    assert uow.read_entries == 2
 
 
 @pytest.mark.asyncio

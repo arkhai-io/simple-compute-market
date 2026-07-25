@@ -14,7 +14,6 @@ from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment import (
     Backoff,
-    CredentialSet,
     FulfillmentProvider,
     FulfillmentResult,
     ProviderConfigInvalidError,
@@ -124,8 +123,8 @@ class _StubProvider(FulfillmentProvider):
             raise self._resolve_error
         return self._resolve_result
 
-    async def fetch_credentials(self, provider_metadata):
-        return CredentialSet()
+    async def fetch_credentials(self, provider_metadata, provisioned_resources):
+        return VersionedEnvelope(kind="vm.fulfillment.result.v1", schema_version=1, payload={"credentials": []})
 
 
 def _settings(**overrides):
@@ -212,7 +211,8 @@ async def test_converge_creates_success_persists_resource_and_transitions_to_act
         assert record.state == SettlementRecordState.active.value
         assert record.claimed_by is None
         resources = repo.list_provisioned_resources(db, "cr-1")
-        assert [r.domain_resource_ref for r in resources] == ["vm-42"]
+        assert len(resources) == 1
+        assert resources[0].status == "active"
 
 
 async def test_converge_creates_fails_terminally_on_invalid_resource_metadata(
@@ -344,7 +344,7 @@ async def test_converge_teardowns_success_updates_resources_and_transitions_to_t
     _active_row_ready_for_teardown(repo, session_factory)
     with session_factory() as db:
         repo.add_provisioned_resource(
-            db, capacity_reservation_id="cr-1", domain_resource_ref="vm-42"
+            db, capacity_reservation_id="cr-1", provisioned_resource_id="provisioned-vm-42"
         )
         repo.transition(
             db,
@@ -371,7 +371,7 @@ async def test_converge_teardowns_success_updates_resources_and_transitions_to_t
         resources = repo.list_provisioned_resources(db, "cr-1")
         # Updated in place, not re-resolved or duplicated.
         assert len(resources) == 1
-        assert resources[0].domain_resource_ref == "vm-42"
+        assert resources[0].provisioned_resource_id == "provisioned-vm-42"
         assert resources[0].status == "torn_down"
 
 

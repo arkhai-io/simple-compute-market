@@ -24,14 +24,9 @@ class SettlementResult:
     provider_metadata: dict[str, Any]
 
 @dataclass(frozen=True)
-class Credential:
-    role: str
-    password: str | None = None
-    ssh_commands: dict[str, Any] | None = None
-
-@dataclass(frozen=True)
-class CredentialSet:
-    credentials: tuple[Credential, ...] = ()
+class ProvisionedResourceDescriptor:
+    provisioned_resource_id: str
+    status: str
 
 @dataclass(frozen=True)
 class ProviderStatus:
@@ -76,8 +71,17 @@ class FulfillmentProvider(ABC):
     @abstractmethod
     async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
     @abstractmethod
-    async def fetch_credentials(self, provider_metadata:dict[str,Any]) -> CredentialSet:
-        """Fetch live access credentials for a confirmed-active fulfillment.
+    async def fetch_credentials(
+        self,
+        provider_metadata: dict[str, Any],
+        provisioned_resources: tuple[ProvisionedResourceDescriptor, ...],
+    ) -> VersionedEnvelope[Any]:
+        """Return a fresh versioned domain result for an active fulfillment.
+
+        The fulfillment kit supplies only its opaque output identities and
+        statuses via ``provisioned_resources``; the adapter owns the nested
+        payload schema and any many-to-many credential-to-output
+        associations it wants to express within it.
 
         Async, since it performs provider I/O -- unlike
         ``resolve_provisioned_resources``, which is pure and synchronous.
@@ -85,9 +89,12 @@ class FulfillmentProvider(ABC):
         ``get_fulfillment_result``, with no claim, lease, or generation
         bookkeeping: this is a stateless read, never a coordinated mutation,
         and this codebase has no credential-rotation source for a generation
-        counter to track. Raise ``CredentialFetchFailedError`` on any fetch
-        failure so shared orchestration can distinguish it from a workload
-        failure and let the caller retry the read.
+        counter to track. Raise ``CredentialFetchFailedError`` on any
+        expected fetch failure (missing/invalid metadata, an unresolvable
+        credential store) so shared orchestration can distinguish it from a
+        workload failure and let the caller retry the read; an unexpected
+        exception is wrapped into the same category by the orchestration
+        boundary rather than leaking raw provider internals to the caller.
         """
         ...
 

@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from market_fulfillment import (
-    Credential,
     CredentialFetchFailedError,
-    CredentialSet,
+    ProvisionedResourceDescriptor,
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -21,6 +20,10 @@ from market_fulfillment import (
     SettlementResource,
     SettlementResult,
     VersionedEnvelope,
+)
+from vm_provisioning_adapter.fulfillment_results import (
+    VmFulfillmentCredential,
+    build_vm_fulfillment_result,
 )
 from vm_provisioning_adapter.models.fulfillment_model import (
     AnsibleFulfillmentMetadata,
@@ -312,8 +315,10 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         )
 
     async def fetch_credentials(
-        self, provider_metadata: dict[str, Any]
-    ) -> CredentialSet:
+        self,
+        provider_metadata: dict[str, Any],
+        provisioned_resources: tuple[ProvisionedResourceDescriptor, ...],
+    ) -> VersionedEnvelope[Any]:
         """Fetch live credentials for the job that created this fulfillment's resource.
 
         Declared async to satisfy the provider-neutral interface, which must
@@ -338,13 +343,18 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         except Exception as exc:
             raise CredentialFetchFailedError(str(exc)) from exc
 
-        return CredentialSet(
-            credentials=tuple(
-                Credential(
+        output_ids = tuple(
+            resource.provisioned_resource_id for resource in provisioned_resources
+        )
+        return build_vm_fulfillment_result(
+            provisioned_resources,
+            tuple(
+                VmFulfillmentCredential(
                     role=credential.role,
                     password=credential.password,
                     ssh_commands=credential.ssh_commands,
+                    provisioned_resource_ids=output_ids,
                 )
                 for credential in response.credentials
-            )
+            ),
         )

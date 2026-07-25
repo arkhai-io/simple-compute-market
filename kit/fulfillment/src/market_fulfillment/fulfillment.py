@@ -10,13 +10,14 @@ from .db import SettlementRecord, SettlementRecordState
 from .envelopes import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
+    CredentialFetchFailedError,
     FulfillmentCreateFailedError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
     ProviderRegistry,
+    ProvisionedResourceDescriptor,
 )
 from .results import (
-    FulfillmentCredential,
     FulfillmentResultPayload,
     ProvisionedResourceOutput,
     build_fulfillment_result_envelope,
@@ -244,7 +245,6 @@ class FulfillmentOrchestrator:
                 outputs = tuple(
                     ProvisionedResourceOutput(
                         provisioned_resource_id=resource.provisioned_resource_id,
-                        domain_resource_ref=resource.domain_resource_ref,
                         status=resource.status,
                     )
                     for resource in tx.list_provisioned_resources(
@@ -260,18 +260,34 @@ class FulfillmentOrchestrator:
             provider_name = record.provider
             provider_metadata = dict(record.provider_metadata or {})
 
-        credentials: tuple[FulfillmentCredential, ...] = ()
+        domain_result: VersionedEnvelope[Any] | None = None
         if is_active:
             provider = self._providers.require(provider_name)
-            credential_set = await provider.fetch_credentials(provider_metadata)
-            credentials = tuple(
-                FulfillmentCredential(
-                    role=credential.role,
-                    password=credential.password,
-                    ssh_commands=credential.ssh_commands,
+            descriptors = tuple(
+                ProvisionedResourceDescriptor(
+                    provisioned_resource_id=output.provisioned_resource_id,
+                    status=output.status,
                 )
-                for credential in credential_set.credentials
+                for output in outputs
             )
+            try:
+                domain_result = await provider.fetch_credentials(
+                    provider_metadata,
+                    descriptors,
+                )
+            except Exception as exc:
+                if isinstance(exc, CredentialFetchFailedError):
+                    raise
+                logger.exception(
+                    "Unexpected credential fetch failure",
+                    extra={
+                        "fulfillment_id": fulfillment_id_value,
+                        "provider": provider_name,
+                    },
+                )
+                raise CredentialFetchFailedError(
+                    "the fulfillment provider could not produce its result"
+                ) from exc
 
         payload = FulfillmentResultPayload(
             fulfillment_id=fulfillment_id_value,
@@ -280,6 +296,6 @@ class FulfillmentOrchestrator:
             failure_reason=failure_reason,
             failure_message=failure_message,
             provisioned_resources=outputs,
-            credentials=credentials,
+            domain_result=domain_result,
         )
         return build_fulfillment_result_envelope(payload)
