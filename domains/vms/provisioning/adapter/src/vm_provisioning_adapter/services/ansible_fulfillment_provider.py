@@ -246,17 +246,34 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 self._job_queue_provider(),
                 contract=contract,
             )
-            return FulfillmentResult(
-                {
-                    "teardown_job_id": response.job_id,
-                    "current_job_id": response.job_id,
-                    "operation": "teardown",
-                }
+            metadata = AnsibleFulfillmentMetadata(
+                create_job_id="",
+                teardown_job_id=response.job_id,
+                current_job_id=response.job_id,
+                vm_host=params.vm_host,
+                vm_target=params.vm_target or "",
+                operation="teardown",
             )
+            return FulfillmentResult(metadata.model_dump(mode="json"))
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
             raise FulfillmentTeardownFailedError(str(exc)) from exc
+
+    def resolve_provisioned_resources(
+        self, provider_metadata: dict[str, Any]
+    ) -> tuple[str, ...]:
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        except Exception as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid Ansible fulfillment metadata: {exc}"
+            ) from exc
+        if not metadata.vm_target.strip():
+            raise ProviderConfigInvalidError(
+                "Ansible fulfillment metadata requires a non-empty vm_target"
+            )
+        return (metadata.vm_target,)
 
     async def get_status(
         self,

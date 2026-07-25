@@ -3,10 +3,10 @@
 # Placed in the directory pointed to by CONFIG_DIRECTORY.
 # Profile-specific overrides go in config-<profile>.yml in the same directory.
 #
-# This file is intentionally empty of values. It exists so the config
-# directory is committed and the loader has a stable base file to include.
+# Stable service defaults live in this YAML layer so Compose, Helm, and other
+# deployment tooling can override the same hierarchy without translating TOML.
 #
-# Available keys (all optional — omit to fall back to settings.toml defaults):
+# Available keys:
 #   database_url, playbook_path, bare_metal_playbook_path, inventory_path, management_vars_path
 #   bare_metal_reclaim_policy
 #   ansible_cfg, ansible_timeout_seconds, default_vm_host
@@ -16,3 +16,16 @@
 #   storefront_url, storefront_admin_key
 #   enable_rate_limiting, rate_limit_requests_per_minute, log_level
 # ---------------------------------------------------------------------------
+
+# Durable fulfillment recovery and provider convergence. These backoff
+# settings are deliberately separate from retry_backoff_* (AnsibleJobService's
+# job-resubmission backoff, in settings.toml) -- claim-lease length across
+# convergence cycles and executor job-resubmission delay are different retry
+# loops and were accidentally sharing one operator knob before this split.
+fulfillment_convergence_watchdog_enabled: true
+fulfillment_convergence_watchdog_poll_interval_seconds: 30
+fulfillment_convergence_batch_size: 50
+fulfillment_convergence_backoff_initial_seconds: 5.0
+fulfillment_convergence_backoff_multiplier: 2.0
+fulfillment_convergence_backoff_max_seconds: 300.0
+fulfillment_convergence_backoff_jitter_fraction: 0.1

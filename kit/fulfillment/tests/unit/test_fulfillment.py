@@ -219,7 +219,7 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         SqlAlchemyFulfillmentTransaction,
         SqlAlchemyFulfillmentUnitOfWork,
     )
-    from market_fulfillment.repository import SettlementRepository
+    from market_fulfillment.settlement_repository import SettlementRepository
     from market_fulfillment.settlement_types import (
         SettlementRequirement,
         SettlementResource,

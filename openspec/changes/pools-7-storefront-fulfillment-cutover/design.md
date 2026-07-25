@@ -114,7 +114,17 @@ From `pools-2-physical-settlement-scheduler` (see its `tasks.md`
 
 POOLS-7 MUST make the database the correctness boundary for fulfillment
 idempotency. Process-local or asynchronous locks are insufficient because the
-provisioning service may have multiple replicas and may restart between steps.
+provisioning service may restart between steps, and because the database is
+the only durable state this service has — not because multiple replicas run
+concurrently against it. The compute provisioner is a SQLite-backed
+single-writer service deployed with `Recreate` and a `ReadWriteOnce` volume
+(`docs/development/ARCHITECTURE.md`, "Production and staging"): two replicas
+never run against the same database at once by construction. Durability
+across restarts is the real requirement this section serves; treat any
+"multi-replica" language elsewhere in this change's history as an earlier,
+imprecise framing of that same requirement (see the Section 6 resolution
+below, "What 'multi-replica-safe' means against this service's actual
+deployment topology").
 
 The durable fulfillment identity is keyed by `allocation_id`:
 
@@ -938,11 +948,15 @@ startup-only sweep misses the case where a provider call fails
 transiently (e.g. a network blip to the Ansible controller) while the
 process keeps running — that record would never be retried until the
 next restart. Same query, same idempotent-retry logic as the startup
-sweep; just scheduled periodically instead of once. Multi-replica safety
-(claiming rows so multiple replicas don't double-process the same record
-— `SELECT ... FOR UPDATE SKIP LOCKED` or an equivalent claim/lease
-pattern) is required regardless of whether the sweep is startup-only or
-periodic, and is left for planning to specify concretely.
+sweep; just scheduled periodically instead of once. Concurrent-claim safety
+(claiming rows so overlapping claim attempts — within one process's cycle,
+across a `Recreate` pod-replacement window, or from a second instance run
+for diagnosis — don't double-process the same record) is required
+regardless of whether the sweep is startup-only or periodic. SQLite has no
+`SELECT ... FOR UPDATE SKIP LOCKED`; the claim itself is a short,
+self-contained write transaction instead (see the Section 6 resolution
+below). Left for planning to specify concretely at the time this note was
+written; resolved in Section 6, "Claim primitive."
 
 ## Active allocation backfill during cutover
 
@@ -1137,8 +1151,11 @@ cutover marker is required.
 ### Provider recovery and lifecycle convergence
 
 Pending provider commands are claimed in short transactions using a
-multi-replica-safe claim/lease pattern. Database locks are released before any
-long-running external provider call. Recovery uses bounded batches,
+concurrent-claim-safe claim/lease pattern (defense-in-depth under SQLite's
+single-writer contract — see Section 6, "What 'multi-replica-safe' means
+against this service's actual deployment topology"). Database locks are
+released before any long-running external provider call. Recovery uses
+bounded batches,
 exponential backoff with jitter, claim expiry after worker death, and
 idempotent deterministic provider command identities.
 
@@ -2176,3 +2193,151 @@ section's changes are contained; the legacy direct-dispatch path is untouched an
 still fully functional. Nothing calls `begin_fulfillment` in production yet — that is
 Section 9's job — so this section is safe to merge as dormant, additive code ahead of
 Section 6 (recovery/convergence) and Section 9 (storefront cutover).
+
+## Section 6 recovery and lifecycle convergence — resolved (2026-07-24)
+
+Discussed and resolved before planning, per the discuss → plan → implement
+workflow. Between the discussion and this write-up, a `dev`-branch merge
+into the Section 5 branch was found to have archived this entire change and
+introduced an independently-evolved, incompatible implementation of
+Sections 6–12 (including a redesigned `FulfillmentProvider` contract that
+dropped `pool_config`, and undiscussed scope — a multi-principal storefront
+auth boundary and a parallel bare-metal cutover). That merge was reverted
+and redone from scratch, resolving every conflict in favor of the design
+recorded in this document; none of `dev`'s code survived. The design ideas
+worth carrying forward were extracted into
+`dev-branch-migration-notes.md` in this change directory, mapped to the
+section each would apply to — reference material for future sections'
+discuss phases, not accepted decisions, and not reflected in what follows.
+
+**1. What "multi-replica-safe" means against this service's actual
+deployment topology.** `docs/development/ARCHITECTURE.md` ("Production and
+staging") states the compute provisioner is SQLite-backed single-writer,
+deployed with `Recreate` and a `ReadWriteOnce` volume — two replicas never
+run against the same database concurrently by construction. Earlier
+"multi-replica" language in this document (now corrected in place, above)
+overstated the requirement. **Resolved:** "multi-replica-safe" is read as
+defense-in-depth under concurrent claim attempts — overlapping asyncio
+tasks within one watchdog cycle, a brief overlap during pod replacement, or
+an operator running a second instance for diagnosis — not a distributed
+multi-replica claim protocol. The claim primitive (item 3) is tested with
+the same independent-session, file-backed SQLite technique task 4.11
+established, and permanent documentation states the SQLite single-writer
+guarantee honestly.
+
+**2. Watchdog shape.** **Resolved:** one asyncio loop, one class,
+`FulfillmentConvergenceWatchdog`, composed in `compute_provisioning_service`
+alongside `LeaseWatchdog`/`CapacityReservationWatchdog`. It runs an ordered
+list of logically separate handler passes per cycle (create
+submission/recovery, create status convergence, teardown
+submission/recovery, teardown status convergence) rather than five
+independent watchdogs. Named for the table it watches (`SettlementRecord`)
+and the verb this document already uses for what the handlers do, matching
+`LeaseWatchdog`/`CapacityReservationWatchdog`'s naming convention. Not
+`SettlementRecoveryWatchdog` — "recovery" overclaims the multi-replica
+framing item 1 rejected.
+
+**3. Claim primitive.** **Resolved:** replaces
+`SettlementRepository.select_pending_for_single_worker` (task 3.11's
+documented placeholder). A new repository method opens its own short,
+self-contained `BEGIN IMMEDIATE` write transaction, selects eligible rows
+(matching state, unclaimed or claim-expired), writes the claim fields
+(`claimed_by`, `claim_expires_at`, increments `attempt_count`), and
+commits — releasing the writer slot before any provider call. SQLite has no
+`SELECT ... FOR UPDATE SKIP LOCKED`; under SQLite's single-writer contract
+it's unnecessary, since the write transaction itself already serializes
+against any other claim attempt.
+
+**4. No automatic terminal failure from attempt exhaustion.** **Resolved:**
+recovery retries `dispatch_pending`/`teardown_dispatch_pending` indefinitely
+with exponential backoff and jitter. `attempt_count` and claim age are
+surfaced as operator-facing diagnostics only, never a trigger that forces
+`failed`/`teardown_failed`. A row reaches those states only because the
+provider explicitly reported failure, or preparation raised a
+non-recoverable validation error. Rationale: this service either grants
+access to a physical resource a buyer is paying for, or releases one
+without stranding it — neither may be silently abandoned by a retry budget.
+This is distinct from, and does not change, the existing
+`LeaseLifecycleService` capacity-reservation-release path, which already has
+its own terminal `release_failed` state and operator-driven retry/force-release
+— that mechanism is unaffected by this section.
+
+**5. Status convergence shape.** **Resolved:** claim a batch (short
+transaction) → call `provider.get_status(...)` per row outside any open
+transaction → apply each row's outcome in its own second short transaction
+(`active`/`failed` for create convergence, `torn_down`/`teardown_failed` for
+teardown convergence), clearing claim fields on terminal outcomes and
+leaving them (or extending the lease) when the provider still reports
+`pending`. Mirrors Section 5's prepare/dispatch/acknowledge transaction
+shape.
+
+**6. Provisioned-resource identity.** **Resolved:** a new,
+pure, synchronous `FulfillmentProvider` method,
+`resolve_provisioned_resources(provider_metadata: dict[str, Any]) ->
+tuple[str, ...]`, called by create-status convergence exactly once, only
+when `get_status` reports `succeeded` — never earlier, so a
+`ProvisionedResource` row is never created for a resource whose creation
+might still fail. Does not touch `get_status`/`ProviderStatus`, which stay
+pure state-polling. For the VM adapter this decodes `vm_target` from the
+already-persisted `AnsibleFulfillmentMetadata` — known since dispatch
+acknowledgement, not something the provider needs to fetch or the job needs
+to have completed to produce. Teardown convergence does not call this
+method; it updates the `status` of the `ProvisionedResource` rows already
+created at create-convergence time, rather than resolving anything new.
+
+**7. Abandonment reconciliation: not built.** **Resolved:** task 6.2's
+originally-planned fifth handler is a no-op, closed rather than
+implemented. `SettlementAbandonmentHook` (Section 4, tasks 4.5.1–4.5.4)
+already fires synchronously and unconditionally, in the same transaction as
+the capacity mutation, from every capacity-reclaiming path
+(`_expire_stale_holds`, `release()`, `resize_reservation`'s supersede
+step) — there is no commit-ordering gap for a periodic sweep to close.
+
+**8. Package boundary.** Not reopened — `openspec/specs/fulfillment/spec.md`
+already states the kit does not own "the periodic multi-replica recovery
+sweep" (wording to be corrected during this section's permanent-doc
+promotion, per item 1). `kit/fulfillment` gains the claim primitive (item
+3) and the domain-neutral convergence functions; `compute_provisioning_service`
+composes `FulfillmentConvergenceWatchdog` as the asyncio timer.
+
+### Recovery diagnostics contract — resolved (2026-07-24)
+
+Recovery diagnostics use immutable typed results rather than nested dictionaries.
+Oldest-row age and maximum attempt count are calculated independently for each
+non-terminal recovery lifecycle state, matching the existing per-state row and
+claim counts; there are no global oldest-age or maximum-attempt fields. Every
+recovery state is present in each snapshot, including zero-valued states, so the
+operator-facing schema remains stable. The repository obtains the snapshot with
+one grouped aggregate query for recovery states and one grouped aggregate query
+for failure-state counts. The convergence worker emits exactly one structured
+diagnostics event after each completed cycle and never one event per row.
+
+### Section 6 permanent-documentation impact (for the design-promotion record)
+
+| Decision | Destination |
+| --- | --- |
+| SQLite single-writer concurrency contract for recovery claims (item 1) | `openspec/specs/fulfillment/spec.md` — also correct "periodic multi-replica recovery sweep" wording |
+| Claim/lease primitive semantics (item 3) | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Unbounded-retry posture for dispatch/teardown recovery (item 4) | `openspec/specs/fulfillment/spec.md` |
+| `resolve_provisioned_resources` contract and call timing (item 6) | `openspec/specs/fulfillment/spec.md`; `FulfillmentProvider` protocol docstring |
+| Watchdog composition and naming (items 2, 8) | `docs/development/ARCHITECTURE.md` (service composition) |
+
+
+
+## Section 6 implementation promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| SQLite recovery claims serialize through short `BEGIN IMMEDIATE` transactions and expire durably | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Provider calls occur outside database transactions and outcomes are applied only by the current claim owner | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Provisioned-resource identities are resolved only after confirmed create success and teardown updates existing rows | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown` |
+| The compute provisioning service composes one fulfillment convergence watchdog | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` (corrected 2026-07-24 from an incorrect `docs/development/ARCHITECTURE.md#runtime-service-map` reference recorded during implementation — this is subsystem-specific behavior, not a repository-wide concern) |
+| `(capacity_reservation_id, domain_resource_ref)` is a durable unique constraint, not just an application-level dedup check; a genuine concurrent-insert race is resolved by re-reading and returning the winning row, not raising | `kit/fulfillment/src/market_fulfillment/db.py` (`ProvisionedResource.__table_args__`) and `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown` |
+| Provider-reported success with unresolvable persisted resource metadata is a non-recoverable `failed` transition, not an indefinite retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` |
+| Claim-lease backoff and executor job-resubmission backoff are deliberately separate settings namespaces | `provisioning/compute/service/src/compute_provisioning_service/config/config.yml` (comment); no spec.md change needed, this is operational configuration, not subsystem behavior |
+| Abandonment reconciliation was evaluated and intentionally not built as a periodic handler — `SettlementAbandonmentHook` (Section 4) already closes the case synchronously | No new spec.md text needed: Section 4's promotion already documents the hook firing unconditionally from every capacity-reclaiming path. This row exists so the "why isn't there a fifth handler" question has a recorded answer rather than looking like an oversight. |
+| No attempt-count ceiling anywhere in recovery; a fresh worker instance resumes purely from durable claim state after a restart | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` |
+| Per-cycle recovery diagnostics use typed stable results; total, active-claim, expired-claim, oldest-row-age, and maximum-attempt metrics are calculated per recovery lifecycle state, with separate failure-state counts, and exactly one structured event is emitted per completed cycle | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `market_fulfillment.recovery_diagnostics`; `SettlementRepository.recovery_diagnostics` |
+| **(2026-07-24, external code review)** Outcome-application ownership must be checked under an acquired SQLite write reservation, not a plain read — a plain SELECT does not open a SQLite-level transaction on its own, so the original check-then-write sequence left a real, empirically-confirmed gap where a worker whose lease had already been reclaimed could still commit a stale outcome on top of the new owner's claim | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `FulfillmentConvergenceWatchdog._with_owned_record` |
+| **(2026-07-24, external code review)** `teardown_failed` needed an actual periodic requeue-to-`teardown_dispatch_pending` step; the state comment and spec text documenting it as retryable predated any handler that actually performed the retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `FulfillmentConvergenceWatchdog.requeue_teardown_failures` |
+| **(2026-07-24, external code review)** `openspec/specs/fulfillment/architecture.md` still described scheduler assignments and the fulfillment registry as process-local with no durable Settlement Record — stale since Section 3, never corrected during that section's own promotion pass | `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |

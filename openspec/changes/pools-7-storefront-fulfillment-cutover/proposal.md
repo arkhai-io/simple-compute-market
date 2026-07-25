@@ -126,6 +126,21 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
   `pools-3` resolved that boundary; this change should not reopen it
   without new evidence of an actual need to correlate them.
 - Durable consumption of Capacity Projections for commercial publication and claim construction, plus operator-declared listing-mode and reservation-TTL hints, remains in `pools-8-capacity-projection-and-listing-hints`. Projection producer endpoints and in-memory cache mechanics already landed here are retained as completed prerequisite work.
+- Multi-principal storefront authentication and per-fulfillment-record
+  ownership (distinct storefront/tenant principals authenticated separately,
+  each scoped to only its own settlement rows). This change's provisioning
+  service continues to authenticate its single VM storefront caller as it
+  does today. A candidate design surfaced and was rejected as out of scope
+  during Section 6's design review (see `dev-branch-migration-notes.md`,
+  "Flagged as new, unscoped, cross-cutting work"); it would need its own
+  proposal, since it touches every fulfillment API surface and the
+  settlement schema, not just one section's caller.
+- The bare-metal domain's own fulfillment cutover (bare-metal
+  `FulfillmentProvider`, site capacity/config/routing). This change is
+  scoped to the VM storefront only, per "Impact" above. A candidate
+  implementation surfaced during Section 6's design review is noted in
+  `dev-branch-migration-notes.md` for whoever owns that domain's roadmap,
+  and is explicitly not part of this change.
 
 ## Capabilities
 

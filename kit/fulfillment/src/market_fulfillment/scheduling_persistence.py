@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from market_resource_pools import ResourcePoolService
 from market_site.ledger import CapacityLedgerService
 
-from .repository import SettlementRepository, begin_sqlite_write_transaction
+from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 
 
 class SchedulingTransaction(Protocol):

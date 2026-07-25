@@ -13,7 +13,7 @@ from market_resource_pools import ResourcePoolService
 from .db import SettlementRecordState
 from .envelopes import VersionedEnvelope
 from .provider import FulfillmentConflictError
-from .repository import SettlementRepository, begin_sqlite_write_transaction
+from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
 
 
 @dataclass(frozen=True)

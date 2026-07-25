@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from market_fulfillment.db import Base, SettlementRecordState
 from market_fulfillment.envelopes import envelope
 from market_fulfillment.provider import FulfillmentConflictError
-from market_fulfillment.repository import SettlementRepository
+from market_fulfillment.settlement_repository import SettlementRepository
 from market_fulfillment.settlement_types import (
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
@@ -424,7 +424,7 @@ def test_add_and_list_provisioned_resources(session_factory, repo):
 # ----------------------------------------------------------------------
 
 
-def test_single_worker_selection_claims_matching_unclaimed_rows(session_factory, repo):
+def test_claim_pending_claims_matching_unclaimed_rows(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
             db,
@@ -442,20 +442,19 @@ def test_single_worker_selection_claims_matching_unclaimed_rows(session_factory,
         db.commit()
 
     with session_factory() as db:
-        claimed = repo.select_pending_for_single_worker(
+        claimed = repo.claim_pending(
             db,
             states=[SettlementRecordState.dispatch_pending.value],
             limit=10,
             lease_seconds=60,
             worker_id="worker-1",
         )
-        db.commit()
         assert len(claimed) == 1
         assert claimed[0].claimed_by == "worker-1"
         assert claimed[0].attempt_count == 1
 
 
-def test_single_worker_selection_skips_rows_with_a_live_claim(session_factory, repo):
+def test_claim_pending_skips_rows_with_a_live_claim(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
             db,
@@ -473,28 +472,26 @@ def test_single_worker_selection_skips_rows_with_a_live_claim(session_factory, r
         db.commit()
 
     with session_factory() as db:
-        repo.select_pending_for_single_worker(
+        repo.claim_pending(
             db,
             states=[SettlementRecordState.dispatch_pending.value],
             limit=10,
             lease_seconds=3600,
             worker_id="worker-1",
         )
-        db.commit()
 
     with session_factory() as db:
-        claimed_again = repo.select_pending_for_single_worker(
+        claimed_again = repo.claim_pending(
             db,
             states=[SettlementRecordState.dispatch_pending.value],
             limit=10,
             lease_seconds=3600,
             worker_id="worker-2",
         )
-        db.commit()
         assert claimed_again == []
 
 
-def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_factory, repo):
+def test_claim_pending_reclaims_rows_with_an_expired_claim(session_factory, repo):
     with session_factory() as db:
         repo.schedule(
             db,
@@ -513,7 +510,7 @@ def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_fac
 
     long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     with session_factory() as db:
-        repo.select_pending_for_single_worker(
+        repo.claim_pending(
             db,
             states=[SettlementRecordState.dispatch_pending.value],
             limit=10,
@@ -521,20 +518,399 @@ def test_single_worker_selection_reclaims_rows_with_an_expired_claim(session_fac
             worker_id="worker-1",
             now=long_ago,
         )
-        db.commit()
 
     with session_factory() as db:
-        claimed_again = repo.select_pending_for_single_worker(
+        claimed_again = repo.claim_pending(
             db,
             states=[SettlementRecordState.dispatch_pending.value],
             limit=10,
             lease_seconds=60,
             worker_id="worker-2",
         )
-        db.commit()
         assert len(claimed_again) == 1
         assert claimed_again[0].claimed_by == "worker-2"
+        # A reclaim is still a new attempt against this row.
         assert claimed_again[0].attempt_count == 2
+
+
+def test_claim_pending_accepts_a_backoff_callable_for_lease_seconds(session_factory, repo):
+    """The mechanism FulfillmentConvergenceWatchdog actually uses: lease
+    length grows with each row's own post-increment attempt_count rather
+    than being fixed."""
+
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    seen_attempt_counts: list[int] = []
+
+    def lease_for_attempt(attempt_count: int) -> float:
+        seen_attempt_counts.append(attempt_count)
+        return 10.0 * attempt_count
+
+    fixed_now = datetime.now(timezone.utc)
+    with session_factory() as db:
+        claimed = repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=10,
+            lease_seconds=lease_for_attempt,
+            worker_id="worker-1",
+            now=fixed_now,
+        )
+        assert seen_attempt_counts == [1]
+        # claim_pending's db.refresh() round-trips this value through
+        # SQLite, which returns a naive datetime regardless of what was
+        # written -- compare the wall-clock value, not tzinfo.
+        expected = (fixed_now + timedelta(seconds=10.0)).replace(tzinfo=None)
+        assert claimed[0].claim_expires_at == expected
+
+
+def test_clear_claim_releases_a_claim_owned_by_the_caller(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    with session_factory() as db:
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=10,
+            lease_seconds=3600,
+            worker_id="worker-1",
+        )
+
+    with session_factory() as db:
+        repo.clear_claim(db, "cr-1", worker_id="worker-1")
+        db.commit()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.claimed_by is None
+        assert record.claim_expires_at is None
+
+
+def test_clear_claim_is_a_noop_when_the_claim_was_reclaimed_by_another_worker(
+    session_factory, repo
+):
+    """A slow worker's stale clear_claim must not release a lease another
+    worker has since legitimately reclaimed."""
+
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    with session_factory() as db:
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=10,
+            lease_seconds=1,
+            worker_id="worker-1",
+            now=long_ago,
+        )
+
+    with session_factory() as db:
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=10,
+            lease_seconds=3600,
+            worker_id="worker-2",
+        )
+
+    with session_factory() as db:
+        repo.clear_claim(db, "cr-1", worker_id="worker-1")
+        db.commit()
+
+    with session_factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.claimed_by == "worker-2"
+        assert record.claim_expires_at is not None
+
+
+def test_mark_provisioned_resources_torn_down_updates_status(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        repo.add_provisioned_resource(
+            db, capacity_reservation_id="cr-1", domain_resource_ref="vm-1"
+        )
+        db.commit()
+
+    with session_factory() as db:
+        repo.mark_provisioned_resources_torn_down(db, "cr-1")
+        db.commit()
+
+    with session_factory() as db:
+        resources = repo.list_provisioned_resources(db, "cr-1")
+        assert len(resources) == 1
+        assert resources[0].status == "torn_down"
+        # No new row -- the existing one was updated, not resolved again.
+
+
+def test_recovery_diagnostics_reports_per_state_counts_and_ages(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-2",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-2",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    with session_factory() as db:
+        # cr-1: claimed and still within its lease.
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=1,
+            lease_seconds=3600,
+            worker_id="worker-a",
+        )
+
+    with session_factory() as db:
+        # cr-2: claimed, but the lease has already lapsed.
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.dispatch_pending.value],
+            limit=1,
+            lease_seconds=1,
+            worker_id="worker-b",
+            now=long_ago,
+        )
+
+    with session_factory() as db:
+        diagnostics = repo.recovery_diagnostics(db)
+        state = diagnostics.per_state[SettlementRecordState.dispatch_pending.value]
+        assert state.total == 2
+        assert state.actively_claimed == 1
+        assert state.expired_claims == 1
+        assert state.max_attempt_count == 1
+        assert state.oldest_row_age_seconds is not None
+        assert state.oldest_row_age_seconds > 0
+        empty_state = diagnostics.per_state[SettlementRecordState.tearing_down.value]
+        assert empty_state.total == 0
+        assert empty_state.oldest_row_age_seconds is None
+        assert empty_state.max_attempt_count == 0
+        assert diagnostics.failed_count == 0
+        assert diagnostics.teardown_failed_count == 0
+
+
+def test_recovery_diagnostics_counts_terminal_failures(session_factory, repo):
+    with session_factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.dispatching.value,
+            provider_metadata={"job": "1"},
+        )
+        repo.transition(
+            db,
+            "cr-1",
+            SettlementRecordState.failed.value,
+            failure_reason="provider_reported_failure",
+        )
+        db.commit()
+
+    with session_factory() as db:
+        diagnostics = repo.recovery_diagnostics(db)
+        assert diagnostics.failed_count == 1
+        assert diagnostics.teardown_failed_count == 0
+        assert (
+            diagnostics.per_state[SettlementRecordState.dispatch_pending.value].total
+            == 0
+        )
+
+
+def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
+    """Task 6.7: the (capacity_reservation_id, domain_resource_ref) unique
+    constraint (6.3.4) is a genuine backstop, not just app-level dedup --
+    two real threads racing add_provisioned_resource for the same
+    reservation/ref must still produce exactly one row."""
+
+    database = tmp_path / "add_provisioned_resource.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    repo = SettlementRepository()
+
+    with factory() as db:
+        repo.schedule(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            scheduling_requirements=_requirement(),
+            resource=_resource(),
+        )
+        repo.accept_fulfillment(
+            db,
+            capacity_reservation_id="cr-1",
+            market="vms",
+            fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+        )
+        db.commit()
+
+    def add() -> None:
+        with factory() as thread_db:
+            repo.add_provisioned_resource(
+                thread_db,
+                capacity_reservation_id="cr-1",
+                domain_resource_ref="vm-42",
+            )
+            thread_db.commit()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(add) for _ in range(4)]
+        for future in futures:
+            future.result(timeout=10)
+
+    with factory() as db:
+        resources = repo.list_provisioned_resources(db, "cr-1")
+        assert len(resources) == 1
+        assert resources[0].domain_resource_ref == "vm-42"
+
+
+def test_concurrent_claim_pending_never_returns_the_same_row_to_two_workers(tmp_path):
+    """Task 6.3.2: two real threads, independent sessions, file-backed
+    SQLite (same technique as test_scheduler.py's independent-session
+    proof), racing claim_pending against the same eligible rows."""
+
+    database = tmp_path / "claim_pending.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    repo = SettlementRepository()
+
+    row_count = 20
+    for i in range(row_count):
+        cr_id = f"cr-{i}"
+        with factory() as db:
+            repo.schedule(
+                db,
+                capacity_reservation_id=cr_id,
+                market="vms",
+                scheduling_requirements=_requirement(),
+                resource=_resource(),
+            )
+            repo.accept_fulfillment(
+                db,
+                capacity_reservation_id=cr_id,
+                market="vms",
+                fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
+            )
+            db.commit()
+
+    def claim(worker_id: str) -> list[str]:
+        with factory() as thread_db:
+            claimed = repo.claim_pending(
+                thread_db,
+                states=[SettlementRecordState.dispatch_pending.value],
+                limit=row_count,
+                lease_seconds=60,
+                worker_id=worker_id,
+            )
+            return [record.capacity_reservation_id for record in claimed]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_a = pool.submit(claim, "worker-a")
+        future_b = pool.submit(claim, "worker-b")
+        claimed_a = future_a.result(timeout=10)
+        claimed_b = future_b.result(timeout=10)
+
+    assert set(claimed_a).isdisjoint(claimed_b)
+    assert len(set(claimed_a) | set(claimed_b)) == row_count
 
 
 def test_transition_allows_shared_lifecycle_fields(session_factory, repo):

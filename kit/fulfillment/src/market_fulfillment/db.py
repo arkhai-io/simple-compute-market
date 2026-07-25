@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import enum
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
@@ -105,9 +105,9 @@ class SettlementRecord(Base):
     failure_reason = Column(String, nullable=True)
     failure_message = Column(Text, nullable=True)
 
-    # Multi-replica recovery-claim boundary. One aggregate has at most one
-    # pending provider operation at a time, so these live on the row itself
-    # rather than in a separate claims table.
+    # Recovery-claim boundary for SQLite single-writer coordination. One
+    # aggregate has at most one pending provider operation at a time, so
+    # these fields live on the row rather than in a separate claims table.
     claimed_by = Column(String, nullable=True)
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)
@@ -170,4 +170,20 @@ class ProvisionedResource(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # Durable backstop against a genuine concurrent double-insert racing
+        # add_provisioned_resource's query-then-insert dedup check, which
+        # remains the primary idempotency mechanism -- this constraint does
+        # not replace it, it closes the gap between that check and its
+        # insert. NULL domain_resource_ref values are not mutually unique
+        # under standard SQL NULL semantics; this is not a gap in practice
+        # since resolve_provisioned_resources requires a non-empty resource
+        # reference and never returns one to persist as NULL.
+        UniqueConstraint(
+            "capacity_reservation_id",
+            "domain_resource_ref",
+            name="uq_provisioned_resources_reservation_domain_ref",
+        ),
     )

@@ -12,9 +12,9 @@ assignment in one transaction. See
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from typing import Callable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,7 @@ from .db import ProvisionedResource, SchedulingCursor, SettlementRecord, Settlem
 from .envelopes import VersionedEnvelope
 from .ids import new_fulfillment_id
 from .provider import FulfillmentConflictError
+from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
 from .settlement_types import (
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
@@ -302,15 +303,42 @@ class SettlementRepository:
                 f"capacity_reservation_id={capacity_reservation_id!r} has no accepted "
                 "fulfillment to attach a provisioned resource to"
             )
+        existing = (
+            db.query(ProvisionedResource)
+            .filter(ProvisionedResource.capacity_reservation_id == capacity_reservation_id)
+            .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
+            .one_or_none()
+        )
+        if existing is not None:
+            return existing
         provisioned = ProvisionedResource(
             capacity_reservation_id=capacity_reservation_id,
             fulfillment_id=record.fulfillment_id,
             domain_resource_ref=domain_resource_ref,
             status=status,
         )
-        db.add(provisioned)
-        db.flush()
-        return provisioned
+        try:
+            with db.begin_nested():
+                db.add(provisioned)
+                db.flush()
+            return provisioned
+        except IntegrityError:
+            # A concurrent caller won the unique-constraint race between our
+            # existence check and our insert. Re-read and return the
+            # winning row rather than raising -- add_provisioned_resource
+            # stays idempotent under genuine concurrency, not just under
+            # sequential retries.
+            existing = (
+                db.query(ProvisionedResource)
+                .filter(
+                    ProvisionedResource.capacity_reservation_id == capacity_reservation_id
+                )
+                .filter(ProvisionedResource.domain_resource_ref == domain_resource_ref)
+                .one_or_none()
+            )
+            if existing is not None:
+                return existing
+            raise
 
     # ------------------------------------------------------------------
     # Scheduling fairness cursor
@@ -382,24 +410,45 @@ class SettlementRepository:
     # Recovery claims
     # ------------------------------------------------------------------
 
-    def select_pending_for_single_worker(
+    def claim_pending(
         self,
         db: Session,
         *,
         states: Sequence[str],
         limit: int,
-        lease_seconds: int,
+        lease_seconds: int | Callable[[int], float],
         worker_id: str,
         now: datetime | None = None,
     ) -> list[SettlementRecord]:
-        """Lease pending rows for one SQLite recovery worker.
+        """Claim pending rows for recovery in one short, self-contained transaction.
 
-        This helper records the durable lease shape and supports a deployment
-        with exactly one recovery worker. It is not a concurrent worker-claim protocol; the provisioning-owned
-        recovery workflow owns duplicate-dispatch prevention when multiple
-        workers are enabled.
+        Opens and commits its own
+        ``BEGIN IMMEDIATE``-guarded transaction rather than depending on a
+        caller-supplied open transaction, so the writer slot is released
+        before any provider call happens. SQLite has no
+        ``SELECT ... FOR UPDATE SKIP LOCKED``; under SQLite's single-writer
+        contract it is unnecessary, since this transaction already
+        serializes against any other concurrent claim attempt. This is
+        concurrent-claim-safe defense-in-depth (overlapping asyncio tasks
+        within one watchdog cycle, a brief overlap during pod replacement,
+        or a second instance run for diagnosis) — not a distributed
+        multi-replica protocol. See
+        ``openspec/specs/fulfillment/spec.md#durable-settlement-persistence``.
+
+        ``lease_seconds`` is either a flat lease length applied to every
+        claimed row, or a callable receiving each row's own
+        (already-incremented) ``attempt_count`` and returning that row's
+        lease length — the mechanism ``FulfillmentConvergenceWatchdog``
+        uses (via ``market_fulfillment.backoff.Backoff.delay_seconds``) to
+        make a claimed-but-not-yet-due row's ``claim_expires_at`` reflect
+        exponential backoff with jitter rather than a fixed lease.
+
+        The caller must pass a session dedicated to this call; it is
+        committed here and should not be reused for the subsequent
+        provider call.
         """
 
+        begin_sqlite_write_transaction(db)
         now = now or datetime.now(timezone.utc)
         candidates = (
             db.query(SettlementRecord)
@@ -414,7 +463,160 @@ class SettlementRepository:
         )
         for record in candidates:
             record.claimed_by = worker_id
-            record.claim_expires_at = now + timedelta(seconds=lease_seconds)
             record.attempt_count = (record.attempt_count or 0) + 1
-        db.flush()
+            lease = (
+                lease_seconds(record.attempt_count)
+                if callable(lease_seconds)
+                else lease_seconds
+            )
+            record.claim_expires_at = now + timedelta(seconds=lease)
+        db.commit()
+        for record in candidates:
+            db.refresh(record)
+            db.expunge(record)
         return candidates
+
+    def clear_claim(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        worker_id: str,
+    ) -> None:
+        """Release a claim once a handler has finished acting on the row.
+
+        A no-op if the row is no longer claimed by ``worker_id`` — e.g. a
+        slow worker whose lease has since lapsed and been reclaimed by
+        another worker must not clear that worker's claim out from under it.
+        """
+
+        record = self.get(db, capacity_reservation_id)
+        if record is None or record.claimed_by != worker_id:
+            return
+        record.claimed_by = None
+        record.claim_expires_at = None
+        db.flush()
+
+    def mark_provisioned_resources_torn_down(
+        self,
+        db: Session,
+        capacity_reservation_id: str,
+        *,
+        status: str = "torn_down",
+    ) -> None:
+        """Update existing ``ProvisionedResource`` rows on confirmed teardown.
+
+        Does not create new rows — teardown convergence updates what create
+        convergence already persisted via ``add_provisioned_resource``;
+        resource identity is not re-resolved at teardown time.
+        """
+
+        db.query(ProvisionedResource).filter(
+            ProvisionedResource.capacity_reservation_id == capacity_reservation_id
+        ).update({"status": status})
+        db.flush()
+
+    # ------------------------------------------------------------------
+    # Recovery diagnostics
+    # ------------------------------------------------------------------
+
+    _RECOVERY_STATES = (
+        SettlementRecordState.dispatch_pending,
+        SettlementRecordState.dispatching,
+        SettlementRecordState.teardown_dispatch_pending,
+        SettlementRecordState.tearing_down,
+    )
+
+    def recovery_diagnostics(
+        self, db: Session, *, now: datetime | None = None
+    ) -> RecoveryDiagnostics:
+        """Return one typed snapshot of recovery health.
+
+        Recovery age and attempt metrics are calculated independently for
+        each non-terminal lifecycle state. The query also distinguishes
+        active leases from expired claims eligible for reclamation.
+        """
+
+        now = now or datetime.now(timezone.utc)
+        state_values = [state.value for state in self._RECOVERY_STATES]
+
+        active_claim = case(
+            (
+                SettlementRecord.claimed_by.isnot(None)
+                & (SettlementRecord.claim_expires_at > now),
+                1,
+            ),
+            else_=0,
+        )
+        expired_claim = case(
+            (
+                SettlementRecord.claimed_by.isnot(None)
+                & (SettlementRecord.claim_expires_at <= now),
+                1,
+            ),
+            else_=0,
+        )
+        rows = (
+            db.query(
+                SettlementRecord.state,
+                func.count(SettlementRecord.capacity_reservation_id),
+                func.sum(active_claim),
+                func.sum(expired_claim),
+                func.min(SettlementRecord.created_at),
+                func.max(SettlementRecord.attempt_count),
+            )
+            .filter(SettlementRecord.state.in_(state_values))
+            .group_by(SettlementRecord.state)
+            .all()
+        )
+
+        per_state = {
+            state.value: RecoveryStateDiagnostics(
+                total=0,
+                actively_claimed=0,
+                expired_claims=0,
+                oldest_row_age_seconds=None,
+                max_attempt_count=0,
+            )
+            for state in self._RECOVERY_STATES
+        }
+        for state, total, actively_claimed, expired_claims, oldest, max_attempts in rows:
+            per_state[state] = RecoveryStateDiagnostics(
+                total=int(total or 0),
+                actively_claimed=int(actively_claimed or 0),
+                expired_claims=int(expired_claims or 0),
+                oldest_row_age_seconds=self._row_age_seconds(now, oldest),
+                max_attempt_count=int(max_attempts or 0),
+            )
+
+        failure_counts = dict(
+            db.query(SettlementRecord.state, func.count(SettlementRecord.capacity_reservation_id))
+            .filter(
+                SettlementRecord.state.in_(
+                    (
+                        SettlementRecordState.failed.value,
+                        SettlementRecordState.teardown_failed.value,
+                    )
+                )
+            )
+            .group_by(SettlementRecord.state)
+            .all()
+        )
+        return RecoveryDiagnostics(
+            per_state=per_state,
+            failed_count=int(failure_counts.get(SettlementRecordState.failed.value, 0)),
+            teardown_failed_count=int(
+                failure_counts.get(SettlementRecordState.teardown_failed.value, 0)
+            ),
+        )
+
+    @staticmethod
+    def _row_age_seconds(now: datetime, created_at: datetime | None) -> float | None:
+        if created_at is None:
+            return None
+        comparison_now = now.replace(tzinfo=None) if now.tzinfo else now
+        comparison_created_at = (
+            created_at.replace(tzinfo=None) if created_at.tzinfo else created_at
+        )
+        return (comparison_now - comparison_created_at).total_seconds()
+
