@@ -27,6 +27,7 @@ from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
 )
 from market_fulfillment import (
+    CredentialSet,
     FulfillmentProvider,
     FulfillmentResult,
     ProviderOperationState,
@@ -60,6 +61,9 @@ class _StubAnsibleProvider(FulfillmentProvider):
 
     def resolve_provisioned_resources(self, provider_metadata):
         return (provider_metadata.get("vm_target") or "vm-resolved",)
+
+    async def fetch_credentials(self, provider_metadata):
+        return CredentialSet()
 
 
 def _settings(**overrides):

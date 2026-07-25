@@ -24,6 +24,16 @@ class SettlementResult:
     provider_metadata: dict[str, Any]
 
 @dataclass(frozen=True)
+class Credential:
+    role: str
+    password: str | None = None
+    ssh_commands: dict[str, Any] | None = None
+
+@dataclass(frozen=True)
+class CredentialSet:
+    credentials: tuple[Credential, ...] = ()
+
+@dataclass(frozen=True)
 class ProviderStatus:
     state: ProviderOperationState
     detail: str | None = None
@@ -65,6 +75,21 @@ class FulfillmentProvider(ABC):
         ...
     @abstractmethod
     async def get_status(self, capacity_reservation_id:str, resource:'SettlementResource', provider_metadata:dict[str,Any])->ProviderStatus: ...
+    @abstractmethod
+    async def fetch_credentials(self, provider_metadata:dict[str,Any]) -> CredentialSet:
+        """Fetch live access credentials for a confirmed-active fulfillment.
+
+        Async, since it performs provider I/O -- unlike
+        ``resolve_provisioned_resources``, which is pure and synchronous.
+        Called only when the aggregate is ``active``, directly by
+        ``get_fulfillment_result``, with no claim, lease, or generation
+        bookkeeping: this is a stateless read, never a coordinated mutation,
+        and this codebase has no credential-rotation source for a generation
+        counter to track. Raise ``CredentialFetchFailedError`` on any fetch
+        failure so shared orchestration can distinguish it from a workload
+        failure and let the caller retry the read.
+        """
+        ...
 
 class FulfillmentError(Exception): pass
 class ProviderNotFoundError(FulfillmentError): pass
@@ -75,6 +100,7 @@ class FulfillmentCreateFailedError(FulfillmentError): pass
 class FulfillmentStatusFailedError(FulfillmentError): pass
 class FulfillmentTeardownFailedError(FulfillmentError): pass
 class FulfillmentRequestInvalidError(FulfillmentError): pass
+class CredentialFetchFailedError(FulfillmentError): pass
 
 class ProviderRegistry:
     def __init__(self, providers:dict[str,FulfillmentProvider]): self._providers=dict(providers)

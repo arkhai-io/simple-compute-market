@@ -9,10 +9,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from market_fulfillment import (
+    FULFILLMENT_RESULT_KIND,
+    Credential,
+    CredentialSet,
     FulfillmentCreateFailedError,
     FulfillmentOrchestrator,
     FulfillmentResult,
     ProviderRegistry,
+    SettlementEntityNotFoundError,
     SettlementRecordState,
     VersionedEnvelope,
 )
@@ -40,13 +44,15 @@ def _record(**overrides):
         "scheduling_requirements": {"resource_kind": "vm"},
         "prepared_create_operation": None,
         "provider_metadata": {},
+        "failure_reason": None,
+        "failure_message": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 class FakeTransaction:
-    def __init__(self, record, *, dispatch_required=True):
+    def __init__(self, record, *, dispatch_required=True, provisioned_resources=None):
         self.record = record
         self.db = MagicMock()
         self.db.get.return_value = record
@@ -54,6 +60,7 @@ class FakeTransaction:
         self.dispatch_required = dispatch_required
         self.persisted = []
         self.acknowledged = []
+        self.provisioned_resources = provisioned_resources or []
 
     def accept(self, **kwargs):
         return FulfillmentAcceptanceDecision(
@@ -75,6 +82,16 @@ class FakeTransaction:
         self.record.provider_metadata = provider_metadata
         self.record.state = SettlementRecordState.dispatching.value
         return self.record
+
+    def get_by_fulfillment_id(self, fulfillment_id):
+        if self.record.fulfillment_id == fulfillment_id:
+            return self.record
+        return None
+
+    def list_provisioned_resources(self, capacity_reservation_id):
+        if capacity_reservation_id == self.record.capacity_reservation_id:
+            return self.provisioned_resources
+        return []
 
 
 class FakeUnitOfWork:
@@ -104,6 +121,17 @@ def _provider():
     provider.dispatch_create = AsyncMock(
         return_value=FulfillmentResult({"job_id": "job-1"})
     )
+    provider.fetch_credentials = AsyncMock(
+        return_value=CredentialSet(
+            credentials=(
+                Credential(
+                    role="tenant",
+                    password="s3cr3t",
+                    ssh_commands={"external": "ssh tenant@host"},
+                ),
+            )
+        )
+    )
     return provider
 
 
@@ -128,6 +156,145 @@ def test_validate_uses_read_transaction_and_shared_preparation_path():
     assert uow.write_entries == 0
     provider.prepare_create.assert_called_once()
     assert provider.prepare_create.call_args.kwargs["capacity_reservation_id"] == "reservation-1"
+
+
+def _provisioned_resource(**overrides):
+    values = {
+        "provisioned_resource_id": "provisioned-1",
+        "domain_resource_ref": "vm-1",
+        "status": "active",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_get_fulfillment_status_reads_without_any_provider_call():
+    record = _record(state=SettlementRecordState.active.value)
+    tx = FakeTransaction(record)
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    result = _orchestrator(uow, provider).get_fulfillment_status("fulfillment-1")
+
+    assert result.fulfillment_id == "fulfillment-1"
+    assert result.capacity_reservation_id == "reservation-1"
+    assert result.state == SettlementRecordState.active.value
+    assert result.failure_reason is None
+    assert uow.read_entries == 1
+    assert uow.write_entries == 0
+    provider.prepare_create.assert_not_called()
+    provider.dispatch_create.assert_not_called()
+
+
+def test_get_fulfillment_status_reports_failure_detail():
+    record = _record(
+        state=SettlementRecordState.failed.value,
+        failure_reason="create_failed",
+        failure_message="provider reported a create failure",
+    )
+    uow = FakeUnitOfWork(FakeTransaction(record))
+
+    result = _orchestrator(uow, _provider()).get_fulfillment_status("fulfillment-1")
+
+    assert result.state == SettlementRecordState.failed.value
+    assert result.failure_reason == "create_failed"
+    assert result.failure_message == "provider reported a create failure"
+
+
+def test_get_fulfillment_status_unknown_id_raises_not_found():
+    uow = FakeUnitOfWork(FakeTransaction(_record()))
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        _orchestrator(uow, _provider()).get_fulfillment_status("no-such-fulfillment")
+
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_active_state_includes_provisioned_resources_and_credentials():
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    outputs = [_provisioned_resource(), _provisioned_resource(
+        provisioned_resource_id="provisioned-2", domain_resource_ref="vm-2"
+    )]
+    tx = FakeTransaction(record, provisioned_resources=outputs)
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    envelope = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert envelope.kind == FULFILLMENT_RESULT_KIND
+    assert envelope.schema_version == 1
+    payload = envelope.payload
+    assert payload["fulfillment_id"] == "fulfillment-1"
+    assert payload["state"] == SettlementRecordState.active.value
+    assert [r["domain_resource_ref"] for r in payload["provisioned_resources"]] == [
+        "vm-1",
+        "vm-2",
+    ]
+    assert payload["credentials"] == [
+        {"role": "tenant", "password": "s3cr3t", "ssh_commands": {"external": "ssh tenant@host"}}
+    ]
+    provider.fetch_credentials.assert_called_once_with({"current_job_id": "job-1"})
+    provider.prepare_create.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.assigned.value,
+        SettlementRecordState.dispatch_pending.value,
+        SettlementRecordState.dispatching.value,
+        SettlementRecordState.failed.value,
+        SettlementRecordState.teardown_dispatch_pending.value,
+        SettlementRecordState.tearing_down.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.teardown_failed.value,
+        SettlementRecordState.abandoned.value,
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_non_active_states_have_no_outputs_and_no_provider_call(state):
+    record = _record(state=state)
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    envelope = await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    assert envelope.payload["provisioned_resources"] == []
+    assert envelope.payload["credentials"] == []
+    assert envelope.payload["state"] == state
+    provider.prepare_create.assert_not_called()
+    provider.dispatch_create.assert_not_called()
+    provider.fetch_credentials.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_unknown_id_raises_not_found():
+    uow = FakeUnitOfWork(FakeTransaction(_record()))
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        await _orchestrator(uow, _provider()).get_fulfillment_result("no-such-fulfillment")
+
+
+@pytest.mark.asyncio
+async def test_get_fulfillment_result_credential_fetch_failure_is_distinct_from_workload_failure():
+    from market_fulfillment import CredentialFetchFailedError
+
+    record = _record(state=SettlementRecordState.active.value)
+    tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
+    provider = _provider()
+    provider.fetch_credentials = AsyncMock(
+        side_effect=CredentialFetchFailedError("job not found")
+    )
+    uow = FakeUnitOfWork(tx)
+
+    with pytest.raises(CredentialFetchFailedError):
+        await _orchestrator(uow, provider).get_fulfillment_result("fulfillment-1")
+
+    # The aggregate's own durable state is unaffected by a live-fetch failure.
+    assert record.state == SettlementRecordState.active.value
 
 
 @pytest.mark.asyncio

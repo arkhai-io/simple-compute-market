@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -92,6 +93,12 @@ class FulfillmentApi:
         resp = await self._client.get(f"/api/v1/jobs/{job_id}/contract")
         assert resp.status_code == 200, resp.text
         return resp.json()
+
+    async def status(self, fulfillment_id: str) -> httpx.Response:
+        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    async def result(self, fulfillment_id: str) -> httpx.Response:
+        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/result")
 
 
 @pytest.fixture
@@ -489,3 +496,98 @@ class TestAcknowledgementFailureRecovery:
             )
             assert len(jobs) == 1
             assert jobs[0].id == job_id
+
+
+class TestStatusAndResultQueries:
+    """Integration coverage for the pull-based `GET /fulfillment/{id}/status`
+    and `GET /fulfillment/{id}/result` endpoints (Section 8), against the
+    real HTTP surface, a real SQLite-backed repository, and -- for the
+    active-state case -- a real `AnsibleFulfillmentProvider.fetch_credentials`
+    read of a `Credential` row inserted the same way the job-completion path
+    would have written one.
+    """
+
+    async def test_status_reflects_dispatching_state_after_begin(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-status"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-status-1")
+        )
+
+        resp = await fulfillment.status(begun["fulfillment_id"])
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["fulfillment_id"] == begun["fulfillment_id"]
+        assert body["capacity_reservation_id"] == capacity_reservation_id
+        assert body["state"] == "dispatching"
+        assert body["failure_reason"] is None
+
+    async def test_status_unknown_id_is_404(self, fulfillment: FulfillmentApi):
+        resp = await fulfillment.status("no-such-fulfillment")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+    async def test_result_on_a_non_active_fulfillment_has_no_outputs_or_credentials(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-result-pending"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-1")
+        )
+        assert begun["state"] == "dispatching"
+
+        resp = await fulfillment.result(begun["fulfillment_id"])
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["kind"] == "fulfillment.result.v1"
+        assert body["payload"]["state"] == "dispatching"
+        assert body["payload"]["provisioned_resources"] == []
+        assert body["payload"]["credentials"] == []
+
+    async def test_result_unknown_id_is_404(self, fulfillment: FulfillmentApi):
+        resp = await fulfillment.result("no-such-fulfillment")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+    async def test_result_on_an_active_fulfillment_includes_live_credentials(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-result-active"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-2")
+        )
+        fulfillment_id = begun["fulfillment_id"]
+
+        # The job pipeline (mocked Ansible, real job_service) already wrote
+        # real root/tenant Credential rows for this job when it succeeded
+        # during `begin`; this section is only responsible for exposing
+        # them through the pull endpoint, not for generating them.
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            SettlementRepository().add_provisioned_resource(
+                db,
+                capacity_reservation_id=capacity_reservation_id,
+                domain_resource_ref="vm-result-2",
+            )
+            SettlementRepository().transition(db, capacity_reservation_id, "active")
+            db.commit()
+
+        resp = await fulfillment.result(fulfillment_id)
+        assert resp.status_code == 200, resp.text
+        payload = resp.json()["payload"]
+        assert payload["state"] == "active"
+        assert [r["domain_resource_ref"] for r in payload["provisioned_resources"]] == [
+            "vm-result-2"
+        ]
+        roles = {c["role"] for c in payload["credentials"]}
+        assert roles == {"root", "tenant"}
+        for credential in payload["credentials"]:
+            assert credential["password"]
+            assert credential["ssh_commands"]

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from compute_provisioning_service import container as _container_module
 from market_fulfillment import (
+    CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentOrchestrator,
     ProviderConfigInvalidError,
@@ -29,6 +30,14 @@ class FulfillmentAcceptanceResponse(BaseModel):
     fulfillment_id: str
     capacity_reservation_id: str
     state: str
+
+
+class FulfillmentStatusResponse(BaseModel):
+    fulfillment_id: str
+    capacity_reservation_id: str
+    state: str
+    failure_reason: str | None = None
+    failure_message: str | None = None
 
 
 class FulfillmentValidationResponse(BaseModel):
@@ -93,6 +102,36 @@ class FulfillmentController:
                 },
             ) from exc
         return FulfillmentAcceptanceResponse(**result.__dict__)
+
+    @router.get("/{fulfillment_id}/status", response_model=FulfillmentStatusResponse)
+    def status(self, fulfillment_id: str) -> FulfillmentStatusResponse:
+        try:
+            result = self._service.get_fulfillment_status(fulfillment_id)
+        except SettlementEntityNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "fulfillment_not_found", "message": "No fulfillment exists for this identifier."},
+            ) from exc
+        return FulfillmentStatusResponse(**result.__dict__)
+
+    @router.get("/{fulfillment_id}/result")
+    async def result(self, fulfillment_id: str) -> dict[str, Any]:
+        try:
+            envelope = await self._service.get_fulfillment_result(fulfillment_id)
+        except SettlementEntityNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "fulfillment_not_found", "message": "No fulfillment exists for this identifier."},
+            ) from exc
+        except CredentialFetchFailedError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "credential_fetch_failed",
+                    "message": "Credentials could not be fetched right now; retry the read.",
+                },
+            ) from exc
+        return envelope.model_dump(mode="json")
 
     @classmethod
     def make_router(cls) -> APIRouter:

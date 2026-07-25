@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from market_fulfillment import (
+    Credential,
+    CredentialFetchFailedError,
+    CredentialSet,
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -306,4 +309,42 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 ProviderOperationState.unknown,
             ),
             job.error,
+        )
+
+    async def fetch_credentials(
+        self, provider_metadata: dict[str, Any]
+    ) -> CredentialSet:
+        """Fetch live credentials for the job that created this fulfillment's resource.
+
+        Declared async to satisfy the provider-neutral interface, which must
+        accommodate providers whose credential store is a real network
+        dependency; this adapter's own credential store is the local
+        ``AnsibleJobService`` database, so no ``await`` is needed internally
+        -- the same shape ``get_status`` already has with ``get_job``.
+        """
+
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+            job_id = metadata.current_job_id
+        except Exception as exc:
+            raise CredentialFetchFailedError(
+                f"invalid provider metadata: {exc}"
+            ) from exc
+
+        try:
+            response = self._job_service.get_credentials(job_id)
+        except LookupError as exc:
+            raise CredentialFetchFailedError(f"job {job_id} not found") from exc
+        except Exception as exc:
+            raise CredentialFetchFailedError(str(exc)) from exc
+
+        return CredentialSet(
+            credentials=tuple(
+                Credential(
+                    role=credential.role,
+                    password=credential.password,
+                    ssh_commands=credential.ssh_commands,
+                )
+                for credential in response.credentials
+            )
         )

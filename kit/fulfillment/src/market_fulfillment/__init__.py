@@ -28,7 +28,18 @@ from .ids import (
     new_settlement_resource_id,
 )
 from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
+from .results import (
+    FULFILLMENT_RESULT_KIND,
+    FULFILLMENT_RESULT_SCHEMA_VERSION,
+    FulfillmentCredential,
+    FulfillmentResultPayload,
+    ProvisionedResourceOutput,
+    build_fulfillment_result_envelope,
+)
 from .provider import (
+    Credential,
+    CredentialFetchFailedError,
+    CredentialSet,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentError,
@@ -48,7 +59,7 @@ from .provider import (
     ProviderUnavailableError,
 )
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
-from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator
+from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator, FulfillmentStatus
 from .fulfillment_persistence import (
     FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
     SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
@@ -87,16 +98,24 @@ __all__ = [
     "FulfillmentAcceptanceDecision",
     "FulfillmentOrchestrator",
     "FulfillmentAcceptance",
+    "FulfillmentStatus",
+    "Credential",
+    "CredentialFetchFailedError",
+    "CredentialSet",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
+    "FulfillmentCredential",
     "FulfillmentError",
     "FulfillmentProvider",
     "FulfillmentRequestInvalidError",
     "FulfillmentResult",
+    "FulfillmentResultPayload",
     "FulfillmentStatusFailedError",
     "FulfillmentTeardownFailedError",
     "FulfillmentValidationIssue",
     "FulfillmentValidationResult",
+    "FULFILLMENT_RESULT_KIND",
+    "FULFILLMENT_RESULT_SCHEMA_VERSION",
     "InvalidSettlementTransitionError",
     "LegacyBackfillValidationError",
     "LegacyFulfillmentBackfillDraft",
@@ -106,6 +125,7 @@ __all__ = [
     "ProviderRegistry",
     "ProviderStatus",
     "ProviderUnavailableError",
+    "ProvisionedResourceOutput",
     "RecoveryDiagnostics",
     "RecoveryStateDiagnostics",
     "ProvisionedResource",
@@ -132,6 +152,7 @@ __all__ = [
     "SettlementResource",
     "SettlementSchedulingPolicy",
     "VersionedEnvelope",
+    "build_fulfillment_result_envelope",
     "envelope",
     "new_capacity_reservation_id",
     "new_fulfillment_id",

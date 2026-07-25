@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 from compute_provisioning import CredentialEnvelope, ResultEnvelope
 from market_fulfillment import (
+    CredentialSet,
     FulfillmentProvider,
     FulfillmentResult,
     VersionedEnvelope,
@@ -71,6 +72,9 @@ class FakeProvider(FulfillmentProvider):
 
     def resolve_provisioned_resources(self, provider_metadata):
         return ()
+
+    async def fetch_credentials(self, provider_metadata):
+        return CredentialSet()
 
 
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:

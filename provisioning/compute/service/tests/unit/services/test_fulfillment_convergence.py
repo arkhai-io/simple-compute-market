@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from market_fulfillment import (
     Backoff,
+    CredentialSet,
     FulfillmentProvider,
     FulfillmentResult,
     ProviderConfigInvalidError,
@@ -122,6 +123,9 @@ class _StubProvider(FulfillmentProvider):
         if self._resolve_error:
             raise self._resolve_error
         return self._resolve_result
+
+    async def fetch_credentials(self, provider_metadata):
+        return CredentialSet()
 
 
 def _settings(**overrides):

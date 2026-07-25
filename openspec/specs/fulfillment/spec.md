@@ -233,9 +233,12 @@ A `FulfillmentProvider` separates pure synchronous preparation from asynchronous
 - `prepare_teardown(settlement_result, pool_config) -> VersionedEnvelope`;
 - `dispatch_teardown(prepared) -> FulfillmentResult`;
 - `get_status(capacity_reservation_id, resource, provider_metadata) -> ProviderStatus`;
-- `resolve_provisioned_resources(provider_metadata) -> tuple[str, ...]`.
+- `resolve_provisioned_resources(provider_metadata) -> tuple[str, ...]`;
+- `fetch_credentials(provider_metadata) -> CredentialSet`.
 
 Preparation receives the durable `capacity_reservation_id` explicitly plus caller-supplied pool configuration captured in the acceptance transaction and MUST NOT query resource-pool state independently or derive the reservation identity from the storefront payload. Teardown receives a provider-neutral durable settlement-result view containing the selected resource, provisioned outputs, and provider metadata. Concrete adapters own validation and interpretation of their metadata; shared orchestration treats it as opaque.
+
+`fetch_credentials` is async, since it performs provider I/O, unlike the pure and synchronous `resolve_provisioned_resources`. It is called only by `get_fulfillment_result` (see "Fulfillment status and result queries"), only when the aggregate is `active`, and carries no claim, lease, or generation bookkeeping of its own — it is a stateless read, not a coordinated mutation. Concrete adapters decode whatever provider-owned metadata they persisted at dispatch acknowledgement time to locate the credential source; shared orchestration does not interpret that metadata.
 
 Prepared operations are immutable and persisted before dispatch. Dispatch commands use deterministic reservation-scoped idempotency keys. Provider metadata is normalized and validated by the concrete adapter before it crosses the shared persistence boundary. Credentials and sensitive access material use a dedicated secure channel rather than generic metadata.
 
@@ -289,11 +292,12 @@ Generic orchestration MUST distinguish stable categories including:
 - request invalid;
 - equivalent/conflicting fulfillment;
 - create, status, or teardown failure;
+- credential fetch failure;
 - no eligible settlement resource;
 - reservation expired or missing;
 - request/assignment mismatch.
 
-Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors SHOULD identify retryability or operator action when the lifecycle persists operations.
+Concrete provider errors may carry additional diagnostics but MUST map into these categories at the shared boundary. Errors SHOULD identify retryability or operator action when the lifecycle persists operations. A credential fetch failure on an otherwise-healthy `active` fulfillment is a distinct, retryable category from create/status/teardown failure: it reflects a transient inability to read live access material, not a workload-lifecycle failure, and does not change the aggregate's durable state.
 
 #### Scenario: Concrete provider reports an execution failure
 
@@ -325,6 +329,7 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_settlement_repository.py`.
 - Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
 - Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`.
+- Status/result read paths (no-provider-call status reads, active-only provisioned-resource and credential projection, empty outputs/credentials across all non-active states, unknown-identifier rejection, live credential-fetch failure isolation): `kit/fulfillment/tests/unit/test_fulfillment.py`. `fulfillment.result.v1` envelope shape and round-trip: `kit/fulfillment/tests/unit/test_results.py`. End-to-end HTTP coverage against a real SQLite-backed repository and a real `AnsibleFulfillmentProvider.fetch_credentials` read: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 
 ### Requirement: Fulfillment validation
 
@@ -334,6 +339,41 @@ The fulfillment validation endpoint accepts the same reservation, market, and fu
 
 - **WHEN** a valid fulfillment request is submitted to the validation endpoint
 - **THEN** preparation validation succeeds and the aggregate remains in its prior state with no prepared operation persisted
+
+### Requirement: Fulfillment status and result queries
+
+`get_fulfillment_status(fulfillment_id)` and `get_fulfillment_result(fulfillment_id)` are storefront-callable pull reads over the durable aggregate (see "Durable settlement persistence" above), addressed by `fulfillment_id` rather than `capacity_reservation_id`. Neither performs a lifecycle transition, prepared-operation write, or other durable mutation; both use a read-only session that does not reserve SQLite's writer slot. There is no separate outbox or delivery-acknowledgement state for either read: a call reflects current durable state on demand, and the caller decides when to call again.
+
+`get_fulfillment_status` returns the aggregate's identity, current state, and failure reason/message only. It never calls a `FulfillmentProvider` method.
+
+`get_fulfillment_result` returns a `fulfillment.result.v1` versioned envelope (see "Versioned envelopes") carrying `fulfillment_id`, `capacity_reservation_id`, `state`, failure reason/message, provisioned-resource outputs, and a `credentials` field. Provisioned-resource outputs and credentials are both populated only when the aggregate's state is `active`; every other lifecycle state returns both empty rather than an error, since a fulfillment that has not yet produced a resource, or has already torn one down, has nothing a provider call could meaningfully return. When `active`, `get_fulfillment_result` calls `FulfillmentProvider.fetch_credentials(provider_metadata)` directly and unconditionally, after the read transaction that loaded the aggregate has already closed — a live credential fetch is provider I/O and must not run with a database transaction open, matching the fulfillment convergence worker's own "no DB transaction open during provider I/O" principle. This is a stateless read: no claim, lease, or generation counter guards it, because nothing durable is being coordinated or mutated and this codebase has no credential-rotation source to track. A fetch failure raises a distinct `credential_fetch_failed` error category (see "Stable error taxonomy") rather than the generic provider-unavailable or status-failure categories, so a caller can distinguish "retry the read" from an actual workload failure; the aggregate's own durable state is unaffected by a fetch failure.
+
+A query for an unknown `fulfillment_id` is rejected as a not-found error by both reads. This is an existence check against this provisioning service's own database, not a per-caller ownership check — the service currently trusts exactly one caller by construction (see "Provider contract" and `docs/development/ARCHITECTURE.md` for the deployment's single-storefront trust model), so there is no second caller identity to compare against yet.
+
+#### Scenario: Status query never calls a provider
+
+- **WHEN** `get_fulfillment_status` is called for an existing `fulfillment_id`
+- **THEN** the durable aggregate's state and failure detail are returned and no `FulfillmentProvider` method is invoked
+
+#### Scenario: Result query on a non-active aggregate omits outputs and credentials
+
+- **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose aggregate is not in the `active` state
+- **THEN** the returned envelope's provisioned-resource outputs and credentials are both empty and no `FulfillmentProvider` method is invoked
+
+#### Scenario: Result query on an active aggregate includes provisioned-resource outputs and live credentials
+
+- **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose aggregate is `active`
+- **THEN** the returned envelope's provisioned-resource outputs reflect that aggregate's `ProvisionedResource` rows, and its credentials reflect a live `fetch_credentials` call against the aggregate's provider metadata
+
+#### Scenario: Live credential fetch fails on an otherwise-healthy fulfillment
+
+- **WHEN** `FulfillmentProvider.fetch_credentials` raises during a `get_fulfillment_result` call for an `active` fulfillment
+- **THEN** the read is rejected with the `credential_fetch_failed` error category and the aggregate's durable state is unchanged
+
+#### Scenario: Query for an unknown fulfillment identifier
+
+- **WHEN** either read is called with a `fulfillment_id` not present in this provisioning service's database
+- **THEN** it is rejected as a not-found error
 
 ### Requirement: Existing lease continuity during fulfillment cutover
 

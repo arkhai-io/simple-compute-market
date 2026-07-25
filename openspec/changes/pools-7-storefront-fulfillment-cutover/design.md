@@ -2608,7 +2608,7 @@ diagnostics event after each completed cycle and never one event per row.
 | **(2026-07-24, external code review)** `openspec/specs/fulfillment/architecture.md` still described scheduler assignments and the fulfillment registry as process-local with no durable Settlement Record — stale since Section 3, never corrected during that section's own promotion pass | `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |
 ## Section 8 (pull-based status/result and live credentials) — resolved design decisions (discuss phase, resolved 2026-07-25)
 
-Six items, resolved in discussion before Section 8 is planned:
+Nine items, resolved in discussion and review before the Section 8 correction plan:
 
 1. **Live credential fetch is stateless — no claim, lease, or rotation
    bookkeeping.** `dev-branch-migration-notes.md`'s candidate shape
@@ -2655,11 +2655,41 @@ Six items, resolved in discussion before Section 8 is planned:
    deferred, so `provisioning-result-push-delivery` can reuse the same
    shape unchanged, matching what that change's proposal already assumes.
 
-6. **Credential resolution is scoped per `ProvisionedResource`** (keyed by
-   `domain_resource_ref`), not per-fulfillment as a whole, even though
-   today's VM adapter only ever produces one `ProvisionedResource` per
-   fulfillment. Cheap to do now; avoids a breaking reshape if a future
-   domain fulfillment produces more than one resource.
+6. **Credential/resource association is domain-specific and many-to-many.**
+   The initial per-`ProvisionedResource` proposal keyed by
+   `domain_resource_ref` was rejected during review because it both assumed
+   one credential belongs to one output and introduced a second generic
+   resource identifier without a present consumer. The generic fulfillment
+   envelope owns stable `provisioned_resource_id` values. A versioned domain
+   result payload may associate one credential with many provisioned
+   resources and one provisioned resource with many credentials by those
+   fulfillment-owned IDs. For the VM domain, this association belongs in a
+   VM-specific type such as `VmFulfillmentCredential`, not in a universal
+   credential model.
+
+7. **`domain_resource_ref` is removed rather than renamed.** Multiple outputs
+   from one fulfillment are already distinguished by globally unique
+   `provisioned_resource_id` values. Provider-operational identifiers such as
+   `vm_host`, `vm_target`, and executor job IDs remain in versioned provider
+   metadata or prepared teardown input. Buyer-facing domain attributes remain
+   in the versioned domain result payload. A second domain-native identifier
+   should be introduced only when a concrete cross-boundary use case requires
+   one.
+
+8. **Credential reads are all-or-nothing and fresh.** If any credential fetch
+   required to build an active result fails, the whole result request fails as
+   `credential_fetch_failed`; Section 8 does not define partial-result error
+   entries. Every active result read performs a fresh provider lookup. Durable
+   fulfillment state and persisted provisioned-resource outputs are stable
+   unless the aggregate changes, but credential equality across reads is not
+   guaranteed and the read itself never mutates fulfillment state.
+
+9. **Expected provider failures are classified at the adapter boundary, with a
+   defensive orchestration fallback.** Adapters translate known metadata,
+   provider, and credential-store failures into `CredentialFetchFailedError`.
+   The orchestration layer also wraps unexpected provider exceptions in the
+   same public category while recording safe diagnostic context and never
+   logging credential material.
 
 **Former task 8.5 (per-caller ownership enforcement) is out of scope for
 this section.** `StorefrontAuthMiddleware` gates the whole service behind
@@ -2691,6 +2721,37 @@ existing dependency on this change.
 | `active`-only credential-fetch gating and non-`active` empty-envelope behavior | `openspec/specs/fulfillment/spec.md` |
 | `fulfillment.result.v1` envelope shape | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
 | `credential_fetch_failed` stable error category | `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy` |
-| Per-`ProvisionedResource` credential-resolution boundary | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Domain-specific many-to-many credential/resource association through `provisioned_resource_id`; no generic `domain_resource_ref` | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown`; `openspec/specs/fulfillment/architecture.md` |
 | No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
+| Fresh-read consistency contract and all-or-nothing credential-fetch failure | `openspec/specs/fulfillment/spec.md#fulfillment-status-and-result-queries`; `openspec/specs/fulfillment/architecture.md` |
+| Adapter-first error classification with defensive orchestration translation and safe diagnostics | `openspec/specs/fulfillment/spec.md#requirement-provider-contract`; `openspec/specs/fulfillment/architecture.md` |
+| Removal of `domain_resource_ref`; provider-operational identifiers remain in provider metadata/prepared teardown input | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown`; `openspec/specs/fulfillment/architecture.md` |
 | Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |
+
+### Section 8 review corrections accepted for planning (2026-07-25)
+
+The initial implementation review found that the generic result contract was
+still VM-shaped, that the proposed per-resource credential boundary could not
+represent credential reuse, and that `domain_resource_ref` duplicated the
+fulfillment-owned output identity without a demonstrated consumer. The accepted
+correction is to keep the outer `fulfillment.result.v1` transport envelope
+provider-neutral while moving credential structure and resource association into
+a versioned domain payload. The VM payload will use `VmFulfillmentCredential`
+and represent a many-to-many relationship through `provisioned_resource_id`.
+`domain_resource_ref` will be removed from the generic durable/result model;
+provider-operational VM identity remains in provider metadata and prepared
+teardown input.
+
+The review also confirms all-or-nothing credential-fetch failure for v1, fresh
+credential lookup on every active read without an equality/idempotency guarantee,
+adapter-owned expected exception translation with a defensive orchestration
+fallback, and the requirement to prove restart and repeated-read behavior with
+dedicated tests rather than inference from one-shot reads.
+
+### Section 8 implementation (2026-07-25) — confirmed against the table above
+
+All six discuss-phase decisions and the ownership-check split were implemented as recorded; each destination cell above now contains the corresponding promoted text. One correction found during implementation, not a design change: the discuss-phase text assumed `AnsibleFulfillmentProvider.fetch_credentials` would need an async HTTP call through `vm_provisioning_operator.client` to a separate adapter service. In fact `AnsibleFulfillmentProvider` and `AnsibleJobService` (which owns `get_credentials`) run in the same process/service already -- the call is a local, synchronous DB read, wrapped in an `async def` only to satisfy the provider-neutral interface (the same shape `get_status`/`get_job` already has). No design implication beyond the implementation itself; recorded here so a future reader of the discuss-phase note above isn't misled by the superseded assumption.
+
+`get_fulfillment_result` was implemented as `async def` (the discuss-phase note did not specify sync/async for the orchestrator method itself, only for `fetch_credentials`); the read transaction closes before the awaited provider call, per the no-transaction-open-during-provider-I/O principle already established for the convergence worker.
+
+

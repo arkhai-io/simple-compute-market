@@ -77,6 +77,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "scheduling.py": set(),
         "round_robin_policy.py": set(),
         "envelopes.py": {"pydantic", "typing"},
+        "results.py": {"pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
         "provider.py": set(),
