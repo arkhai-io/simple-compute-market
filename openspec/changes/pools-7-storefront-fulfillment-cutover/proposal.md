@@ -117,6 +117,26 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
   it was not a behavioral prerequisite, but was selected to land first, so
   this plan now targets the extracted service and adapter paths.
 
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [x] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+Each implemented section carries its own itemized design-promotion record in `design.md`, mapping every accepted decision to its exact permanent destination heading; this list is a proposal-level summary, not a substitute for those records.
+
+- Kit dependency layers, package ownership, wheel/reinit conventions: `docs/development/ARCHITECTURE.md#package-and-dependency-layers`; `openspec/specs/fulfillment/spec.md` (new subsystem specification, added in this change).
+- Capacity-reservation/resource-pool schema cutover, projection naming, and storefront projection caching: `openspec/specs/site-capacity/spec.md`, `openspec/specs/resource-pool-management/spec.md`, `openspec/specs/storefront-publication/spec.md` — see design.md's "Design promotion record" (Section 2).
+- Durable settlement/fulfillment aggregate persistence, identity, and equivalence rules: `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` — see design.md's "Section 3 correction design-promotion record".
+- Atomic scheduling transaction and concurrency contract: `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`; `docs/development/ARCHITECTURE.md#deterministic-database-concurrency-tests` — see design.md's Section 4 entries (4.8.3, 4.14.4).
+- Fulfillment acceptance, provider preparation, and envelope/transaction shape: `openspec/specs/fulfillment/spec.md`, `openspec/specs/fulfillment/architecture.md`, `openspec/specs/resource-pool-management/spec.md` — see design.md's "Section 5 design-promotion record".
+- Recovery/convergence claim semantics, provider-call transaction boundary, and convergence worker contract: `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` — see design.md's "Section 6 implementation promotion record".
+- Legacy-lease-to-fulfillment cutover: lease-state mapping, atomicity, provider-owned teardown preparation, and the compiler/migration split: `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover`, `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover`, `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts`, `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover`, `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` — see design.md's "Section 7 implementation promotion record".
+- Sections 8–11 (pull-based status/result queries, storefront cutover, teardown/reclamation, and obsolete-schema removal) have not started; their promotion records do not exist yet and will be added as those sections implement.
+
 ## Section 7 cutover boundary
 
 Section 7 is a pre-release, all-or-nothing migration of legacy VM leases into

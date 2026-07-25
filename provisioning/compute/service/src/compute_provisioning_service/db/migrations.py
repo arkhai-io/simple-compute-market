@@ -260,39 +260,87 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     if not _table_exists(engine, "vm_leases"):
         return
 
-    from market_fulfillment.backfill import LegacyBackfillValidationError
     from market_fulfillment.db import Base as FulfillmentBase
+
+    FulfillmentBase.metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        _apply_legacy_vm_lease_backfill(connection)
+
+
+def _normalize_json_column(value):
+    """Return a JSON column's value as a Python object regardless of whether
+    the driver already decoded it or returned the stored text."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _existing_settlement_row_conflicts(existing, draft) -> bool:
+    """Compare an already-persisted settlement row against a compiled draft.
+
+    Equivalence covers every field a provider operation depends on for
+    correctness, not only coarse placement fields: provider metadata
+    (including the tracked create job), teardown provider metadata
+    (including the active teardown job), the prepared teardown envelope,
+    and resource attributes. A row matching on state/resource/pool/provider
+    alone but differing in tracked job identity is a conflict, not an
+    equivalent rerun.
+    """
+    expected = (
+        draft.state,
+        draft.settlement_resource_id,
+        draft.pool_id,
+        draft.provider,
+        draft.resource_attributes,
+        draft.provider_metadata,
+        draft.teardown_provider_metadata,
+        draft.prepared_teardown_operation,
+    )
+    actual = (
+        existing["state"],
+        existing["settlement_resource_id"],
+        existing["pool_id"],
+        existing["provider"],
+        _normalize_json_column(existing["resource_attributes"]),
+        _normalize_json_column(existing["provider_metadata"]),
+        _normalize_json_column(existing["teardown_provider_metadata"]),
+        _normalize_json_column(existing["prepared_teardown_operation"]),
+    )
+    return actual != expected
+
+
+def _existing_provisioned_resources_conflict(connection, capacity_reservation_id, expected_ref) -> bool:
+    """Compare already-persisted ``ProvisionedResource`` rows against a draft.
+
+    A candidate with no live target expects zero provisioned-resource rows;
+    a candidate with a live target expects exactly one, referencing that
+    target. Zero, several, or a differently-targeted row are all conflicts:
+    silently accepting any of them could mean losing track of, or
+    overwriting, which VM a reservation actually owns.
+    """
+    rows = connection.execute(text(
+        "SELECT domain_resource_ref FROM provisioned_resources WHERE capacity_reservation_id=:id"
+    ), {"id": capacity_reservation_id}).mappings().all()
+    refs = [row["domain_resource_ref"] for row in rows]
+    if expected_ref is None:
+        return len(refs) != 0
+    return refs != [expected_ref]
+
+
+def _apply_legacy_vm_lease_backfill(connection) -> None:
+    """Enumerate all historical VM lease candidates, compile them before
+    writing, reject conflicts, and persist the population atomically.
+
+    Takes an open connection rather than an engine: the caller owns the
+    transaction boundary this enumeration and write run inside.
+    """
+    from market_fulfillment.backfill import LegacyBackfillValidationError
     from vm_provisioning_adapter.legacy_backfill import (
         LegacyVmLeaseCandidate,
         compile_legacy_vm_fulfillment_backfill,
     )
 
-    FulfillmentBase.metadata.create_all(engine)
-
-    with engine.begin() as connection:
-        _apply_legacy_vm_lease_backfill(
-            connection,
-            LegacyVmLeaseCandidate=LegacyVmLeaseCandidate,
-            compile_legacy_vm_fulfillment_backfill=compile_legacy_vm_fulfillment_backfill,
-            LegacyBackfillValidationError=LegacyBackfillValidationError,
-        )
-
-
-def _apply_legacy_vm_lease_backfill(
-    connection,
-    *,
-    LegacyVmLeaseCandidate,
-    compile_legacy_vm_fulfillment_backfill,
-    LegacyBackfillValidationError,
-) -> None:
-    """Enumerate, compile, and atomically write the legacy VM lease backfill.
-
-    Split from ``_migrate_legacy_vm_leases_to_fulfillment`` so tests can
-    invoke it directly against an already-open connection without going
-    through the once-per-schema-version ``apply_schema_migrations`` gate,
-    which is otherwise the only caller in normal operation and never
-    re-enters an applied migration.
-    """
     rows = connection.execute(text(
         """
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
@@ -356,13 +404,15 @@ def _apply_legacy_vm_lease_backfill(
 
     for draft in drafts:
         existing = connection.execute(text(
-            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider "
+            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider, "
+            "resource_attributes, provider_metadata, teardown_provider_metadata, "
+            "prepared_teardown_operation "
             "FROM settlement_records WHERE capacity_reservation_id=:id"
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
         if existing:
-            expected = (draft.state, draft.settlement_resource_id, draft.pool_id, draft.provider)
-            actual = (existing["state"], existing["settlement_resource_id"], existing["pool_id"], existing["provider"])
-            if actual != expected:
+            if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
+                connection, draft.capacity_reservation_id, draft.provisioned_resource_ref
+            ):
                 raise SchemaDriftError(
                     f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
                 )

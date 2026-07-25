@@ -1,5 +1,5 @@
 """Prove ``FulfillmentConvergenceWatchdog`` can observe and progress rows
-produced by the legacy VM lease backfill (task 7.10).
+produced by the legacy VM lease backfill.
 
 Migration ordering and schema shape are covered elsewhere
 (``test_database.py``'s index/FK/schema-migrations-set assertions). This
@@ -34,11 +34,6 @@ from market_fulfillment import (
     ProviderStatus,
     SettlementRecordState,
     SettlementRepository,
-)
-from market_fulfillment.backfill import LegacyBackfillValidationError
-from vm_provisioning_adapter.legacy_backfill import (
-    LegacyVmLeaseCandidate,
-    compile_legacy_vm_fulfillment_backfill,
 )
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
@@ -130,12 +125,7 @@ def engine():
             """
         ))
     with engine.begin() as connection:
-        _apply_legacy_vm_lease_backfill(
-            connection,
-            LegacyVmLeaseCandidate=LegacyVmLeaseCandidate,
-            compile_legacy_vm_fulfillment_backfill=compile_legacy_vm_fulfillment_backfill,
-            LegacyBackfillValidationError=LegacyBackfillValidationError,
-        )
+        _apply_legacy_vm_lease_backfill(connection)
     return engine
 
 

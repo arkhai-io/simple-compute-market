@@ -24,11 +24,6 @@ from compute_provisioning_service.db.migrations import (
     SchemaDriftError,
     _apply_legacy_vm_lease_backfill,
 )
-from market_fulfillment.backfill import LegacyBackfillValidationError
-from vm_provisioning_adapter.legacy_backfill import (
-    LegacyVmLeaseCandidate,
-    compile_legacy_vm_fulfillment_backfill,
-)
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
 _INVENTORY_GROUP = "legacy_hosts"
@@ -117,12 +112,7 @@ def _insert_vm_lease(
 
 def _apply_backfill(engine):
     with engine.begin() as connection:
-        _apply_legacy_vm_lease_backfill(
-            connection,
-            LegacyVmLeaseCandidate=LegacyVmLeaseCandidate,
-            compile_legacy_vm_fulfillment_backfill=compile_legacy_vm_fulfillment_backfill,
-            LegacyBackfillValidationError=LegacyBackfillValidationError,
-        )
+        _apply_legacy_vm_lease_backfill(connection)
 
 
 def _settlement_state(engine, reservation_id):
@@ -239,3 +229,138 @@ def test_whole_migration_rolls_back_on_any_candidate_failure():
     # valid one enumerated before the failing candidate.
     assert _count(engine, "settlement_records") == 0
     assert _count(engine, "provisioned_resources") == 0
+
+
+def test_conflicting_duplicate_rejects_different_create_job_id():
+    """Same derived state/resource/pool/provider, but the tracked create
+    job identity itself differs -- accepting this would silently lose or
+    swap which provider job a reservation is actually attached to."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-active", allocation_id="reservation-1",
+        status="leased", vm_target="vm-active", create_job_id="job-1",
+    )
+    _apply_backfill(engine)
+    assert _settlement_state(engine, "reservation-1") == "active"
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE vm_leases SET create_job_id='job-2' WHERE id='lease-active'"
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)
+
+
+def test_conflicting_duplicate_rejects_different_teardown_job_id():
+    """Same derived state, but the active teardown job identity differs."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-tearing", allocation_id="reservation-1",
+        status="releasing", vm_target="vm-tearing", create_job_id="job-1",
+        vm_remove_job_id="job-remove-1",
+    )
+    _apply_backfill(engine)
+    assert _settlement_state(engine, "reservation-1") == "tearing_down"
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE vm_leases SET vm_remove_job_id='job-remove-2' WHERE id='lease-tearing'"
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)
+
+
+def test_conflicting_duplicate_rejects_missing_prepared_teardown_operation():
+    """An already-persisted row with a live target but no prepared teardown
+    envelope is not equivalent to a freshly-compiled draft, which always
+    prepares one for a live target -- accepting it would leave a recovered
+    reservation with no way to tear the resource down."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-active", allocation_id="reservation-1",
+        status="leased", vm_target="vm-active", create_job_id="job-1",
+    )
+    _apply_backfill(engine)
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE settlement_records SET prepared_teardown_operation=NULL "
+            "WHERE capacity_reservation_id='reservation-1'"
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)
+
+
+def test_conflicting_duplicate_rejects_missing_provisioned_resource_row():
+    """A live-target candidate expects exactly one ProvisionedResource row;
+    an already-persisted aggregate with none is a conflict, not something
+    to silently leave as-is."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-active", allocation_id="reservation-1",
+        status="leased", vm_target="vm-active", create_job_id="job-1",
+    )
+    _apply_backfill(engine)
+    assert _count(engine, "provisioned_resources") == 1
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "DELETE FROM provisioned_resources WHERE capacity_reservation_id='reservation-1'"
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)
+
+
+def test_conflicting_duplicate_rejects_provisioned_resource_with_different_target():
+    """An existing ProvisionedResource row pointing at a different VM target
+    than the one the lease actually describes is a conflict."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-active", allocation_id="reservation-1",
+        status="leased", vm_target="vm-active", create_job_id="job-1",
+    )
+    _apply_backfill(engine)
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE provisioned_resources SET domain_resource_ref='vm-different' "
+            "WHERE capacity_reservation_id='reservation-1'"
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)
+
+
+def test_conflicting_duplicate_rejects_multiple_provisioned_resource_rows():
+    """Exactly one ProvisionedResource row is expected for a live-target
+    candidate; a second, differently-targeted row for the same reservation
+    is a conflict, not something the rerun should tolerate or pick from."""
+    engine = _bootstrap_engine()
+    _insert_host(engine)
+    _insert_vm_lease(
+        engine, lease_id="lease-active", allocation_id="reservation-1",
+        status="leased", vm_target="vm-active", create_job_id="job-1",
+    )
+    _apply_backfill(engine)
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            """INSERT INTO provisioned_resources
+            (provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+             domain_resource_ref, status)
+            SELECT 'extra-resource', capacity_reservation_id, fulfillment_id,
+                   'vm-active-extra', 'active'
+            FROM settlement_records WHERE capacity_reservation_id='reservation-1'"""
+        ))
+
+    with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
+        _apply_backfill(engine)

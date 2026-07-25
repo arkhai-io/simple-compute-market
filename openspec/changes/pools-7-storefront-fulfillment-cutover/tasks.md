@@ -323,7 +323,7 @@ self-committing calls glued together in the scheduler, the way today's
 - [x] 7.8 Make the complete backfill atomic: derive and validate every candidate before commit, insert all settlement and provisioned-resource rows in one database transaction, and roll back every Section 7 write on any failure. Ensure the migration is safely rerunnable with no partially migrated population visible.
 - [x] 7.9 **Closed 2026-07-25.** Full scenario matrix now covered:
   - [x] 7.9.1 `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py` — compiler-level unit tests (no engine): provisioning with tracked create job, active lease, releasing before/with teardown dispatch, failed teardown, missing host/pool/provider, missing pool config, conflicting `vm_target`/`executor_target`, missing create job (provisioning and live-target cases), unsupported status.
-  - [x] 7.9.2 `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py` — DB-level tests calling `_apply_legacy_vm_lease_backfill` directly: terminal/expired skip, unmatched-reservation tolerance, equivalent rerun, conflicting duplicate, whole-migration rollback.
+  - [x] 7.9.2 `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py` — DB-level tests calling `_apply_legacy_vm_lease_backfill` directly: terminal/expired skip, unmatched-reservation tolerance, equivalent rerun, whole-migration rollback, and conflicting duplicate covering every field the equivalence check compares — different `create_job_id`, different teardown job ID, missing `prepared_teardown_operation`, missing `ProvisionedResource` row, `ProvisionedResource` row with a different `domain_resource_ref`, and multiple `ProvisionedResource` rows. **Extended 2026-07-25 (code review):** the original conflict check only compared `state`/`settlement_resource_id`/`pool_id`/`provider`; see `design.md`'s "Third code-review pass" for the fix and the six added scenarios.
   - [x] 7.9.3 Covered by `test_provisioning_without_tracked_create_job_is_rejected` and `test_live_target_without_known_create_job_is_rejected` in 7.9.1 — both assert `LegacyBackfillValidationError`, never a dispatched create.
 - [x] 7.10 **Closed 2026-07-25.** `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py` runs `run_migrations` against a populated pre-migration schema producing one backfilled row in each of `dispatching`, `teardown_dispatch_pending`, `tearing_down`, and `teardown_failed`, then drives `FulfillmentConvergenceWatchdog.converge_creates`/`dispatch_pending_teardowns`/`converge_teardowns`/`requeue_teardown_failures` (and a full `run_cycle` loop) against them and asserts each converges to `active`/`torn_down` exactly as a natively-created row would.
 - [x] 7.11 Promote durable design knowledge during implementation:
@@ -335,16 +335,8 @@ self-committing calls glued together in the scheduler, the way today's
 
 ### Section 7 correction pass (opened 2026-07-25)
 
-- [ ] 7.13 Once this section's code review closes, relocate the existing
-  "Section 7 design-promotion record" (currently `tasks.md:405-412`) into
-  `design.md` as a "## Section 7 implementation promotion record" heading,
-  matching the Section 5/6 pattern, and add entries for the compiler
-  extraction (7.3.1/7.3.2) and the new create-job-identity validation rule
-  (7.7).
-- [ ] 7.14 `proposal.md` is missing the `openspec/README.md`-mandated
-  "Permanent documentation impact" checklist (predates this change's
-  Section 7 work; not specific to it). Fix in the final POOLS-7 review
-  (Section 12) rather than here — cross-referenced from task 12.4.
+- [x] 7.13 **Closed 2026-07-25.** Promotion record relocated into `design.md`'s "## Section 7 implementation promotion record", including entries for the compiler extraction and the new create-job-identity validation rule; `tasks.md`'s copy replaced with a reference, matching the Section 6 pattern.
+- [x] 7.14 **Closed 2026-07-25.** Added the missing "Permanent documentation impact" checklist to `proposal.md`.
 
 ## 8. Implement pull-based fulfillment status and result queries
 
@@ -399,7 +391,7 @@ design.
 - [ ] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `provisioning-result-push-delivery` as planned future work, not implemented by this change.
 - [ ] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived.
 - [ ] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions.
-- [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. Includes closing task 7.14: add the missing `openspec/README.md` "Permanent documentation impact" checklist to `proposal.md` before archiving.
+- [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirm it still reflects reality once Sections 8–11 land.
 
 ## Section 1 documentation-system retrofit
 
@@ -422,9 +414,6 @@ design.
 
 ### Section 7 design-promotion record
 
-- Lease-state mapping, known-job observation, state-based inputs, conflict/idempotency rules, and the prohibition on speculative create fallback: `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover`.
-- Atomicity and the authority priority of active leases/provider operations over unused pre-release reservations: `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover`.
-- VM target derivation, provider metadata preservation, and provider-owned teardown preparation: `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts` and `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover`.
-- Repository-wide all-or-nothing workload lifecycle cutover rule: `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers`.
+**Relocated 2026-07-25** to `design.md`'s "## Section 7 implementation promotion record", matching the Section 5/6 pattern (a change document holds one copy of the record, not a duplicate here). See that table for the full accepted-decision-to-permanent-location mapping, including the compiler-extraction and create-job-identity decisions added during code review.
 
-Section 7 implementation is complete. Focused execution was blocked in this review environment because the configured package index returned HTTP 503 while `uv` attempted to populate the service environment; syntax validation completed with `py_compile`.
+Section 7 implementation is complete. `test_legacy_vm_fulfillment_backfill.py`, `test_legacy_vm_lease_migration.py`, and `test_fulfillment_convergence_after_legacy_backfill.py` were run directly (not `py_compile`-checked only); the full reachable `kit/fulfillment`/`provisioning/compute/service` suite passes at 598 tests with no regressions. Code review found and fixed a real gap in the rerun/conflict comparison (it originally checked only four coarse fields, not tracked job identity or the provisioned-resource population) — see `design.md`'s "Third code-review pass".

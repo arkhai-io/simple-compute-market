@@ -5,8 +5,8 @@ These cover the per-candidate scenario matrix directly against
 migration harness -- because the compiler is a pure function of one
 already-read row. Cross-candidate concerns (duplicate identity, duplicate
 target, conflicting already-persisted rows, whole-migration rollback) are
-enumeration-level and covered separately in ``test_database.py`` against a
-real connection.
+enumeration-level and covered separately in
+``test_legacy_vm_lease_migration.py`` against a real connection.
 """
 
 from __future__ import annotations

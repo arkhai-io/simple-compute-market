@@ -2167,8 +2167,7 @@ natively-created row would be.
 #### Follow-up closed (2026-07-25)
 
 7.3.1/7.3.2, 7.9.1–7.9.3, and 7.10 are implemented: `market_fulfillment.backfill`
-(`LegacyFulfillmentBackfillDraft`/`LegacyBackfillValidationError`/
-`LegacyFulfillmentBackfillCompiler`) plus
+(`LegacyFulfillmentBackfillDraft`/`LegacyBackfillValidationError`) plus
 `vm_provisioning_adapter.legacy_backfill.compile_legacy_vm_fulfillment_backfill`
 now own state derivation and provider-envelope preparation as a pure
 function; `_migrate_legacy_vm_leases_to_fulfillment`/
@@ -2203,6 +2202,104 @@ Tasks 7.13 (relocate the promotion record into `design.md`) and 7.14
 (`proposal.md`'s missing checklist) remain open, deferred to Section 7
 review close and the final POOLS-7 review respectively, per the plan
 above.
+
+#### Second code-review pass (2026-07-25): production-comment history and `kit/fulfillment` placement
+
+External review of the closed follow-up found `_apply_legacy_vm_lease_backfill`'s
+docstring explaining *why* it was split out (test-invocation convenience)
+rather than *what* it durably does — a direct `AGENTS.md` violation, since
+that rationale is change history, not a present invariant. Fixed by
+rewriting the docstring to state the responsibility only ("Enumerate all
+historical VM lease candidates, compile them before writing, reject
+conflicts, and persist the population atomically") and, since the
+parameter list existed only to thread already-imported classes down from
+the outer migration function rather than to serve any real caller
+diversity, simplifying `_apply_legacy_vm_lease_backfill` back down to a
+single `connection` parameter that does its own lazy import — removing the
+awkward-looking kwarg-threading pattern along with the docstring problem it
+was attached to, not just papering over the wording.
+
+The same review raised a design question, not a mechanical defect:
+`market_fulfillment/backfill.py`'s generic naming and its now-removed
+`LegacyFulfillmentBackfillCompiler` `Protocol` presented a one-time
+historical cutover as a lasting, general-purpose fulfillment extension
+point, which reinforced the question of whether this belongs in
+`kit/fulfillment` at all. Resolution: the `Protocol` is removed — it had
+exactly one implementation (VM), was not referenced by any type annotation
+anywhere in the tree, and existed only as speculative interface scaffolding
+for a second domain this change does not accept as in scope. What remains
+(`LegacyFulfillmentBackfillDraft`, `LegacyBackfillValidationError`) does
+belong in `kit/fulfillment` specifically, but not because domain cutover
+compilation is itself a durable fulfillment concept — because
+`LegacyFulfillmentBackfillDraft` mirrors `SettlementRecord`/
+`ProvisionedResource`'s own row shape, which is already defined in this
+package, and because both `vm_provisioning_adapter` and
+`compute_provisioning_service` already depend on `kit/fulfillment` without
+depending on each other, making it the only location both a domain
+adapter's compiler and the generic service's migration can share without
+crossing the dependency boundary `openspec/specs/fulfillment/spec.md#dependency-boundary`
+establishes. The module docstring was rewritten to state this directly
+rather than lead with generic "contracts for compiling" framing. If a
+second domain later needs an equivalent historical cutover, a shared
+extension point can be reconsidered then, against a second real
+implementation instead of a speculative one.
+
+Test-file docstrings were also checked against the same rule: task-ID
+references (`task 7.10`) are removed from `test_legacy_vm_fulfillment_backfill.py`
+and `test_fulfillment_convergence_after_legacy_backfill.py`'s module
+docstrings, consistent with `AGENTS.md`'s "task IDs are not durable
+documentation" position even where test-strategy prose itself remains
+freely descriptive.
+
+#### Third code-review pass (2026-07-25): rerun equivalence was too coarse
+
+External review found the existing-row equivalence check task 7.7/7.8
+require ("accept exactly equivalent target rows for idempotent reruns;
+never overwrite conflicts") compared only `state`, `settlement_resource_id`,
+`pool_id`, and `provider`. A row matching on those four fields could still
+carry a different (or missing) tracked create job, a different active
+teardown job, a missing prepared teardown envelope, or no corresponding
+`ProvisionedResource` row at all — and the rerun would silently `continue`
+rather than reject it. That is exactly the provider-operation-identity loss
+Section 7 exists to prevent; the coarse check made "equivalent" weaker than
+the design decision it was implementing.
+
+Fixed by comparing every field a provider operation depends on:
+`resource_attributes`, `provider_metadata` (including the tracked create
+job), `teardown_provider_metadata` (including the active teardown job), and
+`prepared_teardown_operation`, plus a separate check that the corresponding
+`ProvisionedResource` population matches exactly — zero rows for no live
+target, exactly one row with the expected `domain_resource_ref` for a live
+target. Any mismatch across either check raises the same
+`SchemaDriftError` as before; equivalence now means bit-for-bit equivalent,
+not merely coarsely similar.
+
+Added to `test_legacy_vm_lease_migration.py`: same coarse fields but a
+different `create_job_id`; a different teardown job ID; a missing prepared
+teardown operation; a missing `ProvisionedResource` row; a
+`ProvisionedResource` row with a different `domain_resource_ref`; and
+multiple `ProvisionedResource` rows where exactly one is expected. All six
+raise `SchemaDriftError` against otherwise-unmodified legacy lease data,
+proving the tightened check — not just the original four-field comparison
+— is what rejects them. Full suite re-run: 598 tests, no regressions.
+
+## Section 7 implementation promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Legacy lease state mapping, known-job observation, state-based required inputs, and no speculative create fallback | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
+| A live target with no known create job identity is rejected rather than backfilled | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
+| Idempotent-rerun and conflict-rejection rules for the cutover | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
+| Whole-population validation-before-commit and atomic-transaction cutover | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
+| Active lease/provider-operation continuity outranks unused pre-release reservations | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
+| Per-candidate state derivation and provider-envelope preparation live in a pure, domain-owned compiler; the enumerating migration owns only enumeration, dedup, conflict comparison, and the atomic write | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
+| Equivalent-rerun/conflict comparison covers every field a provider operation depends on for correctness (resource attributes, provider metadata including the tracked create job, teardown provider metadata including the active teardown job, the prepared teardown envelope) plus the corresponding `ProvisionedResource` population, not only state/resource/pool/provider | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
+| VM target derivation, provider metadata preservation, and provider-owned teardown preparation | `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts` |
+| Provider job identifier as the durable correlation point migration cannot safely replace | `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover` |
+| Repository-wide all-or-nothing workload lifecycle cutover rule | `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` |
+| Shared cutover row-draft/error types live in `kit/fulfillment` because they mirror `SettlementRecord`/`ProvisionedResource`'s own row shape and because the dependency graph gives a domain adapter and the generic service no other common location to share them, not because domain cutover compilation is itself a durable fulfillment concept | `kit/fulfillment/src/market_fulfillment/backfill.py` module docstring; no separate spec.md entry — this is a code-location rationale, not observable behavior |
+
+Validation evidence: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`, `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`, and `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py` were run directly against the assembled `kit/fulfillment`/`kit/site`/`kit/resource-pools`/`provisioning/compute/{,service}`/VM-adapter/VM-client/`arkhai_bare_metal` source tree, not evaluated by `py_compile` alone. The full reachable suite (`kit/fulfillment/tests` plus `provisioning/compute/service/tests`, unit and integration) passes: 598 tests, no regressions.
 
 ## Section 5 (fulfillment acceptance and provider preparation) — resolved design decisions (discuss phase, resolved 2026-07-23)
 

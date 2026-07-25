@@ -1,15 +1,22 @@
-"""Contracts for compiling one durable fulfillment aggregate from a
-domain adapter's pre-existing execution record during a schema cutover.
+"""Shared row shape and error type for one-time historical-data cutovers
+into the fulfillment aggregate.
 
-A backfill compiler is a pure function of one already-enumerated candidate:
-it performs no I/O, holds no database session, and either returns a
-``LegacyFulfillmentBackfillDraft`` or raises
-``LegacyBackfillValidationError``. A migration owns everything the compiler
-does not: SQL enumeration, whole-population validation-before-commit
-ordering, existing-row conflict/equivalence comparison against already
-persisted aggregates, and the single atomic write. Keeping compilation pure
-lets every candidate shape be covered by fast, direct unit tests instead of
-only through a live database engine.
+A domain adapter's cutover compiler is a pure function of one
+already-enumerated candidate: it performs no I/O, holds no database
+session, and either returns a ``LegacyFulfillmentBackfillDraft`` or raises
+``LegacyBackfillValidationError``. The migration that calls it owns
+everything the compiler does not: SQL enumeration, whole-population
+validation-before-commit ordering, existing-row conflict/equivalence
+comparison against already persisted aggregates, and the single atomic
+write.
+
+These two types live here, rather than in the migration or the domain
+adapter, because ``LegacyFulfillmentBackfillDraft`` mirrors
+``SettlementRecord``/``ProvisionedResource``'s own row shape, which is
+defined in this package — not because a domain cutover compiler is a
+general-purpose fulfillment extension point. A domain adapter and the
+service that runs its migration both already depend on this package for
+that reason.
 
 See ``openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover``.
 """
@@ -17,7 +24,7 @@ See ``openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfil
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 
 class LegacyBackfillValidationError(Exception):
@@ -50,14 +57,3 @@ class LegacyFulfillmentBackfillDraft:
     teardown_provider_metadata: dict[str, Any] | None
     prepared_teardown_operation: dict[str, Any] | None
     provisioned_resource_ref: str | None
-
-
-class LegacyFulfillmentBackfillCompiler(Protocol):
-    """Structural contract a domain adapter's backfill compiler satisfies.
-
-    Each domain defines its own candidate input shape (its historical
-    execution record's fields), so this protocol fixes only the compiler's
-    output and error contract, not its parameter list.
-    """
-
-    def __call__(self, candidate: Any, *, fulfillment_id: str) -> LegacyFulfillmentBackfillDraft: ...

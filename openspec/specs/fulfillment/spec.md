@@ -345,4 +345,15 @@ A database cutover that converts legacy VM leases into fulfillment aggregates SH
 - A failed release becomes `teardown_failed`.
 - Terminal or expired legacy leases do not create fulfillment aggregates.
 
-The cutover SHALL NOT submit a replacement create operation merely because an existing provider job cannot be identified. A known failed job may subsequently follow the provider's normal retry behavior. Equivalent target rows make the cutover idempotent; conflicting rows cause the cutover to fail without overwriting them.
+The cutover SHALL NOT submit a replacement create operation merely because an existing provider job cannot be identified. A known failed job may subsequently follow the provider's normal retry behavior. Equivalent target rows make the cutover idempotent; conflicting rows cause the cutover to fail without overwriting them. Equivalence SHALL compare every field a provider operation depends on for correctness — resource attributes, provider metadata (including the tracked create job), teardown provider metadata (including the active teardown job), the prepared teardown envelope, and the corresponding `ProvisionedResource` population — not only placement fields such as state, resource, pool, and provider; a row that matches on placement alone but differs in tracked job identity or provisioned-resource population is a conflict. A candidate with a live target (active or tearing down) but no known create job identity is rejected rather than backfilled without one, since a teardown operation must be able to record which create job produced the resource it tears down.
+
+#### Scenario: Legacy lease population is backfilled atomically
+
+- **WHEN** the cutover enumerates a population of nonterminal legacy leases and one candidate fails validation
+- **THEN** no candidate's settlement or provisioned-resource rows are committed, and a rerun against the same unmodified population is idempotent
+
+## Evidence
+
+- Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
+- Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
+- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
