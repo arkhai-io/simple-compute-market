@@ -259,11 +259,11 @@ class AggregateFulfillmentClient:
     A cold cache (process restart) falls back to trying every configured
     site in turn, same as ``AggregateCapacityClient.commit``/``release``.
     This is safe, not just convenient: `schedule_resource`/`begin_fulfillment`
-    retries are idempotent by `capacity_reservation_id`
-    (`kit/fulfillment`'s Section 3/4 equivalence contract — an equivalent
-    retry returns the existing row rather than erroring), so a wrong-site
-    attempt before the right one costs latency, not correctness. A site that
-    doesn't recognize the reservation answers 404
+    retries are idempotent by `capacity_reservation_id` (see
+    `openspec/specs/fulfillment/spec.md`, "Durable settlement persistence" --
+    an equivalent retry returns the existing row rather than erroring), so a
+    wrong-site attempt before the right one costs latency, not correctness. A
+    site that doesn't recognize the reservation answers 404
     (`SettlementEntityNotFoundError`), which routes to the next site exactly
     like a capacity `commit`/`release` refusal does today.
     """

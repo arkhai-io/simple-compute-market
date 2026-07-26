@@ -14,9 +14,9 @@ class VmConnectivitySettings(BaseModel):
     these aren't sizing/feasibility requirements the provisioning server
     (or, in principle, a future scheduler) would ever reason about — they're
     opaque connectivity metadata the VM provider forwards verbatim to
-    Ansible. Storefront-configured for now; see
-    ``add-buyer-vm-connectivity-terms`` for negotiated, buyer-specified
-    values as a second source for this same field.
+    Ansible. Storefront-configured for now; a negotiated, buyer-specified
+    second source for this same field is a plausible future addition, not
+    yet implemented.
     """
 
     frp_server_addr: str | None = None

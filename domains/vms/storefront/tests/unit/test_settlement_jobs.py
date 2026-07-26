@@ -525,3 +525,35 @@ def test_serialize_parses_tenant_credentials_json():
     assert out["tenant_credentials"] == {"password": "secret"}
     assert out["fulfillment_uid"] == "0xa"
     assert "attestation_uid" not in out
+
+
+def test_serialize_includes_fulfillment_id_distinct_from_fulfillment_uid():
+    """fulfillment_id (durable physical-fulfillment identity) and
+    fulfillment_uid (on-chain settlement-claim identity) are different
+    concepts and may both be set on the same row."""
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_uid": "0xa",
+        "fulfillment_id": "fulfillment-123",
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert out["fulfillment_id"] == "fulfillment-123"
+    assert out["fulfillment_uid"] == "0xa"
+    assert out["fulfillment_id"] != out["fulfillment_uid"]
+
+
+def test_serialize_omits_fulfillment_id_when_none():
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_id": None,
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert "fulfillment_id" not in out

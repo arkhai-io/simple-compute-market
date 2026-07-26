@@ -181,8 +181,8 @@ class TestSizingPrecedence:
 class TestConnectivity:
     """Connectivity (FRP) settings forward through the
     fulfillment request to the Ansible job, separate from sizing
-    requirements. Storefront-configured for now; see
-    ``add-buyer-vm-connectivity-terms`` for a negotiated source."""
+    requirements. Storefront-configured for now; a negotiated source is a
+    plausible future addition, not yet implemented."""
 
     async def test_connectivity_settings_forward_to_the_ansible_job(self, provider, job_service):
         request = _request()

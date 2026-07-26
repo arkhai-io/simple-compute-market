@@ -20,7 +20,10 @@ from compute_provisioning import (
     LeaseRegistration,
 )
 from market_fulfillment import VersionedEnvelope
-from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligation
+from market_storefront.services.vm_fulfillment_service import (
+    fulfill_vm_obligation,
+    persist_escrow_fields_with_retry,
+)
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
@@ -77,19 +80,12 @@ async def _do_provision(
     )
     escrow_uid = deal_ref.get("escrow_uid")
     if escrow_uid:
-        try:
-            await get_sqlite_client().update_escrow(
-                escrow_uid=escrow_uid,
-                capacity_reservation_id=capacity_reservation_id,
-                settlement_resource_id=scheduled.settlement_resource_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[PROVISIONING] Failed to persist settlement_resource_id for "
-                "escrow %s: %s",
-                escrow_uid,
-                exc,
-            )
+        await persist_escrow_fields_with_retry(
+            get_sqlite_client,
+            escrow_uid=escrow_uid,
+            capacity_reservation_id=capacity_reservation_id,
+            settlement_resource_id=scheduled.settlement_resource_id,
+        )
 
     connectivity = _connectivity_settings_from_storefront_config()
     request_payload: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
@@ -141,9 +137,9 @@ async def _do_provision(
 def _connectivity_settings_from_storefront_config() -> dict[str, Any] | None:
     """Storefront-operator-configured FRP settings, or None if unset.
 
-    The only source of connectivity terms today; see
-    ``add-buyer-vm-connectivity-terms`` for a negotiated, buyer-specified
-    second source populating this same request field.
+    Currently the only source of connectivity terms; a buyer-specified,
+    negotiated source populating this same request field is a plausible
+    future addition, not yet implemented.
     """
     provisioning = settings.provisioning
     frp_server_addr = getattr(provisioning, "frp_server_addr", None) or None

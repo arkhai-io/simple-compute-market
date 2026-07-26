@@ -3007,7 +3007,7 @@ dependency note) belongs to the plan phase, not this document.
 | Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring |
 | Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/add-buyer-vm-connectivity-terms/proposal.md`; registered in `openspec/changes/README.md` |
 | `register_lease` removal sequencing (Section 10 task 10.5, not 9.2/9.6) | Noted on both `tasks.md`'s 9.2 and 10.5 entries |
-| `capacity_reservation_id`/`settlement_resource_id`/`fulfillment_id` persisted on the shared `escrows` table for restart-safe fulfillment-progress resumption | `core_storefront/sqlite_client.py` schema/docstrings; no subsystem spec covers storefront-side escrow persistence as its own capability, so this is recorded as code-owned schema documentation, matching the existing `fulfillment_uid`/`provisioning_job_id` precedent on the same table |
+| `capacity_reservation_id`/`settlement_resource_id`/`fulfillment_id` persisted on the shared `escrows` table, a prerequisite for future restart recovery — **not itself restart recovery**; nothing yet reads these values back to resume an in-progress fulfillment after a crash (see the Section 9 status note below) | `core_storefront/sqlite_client.py` schema/docstrings; no subsystem spec covers storefront-side escrow persistence as its own capability, so this is recorded as code-owned schema documentation, matching the existing `fulfillment_uid`/`provisioning_job_id` precedent on the same table |
 
 ### Section 9 implementation confirmation (2026-07-26)
 
@@ -3037,5 +3037,110 @@ never previously forced to refresh in that project's venv) — both fixed.
 None of the four change what was decided above; all are places the
 implementation would otherwise have silently diverged from, or failed to
 apply, an already-correct decision.
+
+### Section 9 reconciled status (2026-07-26, after external code review)
+
+An external review of the completed 9.0–9.8 work found the design-promotion
+record above overclaiming one decision ("restart-safe... resumption") and
+several documentation-compliance gaps (a too-narrow reference sweep that
+missed non-`POOLS-7`-prefixed change-document and section-number references;
+a stale `proposal.md`). Those mechanical issues are fixed as of this note.
+The review's substantive finding is not mechanical and is not yet resolved:
+
+**Accepted (discuss-phase decisions, still standing):** the sibling
+aggregator over `AggregateCapacityClient`/`AggregateFulfillmentClient`
+architecture; `schedule_resource` → `begin_fulfillment` → poll
+status/result as the fulfillment-cutover shape; `VmConnectivitySettings`/
+`VmConnectionInfo` as separate request/result-side models; the three-tier
+VM sizing precedence; `register_lease` removal sequenced with Section 10;
+`fulfillment_id` kept bare (not renamed) alongside `fulfillment_uid`.
+
+**Implemented and verified:** the HTTP schedule endpoint and shared client
+contracts; the storefront cutover itself (`_do_provision`); durable
+identifier *persistence* (writes, not resumption — see below); status/
+credential delivery parity with the legacy path, including four real data
+gaps found and fixed (VM sizing, credential fields, result connection
+metadata, an `on_job_submitted`/`provisioning_job_id` naming bug); site
+routing with cold-cache fan-out; a real `make test` environment gap
+(missing transitive `reinit` dependencies) found and fixed.
+
+**Not implemented, contrary to what "restart-safe... resumption" language
+in an earlier version of this record implied:** nothing reads the
+persisted `capacity_reservation_id`/`settlement_resource_id`/
+`fulfillment_id` back to resume an in-progress fulfillment after a
+storefront restart or crash. `_do_provision` always runs
+schedule→begin→poll→result from the top; there is no separate resume path
+that skips straight to polling an existing `fulfillment_id`. This matters
+concretely, not just formally: `capacity.reserve()` is not idempotent by
+request content the way `schedule_resource`/`begin_fulfillment` are — it
+mints a fresh `capacity_reservation_id` on every call — so a naive
+"re-invoke the same call after a crash" retry would reserve a second
+capacity allocation rather than resume the first. Persistence-write
+failures are currently best-effort (logged, not escalated, not retried),
+which is the same class of gap: the identifiers this section added exist
+to prevent orphaned work, but a failed write to them is not itself
+detected or recovered from.
+
+**Fixed since the review (2026-07-26):** identity-persistence writes now
+retry a bounded number of times and escalate loudly (ERROR, not WARNING)
+on final failure rather than a single silent attempt (`persist_escrow_fields_with_retry`
+in `vm_fulfillment_service.py`). `fulfillment_id` is now exposed on all
+three buyer-facing settlement response models. `physical-provisioning/spec.md`'s
+VM fulfillment result payload and Ansible fulfillment adapter requirements
+now document the sizing precedence, connectivity forwarding, and
+credential/connection-metadata field changes made in this section. A
+broader documentation-reference sweep (not just the `POOLS-7`/`pools-7`
+prefix originally checked) found and fixed several more change-document
+and section-number references this section's own comment cleanup had
+missed.
+
+**Still not fixed -- the substantive finding stands:** persistence
+retrying and escalating on failure is not the same as *implementing
+recovery*. Nothing yet reads a persisted `fulfillment_id` back to resume
+an in-progress fulfillment after a restart or crash. This remains the
+open item below.
+
+**Validation still required before Section 9 is considered closed:**
+a real fresh-process/fresh-composition restart test (not just persistence
+round-tripping and cold-cache fan-out, which prove prerequisites for
+recovery, not recovery itself); a crash-window matrix across the
+schedule/begin/poll/result/store/complete sequence; stricter exception
+classification in the aggregator's fan-out (a genuine "wrong site" 404
+versus auth/validation/timeout/5xx currently route identically).
+
+**Open discuss-phase questions this raises:**
+
+1. **Resolved and implemented (2026-07-26):** `capacity.reserve()`
+   (`CapacityLedgerService.reserve` in `kit/site/src/market_site/ledger.py`)
+   is now idempotent by `deal_ref["escrow_uid"]`: a repeat call for an
+   escrow_uid with an existing reservation in any held state returns that
+   reservation instead of admitting a second one, using the existing
+   `_find_reservation(db, escrow_uid=...)` lookup (already used by
+   `get_reservation_by_escrow` and `commit`/`release`'s own lookups, just
+   not previously called from within `reserve()` itself). No new
+   caller-supplied identity parameter was needed -- `deal_ref` already
+   carried `escrow_uid` on every call site. Promoted into
+   `openspec/specs/site-capacity/spec.md`'s "Reservation lifecycle"
+   requirement, which already stated reservation "MUST... be idempotent
+   for retries" -- `commit`/`release` already satisfied that; `reserve()`
+   itself did not, until now. 6 new tests in `kit/site/tests/unit/test_ledger.py`.
+2. **Resolved and implemented (2026-07-26):** a failed identity-persistence
+   write is now retried a bounded number of times and escalated loudly
+   (ERROR, not silently logged) rather than proceeding on a single silent
+   attempt. See `persist_escrow_fields_with_retry`.
+3. Which component owns scanning for and resuming incomplete escrow
+   fulfillments after restart (storefront startup, a dedicated watchdog, or
+   the existing settlement-job runner) — under investigation, not yet
+   decided.
+4. **Resolved and implemented (2026-07-26):** the buyer-facing settlement
+   status response now exposes `fulfillment_id` (`SettleResponse`,
+   `SettleStatusResponse`, `SettleWaitResponse`), now that
+   `provisioning_job_id` is permanently empty for the new path.
+5. Which permanent subsystem specification should own storefront
+   fulfillment-progress and recovery semantics generally — under
+   investigation, not yet decided.
+
+Section 9 is not considered closed pending resolution of questions 3
+and 5, and the validation gaps above.
 
 

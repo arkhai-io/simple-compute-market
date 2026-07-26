@@ -177,8 +177,9 @@ async def test_status_and_result_route_by_explicit_capacity_reservation_id(
     reservation_sites: dict[str, str],
 ):
     # fulfillment_id alone isn't in the reservation_sites cache (it's keyed
-    # by capacity_reservation_id) — callers that have it (task 9.3's
-    # persisted workflow row) should pass it explicitly for routing.
+    # by capacity_reservation_id) — callers that have it (e.g. from the
+    # storefront's own persisted workflow row) should pass it explicitly
+    # for routing.
     reservation_sites["res-4"] = "west"
 
     status = await aggregate.get_fulfillment_status(

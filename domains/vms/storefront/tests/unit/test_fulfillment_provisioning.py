@@ -33,6 +33,7 @@ import pytest
 from compute_provisioning import ComputeProvisioningTimeoutError
 from market_fulfillment import VersionedEnvelope
 from market_storefront.services import fulfillment_service as fs
+from market_storefront.services import vm_fulfillment_service as vfs
 
 
 class TestFulfillmentResultToLegacyShape:
@@ -357,3 +358,51 @@ class TestDoProvision:
                 client, "fulfillment-1", capacity_reservation_id="res-1",
                 timeout=0.02, poll_interval=0.01,
             )
+
+
+class TestPersistEscrowFieldsWithRetry:
+    """Persistence must not be a single silent attempt: retry a bounded
+    number of times, and escalate loudly (ERROR, not WARNING) if every
+    attempt fails, rather than swallowing the failure -- a failed write
+    here reopens the orphaned-work window this persistence exists to
+    close."""
+
+    async def test_succeeds_on_first_attempt(self):
+        sqlite_client = SimpleNamespace(update_escrow=AsyncMock())
+        ok = await vfs.persist_escrow_fields_with_retry(
+            lambda: sqlite_client, escrow_uid="escrow-1", fulfillment_id="f-1",
+        )
+        assert ok is True
+        sqlite_client.update_escrow.assert_awaited_once_with(
+            escrow_uid="escrow-1", fulfillment_id="f-1",
+        )
+
+    async def test_retries_and_succeeds(self):
+        sqlite_client = SimpleNamespace(
+            update_escrow=AsyncMock(
+                side_effect=[RuntimeError("db locked"), RuntimeError("db locked"), None]
+            )
+        )
+        ok = await vfs.persist_escrow_fields_with_retry(
+            lambda: sqlite_client, escrow_uid="escrow-1", fulfillment_id="f-1",
+            backoff_seconds=0.001,
+        )
+        assert ok is True
+        assert sqlite_client.update_escrow.await_count == 3
+
+    async def test_gives_up_after_bounded_attempts_and_logs_error(self, caplog):
+        sqlite_client = SimpleNamespace(
+            update_escrow=AsyncMock(side_effect=RuntimeError("db locked"))
+        )
+        with caplog.at_level("ERROR"):
+            ok = await vfs.persist_escrow_fields_with_retry(
+                lambda: sqlite_client, escrow_uid="escrow-1", fulfillment_id="f-1",
+                attempts=3, backoff_seconds=0.001,
+            )
+        assert ok is False
+        assert sqlite_client.update_escrow.await_count == 3
+        assert any(
+            "Failed to persist" in record.message and "escrow-1" in record.message
+            for record in caplog.records
+        )
+        assert any(record.levelname == "ERROR" for record in caplog.records)

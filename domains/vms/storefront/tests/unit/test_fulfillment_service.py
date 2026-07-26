@@ -233,8 +233,8 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
     """Moved from the now-removed test_compute_provisioning_orchestration.py:
     _register_vm_lease_with_settings is unrelated to
     the direct-executor-dispatch path removed alongside that file, and stays
-    in production use (its removal is deferred to Section 10 task 10.5, once
-    the legacy teardown path it feeds no longer needs it)."""
+    in production use (removed only once the legacy teardown path it feeds
+    no longer needs it)."""
     captured = {}
 
     class FakeComputeClient:
@@ -399,9 +399,8 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     fulfillment_client.begin_fulfillment.assert_awaited_once()
     fulfillment_client.get_fulfillment_result.assert_awaited_once()
 
-    # Real rows via the unchanged downstream credential-storage code -- the
-    # thing 9.4 claimed was satisfied by field-name inspection alone;
-    # verified here for real.
+    # Real rows via the unchanged downstream credential-storage code --
+    # verified here for real, not by field-name inspection alone.
     stored = await client.get_credentials(listing_id="listing-1x", granted_to="self")
     roles = {row["role"]: row for row in stored}
     assert set(roles) == {"root", "tenant"}
@@ -410,8 +409,10 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     assert roles["tenant"]["password"] == "tenant-pw"
     assert roles["tenant"]["key_type"] == "generated"
 
-    # Restart-safety persistence (9.3): the escrow row carries the durable
-    # fulfillment identity by the time this call returns.
+    # The escrow row carries the durable fulfillment identity by the time
+    # this call returns. This proves the identifiers round-trip correctly;
+    # it does not by itself prove restart *resumption* -- nothing yet reads
+    # these values back to resume an in-progress fulfillment after a crash.
     escrow = await client.load_escrow(escrow_uid="escrow-e2e-1")
     assert escrow["fulfillment_id"] == "fulfillment-e2e-1"
     assert escrow["settlement_resource_id"] == "host-1"
@@ -420,7 +421,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
 
 @pytest.mark.asyncio
 async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
-    """'Duplicate result' coverage (9.7): fetching get_fulfillment_result
+    """Duplicate-result coverage: fetching get_fulfillment_result
     more than once for the same fulfillment must not mutate state or
     double-store credentials -- store_credential's own INSERT OR IGNORE
     already guarantees the storage half; this confirms _do_provision's

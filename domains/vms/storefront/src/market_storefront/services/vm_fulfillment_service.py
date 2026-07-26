@@ -18,6 +18,50 @@ StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
 
 
+async def persist_escrow_fields_with_retry(
+    get_sqlite_client: SQLiteClientFactory,
+    *,
+    escrow_uid: str,
+    attempts: int = 3,
+    backoff_seconds: float = 0.5,
+    **fields: Any,
+) -> bool:
+    """Persist durable identity fields onto an escrow row, retrying a
+    bounded number of times before giving up.
+
+    Used for the fulfillment-identity fields (``capacity_reservation_id``,
+    ``settlement_resource_id``, ``fulfillment_id``) this section added --
+    a failed write here reopens exactly the orphaned-work window that
+    persistence exists to close, so a single silent attempt is not
+    sufficient. Returns True on success, False if every attempt failed.
+
+    A caller that gets False should not abort an otherwise-successful
+    fulfillment attempt over a failed metadata write -- a real VM and its
+    credentials are not thrown away because a database write failed -- but
+    the failure MUST be operator-visible (logged at ERROR, not WARNING),
+    since a silently-swallowed failure here defeats the whole point of
+    this persistence: this escrow's durable pointer to the fulfillment it
+    initiated would otherwise be silently missing.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            await get_sqlite_client().update_escrow(escrow_uid=escrow_uid, **fields)
+            return True
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts:
+                await asyncio.sleep(backoff_seconds * attempt)
+    logger.error(
+        "[PROVISIONING] Failed to persist %s for escrow %s after %d attempts "
+        "-- this fulfillment's durable identity is NOT recorded; restart/"
+        "resume tracking for this escrow is degraded until reconciled "
+        "manually. Last error: %s",
+        sorted(fields), escrow_uid, attempts, last_exc,
+    )
+    return False
+
+
 def _hold_lapsed(hold_expires_at: Any) -> bool:
     """Whether a TTL hold's deadline has passed (unparseable → lapsed)."""
     if not hold_expires_at:
@@ -276,10 +320,12 @@ async def fulfill_vm_obligation(
             (the on-chain settlement-claim identity), which may already be
             set on the same row. ``capacity_reservation_id`` is persisted
             alongside it here since both are durable and known by this
-            point, letting a caller resume checking fulfillment progress by
-            escrow after a storefront restart.
+            point. This is identity persistence only -- nothing yet reads
+            these values back to resume an in-progress fulfillment after a
+            storefront restart; that capability does not exist yet.
             """
-            await get_sqlite_client().update_escrow(
+            await persist_escrow_fields_with_retry(
+                get_sqlite_client,
                 escrow_uid=escrow_uid,
                 fulfillment_id=fulfillment_id,
                 capacity_reservation_id=reserved_capacity_reservation_id,
