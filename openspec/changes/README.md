@@ -32,6 +32,7 @@ archived POOLS-1…6 foundations
 POOLS-7 durable fulfillment cutover
       ├──► POOLS-8 projection consumption and hints
       ├──► fair scheduling policy
+      ├──► add-buyer-vm-connectivity-terms
       ├──► add-storefront-principal-authentication ──► result push delivery
       └──► result push delivery
 ```
@@ -41,6 +42,7 @@ POOLS-7 durable fulfillment cutover
 | [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | active; 72 prerequisite tasks completed | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
 | [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | active; may overlap after identity decisions | Persists already-produced projections, maps them into commercial publication/claims, and adds advisory domain-owned hints |
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | blocked/design-gated | Simulation/decisions may proceed; production policy waits for POOLS-7 transactional assignment state and a selected fairness subject |
+| [`add-buyer-vm-connectivity-terms`](add-buyer-vm-connectivity-terms/) | design phase; not yet planned | Buyer-specified, negotiated VM connectivity (FRP relay) terms, replacing storefront-operator-only configuration as the sole source; depends on POOLS-7 Section 9's `connectivity` field shape |
 | [`add-storefront-principal-authentication`](add-storefront-principal-authentication/) | design phase; not yet planned | Multi-principal storefront request identity and per-record `owner_principal` ownership, extending the existing single-shared-key model; unblocks real ownership enforcement for POOLS-7 Section 8's pull endpoints and supplies the identity half of push delivery's trust model |
 | [`provisioning-result-push-delivery`](provisioning-result-push-delivery/) | deferred follow-on | Hardens the existing reverse callback with trusted authentication, durable outbox, and receiver deduplication after POOLS-7 results exist; also depends on `add-storefront-principal-authentication` for owner/site identity |
 

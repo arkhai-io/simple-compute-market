@@ -2753,3 +2753,289 @@ All six discuss-phase decisions and the ownership-check split were implemented a
 `get_fulfillment_result` was implemented as `async def` (the discuss-phase note did not specify sync/async for the orchestrator method itself, only for `fetch_credentials`); the read transaction closes before the awaited provider call, per the no-transaction-open-during-provider-I/O principle already established for the convergence worker.
 
 
+## Section 9 (cut over storefront orchestration) — design review (discuss phase, opened 2026-07-25)
+
+Read against current code, not assumed from `proposal.md`'s "Why" narrative or
+`tasks.md`'s 9.1–9.7 task text, both of which predate this review and are
+partly stale.
+
+### 1. Task 9.1's premise is partly already satisfied
+
+`proposal.md`'s "Why" says the storefront reserves with
+`required_attributes=("vm_host",)`. Current code
+(`vm_job_spec_service.compute_capacity_claim_from_order`) already builds a
+pool/resource/dimension-shaped claim (`pool_id` or `resource_id`, plus a
+`dimensions` map) — the POOLS-4 claim shape 9.1 asks for is implemented.
+What 9.1 actually still needs: the reservation response's `vm_host` (a
+concrete, feasibility-verified host bound at `reserve()` time — this is
+correct, current, "Option A" behavior per this file's "`SiteResource` is
+retired" section, not a bug) is today read directly by
+`vm_fulfillment_service.py` and handed straight to the executor. Task 9.2,
+not 9.1, is where that direct hand-off must be replaced by an explicit
+`schedule_resource` call that confirms or fairness-reassigns the settlement
+resource before `begin_fulfillment`. 9.1's own text should be corrected to
+say this rather than describing the claim-shape work as still to do.
+
+### 2. `schedule_resource` has no HTTP endpoint
+
+`kit/fulfillment/src/market_fulfillment/scheduler.py`'s
+`PhysicalSettlementScheduler.schedule_resource` is composed into
+`compute_provisioning_service/container.py` but
+`fulfillment_controller.py` exposes only `/validate`, `/begin`,
+`/{id}/status`, `/{id}/result` — no `/schedule` route. `begin_fulfillment`
+requires an already-scheduled `SettlementRecord` (raises `LookupError` /
+404 `fulfillment_not_found` otherwise per its own controller mapping), so
+the storefront cannot reach the scheduling step at all today, over HTTP,
+regardless of what 9.2's storefront-side code does. This blocks 9.2 and is
+not called out as its own task anywhere in Sections 1–8.
+
+**Proposed resolution:** add `POST /fulfillment/schedule` to
+`fulfillment_controller.py`, wrapping `PhysicalSettlementScheduler.schedule_resource`
+the same way `/begin` wraps `FulfillmentOrchestrator.begin_fulfillment` —
+same error-mapping conventions (404/409/422 per the existing
+`SettlementEntityNotFoundError`/`FulfillmentConflictError`/etc. taxonomy).
+The "thin convenience operation" this file already describes (composing
+schedule+begin for callers that don't need the placement preview) can be a
+second route or a query flag on `/begin`, not a replacement for exposing
+`schedule_resource` on its own — 9.2's design explicitly wants the preview
+available separately when commercially material.
+
+### 3. No shared client-side contract for the fulfillment HTTP surface
+
+Unlike every other endpoint family this service exposes (`ExecutorActionEnvelope`,
+`ProvisioningJob`, `LeaseRegistration`, `LeaseView`, ... all defined once in
+`provisioning/compute/src/compute_provisioning/contracts.py` and consumed by
+both the server and `ComputeProvisioningClient`), `FulfillmentRequestBody`,
+`FulfillmentAcceptanceResponse`, `FulfillmentStatusResponse`, and
+`FulfillmentValidationResponse` are defined only inside
+`compute_provisioning_service/controllers/fulfillment_controller.py` —
+server-only, nothing shared. `ComputeProvisioningClient` has no
+`schedule`/`begin`/`get_fulfillment_status`/`get_fulfillment_result` methods
+at all today.
+
+**Proposed resolution:** move these four models (plus a new
+`FulfillmentScheduleRequest`/`FulfillmentScheduleResponse` pair for the new
+route) into `compute_provisioning.contracts`, matching the established
+pattern, and have `fulfillment_controller.py` import them from there
+instead of declaring local duplicates. Add corresponding methods to
+`ComputeProvisioningClient`. Open sub-question: `contracts.py` has its own
+`COMPUTE_PROVISIONING_CONTRACT_VERSION`/`VersionedContractModel` scheme,
+independent of `market_fulfillment`'s `VersionedEnvelope`/`fulfillment.result.v1`
+versioning. The fulfillment response models should carry a
+`contract_version` field for consistency with every sibling contract in this
+file, without conflating it with the *inner* envelope's own
+`schema_version` — two different, deliberately independent version axes,
+not one collapsed into the other.
+
+### 4. Site-routing durability is incomplete for the new calls
+
+`core_storefront/aggregation.py`'s `AggregateCapacityClient._reservation_sites`
+is an in-memory, process-local cache mapping `capacity_reservation_id` →
+site name, explicitly documented as cold after a restart (falls back to
+fanning out to every site). `schedule_resource`/`begin_fulfillment`/
+`get_fulfillment_status`/`get_fulfillment_result` have no existing home on
+`AggregateCapacityClient` (it only implements the six `CapacityClient`
+protocol methods) and therefore no routing mechanism of their own yet.
+
+**Proposed resolution:** extend `AggregateCapacityClient` (or a sibling
+aggregator reusing its `_reservation_sites` cache and `_route_order` fallback)
+with the four new calls, so in-process routing matches `commit`/`release`'s
+existing pattern. Separately, amend task 9.3: it currently says to persist
+`capacity_reservation_id`, the selected settlement resource, and
+`fulfillment_id` for restart recovery, but not which site owns them. Since
+the site authority URL and the fulfillment HTTP surface are the same
+deployed service (confirmed: `_capacity_settings()`'s `sites` map already is
+the provisioning-service base URL), persisting the site name alongside the
+other three values in the storefront's own durable workflow row is cheap and
+avoids relying on a blind fan-out for a call that mutates state
+(`begin_fulfillment`) — fan-out would still be *correct* here given
+schedule/begin's idempotent-retry contract, but persisting the site is
+simpler and matches 9.3's own restart-safety goal directly.
+
+### 5. Naming collision: `fulfillment_uid` vs. `fulfillment_id`
+
+The storefront's existing schema already uses `fulfillment_uid` for the
+on-chain settlement-claim identity (Alkahest escrow arbitration target —
+`groups/escrow.py`, `claims_runtime.py`, `listing_service.py`). `kit/fulfillment`'s
+`fulfillment_id` (this change's durable physical-provisioning aggregate
+identity, `ARCHITECTURE.md`'s "Shared vocabulary and identities" table) is a
+different concept that will now be persisted in the same escrow-scoped
+workflow row per task 9.3. `ARCHITECTURE.md`'s vocabulary table lists
+`fulfillment_id` but has no entry for `fulfillment_uid` at all today.
+
+**Proposed resolution:** when 9.3 adds storage for the new identity, name
+the column/field something unambiguous — e.g. `provisioning_fulfillment_id`
+— rather than `fulfillment_id` bare, and add `fulfillment_uid` to
+`ARCHITECTURE.md`'s vocabulary table alongside `fulfillment_id` with a
+one-line disambiguation, since both now legitimately coexist on the same
+row and the table's job is exactly to prevent this kind of collision from
+being silently discovered later.
+
+### 6. `register_lease` (`/api/v1/contract/leases`) sequencing
+
+`fulfillment_service.py`'s `_register_vm_lease_with_settings` calls the
+legacy `POST /api/v1/contract/leases` endpoint via `ComputeProvisioningClient`
+today. This is exactly the legacy-lease bookkeeping Section 7's backfill
+migrates *from* and Section 11 removes the schema for. Once 9.2 wires a real
+`begin_fulfillment` call, the durable `SettlementRecord` it creates
+supersedes what `register_lease` records — leaving both call sites active
+between 9.2 landing and Section 11's cleanup would write two
+partially-overlapping durable records per fulfillment with nothing keeping
+them consistent.
+
+**Proposed resolution:** remove the `register_lease` call site as part of
+9.2/9.6 (when direct executor dispatch is replaced), not deferred to 11.1's
+generic schema removal — 11.1 should drop the now-provably-unused
+table/endpoint, not be the first point where the *call site* stops being
+exercised.
+
+### 7. Minor, non-blocking observations
+
+- `fulfillment_service.py`'s `_do_shutdown` already unconditionally raises
+  `NotImplementedError` in production (the provisioning service was never
+  given a `schedule_expiry` endpoint); it's caught and logged by
+  `_schedule_shutdown_best_effort`'s own try/except, so this is inert
+  log-spam today, not a live bug 9.x introduces or must fix. It is Section
+  10's concern (teardown cutover), not Section 9's — noted here only so it
+  isn't mistaken for new breakage once 9.x starts touching this file.
+- `PhysicalSettlementScheduler`'s `default_resource_kind="compute.gpu"` is
+  already composed at the VM composition root
+  (`compute_provisioning_service/container.py`), so the storefront does not
+  need to supply `resource_kind` explicitly in the ordinary VM path. It does
+  need to supply `market`; no canonical value is documented anywhere, but
+  `provisioning/compute/service/tests/integration/test_fulfillment_api.py`
+  already uses `"vms"`, matching the `domains/vms` package name. Proposed:
+  adopt `"vms"` as the VM domain's `market` value for schedule/begin calls,
+  and record it once `ARCHITECTURE.md`'s vocabulary section once decided.
+
+### Resolved (2026-07-25)
+
+1. **Contract placement:** fulfillment wire models move into
+   `compute_provisioning.contracts`, matching every other endpoint family.
+   Confirmed — not the alternative (storefront importing `market_fulfillment`
+   types directly).
+2. **New tasks vs. folding into 9.2:** the missing `/fulfillment/schedule`
+   route and the shared client contracts get their own explicit subtasks in
+   `tasks.md`'s Section 9 list, ahead of the existing 9.1–9.7, rather than
+   being absorbed silently into 9.2's text. Confirmed.
+
+### Resolved (2026-07-25, continued)
+
+3. **`fulfillment_uid` vs. `fulfillment_id`:** keep `fulfillment_id` bare
+   rather than renaming to `provisioning_fulfillment_id`. The existing
+   `_uid`/`_id` suffix distinction from `fulfillment_uid` is tried first as
+   sufficient disambiguation; add both terms to `ARCHITECTURE.md`'s "Shared
+   vocabulary and identities" table with a one-line note distinguishing
+   them (on-chain settlement-claim identity vs. physical-provisioning
+   aggregate identity). Revisit the name later if this proves confusing in
+   practice — not committed permanently, chosen as the first thing to try.
+
+4. **Site-routing for schedule/begin/status/result:** do not add these
+   methods to `AggregateCapacityClient`/`RemoteCapacityClient` — those are
+   deliberately scoped to the `CapacityClient` protocol's
+   `/api/v1/capacity` site-ledger surface only (`RemoteCapacityClient`'s own
+   docstring: "speaks one site authority's `/api/v1/capacity` HTTP
+   surface"). Instead:
+   - Add a new sibling aggregator (name TBD at planning time, e.g.
+     `AggregateComputeProvisioningClient`) mapping site name →
+     `ComputeProvisioningClient` instance, routing the four new calls the
+     same way `AggregateCapacityClient` routes `commit`/`release` — owning
+     site first (cache hit), fan-out to the rest on a cold cache.
+   - Reuse the *same* `_reservation_sites` mapping instance
+     `AggregateCapacityClient` already populates at `reserve()` time, rather
+     than maintaining a second, independently-populated cache. This
+     requires promoting `_reservation_sites` from `AggregateCapacityClient`-
+     private state to a shared object the composition root
+     (`market_storefront/services/capacity_client.py`) constructs once and
+     passes to both aggregators.
+   - `ComputeProvisioningClient` itself is **not** renamed and **not**
+     split. Checked directly: every model in
+     `compute_provisioning/contracts.py` (`ExecutorActionEnvelope` through
+     `LifecycleEvent`) is free of dimension/shape coupling (`ram_gb`,
+     `vcpu_count`, `gpu_count`, `dimensions` do not appear anywhere in that
+     file; `deal_ref`/`parameters` are opaque dicts, `executor_kind`/
+     `action_kind` are plain strings). `openspec/specs/physical-provisioning/spec.md`'s
+     "Compute-owned caller contract" requirement already documents
+     `fulfillment` as one of the generic, executor-neutral surfaces this
+     package is meant to cover, alongside job/lease/capacity — the new
+     methods are a documented fit, not scope creep.
+   - Non-blocking naming observation, not resolved here: "compute" as a
+     package/service boundary name encodes a "has a physical resource"
+     commitment (VM, bare-metal, future kube-pod-style executors per
+     `ARCHITECTURE.md`'s runtime service map) that is narrower than fully
+     domain-agnostic (excludes apicredits, correctly) but the exact
+     intended boundary of that commitment (would it fit an electricity
+     market? would each unit in a non-physical market like NFTs be a
+     "physical_resource"?) has not been reviewed and is out of scope for
+     Section 9. Left as a flag for a future change, not a blocker here.
+
+5. **`register_lease` removal timing — corrected, not safe for 9.2/9.6:**
+   traced further than the original proposal. `register_lease` does not
+   write a separate, superseded table — it attaches `executor_kind`/
+   `executor_target`/`executor_ref` directly onto the *same*
+   `CapacityReservation` row via `attach_lease_reservation`. Today's legacy
+   teardown path reads exactly those fields:
+   `LeaseWatchdog` → `LeaseLifecycleService._run_release_delegate` →
+   `VmReleaseExecutor.submit_release(reservation)`, which pulls `vm_host`
+   and `executor_target` off the row and silently no-ops (leaking the VM)
+   if they're missing. Removing the `register_lease` call site in 9.2/9.6 —
+   before Section 10 replaces `VmReleaseExecutor` (task 10.5) — would strand
+   every VM fulfilled through the new path with no teardown mechanism at
+   all. **Decision: `register_lease` stays active through all of Section 9;
+   its removal is sequenced with Section 10, specifically task 10.5.** This
+   dependency will be noted explicitly on 10.5 when Section 10 is planned.
+
+6. **`market` value:** adopt `"vms"` for the VM domain's schedule/begin
+   calls (matching the existing integration test and the `domains/vms`
+   package name), pending no objection — not separately contested during
+   this review.
+
+This closes the Section 9 discuss-phase design review. Remaining follow-up
+work (adding explicit tasks for the `/fulfillment/schedule` endpoint and
+shared client contracts, the new sibling aggregator, and the 10.5
+dependency note) belongs to the plan phase, not this document.
+
+### Section 9 completed design-promotion record
+
+| Decision | Destination |
+| --- | --- |
+| `POST /fulfillment/schedule` HTTP contract (request/response shape, 404/409/422 error mapping, schedule-before-begin requirement) | `openspec/specs/fulfillment/spec.md` (new scenarios under "Scheduling and assignment") |
+| `schedule_resource`/`begin_fulfillment`/`get_fulfillment_status`/`get_fulfillment_result` as generic `ComputeProvisioningClient` methods, not split into a separate client/class | `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance` |
+| Sibling aggregator (`AggregateFulfillmentClient`) pattern and shared `reservation_sites` cache, not an extension of `AggregateCapacityClient`/`RemoteCapacityClient` | `core_storefront/aggregation.py` and `market_storefront/services/capacity_client.py` docstrings — no dedicated subsystem spec exists for storefront-side capacity aggregation at all (checked); recorded as code-owned rationale, not promoted into a new spec file for this one mechanism |
+| `fulfillment_id`/`fulfillment_uid` disambiguation | `docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities" |
+| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects |
+| Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring |
+| Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/add-buyer-vm-connectivity-terms/proposal.md`; registered in `openspec/changes/README.md` |
+| `register_lease` removal sequencing (Section 10 task 10.5, not 9.2/9.6) | Noted on both `tasks.md`'s 9.2 and 10.5 entries |
+| `capacity_reservation_id`/`settlement_resource_id`/`fulfillment_id` persisted on the shared `escrows` table for restart-safe fulfillment-progress resumption | `core_storefront/sqlite_client.py` schema/docstrings; no subsystem spec covers storefront-side escrow persistence as its own capability, so this is recorded as code-owned schema documentation, matching the existing `fulfillment_uid`/`provisioning_job_id` precedent on the same table |
+
+### Section 9 implementation confirmation (2026-07-26)
+
+Every decision above was implemented as recorded, with four corrections
+found during implementation, not design changes: (1) the legacy VM
+provisioning path never sent `vm_ram`/`vm_vcpus`/`vm_disk_size` at all
+(relied on Ansible inventory defaults), while the new `VmFulfillmentRequirements`
+initially made them required — traced against the actual Ansible role and
+made optional with the three-tier precedence above, rather than either
+silently breaking every ordinary fulfillment or inventing plausible-looking
+required values; (2) `VmFulfillmentCredential` and the new fulfillment
+result payload were both missing real data the legacy path carried
+(`ssh_key_path_host`/`key_type` on credentials; `vm_name`/`host`/`timestamp`/
+`tenant_user`/`vm_ip_internal`/`ssh_port` as connection metadata) — both
+gaps traced to their actual source (`job_service.get_credentials`/
+`AnsibleJob.result`) and fixed, not assumed acceptable to drop; (3) the
+`on_job_submitted` callback in `vm_fulfillment_service.py` was found
+persisting a durable `fulfillment_id` value into the `provisioning_job_id`
+column (a column whose entire meaning is an ephemeral executor job id) —
+renamed the callback and its column target to match what it actually
+receives; (4) `domains/vms/storefront/Makefile`'s `reinit` target was
+missing `arkhai-kit-fulfillment` (a genuinely new dependency for that
+project) and, on a real `make test` run rather than this session's own
+sandbox verification, was found also missing `arkhai-kit-site`/
+`arkhai-kit-resource-pools` (kit/fulfillment's own transitive dependencies,
+never previously forced to refresh in that project's venv) — both fixed.
+None of the four change what was decided above; all are places the
+implementation would otherwise have silently diverged from, or failed to
+apply, an already-correct decision.
+
+

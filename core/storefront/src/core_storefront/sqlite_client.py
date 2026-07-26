@@ -609,11 +609,27 @@ class SQLiteClient:
                   connection_details TEXT,
                   tenant_credentials TEXT,
                   reason TEXT,
+                  -- Durable physical-fulfillment identity, so a caller can
+                  -- resume checking progress after a storefront restart
+                  -- without redispatching. Distinct from fulfillment_uid
+                  -- above (the on-chain settlement-claim identity) --
+                  -- see ARCHITECTURE.md's "Shared vocabulary and identities".
+                  capacity_reservation_id TEXT,
+                  settlement_resource_id TEXT,
+                  fulfillment_id TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 )
                 """
             )
+            # Add columns if they don't exist (for existing databases)
+            for _escrow_column in (
+                "capacity_reservation_id", "settlement_resource_id", "fulfillment_id",
+            ):
+                try:
+                    cur.execute(f"ALTER TABLE escrows ADD COLUMN {_escrow_column} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)"
             )
@@ -1343,6 +1359,9 @@ class SQLiteClient:
         "connection_details",
         "tenant_credentials",
         "reason",
+        "capacity_reservation_id",
+        "settlement_resource_id",
+        "fulfillment_id",
         "created_at",
         "updated_at",
     )
@@ -1606,8 +1625,19 @@ class SQLiteClient:
         connection_details: str | None = None,
         tenant_credentials: str | None = None,
         reason: str | None = None,
+        capacity_reservation_id: str | None = None,
+        settlement_resource_id: str | None = None,
+        fulfillment_id: str | None = None,
     ) -> None:
-        """Patch an escrows row. Any None field is skipped."""
+        """Patch an escrows row. Any None field is skipped.
+
+        ``capacity_reservation_id``/``settlement_resource_id``/``fulfillment_id``
+        are the durable physical-fulfillment identity -- persisted so a
+        caller can resume checking fulfillment progress by escrow after a
+        storefront restart, without redispatching. Distinct from
+        ``fulfillment_uid`` (the on-chain settlement-claim identity); both
+        may legitimately be set on the same row.
+        """
         def _update() -> None:
             updates: list[str] = []
             values: list[Any] = []
@@ -1624,6 +1654,9 @@ class SQLiteClient:
             add("connection_details", connection_details)
             add("tenant_credentials", tenant_credentials)
             add("reason", reason)
+            add("capacity_reservation_id", capacity_reservation_id)
+            add("settlement_resource_id", settlement_resource_id)
+            add("fulfillment_id", fulfillment_id)
             if not updates:
                 return
             updates.append("updated_at = ?")

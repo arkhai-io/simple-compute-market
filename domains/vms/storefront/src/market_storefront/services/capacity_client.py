@@ -21,8 +21,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
+from compute_provisioning import (
+    ComputeProvisioningClient,
+    ComputeProvisioningError,
+    FulfillmentAcceptanceResponse,
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+)
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
@@ -36,6 +45,7 @@ from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
     RemoteCapacityClient,
     site_events_poller,
 )
+from market_fulfillment import VersionedEnvelope
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +230,179 @@ def build_capacity_client(
     """
     sites, admin_key, placement_name = _capacity_settings()
     return _aggregate_for(sqlite_client_factory, sites, admin_key, placement_name)
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment (schedule/begin/status/result) aggregation.
+#
+# Sibling to ``AggregateCapacityClient`` above, not an extension of it:
+# ``CapacityClient``/``RemoteCapacityClient`` are deliberately scoped to the
+# site authority's ``/api/v1/capacity`` surface (see their own docstrings),
+# while schedule/begin/status/result live on the compute-provisioning
+# service's ``/fulfillment`` surface, reached through
+# ``ComputeProvisioningClient`` — a different wire contract
+# (``compute_provisioning.contracts``), already used for that service's
+# other domain-neutral surfaces (jobs, leases).
+# ---------------------------------------------------------------------------
+
+
+class AggregateFulfillmentClient:
+    """Routes fulfillment scheduling/acceptance calls to the owning site.
+
+    Shares its ``capacity_reservation_id`` → site routing cache with the
+    paired ``AggregateCapacityClient`` (same dict instance, via
+    ``build_fulfillment_client``'s ``reservation_sites=``), so a
+    reservation's site is learned once, at ``reserve()`` time, and reused
+    for both the capacity and fulfillment surfaces — not re-learned or
+    tracked twice.
+
+    A cold cache (process restart) falls back to trying every configured
+    site in turn, same as ``AggregateCapacityClient.commit``/``release``.
+    This is safe, not just convenient: `schedule_resource`/`begin_fulfillment`
+    retries are idempotent by `capacity_reservation_id`
+    (`kit/fulfillment`'s Section 3/4 equivalence contract — an equivalent
+    retry returns the existing row rather than erroring), so a wrong-site
+    attempt before the right one costs latency, not correctness. A site that
+    doesn't recognize the reservation answers 404
+    (`SettlementEntityNotFoundError`), which routes to the next site exactly
+    like a capacity `commit`/`release` refusal does today.
+    """
+
+    def __init__(
+        self,
+        sites: Mapping[str, ComputeProvisioningClient],
+        *,
+        reservation_sites: dict[str, str],
+    ) -> None:
+        if not sites:
+            raise ValueError("AggregateFulfillmentClient needs at least one site")
+        self._sites = dict(sites)
+        self._reservation_sites = reservation_sites
+
+    @property
+    def site_names(self) -> list[str]:
+        return list(self._sites)
+
+    def _route_order(self, capacity_reservation_id: str | None) -> Iterable[str]:
+        cached = (
+            self._reservation_sites.get(str(capacity_reservation_id))
+            if capacity_reservation_id else None
+        )
+        if cached and cached in self._sites:
+            yield cached
+            for name in self._sites:
+                if name != cached:
+                    yield name
+        else:
+            yield from self._sites
+
+    async def schedule_resource(
+        self, request: FulfillmentScheduleRequest,
+    ) -> FulfillmentScheduleResponse:
+        last_error: Exception | None = None
+        for name in self._route_order(request.capacity_reservation_id):
+            try:
+                result = await self._sites[name].schedule_resource(request)
+            except ComputeProvisioningError as exc:
+                logger.warning(
+                    "[FULFILLMENT_AGGREGATOR] schedule at site %r failed, "
+                    "trying next: %s", name, exc,
+                )
+                last_error = exc
+                continue
+            self._reservation_sites[str(request.capacity_reservation_id)] = name
+            return result
+        assert last_error is not None
+        raise last_error
+
+    async def begin_fulfillment(
+        self, body: FulfillmentRequestBody,
+    ) -> FulfillmentAcceptanceResponse:
+        last_error: Exception | None = None
+        for name in self._route_order(body.capacity_reservation_id):
+            try:
+                result = await self._sites[name].begin_fulfillment(body)
+            except ComputeProvisioningError as exc:
+                logger.warning(
+                    "[FULFILLMENT_AGGREGATOR] begin at site %r failed, "
+                    "trying next: %s", name, exc,
+                )
+                last_error = exc
+                continue
+            self._reservation_sites[str(body.capacity_reservation_id)] = name
+            return result
+        assert last_error is not None
+        raise last_error
+
+    async def get_fulfillment_status(
+        self, fulfillment_id: str, *, capacity_reservation_id: str | None = None,
+    ) -> FulfillmentStatusResponse:
+        """Read fulfillment status, routed by ``capacity_reservation_id`` if
+        the caller has it (it's keyed on that, not ``fulfillment_id``, in the
+        shared routing cache — pass it whenever available, e.g. from the
+        storefront's own persisted workflow state)."""
+        last_error: Exception | None = None
+        for name in self._route_order(capacity_reservation_id):
+            try:
+                return await self._sites[name].get_fulfillment_status(fulfillment_id)
+            except ComputeProvisioningError as exc:
+                logger.warning(
+                    "[FULFILLMENT_AGGREGATOR] status at site %r failed, "
+                    "trying next: %s", name, exc,
+                )
+                last_error = exc
+                continue
+        assert last_error is not None
+        raise last_error
+
+    async def get_fulfillment_result(
+        self, fulfillment_id: str, *, capacity_reservation_id: str | None = None,
+    ) -> VersionedEnvelope[dict[str, Any]]:
+        """Read fulfillment result; see ``get_fulfillment_status`` on routing."""
+        last_error: Exception | None = None
+        for name in self._route_order(capacity_reservation_id):
+            try:
+                return await self._sites[name].get_fulfillment_result(fulfillment_id)
+            except ComputeProvisioningError as exc:
+                logger.warning(
+                    "[FULFILLMENT_AGGREGATOR] result at site %r failed, "
+                    "trying next: %s", name, exc,
+                )
+                last_error = exc
+                continue
+        assert last_error is not None
+        raise last_error
+
+
+_fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}
+
+
+def build_fulfillment_client(
+    capacity_client: AggregateCapacityClient,
+) -> AggregateFulfillmentClient:
+    """Assemble the storefront's fulfillment client, paired with ``capacity_client``.
+
+    Reuses ``capacity_client``'s own site configuration (same names, same
+    URLs — the site authority and the compute-provisioning fulfillment
+    surface are the same deployed service, per
+    ``ARCHITECTURE.md``, "Runtime service map") and its exact
+    ``reservation_sites`` dict instance, so routing knowledge learned by one
+    aggregator is immediately visible to the other.
+    """
+    sites, admin_key, _ = _capacity_settings()
+    key = tuple(sorted(sites.items())), admin_key
+    if _fulfillment_aggregate_state["key"] == key:
+        return _fulfillment_aggregate_state["client"]
+    aggregate = AggregateFulfillmentClient(
+        {
+            name: ComputeProvisioningClient(url, admin_key=admin_key)
+            for name, url in sites.items()
+        },
+        reservation_sites=capacity_client.reservation_sites,
+    )
+    _fulfillment_aggregate_state["key"] = key
+    _fulfillment_aggregate_state["client"] = aggregate
+    return aggregate
 
 
 def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:

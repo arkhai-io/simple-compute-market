@@ -127,6 +127,92 @@ class TestCreate:
             provider.prepare_create(capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config={"extra_vars": {}})
 
 
+class TestSizingPrecedence:
+    """vm_ram/vm_vcpus/vm_disk_size are optional on the
+    fulfillment request; buyer-specified wins, else the pool's configured
+    default, else left unset (Ansible/inventory group_vars resolve it,
+    unchanged from before these fields existed on the request)."""
+
+    async def test_buyer_specified_sizing_wins_over_pool_default(self, provider, job_service):
+        request = _request()  # already carries vm_ram=4096, vm_vcpus=2, vm_disk_size="40G"
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=request, resource=_resource(),
+            pool_config=_pool_config(
+                default_vm_ram=8192, default_vm_vcpus=4, default_vm_disk_size="80G",
+            ),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.vm_ram == 4096
+        assert submitted_params.vm_vcpus == 2
+        assert submitted_params.vm_disk_size == "40G"
+
+    async def test_pool_default_used_when_buyer_omits_sizing(self, provider, job_service):
+        request = _request()
+        del request.payload["vm_ram"], request.payload["vm_vcpus"], request.payload["vm_disk_size"]
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=request, resource=_resource(),
+            pool_config=_pool_config(
+                default_vm_ram=8192, default_vm_vcpus=4, default_vm_disk_size="80G",
+            ),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.vm_ram == 8192
+        assert submitted_params.vm_vcpus == 4
+        assert submitted_params.vm_disk_size == "80G"
+
+    async def test_sizing_left_unset_when_neither_buyer_nor_pool_specify_it(self, provider, job_service):
+        request = _request()
+        del request.payload["vm_ram"], request.payload["vm_vcpus"], request.payload["vm_disk_size"]
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=request, resource=_resource(), pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.vm_ram is None
+        assert submitted_params.vm_vcpus is None
+        assert submitted_params.vm_disk_size is None
+
+
+class TestConnectivity:
+    """Connectivity (FRP) settings forward through the
+    fulfillment request to the Ansible job, separate from sizing
+    requirements. Storefront-configured for now; see
+    ``add-buyer-vm-connectivity-terms`` for a negotiated source."""
+
+    async def test_connectivity_settings_forward_to_the_ansible_job(self, provider, job_service):
+        request = _request()
+        request.payload["connectivity"] = {
+            "frp_server_addr": "relay.example.com:7000",
+            "frp_domain": "buyer-vm.example.com",
+            "frp_dashboard_password": "s3cr3t",
+        }
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=request, resource=_resource(), pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.frp_server_addr == "relay.example.com:7000"
+        assert submitted_params.frp_domain == "buyer-vm.example.com"
+        assert submitted_params.frp_dashboard_password == "s3cr3t"
+
+    async def test_no_connectivity_settings_means_no_frp_fields(self, provider, job_service):
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=_request(), resource=_resource(), pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        assert submitted_params.frp_server_addr is None
+        assert submitted_params.frp_domain is None
+        assert submitted_params.frp_dashboard_password is None
+
+
 class TestTeardown:
     async def test_prepare_is_side_effect_free_and_dispatch_submits(self, provider, job_service):
         prepared = provider.prepare_teardown(_settlement_result(), _pool_config())

@@ -266,10 +266,23 @@ async def fulfill_vm_obligation(
             )
             await asyncio.sleep(delay_seconds)
 
-        async def _record_job_id(job_id: str) -> None:
+        async def _record_fulfillment_id(fulfillment_id: str) -> None:
+            """Persist the durable fulfillment identity as soon as it's known.
+
+            Named for what it now carries: ``provision_vm``'s
+            ``on_job_submitted`` hook is invoked with a durable
+            ``fulfillment_id`` (from ``begin_fulfillment``), not an
+            ephemeral executor job id -- distinct from ``fulfillment_uid``
+            (the on-chain settlement-claim identity), which may already be
+            set on the same row. ``capacity_reservation_id`` is persisted
+            alongside it here since both are durable and known by this
+            point, letting a caller resume checking fulfillment progress by
+            escrow after a storefront restart.
+            """
             await get_sqlite_client().update_escrow(
                 escrow_uid=escrow_uid,
-                provisioning_job_id=job_id,
+                fulfillment_id=fulfillment_id,
+                capacity_reservation_id=reserved_capacity_reservation_id,
             )
             stage_event(
                 "provision", "job_submitted",
@@ -277,7 +290,7 @@ async def fulfill_vm_obligation(
                 escrow_uid=escrow_uid,
                 resource_id=reserved_resource_id,
                 vm_host=reserved_vm_host,
-                provisioning_job_id=job_id,
+                fulfillment_id=fulfillment_id,
             )
 
         provision_result = await provision_vm(
@@ -286,7 +299,7 @@ async def fulfill_vm_obligation(
             vm_target=vm_target,
             capacity_reservation_id=reserved_capacity_reservation_id,
             deal_ref={"escrow_uid": escrow_uid, "listing_id": listing_id or order_id},
-            on_job_submitted=_record_job_id,
+            on_job_submitted=_record_fulfillment_id,
         )
         authentication: dict[str, Any] | None = None
         if isinstance(provision_result, dict):

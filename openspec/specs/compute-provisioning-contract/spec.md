@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the executor-neutral, versioned caller contract for compute action submission, durable jobs, typed results and credentials, allocation-backed leases, and deal-scoped lifecycle events.
+Define the executor-neutral, versioned caller contract for compute action submission, durable jobs, typed results and credentials, allocation-backed leases, fulfillment scheduling and acceptance, and deal-scoped lifecycle events.
 
 ## Requirements
 
@@ -56,6 +56,20 @@ The contract MUST support allocation-backed lease registration, inspection, term
 
 - **WHEN** a registered lease reaches its end and executor release succeeds
 - **THEN** the lease reaches released state and the corresponding site allocation becomes available exactly once
+
+### Requirement: Fulfillment scheduling and acceptance
+
+The shared client MUST expose `schedule_resource`, `begin_fulfillment`, `get_fulfillment_status`, and `get_fulfillment_result` as generic, executor-neutral operations alongside action submission and lease control, since fulfillment scheduling and acceptance is domain-neutral kit behavior (see `openspec/specs/fulfillment/spec.md`), not a VM-specific concern requiring its own client package. A caller MUST schedule a resource before it can begin fulfillment for the same capacity reservation.
+
+#### Scenario: Storefront schedules then begins fulfillment through the shared client
+
+- **WHEN** a caller invokes `schedule_resource` and then `begin_fulfillment` for the same capacity reservation through the shared client
+- **THEN** the second call succeeds using the resource the first call assigned, with no VM-specific type imported by the caller to do so
+
+#### Scenario: Client is reused for bare-metal fulfillment
+
+- **WHEN** a bare-metal caller uses the same shared client's fulfillment methods
+- **THEN** it succeeds without importing VM-owned request or result models, matching the "Compute-owned caller contract" requirement `openspec/specs/physical-provisioning/spec.md` already establishes for action submission and lease control
 
 ### Requirement: Deal-scoped lifecycle events
 

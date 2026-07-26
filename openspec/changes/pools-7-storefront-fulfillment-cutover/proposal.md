@@ -24,6 +24,18 @@ POOLS-7 reconciles these paths by cutting the storefront over to durable
 physical-resource scheduling and fulfillment managed by the provisioning
 service.
 
+**Status note (2026-07-25, Section 9 design review):** the paragraph above
+is this proposal's original motivating rationale and is kept as written for
+that history, but two of its factual claims no longer describe current
+code and should not be read as current: `vm_fulfillment_service.py`
+reserves with a pool/resource/dimension-shaped claim today (POOLS-4
+landed), not `required_attributes=("vm_host",)` — the reservation
+response's `vm_host` is still read and dispatched to directly, which is the
+actual remaining gap; and `PhysicalSettlementScheduler.select_resource`/
+`FulfillmentProvider.create` were renamed to `schedule_resource`/
+`FulfillmentOrchestrator.begin_fulfillment` by Sections 3-8. See `design.md`'s
+"Section 9 design review" for the current, verified state.
+
 ## Current Rebaseline
 
 The shared fulfillment package, multidimensional capacity model, shared feasibility predicate, two provisioning projection families, pull projection endpoints, and storefront in-memory projection loading/polling are now implemented. The production cutover is not: scheduling and fulfillment state remain process-local, provider dispatch is not durably recoverable, the storefront still calls the VM executor path directly, credentials remain persisted, teardown bypasses the provider lifecycle, and pull fulfillment status/results do not exist.
@@ -135,7 +147,8 @@ Each implemented section carries its own itemized design-promotion record in `de
 - Fulfillment acceptance, provider preparation, and envelope/transaction shape: `openspec/specs/fulfillment/spec.md`, `openspec/specs/fulfillment/architecture.md`, `openspec/specs/resource-pool-management/spec.md` — see design.md's "Section 5 design-promotion record".
 - Recovery/convergence claim semantics, provider-call transaction boundary, and convergence worker contract: `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` — see design.md's "Section 6 implementation promotion record".
 - Legacy-lease-to-fulfillment cutover: lease-state mapping, atomicity, provider-owned teardown preparation, and the compiler/migration split: `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover`, `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover`, `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts`, `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover`, `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` — see design.md's "Section 7 implementation promotion record".
-- Sections 8–11 (pull-based status/result queries, storefront cutover, teardown/reclamation, and obsolete-schema removal) have not started; their promotion records do not exist yet and will be added as those sections implement.
+- Section 8 (pull-based status/result queries and live credentials) is implemented at the source level; its design-promotion record is `design.md`'s "Section 8 completed design-promotion record," promoted into `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload`. The repository-standard wheel-based validation and `openspec validate --all --strict` remain outstanding — see `tasks.md`'s "Section 8 reconciled status" — and gate the start of Section 9's cutover work.
+- Sections 9–11 (storefront cutover, teardown/reclamation, and obsolete-schema removal) have not started; their promotion records do not exist yet and will be added as those sections implement.
 
 ## Section 7 cutover boundary
 

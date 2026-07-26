@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
@@ -11,19 +13,31 @@ from alkahest_py import AlkahestClient
 
 from compute_provisioning import (
     ComputeProvisioningClient,
+    ComputeProvisioningJobError,
+    ComputeProvisioningTimeoutError,
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
     LeaseRegistration,
 )
-from market_storefront.services.provisioning_orchestration_service import (
-    create_vm_and_wait_with_credentials,
-)
+from market_fulfillment import VersionedEnvelope
 from market_storefront.services.vm_fulfillment_service import fulfill_vm_obligation
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
 
 from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
-from market_storefront.services.capacity_client import build_capacity_client
+from market_storefront.services.capacity_client import (
+    build_capacity_client,
+    build_fulfillment_client,
+)
 from market_storefront.utils.sqlite_client import get_sqlite_client
+
+logger = logging.getLogger(__name__)
+
+# The VM domain's market identity for schedule_resource/begin_fulfillment
+# calls -- matches the domains/vms package name; no other convention is
+# documented anywhere in the fulfillment kit.
+_VM_MARKET = "vms"
 
 
 
@@ -36,35 +50,186 @@ async def _do_provision(
     capacity_reservation_id: str,
     deal_ref: dict[str, Any],
 ) -> dict:
-    """Submit a create VM job to the provisioning service and return the result.
+    """Schedule and begin durable fulfillment for this VM, then poll to completion.
 
-    ``on_job_submitted`` runs after the create_vm call returns the job_id but
-    before we start polling — gives the caller a hook to record the job_id
-    in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
-    surface it while the job is still queued/running.
+    ``vm_host``/``deal_ref`` are accepted for call-site compatibility with
+    the ``provision_vm`` seam ``fulfill_vm_obligation`` calls through.
+    ``vm_host`` is not used to select a resource here: ``schedule_resource``
+    re-confirms (or fairness-reassigns) the settlement resource from the
+    reservation itself, independent of which host the reservation happened
+    to bind at reserve time. Commercial context (``deal_ref``) does not
+    cross into the generic fulfillment request; only ``capacity_reservation_id``
+    does.
+
+    ``on_job_submitted`` runs once ``begin_fulfillment`` returns a durable
+    ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
+    hook this replaces.
     """
+    fulfillment_client = build_fulfillment_client(
+        build_capacity_client(lambda: get_sqlite_client())
+    )
+
+    scheduled = await fulfillment_client.schedule_resource(
+        FulfillmentScheduleRequest(
+            capacity_reservation_id=capacity_reservation_id,
+            market=_VM_MARKET,
+        )
+    )
+    escrow_uid = deal_ref.get("escrow_uid")
+    if escrow_uid:
+        try:
+            await get_sqlite_client().update_escrow(
+                escrow_uid=escrow_uid,
+                capacity_reservation_id=capacity_reservation_id,
+                settlement_resource_id=scheduled.settlement_resource_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[PROVISIONING] Failed to persist settlement_resource_id for "
+                "escrow %s: %s",
+                escrow_uid,
+                exc,
+            )
+
+    connectivity = _connectivity_settings_from_storefront_config()
+    request_payload: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+    if connectivity:
+        request_payload["connectivity"] = connectivity
+
+    accepted = await fulfillment_client.begin_fulfillment(
+        FulfillmentRequestBody(
+            capacity_reservation_id=capacity_reservation_id,
+            market=_VM_MARKET,
+            fulfillment_request=VersionedEnvelope(
+                kind="vm.fulfillment.request",
+                schema_version=1,
+                payload=request_payload,
+            ),
+        )
+    )
+
+    if on_job_submitted is not None:
+        try:
+            await on_job_submitted(accepted.fulfillment_id)
+        except Exception as exc:
+            logger.warning(
+                "[PROVISIONING] on_job_submitted callback failed for fulfillment %s: %s",
+                accepted.fulfillment_id,
+                exc,
+            )
+
     timeout = float(settings.provisioning.timeout)
     poll_interval = float(settings.provisioning.poll_interval)
-
-    params: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
-    if settings.provisioning.frp_server_addr:
-        params["frp_server_addr"] = settings.provisioning.frp_server_addr
-    if settings.provisioning.frp_domain:
-        params["frp_domain"] = settings.provisioning.frp_domain
-    if settings.provisioning.frp_dashboard_password:
-        params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
-
-    return await create_vm_and_wait_with_credentials(
-        service_url=settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
+    status = await _poll_fulfillment_until_terminal(
+        fulfillment_client,
+        accepted.fulfillment_id,
+        capacity_reservation_id=capacity_reservation_id,
         timeout=timeout,
         poll_interval=poll_interval,
-        vm_host=vm_host,
-        capacity_reservation_id=capacity_reservation_id,
-        deal_ref=deal_ref,
-        parameters=params,
-        on_job_submitted=on_job_submitted,
     )
+    if status.state == "failed":
+        raise ComputeProvisioningJobError(
+            status.failure_message or f"fulfillment {accepted.fulfillment_id} failed"
+        )
+
+    envelope = await fulfillment_client.get_fulfillment_result(
+        accepted.fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+    )
+    return _fulfillment_result_to_legacy_shape(envelope)
+
+
+def _connectivity_settings_from_storefront_config() -> dict[str, Any] | None:
+    """Storefront-operator-configured FRP settings, or None if unset.
+
+    The only source of connectivity terms today; see
+    ``add-buyer-vm-connectivity-terms`` for a negotiated, buyer-specified
+    second source populating this same request field.
+    """
+    provisioning = settings.provisioning
+    frp_server_addr = getattr(provisioning, "frp_server_addr", None) or None
+    frp_domain = getattr(provisioning, "frp_domain", None) or None
+    frp_dashboard_password = getattr(provisioning, "frp_dashboard_password", None) or None
+    if not (frp_server_addr or frp_domain or frp_dashboard_password):
+        return None
+    return {
+        "frp_server_addr": frp_server_addr,
+        "frp_domain": frp_domain,
+        "frp_dashboard_password": frp_dashboard_password,
+    }
+
+
+async def _poll_fulfillment_until_terminal(
+    fulfillment_client: Any,
+    fulfillment_id: str,
+    *,
+    capacity_reservation_id: str,
+    timeout: float,
+    poll_interval: float,
+) -> Any:
+    """Poll ``get_fulfillment_status`` until ``active``/``failed`` or timeout.
+
+    Every other state (``assigned``, ``dispatch_pending``, ``dispatching``,
+    and the teardown-side states, which cannot appear here) is still in
+    progress.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        status = await fulfillment_client.get_fulfillment_status(
+            fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+        )
+        if status.state in ("active", "failed"):
+            return status
+        if loop.time() >= deadline:
+            raise ComputeProvisioningTimeoutError(
+                f"fulfillment {fulfillment_id} did not reach a terminal state "
+                f"within {timeout}s (last state: {status.state})"
+            )
+        await asyncio.sleep(poll_interval)
+
+
+def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str, Any]:
+    """Map a fulfillment result envelope into the shape callers of
+    ``provision_vm`` expect: a dict with an optional ``authentication`` key
+    (``{"root": {...}, "tenant": {...}}``, popped out by the caller) plus
+    other connection-detail fields serialized as ``connection_details``.
+    """
+    payload: dict[str, Any] = envelope.payload or {}
+    domain_result = payload.get("domain_result") or {}
+    domain_payload: dict[str, Any] = domain_result.get("payload") or {}
+    credentials = domain_payload.get("credentials") or []
+
+    authentication: dict[str, Any] = {}
+    for credential in credentials:
+        role = credential.get("role")
+        if role not in ("root", "tenant"):
+            continue
+        entry: dict[str, Any] = {
+            "password": credential.get("password"),
+            "ssh_commands": credential.get("ssh_commands"),
+        }
+        if role == "root":
+            entry["ssh_key_path_host"] = credential.get("ssh_key_path_host")
+        else:
+            entry["key_type"] = credential.get("key_type")
+        authentication[role] = entry
+
+    # `connection_info` is VmConnectionInfo's field set (vm_name, host,
+    # timestamp, tenant_user, vm_ip_internal, ssh_port), dumped as a plain
+    # dict on the wire -- spread directly rather than naming each field
+    # again here.
+    connection_info: dict[str, Any] = domain_payload.get("connection_info") or {}
+    result: dict[str, Any] = {
+        **connection_info,
+        "provisioned_resource_ids": [
+            resource.get("provisioned_resource_id")
+            for resource in payload.get("provisioned_resources", [])
+        ],
+    }
+    if authentication:
+        result["authentication"] = authentication
+    return result
+
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
