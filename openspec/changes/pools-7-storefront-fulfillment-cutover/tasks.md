@@ -1089,3 +1089,12 @@ Tasks 9.9–9.18 are complete. The final implementation provides a versioned rec
 The accepted completion boundary does not require repository-owned raw RPC/EAS event scanning. `alkahest-py==1.1.2` does not expose a bounded attestation query or its provider. Recovery adopts a matching attestation when a supported client query exists and otherwise leaves an ambiguous submission pending rather than blindly resubmitting. The upstream query capability is follow-up work and does not block POOLS-7.
 
 Root `make test` passed in the repository owner's environment. Strict OpenSpec validation was unavailable because neither validation environment contains the CLI; this was explicitly accepted for the section. Section 9 is complete and Section 10 may begin. Earlier progress notes below that described Section 9 as incomplete are preserved as implementation history and are superseded by this final record.
+
+
+### Section 9 post-completion correction record (2026-07-26)
+
+Tasks 9.19–9.24 are complete. The generated `vm_target` is now owned by `fulfill_vm_obligation`, passed explicitly into the immutable context builder, validated with the production `VmFulfillmentRequirements` model, and proven identical at persistence, physical fulfillment, and lease registration boundaries. The previous green suite did not validate this composed seam because its network boundary mocks accepted invalid request payloads.
+
+Speculative probes for nonexistent Alkahest methods were removed. The current production composition has no supported unknown-attestation discovery capability with `alkahest-py==1.1.2`; ambiguous recovery therefore remains safely pending and never blindly resubmits. A future supported query can be injected through the explicit adapter seam. Every permanent requirement now has concrete `#### Scenario:` coverage.
+
+Focused correction validation passed 19 tests against the supplied installed wheelhouse environment. The repository owner's previously supplied root `make test` result remains the full-suite baseline; strict OpenSpec CLI validation remains explicitly waived because the CLI is unavailable. Section 9 is complete again and Section 10 may begin.

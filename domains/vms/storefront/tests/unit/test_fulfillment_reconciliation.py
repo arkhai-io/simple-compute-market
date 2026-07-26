@@ -11,18 +11,14 @@ from domains.vms.settlement.fulfillment import (
 
 @pytest.mark.asyncio
 async def test_reconciliation_adopts_matching_attestation_without_submission():
-    obligation = SimpleNamespace(
-        find_obligations_by_ref=AsyncMock(return_value=[{
-            "uid": "att-1", "refUID": "escrow-1", "data": "details"
-        }]),
-        do_obligation=AsyncMock(),
-    )
+    obligation = SimpleNamespace(do_obligation=AsyncMock())
     client = SimpleNamespace(string_obligation=obligation)
     uid = await reconcile_or_submit_compute_fulfillment(
         client=client,
         escrow_uid="escrow-1",
         connection_details="details",
         allow_submit=False,
+        query_fulfillments=AsyncMock(return_value=["att-1"]),
     )
     assert uid == "att-1"
     obligation.do_obligation.assert_not_awaited()

@@ -195,16 +195,15 @@ ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
 async def _build_vm_fulfillment_context(
-    *, escrow_uid: str, ssh_public_key: str,
+    *, escrow_uid: str, vm_target: str, ssh_public_key: str,
     order: str | dict[str, Any] | None, duration_seconds: int,
     start_utc: str | None, listing_id: str | None,
     seller_order_id: str | None, chain_configs: dict[str, Any] | None,
-) -> tuple[Any, str, dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     """Build the immutable VM request and its restart-recovery envelope."""
     plan = build_vm_fulfillment_plan(
         order=order, duration_seconds=duration_seconds, chain_configs=chain_configs,
     )
-    vm_target: str | None = None
     connectivity = None
     try:
         from market_storefront.services.fulfillment_service import (
@@ -238,7 +237,7 @@ async def _build_vm_fulfillment_context(
             },
         },
     }
-    return plan, vm_target, context
+    return plan, context
 
 
 async def _reserve_capacity_for_obligation(
@@ -312,8 +311,9 @@ async def fulfill_vm_obligation(
     logger.info("[ALKAHEST] Order for fulfillment: %s", order)
 
     try:
-        plan, vm_target, recovery_context = await _build_vm_fulfillment_context(
-            escrow_uid=escrow_uid, ssh_public_key=ssh_public_key, order=order,
+        plan, recovery_context = await _build_vm_fulfillment_context(
+            escrow_uid=escrow_uid, vm_target=vm_target,
+            ssh_public_key=ssh_public_key, order=order,
             duration_seconds=duration_seconds, start_utc=start_utc,
             listing_id=listing_id, seller_order_id=seller_order_id,
             chain_configs=chain_configs,

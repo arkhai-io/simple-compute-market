@@ -3352,3 +3352,12 @@ Validation completed through the supplied offline wheelhouse and the repository 
 | Aggregate routing parity during recovery | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-aggregate-site-routing` |
 | Duplicate-safe ambiguous on-chain handling and upstream query deferral | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety` |
 | `vm_host` compatibility seam removal | Section 10 task 10.5 and its permanent teardown documentation |
+
+
+## Section 9 post-completion correction and promotion record (2026-07-26)
+
+The correction pass restores the generated VM target as a single caller-owned identity and proves that the exact value survives context persistence, production-model validation, physical fulfillment submission, and lease registration. The permanent contract and its scenarios are in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-versioned-fulfillment-context`.
+
+The VM settlement adapter no longer probes guessed Alkahest methods. Unknown-attestation discovery is unavailable in `alkahest-py==1.1.2`; ambiguous outcomes remain pending without resubmission. A supported future query capability can be injected explicitly. This limitation and its falsifiable scenarios are in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`.
+
+All requirements in the permanent VM storefront fulfillment specification now include repository-convention `#### Scenario:` blocks. Focused correction tests passed against installed review artifacts. Strict OpenSpec CLI validation remains waived because the executable is unavailable.

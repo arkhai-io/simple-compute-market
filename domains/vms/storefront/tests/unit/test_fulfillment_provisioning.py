@@ -11,6 +11,8 @@ end-to-end test needs the real settlement/negotiation fixtures
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 import types
 
@@ -406,3 +408,85 @@ class TestPersistEscrowFieldsWithRetry:
             for record in caplog.records
         )
         assert any(record.levelname == "ERROR" for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_generated_vm_target_survives_context_fulfillment_and_lease_registration(
+    monkeypatch,
+):
+    """Exercise target generation across context, fulfillment, and lease seams.
+
+    The storefront project deliberately does not depend on the provider adapter,
+    so this test validates the shared wire invariant directly rather than importing
+    the adapter's private Pydantic model. Provider-model validation remains covered
+    in the provisioning-adapter suite.
+    """
+
+    plan = SimpleNamespace(
+        order_id="listing-1",
+        required_attributes={"vcpu_count": 2},
+    )
+    monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
+
+    sqlite_client = SimpleNamespace(
+        update_escrow=AsyncMock(),
+        update_listing=AsyncMock(),
+        store_credential=AsyncMock(),
+    )
+    capacity = SimpleNamespace(
+        reserve=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            "resource_id": "resource-1",
+            "vm_host": "host-1",
+        }),
+        commit=AsyncMock(),
+    )
+    observed: dict[str, str] = {}
+
+    async def validating_provision_vm(
+        ssh_public_key: str,
+        *,
+        vm_target: str,
+        on_job_submitted,
+        **_: object,
+    ) -> dict[str, object]:
+        assert isinstance(vm_target, str)
+        assert vm_target.startswith("tenant-")
+        assert len(vm_target) > len("tenant-")
+        assert ssh_public_key
+        observed["provision"] = vm_target
+        await on_job_submitted("fulfillment-1")
+        return {"vm_name": vm_target, "authentication": {}}
+
+    async def register_lease(*, vm_target: str, **_: object) -> None:
+        observed["lease"] = vm_target
+
+    result = await vfs.fulfill_vm_obligation(
+        client=None,
+        escrow_uid="escrow-1",
+        ssh_public_key="ssh-ed25519 test",
+        order={"listing_id": "listing-1"},
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=capacity,
+        stage_event=lambda *args, **kwargs: None,
+        provision_vm=validating_provision_vm,
+        schedule_shutdown=AsyncMock(),
+        register_lease=register_lease,
+    )
+    await asyncio.sleep(0)
+
+    context_write = next(
+        call for call in sqlite_client.update_escrow.await_args_list
+        if "fulfillment_context" in call.kwargs
+    )
+    context = json.loads(context_write.kwargs["fulfillment_context"])
+    payload = context["payload"]["fulfillment_request"]["payload"]
+    persisted_vm_target = payload["vm_target"]
+    assert isinstance(persisted_vm_target, str)
+    assert persisted_vm_target.startswith("tenant-")
+    assert payload["ssh_pubkey"] == "ssh-ed25519 test"
+    assert observed == {
+        "provision": persisted_vm_target,
+        "lease": persisted_vm_target,
+    }
+    assert result["status"] == "fulfilled"

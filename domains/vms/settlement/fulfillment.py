@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import uuid
 from typing import Any
@@ -16,56 +15,25 @@ class FulfillmentReconciliationUnavailable(RuntimeError):
 
 async def find_compute_fulfillments(
     *,
-    client: Any,
+    query_fulfillments: Any | None,
     escrow_uid: str,
     connection_details: str | None,
 ) -> list[str]:
-    """Find matching string-obligation attestations for an escrow.
+    """Use an explicitly supplied supported attestation query capability.
 
-    Alkahest client versions expose chain queries through different adapter
-    names. This narrow compatibility shim accepts only query methods that
-    return attestations and validates their reference and payload when those
-    fields are present. Absence of a query surface is not interpreted as
-    absence of an attestation.
+    The pinned Alkahest dependency does not expose discovery by ``refUID``.
+    Production composition therefore passes no query today.  This seam exists
+    only so a future supported adapter can be injected without probing guessed
+    method names on the external client.
     """
-    obligation = getattr(client, "string_obligation", None)
-    candidates = []
-    for name in (
-        "find_obligations_by_ref",
-        "get_obligations_by_ref",
-        "find_attestations_by_ref",
-    ):
-        method = getattr(obligation, name, None)
-        if method is None:
-            continue
-        value = method(escrow_uid)
-        rows = await value if inspect.isawaitable(value) else value
-        candidates = list(rows or [])
-        break
-    else:
+    if query_fulfillments is None:
         raise FulfillmentReconciliationUnavailable(
-            "The configured Alkahest client exposes no attestation query by refUID"
+            "No supported attestation query capability is configured"
         )
-
-    matches: list[str] = []
-    for row in candidates:
-        if isinstance(row, str):
-            matches.append(row)
-            continue
-        if not isinstance(row, dict):
-            row = vars(row)
-        ref_uid = row.get("refUID") or row.get("ref_uid") or row.get("reference_uid")
-        if ref_uid is not None and str(ref_uid) != str(escrow_uid):
-            continue
-        data = row.get("data") or row.get("obligation_data") or row.get("value")
-        if data is not None and connection_details is not None and str(data) != str(connection_details):
-            continue
-        if row.get("revoked") is True or row.get("is_revoked") is True:
-            continue
-        uid = row.get("uid") or row.get("attestation_uid") or row.get("fulfillment_uid")
-        if uid:
-            matches.append(str(uid))
-    return sorted(set(matches))
+    rows = await query_fulfillments(
+        escrow_uid=escrow_uid, connection_details=connection_details
+    )
+    return sorted({str(uid) for uid in (rows or []) if uid})
 
 
 async def reconcile_or_submit_compute_fulfillment(
@@ -74,6 +42,7 @@ async def reconcile_or_submit_compute_fulfillment(
     escrow_uid: str,
     connection_details: str | None,
     allow_submit: bool,
+    query_fulfillments: Any | None = None,
 ) -> str:
     """Adopt an existing fulfillment or submit only at a known-safe boundary.
 
@@ -93,7 +62,7 @@ async def reconcile_or_submit_compute_fulfillment(
 
     try:
         matches = await find_compute_fulfillments(
-            client=client,
+            query_fulfillments=query_fulfillments,
             escrow_uid=escrow_uid,
             connection_details=connection_details,
         )
