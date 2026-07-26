@@ -617,6 +617,10 @@ class SQLiteClient:
                   capacity_reservation_id TEXT,
                   settlement_resource_id TEXT,
                   fulfillment_id TEXT,
+                  fulfillment_context TEXT,
+                  fulfillment_phase TEXT,
+                  processing_owner TEXT,
+                  processing_lease_until TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 )
@@ -625,6 +629,8 @@ class SQLiteClient:
             # Add columns if they don't exist (for existing databases)
             for _escrow_column in (
                 "capacity_reservation_id", "settlement_resource_id", "fulfillment_id",
+                "fulfillment_context", "fulfillment_phase",
+                "processing_owner", "processing_lease_until",
             ):
                 try:
                     cur.execute(f"ALTER TABLE escrows ADD COLUMN {_escrow_column} TEXT")
@@ -1362,6 +1368,10 @@ class SQLiteClient:
         "capacity_reservation_id",
         "settlement_resource_id",
         "fulfillment_id",
+        "fulfillment_context",
+        "fulfillment_phase",
+        "processing_owner",
+        "processing_lease_until",
         "created_at",
         "updated_at",
     )
@@ -1628,6 +1638,10 @@ class SQLiteClient:
         capacity_reservation_id: str | None = None,
         settlement_resource_id: str | None = None,
         fulfillment_id: str | None = None,
+        fulfillment_context: str | None = None,
+        fulfillment_phase: str | None = None,
+        processing_owner: str | None = None,
+        processing_lease_until: str | None = None,
     ) -> None:
         """Patch an escrows row. Any None field is skipped.
 
@@ -1657,6 +1671,10 @@ class SQLiteClient:
             add("capacity_reservation_id", capacity_reservation_id)
             add("settlement_resource_id", settlement_resource_id)
             add("fulfillment_id", fulfillment_id)
+            add("fulfillment_context", fulfillment_context)
+            add("fulfillment_phase", fulfillment_phase)
+            add("processing_owner", processing_owner)
+            add("processing_lease_until", processing_lease_until)
             if not updates:
                 return
             updates.append("updated_at = ?")
@@ -1673,6 +1691,67 @@ class SQLiteClient:
                 conn.close()
 
         await asyncio.to_thread(_update)
+
+    async def list_incomplete_primary_escrows(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return bounded primary escrows whose commercial delivery is unfinished."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows
+                    WHERE is_primary = 1 AND status NOT IN ('ready', 'failed', 'refunded')
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [self._escrow_row_to_dict(row) for row in rows]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def claim_escrow_convergence(
+        self, *, escrow_uid: str, owner: str, lease_until: str
+    ) -> bool:
+        """Atomically claim unfinished escrow convergence until ``lease_until``."""
+        def _claim() -> bool:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE escrows
+                    SET processing_owner = ?, processing_lease_until = ?, updated_at = ?
+                    WHERE escrow_uid = ?
+                      AND status NOT IN ('ready', 'failed', 'refunded')
+                      AND (processing_lease_until IS NULL OR processing_lease_until < ?
+                           OR processing_owner = ?)
+                    """,
+                    (owner, lease_until, now, escrow_uid, now, owner),
+                )
+                conn.commit()
+                return cur.rowcount == 1
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_claim)
+
+    async def release_escrow_convergence(self, *, escrow_uid: str, owner: str) -> None:
+        """Release a convergence claim owned by ``owner``."""
+        def _release() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """UPDATE escrows SET processing_owner = NULL,
+                       processing_lease_until = NULL, updated_at = ?
+                       WHERE escrow_uid = ? AND processing_owner = ?""",
+                    (datetime.now().isoformat(), escrow_uid, owner),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_release)
 
     async def load_escrow(
         self,

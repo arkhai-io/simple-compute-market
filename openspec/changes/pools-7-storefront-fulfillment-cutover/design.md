@@ -3144,3 +3144,211 @@ Section 9 is not considered closed pending resolution of questions 3
 and 5, and the validation gaps above.
 
 
+
+## Section 9 fulfillment-resume design decisions (2026-07-26)
+
+### Accepted commercial-delivery priority
+
+Once a deal has been accepted, commercial delivery takes priority over local
+bookkeeping durability. Storefront persistence writes MUST be retried and
+exhausted retries MUST be logged loudly with safe lifecycle identifiers, but a
+local SQLite persistence failure MUST NOT by itself cause the storefront to
+abandon a VM that can still be provisioned and delivered under the accepted
+deal. Fail-closed persistence behavior is appropriate only before deal
+acceptance. After acceptance, recovery reconciles the local record against the
+capacity, fulfillment, credential, chain, and claim authorities using their
+available idempotent or queryable boundaries.
+
+This priority is durable VM-storefront behavior and must be promoted into the
+VM-domain storefront/adapter specification during Section 9 implementation.
+
+### Accepted recovery model
+
+Section 9 will use a VM-storefront-scoped durable convergence state machine.
+The existing foreground settlement job and a new dedicated startup background
+worker will call the same convergence implementation. The foreground behavior
+remains blocking in Section 9; converting initiation and convergence into the
+normal asynchronous product flow is deferred to a separate future OpenSpec
+change.
+
+The recovery worker owns full settlement convergence through physical
+fulfillment, result and credential persistence, lease registration, on-chain
+fulfillment, escrow readiness, and claim creation. It is not part of the claims
+engine and does not stop after physical result retrieval.
+
+The storefront will persist a versioned VM fulfillment-context envelope on the
+escrow record before physical fulfillment acceptance. The envelope preserves
+the immutable inputs required to make an equivalent scheduling/acceptance retry,
+including the generated VM target and normalized fulfillment request, without
+adding VM-specific columns for every request field to the shared escrow schema.
+Unknown envelope kinds or schema versions fail visibly rather than being guessed
+into the current model.
+
+A dedicated periodic worker, registered through the existing storefront startup
+background-task mechanism, will sweep nonterminal primary escrows. It must also
+consider rows lacking persisted lifecycle identifiers because accepted deals can
+survive a failed local write. The worker reconciles from the earliest safe
+boundary supported by the surviving context and external authorities. Persisted
+`fulfillment_id` skips scheduling and acceptance; a missing identifier uses the
+persisted request envelope to make equivalent retries.
+
+Aggregate fulfillment routing retains parity with the existing aggregate
+capacity-client fallback behavior for this section. Typed fallback/error
+classification across both aggregate clients is deferred as one aggregation-wide
+concern rather than changed for only one sibling.
+
+`deal_ref` will be removed from the new `_do_provision` fulfillment seam and
+`escrow_uid` passed explicitly. The legacy `vm_host` compatibility parameter is
+deferred to Section 10.
+
+### On-chain fulfillment idempotency assessment
+
+Repository inspection does not establish `submit_compute_fulfillment` as
+idempotent. The helper serializes wallet transactions with `chain_tx_lock` and
+then calls `client.string_obligation.do_obligation(connection_details,
+escrow_uid)`. It does not provide a deterministic idempotency key, query for an
+existing matching fulfillment, persist a transaction intent before submission,
+or reconcile a transaction receipt after an ambiguous return. The demo-mode
+path also generates a fresh random fulfillment identifier on every call.
+
+No higher storefront layer currently deduplicates this call before submission.
+The local `fulfillment_uid` write happens only after `do_obligation` returns, so
+a process failure after the chain accepts the transaction but before the local
+write leaves an external-commit/local-persistence ambiguity. The Ansible layer
+cannot close this chain-side gap.
+
+Therefore Section 9 must not assume that retrying
+`submit_compute_fulfillment` is safe. Planning must include chain reconciliation
+before resubmission: query authoritative chain state for an existing fulfillment
+attestation matching the escrow, seller, obligation schema, and expected
+connection-details payload, and reuse its UID when exactly one valid match
+exists. If the current Alkahest client does not expose such a query, Section 9
+must add a narrow adapter/query surface or retain the escrow in a visible
+operator-recovery state rather than blindly create another attestation.
+
+### Permanent documentation disposition
+
+The accepted storefront convergence, versioned recovery-context, aggregate
+routing, and delivery-over-bookkeeping decisions belong in VM-domain
+storefront/adapter-scoped permanent documentation. A standalone recovery spec or
+an aggregation spec folder is not introduced solely for Section 9. The active
+change documents retain the design alternatives and migration plan; production
+code and permanent documentation must describe only the resulting current
+behavior.
+
+## Section 9 recovery design conclusion and planning record (2026-07-26)
+
+The remaining Section 9 recovery design is accepted and ready for implementation planning.
+
+### Delivery priority after deal acceptance
+
+Once a deal has been accepted, commercial delivery takes priority over local bookkeeping durability. Storefront-local persistence writes MUST be retried and failures MUST be logged with sufficient safe identifiers for operator diagnosis, but an exhausted local metadata write MUST NOT by itself cause the storefront to abandon a VM it can still build and deliver. Recovery therefore reconciles durable local evidence with the capacity, fulfillment, credential, chain, listing, and claims authorities rather than assuming every prior local checkpoint succeeded.
+
+This priority is VM storefront settlement behavior and will be promoted to the permanent VM storefront/adapter-scoped specification. It does not weaken pre-acceptance validation or permit accepting a deal when required durable preconditions are unavailable.
+
+### Selected recovery architecture
+
+The selected design is a durable VM storefront convergence state machine with a versioned recovery-context envelope on the escrow row.
+
+The ordinary foreground settlement task remains blocking in this section and continues to attempt the complete fulfillment sequence. Section 9 does not implement the separately deferred initiate/converge product redesign. Instead, the foreground task and a new dedicated startup worker invoke the same idempotent convergence operations so interrupted work can continue after restart.
+
+The worker is registered through `start_storefront_background_task`, owns its own `SQLiteClient`, and periodically sweeps nonterminal primary VM escrows. It is separate from `claims_engine_loop`, because claims processing begins after fulfillment and has a different authority and retry boundary.
+
+Recovery owns full settlement convergence, not physical polling alone. It continues through physical result retrieval, credential delivery, lease registration required by the still-active Section 10 compatibility path, on-chain fulfillment reconciliation/submission, listing update, escrow readiness, and claim creation.
+
+### Versioned VM fulfillment context
+
+Before the first externally visible physical-fulfillment mutation, the storefront persists a versioned VM-domain recovery envelope containing the immutable information needed to reproduce an equivalent request and finish settlement. The envelope uses one shared escrow column rather than adding VM-specific columns to the generic escrow schema.
+
+The envelope includes, at minimum, the accepted listing/order references needed by the VM storefront, the generated `vm_target`, the exact normalized physical `fulfillment_request`, lease timing inputs, the SSH key and connectivity inputs required to reproduce that request, and chain-reconciliation context. Secret response credentials are not placed in this request envelope.
+
+The envelope has a stable kind and positive schema version. Readers reject unknown kinds or unsupported versions visibly instead of guessing. Permanent documentation will define the envelope's ownership, lifecycle, and redaction requirements; the exact Python carrier remains VM-domain-owned.
+
+### Reconciliation from the earliest safe boundary
+
+The convergence operation scans every nonterminal primary VM escrow, including rows where no capacity or fulfillment identity was persisted.
+
+- When no capacity reservation is recorded, it invokes escrow-idempotent reservation recovery.
+- When no settlement resource is recorded, it invokes equivalent scheduling.
+- When no `fulfillment_id` is recorded, it invokes equivalent `begin_fulfillment` with the exact request preserved in the recovery envelope.
+- When `fulfillment_id` exists, it skips schedule/begin work and resumes status/result convergence directly.
+- Nonterminal physical state leaves the escrow pending for a later sweep.
+- Terminal physical failure applies the existing commercial failure policy.
+- Active physical state converges all downstream settlement effects before marking the escrow ready.
+
+Each recovered identifier or checkpoint is persisted with bounded retry. Persistence exhaustion is loud but does not abort a live deliverable operation after deal acceptance.
+
+### Shared convergence implementation
+
+Foreground and recovery execution MUST NOT maintain independent copies of the settlement sequence. Section 9 extracts shared phase operations from the existing storefront fulfillment path and uses them from both callers.
+
+The shared implementation preserves the current blocking storefront behavior. Moving ordinary fulfillment initiation and convergence into separate user-visible phases is deferred to a new future OpenSpec change rather than Section 10 or 11.
+
+`escrow_uid` is passed explicitly through the durable fulfillment path. The opaque `deal_ref` parameter is removed from `_do_provision` and retained only at compatibility or commercial-boundary adapters where required. The existing `vm_host` compatibility parameter is not changed in Section 9; its removal or reshaping is Section 10 work.
+
+### Concurrency and replay
+
+The foreground task and startup worker may observe the same escrow. Correctness therefore relies on durable, cross-process coordination plus replay-safe phase operations, not a process-local lock.
+
+Implementation will first inventory existing escrow update/claim primitives and use the narrowest durable mechanism that prevents simultaneous phase execution. A renewable escrow processing lease is preferred if no suitable compare-and-set primitive already exists. The lease must expire after process death and must not become a permanent ownership record.
+
+External side effects are reconciled against their owning authorities before replay whenever local persistence may have been lost.
+
+### On-chain fulfillment is reconciliation, not blind retry
+
+Repository and available Alkahest surfaces do not establish `string_obligation.do_obligation` as idempotent. `chain_tx_lock` serializes wallet nonce use only. The obligation's `refUID` references the escrow but is not a uniqueness constraint, and a successful transaction followed by loss of its returned UID creates an ambiguous local state.
+
+Before submitting an on-chain compute fulfillment when no local `fulfillment_uid` is available, the VM settlement adapter queries chain truth for existing matching attestations. Raw EAS/RPC event scanning and attestation decoding belong in `kit/alkahest`; matching the VM string-obligation schema, escrow reference, storefront attester, recipient semantics, connection-details payload, and active state belongs in the VM settlement adapter.
+
+RPC/event-based reconciliation is authoritative. A hosted indexer may be added later as an optimization but cannot be the correctness boundary.
+
+Reconciliation outcomes are:
+
+- zero valid matches: submit the fulfillment, then persist the returned UID;
+- exactly one valid match: adopt and persist its UID;
+- multiple identical valid matches: select the earliest valid attestation deterministically, log the duplicate condition loudly, and continue commercial delivery;
+- conflicting matches: do not submit another fulfillment and place the escrow into operator-visible reconciliation failure/pending state.
+
+A failed or timed-out submission returns to reconciliation before any retry. The recovery context records a bounded chain scan origin, preferably a block observed before first submission or another authoritative lower bound already available from the accepted escrow.
+
+### Aggregate routing policy
+
+`AggregateFulfillmentClient` retains the same broad site-fallback policy already used by `AggregateCapacityClient.commit` and `release`. Section 9 does not introduce stricter error classification for only one sibling. Typed retryability and failure classification are deferred as an aggregation-wide concern and must correct both clients together.
+
+Aggregate capacity and fulfillment routing, including cold-cache fan-out and storefront recovery use, are documented together in the VM storefront/adapter-scoped permanent specification. A new aggregation subsystem spec is not created solely for these sibling classes.
+
+### Permanent documentation destinations
+
+| Accepted decision | Permanent documentation destination |
+|---|---|
+| Commercial delivery takes priority over storefront-local bookkeeping durability after deal acceptance | VM storefront/adapter-scoped specification, storefront fulfillment recovery requirement |
+| Versioned VM fulfillment-context envelope and redaction/version rules | VM storefront/adapter-scoped specification; generic envelope principles remain in `openspec/specs/fulfillment/spec.md` |
+| Dedicated storefront startup recovery worker and full settlement convergence ownership | VM storefront/adapter-scoped specification; `docs/development/ARCHITECTURE.md` only for repository-wide worker/service-flow updates |
+| Shared foreground/recovery convergence implementation and explicit `escrow_uid` | VM storefront/adapter-scoped specification and current code docstrings |
+| Duplicate-safe ambiguous on-chain submission handling | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`; a supported generic bounded attestation query is deferred to `alkahest-py` or `kit/alkahest` |
+| Aggregate capacity/fulfillment routing parity and cold-cache fallback | VM storefront/adapter-scoped specification |
+| `vm_host` compatibility seam retained until teardown cutover | Section 10 plan and the permanent VM teardown documentation updated by that section |
+| Two-phase ordinary initiate/converge redesign deferred | New future OpenSpec change; no production comment or permanent current-state claim until implemented |
+
+The implementation planning tasks below must resolve the exact existing permanent-spec file or create the broader VM storefront/adapter specification before implementation begins. A recovery-only specification is not created.
+
+
+## Section 9 final implementation and promotion record (2026-07-26)
+
+Section 9 is complete. The implementation uses a versioned VM fulfillment context, durable escrow processing claims, a dedicated storefront startup worker, shared foreground/restart convergence operations, exact replay before fulfillment acceptance, direct resumption after a durable fulfillment ID, and replay-safe downstream convergence through credentials, lease registration, on-chain fulfillment, listing update, escrow readiness, and claim creation.
+
+The accepted operational priority is permanently documented in `openspec/specs/vm-storefront-fulfillment/spec.md`: once a deal is accepted, commercial delivery takes priority over storefront-local bookkeeping durability. Failed checkpoint writes are retried and loudly reported but do not cause abandonment of an otherwise deliverable VM.
+
+The Alkahest investigation established that `alkahest-py==1.1.2` contains internal log-scanning machinery but exposes neither its provider nor a bounded `refUID` attestation query. Section 9 therefore implements the strongest supported safety boundary: adopt a matching attestation when an exposed query is available; otherwise never blindly resubmit after an ambiguous transaction outcome, keep the escrow pending, and surface operator reconciliation. Raw repository-owned RPC/EAS scanning is deferred because it would depend on external ABI, address, and network assumptions that belong behind a supported Alkahest abstraction.
+
+Validation completed through the supplied offline wheelhouse and the repository owner's root `make test`. The final local run included 627 VM storefront unit tests (1 skipped), 145 VM storefront integration tests, both Alkahest integration tests, and all other repository suites. Strict OpenSpec validation was unavailable in both environments because the CLI was not installed; this was explicitly accepted and is not an open Section 9 defect. Section 10 may begin.
+
+| Material decision | Permanent destination |
+|---|---|
+| Accepted-deal commercial delivery priority | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-accepted-deal-delivery-priority` |
+| Versioned fulfillment context and restart convergence | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-versioned-fulfillment-context` and `#requirement-foreground-and-restart-convergence` |
+| Full storefront settlement convergence ownership | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-full-settlement-convergence-ownership` |
+| Physical fulfillment replay and direct resumption | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-physical-fulfillment-resumption` |
+| Aggregate routing parity during recovery | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-aggregate-site-routing` |
+| Duplicate-safe ambiguous on-chain handling and upstream query deferral | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety` |
+| `vm_host` compatibility seam removal | Section 10 task 10.5 and its permanent teardown documentation |

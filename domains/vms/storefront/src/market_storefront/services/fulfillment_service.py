@@ -51,18 +51,17 @@ async def _do_provision(
     vm_target: str,
     on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
     capacity_reservation_id: str,
-    deal_ref: dict[str, Any],
+    escrow_uid: str,
 ) -> dict:
     """Schedule and begin durable fulfillment for this VM, then poll to completion.
 
-    ``vm_host``/``deal_ref`` are accepted for call-site compatibility with
-    the ``provision_vm`` seam ``fulfill_vm_obligation`` calls through.
+    ``vm_host`` is accepted for call-site compatibility with the
+    ``provision_vm`` seam ``fulfill_vm_obligation`` calls through.
     ``vm_host`` is not used to select a resource here: ``schedule_resource``
     re-confirms (or fairness-reassigns) the settlement resource from the
     reservation itself, independent of which host the reservation happened
-    to bind at reserve time. Commercial context (``deal_ref``) does not
-    cross into the generic fulfillment request; only ``capacity_reservation_id``
-    does.
+    to bind at reserve time. The storefront escrow identity is used only for
+    local progress persistence and does not enter the generic fulfillment request.
 
     ``on_job_submitted`` runs once ``begin_fulfillment`` returns a durable
     ``fulfillment_id`` but before polling starts, mirroring the legacy job-id
@@ -78,7 +77,6 @@ async def _do_provision(
             market=_VM_MARKET,
         )
     )
-    escrow_uid = deal_ref.get("escrow_uid")
     if escrow_uid:
         await persist_escrow_fields_with_retry(
             get_sqlite_client,

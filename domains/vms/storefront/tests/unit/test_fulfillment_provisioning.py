@@ -228,7 +228,7 @@ class TestDoProvision:
             vm_target="tenant-abcd",
             on_job_submitted=_on_job_submitted,
             capacity_reservation_id="res-1",
-            deal_ref={"escrow_uid": "escrow-1"},
+            escrow_uid="escrow-1",
         )
 
         fulfillment_client.schedule_resource.assert_awaited_once()
@@ -272,7 +272,7 @@ class TestDoProvision:
 
         await fs._do_provision(
             "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
-            capacity_reservation_id="res-1", deal_ref={},
+            capacity_reservation_id="res-1", escrow_uid="escrow-1",
         )
 
         begin_body = fulfillment_client.begin_fulfillment.await_args.args[0]
@@ -303,7 +303,7 @@ class TestDoProvision:
         with pytest.raises(ComputeProvisioningJobError, match="provisioning failed"):
             await fs._do_provision(
                 "ssh-ed25519 AAAA", vm_host="kvm1", vm_target="tenant-abcd",
-                capacity_reservation_id="res-1", deal_ref={},
+                capacity_reservation_id="res-1", escrow_uid="escrow-1",
             )
         fulfillment_client.get_fulfillment_result.assert_not_awaited()
     async def test_returns_immediately_on_active(self):

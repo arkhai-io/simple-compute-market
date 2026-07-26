@@ -794,6 +794,33 @@ Do not treat 8.1–8.8 as Section 8's complete or final state in isolation.
   - [x] 9.8.4 Add design-promotion record entries (table at the end of `design.md`) for: the `/fulfillment/schedule` endpoint, the moved/added client contracts, the sibling aggregator and shared routing-cache decision (recorded as a code-docstring destination, not a new spec — see 9.0.5), and the `fulfillment_id`/`fulfillment_uid` vocabulary entries. **Done:** "Section 9 completed design-promotion record" table added at the end of `design.md`, matching Section 8's format exactly, with nine rows covering every decision from the design review plus the connectivity/sizing/persistence decisions made during implementation. An "implementation confirmation" note alongside it records four real corrections found during implementation (sizing, two result-pipeline data gaps, the `on_job_submitted`/`provisioning_job_id` naming bug, and the reinit dependency gaps) — matching the same honest-confirmation pattern Section 8's own promotion record already established.
   - [x] 9.8.5 Remove change-document/task-number references from any Section 9 production code comments before considering the section implemented, per `AGENTS.md`'s comment rules. **Done:** final repository-wide `grep` across every production and test file touched this section (`core/storefront`, `domains/vms/storefront`, `domains/vms/provisioning`, `provisioning`, and both `Makefile`s) for `POOLS-7`/`pools-7` — zero matches outside this change's own `openspec/changes` documents.
 
+
+### Section 9 recovery completion plan (opened 2026-07-26)
+
+The completed 9.0–9.8 tasks above remain implementation history. The following tasks close the recovery capability that their original restart language assumed but did not implement.
+
+- [x] 9.9 Define and persist the versioned VM storefront fulfillment-context envelope before the first recoverable external mutation. Include the exact normalized `FulfillmentRequestBody.fulfillment_request`, generated `vm_target`, accepted listing/order references, lease timing inputs, required SSH/connectivity inputs, and a bounded chain-scan origin. Do not persist response credentials in this envelope. Add fresh-schema migration, existing-schema migration, round-trip, unsupported-kind/version, redaction, and partial-update tests. **Permanent documentation:** the VM storefront/adapter-scoped specification for envelope ownership and recovery semantics; `openspec/specs/fulfillment/spec.md` only for any generic envelope invariant not already present.
+
+- [x] 9.10 Refactor the existing storefront VM settlement sequence into shared, replay-safe convergence operations used by both the foreground settlement task and recovery worker. Preserve the current blocking foreground behavior. Pass `escrow_uid` explicitly into `_do_provision` and remove `deal_ref` from the durable fulfillment seam. Leave `vm_host` unchanged and record its cleanup under Section 10. Keep post-acceptance persistence failures bounded, loudly logged, and nonfatal to an otherwise deliverable VM. **Permanent documentation:** VM storefront/adapter-scoped fulfillment and recovery requirements; current production docstrings describe only present intent and stable invariants.
+
+- [x] 9.11 Add durable, cross-process escrow convergence coordination. Inventory existing compare-and-set or worker-claim primitives first; reuse one when it provides expiry and restart recovery, otherwise add a renewable escrow processing lease with owner and expiry fields. Prove that foreground execution and the background sweep cannot concurrently perform the same non-idempotent phase, that an expired claim is recoverable, and that one blocked escrow does not prevent progress for others. Do not use a process-local lock as the correctness boundary. **Permanent documentation:** VM storefront/adapter-scoped worker/concurrency requirement; `docs/development/ARCHITECTURE.md` only if this establishes a repository-wide worker-coordination rule.
+
+- [x] 9.12 Implement the dedicated storefront fulfillment-convergence runtime and register it through `start_storefront_background_task`. The loop owns its own `SQLiteClient`, scans bounded batches of every nonterminal primary VM escrow (including rows with no persisted reservation/fulfillment identity), claims work durably, and invokes one independently testable convergence pass per escrow. Keep it separate from `claims_engine_loop` and `negotiation_watchdog_loop`. Add startup-registration, cancellation, per-row isolation, sweep-bounding, and restart tests. **Permanent documentation:** VM storefront/adapter-scoped startup-worker and lifecycle ownership requirements.
+
+- [x] 9.13 Reconcile physical fulfillment from the earliest safe boundary. Recover or create the escrow-idempotent capacity reservation; equivalently schedule the resource; equivalently begin fulfillment from the persisted exact request; skip schedule/begin when `fulfillment_id` is already known; poll nonterminal state without failure; fetch active results; and apply the existing terminal failure policy. Persist recovered IDs/checkpoints with bounded retry without abandoning live delivery solely because storefront-local persistence failed. Add crash-window tests before/after reserve, schedule, begin, fulfillment-ID persistence, status polling, and result retrieval, using fresh service/client composition rather than reusing process-local caches. **Permanent documentation:** VM storefront/adapter-scoped convergence state machine; existing site-capacity and fulfillment specs remain authoritative for reserve/schedule/begin idempotency.
+
+- [x] 9.14 Extract and converge all required post-physical settlement effects through the shared state machine: capacity lease refresh/commit behavior still required before Section 10, credential storage, provisioning-service lease registration still required by the legacy teardown compatibility path, shutdown scheduling as best effort, on-chain fulfillment, listing update, durable `fulfillment_uid`, escrow readiness, and settlement-claim creation. Define which persisted fields or authoritative queries prove each phase complete. Add recovery tests after each external side effect, duplicate-result tests, credential non-duplication tests, and a test proving `ready` is not written before required commercial settlement effects complete. **Permanent documentation:** VM storefront/adapter-scoped full-convergence requirement; settlement/claims permanent specs for any cross-subsystem invariant changed.
+
+- [x] 9.15 Make ambiguous on-chain compute-fulfillment outcomes duplicate-safe without blocking POOLS-7 on an external Alkahest release. The VM settlement adapter adopts a matching attestation when the installed client exposes a supported query surface. When no such surface exists, recovery records the submission-intent checkpoint, refuses blind resubmission, leaves the escrow pending, and logs an operator-visible reconciliation condition. Investigation of `alkahest-py==1.1.2` confirmed that its compiled extension contains log-scanning internals but exposes neither the provider nor a bounded `refUID` query. Repository-owned raw RPC/EAS scanning was therefore not added because it would require unstable assumptions about external ABIs, deployment addresses, and network behavior. A supported generic query API is deferred to `alkahest-py` or `kit/alkahest`. Tests cover matching-attestation adoption and refusal to resubmit without a query surface. **Permanent documentation:** `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`.
+
+- [x] 9.16 Preserve aggregate routing parity while validating recovery use. Reuse `AggregateCapacityClient`/`AggregateFulfillmentClient` cold-cache fan-out in the recovery worker and keep the existing broad exception fallback policy unchanged for both siblings. Add recovery tests proving a fresh aggregate composition locates the owning site. Record typed error classification as deferred aggregation-wide work rather than changing only the fulfillment sibling. **Permanent documentation:** VM storefront/adapter-scoped aggregate routing requirement.
+
+- [x] 9.17 Reconcile Section 9 documentation and promotion records. Create or expand the broader VM storefront/adapter-scoped permanent specification rather than a recovery-only spec; promote the delivery-over-bookkeeping priority, versioned context, worker ownership, full convergence, chain reconciliation, and routing behavior. Update `proposal.md`, `design.md`, and this task list to one consistent current status. Replace the earlier code-docstring-only promotion destinations for material storefront persistence/routing/recovery decisions. Preserve implementation history but remove contradictory completion claims. Perform a broad production-reference sweep for `openspec/changes`, active change names, task/section numbering, migration commentary, and tombstone references. **Permanent documentation:** exact headings recorded in the Section 9 design-promotion table after implementation.
+
+- [x] 9.18 Complete the Section 9 validation gate before beginning Section 10. Wheelhouse validation passed the focused recovery set (43 tests), `core/storefront` (67 tests), and the VM storefront suite available in the review environment (770 passed, 1 skipped). The repository owner then ran root `make test` successfully, including VM storefront unit tests (627 passed, 1 skipped), VM storefront integration tests (145 passed), both Alkahest integration tests, and all other repository suites. The OpenSpec CLI is absent from both validation environments; strict validation is explicitly waived for this section rather than recorded as a repository failure. Final artifacts contain only updated files in repository structure. Section 10 may begin. **Permanent documentation:** this validation record and the completed Section 9 promotion record in `design.md`.
+
+**Deferred follow-up:** moving ordinary VM fulfillment to an explicitly asynchronous initiate/converge product model requires a new OpenSpec change after POOLS-7. It is not part of Section 9, 10, or 11. Typed site-fallback error classification is likewise deferred as an aggregation-wide correction affecting both aggregate clients.
+
 ## 10. Cut over teardown and physical-resource reclamation
 
 - [ ] 10.1 Add `begin_fulfillment_teardown(fulfillment_id)` as the whole-fulfillment teardown contract; keep `provisioned_resource_id` in the schema for a future per-resource teardown extension.
@@ -992,3 +1019,73 @@ against current source (`kit/fulfillment` unit suite, `PYTHONPATH`-based, no
   internal package index and `openspec` CLI are reachable, which this review
   pass did not have either. Section 9 should not begin substantive cutover
   implementation until both are run and pass, per 8.15.
+
+### Section 9 recovery implementation progress (2026-07-26)
+
+Implementation began for tasks 9.9–9.18. The current patch adds the versioned
+VM fulfillment context, escrow phase/processing-lease persistence, explicit
+`escrow_uid` plumbing, startup registration for a dedicated bounded recovery
+sweep, cold-cache-compatible fulfillment status/result recovery for rows with a
+known `fulfillment_id`, and the permanent VM storefront fulfillment
+specification. Source compilation succeeds for the touched Python modules.
+
+A follow-up implementation pass added exact pre-acceptance replay from the
+versioned envelope: the recovery worker now recreates an escrow-idempotent
+capacity reservation when its identifier is absent, schedules the resource
+idempotently, and calls ``begin_fulfillment`` with the exact persisted
+``vm.fulfillment.request`` envelope before resuming status polling. The context
+now persists the planner's required attributes so capacity recovery does not
+silently broaden placement. Focused source compilation passes. The focused test
+run could not execute because the configured internal package index returned
+HTTP 503 while ``uv`` resolved dependencies; this is an environment failure,
+not passing test evidence.
+
+The following planned work is still open and the Section 9 completion gate is
+not satisfied: shared full post-physical convergence through lease/credentials/
+on-chain/listing/ready/claim phases, RPC/EAS attestation reconciliation,
+complete crash-window tests, repository-standard installed-wheel validation,
+and strict OpenSpec validation. The checkboxes above intentionally remain open
+until their complete acceptance criteria pass.
+
+
+**Continuation implementation note (2026-07-26):** post-physical storefront
+convergence is now implemented as a replayable recovery phase. It refreshes the
+capacity lease, stores root/tenant credentials idempotently, registers the VM
+lease, updates the listing, persists the on-chain fulfillment identity, marks
+the escrow ready, and creates the claims-engine row. The recovery path writes an
+``onchain_submission_started`` checkpoint before the first chain call and never
+blindly resubmits after observing that checkpoint. A VM settlement reconciliation
+adapter adopts matching attestations through an available Alkahest refUID query
+surface and otherwise leaves the escrow pending with an operator-visible error.
+Focused reconciliation tests pass (2); the broader recovery tests remain blocked
+in this environment by the missing ``uuid6`` dependency/internal-index outage.
+
+The generic RPC/EAS event-scanning adapter required when the installed Alkahest
+client exposes no refUID query remains open, as do foreground reuse of the shared
+post-physical finalizer, the complete crash-window matrix, wheel validation, and
+strict OpenSpec validation. Section 9 therefore remains incomplete.
+
+**Wheelhouse validation continuation (2026-07-26):** the repository-provided
+CPython 3.13 review wheelhouse for `core/storefront` and
+`domains/vms/storefront` recreated both selected environments fully offline.
+The focused Section 9 recovery/reconciliation/provisioning/settlement-job set
+passed 43 tests after correcting one phase-ordering defect found by the
+wheelhouse run: an escrow with an already-durable `fulfillment_id` no longer
+requires the pre-acceptance request envelope or re-runs resource scheduling.
+The complete `core/storefront` suite passed 67 tests. The complete VM storefront
+suite produced 770 passes and 1 skip; its only two failures were the Alkahest
+host-runtime integration cases, which could not spawn Node.js and therefore
+also could not use Cargo/Foundry/Anvil. These are recorded as environment
+failures rather than repository failures. Strict OpenSpec validation remains
+unrun because no `openspec` executable is installed in this environment.
+Task 9.18 remains open, as does task 9.15's generic RPC/EAS event-query fallback
+for Alkahest clients that expose no bounded `refUID` lookup.
+
+
+### Section 9 final completion record (2026-07-26)
+
+Tasks 9.9–9.18 are complete. The final implementation provides a versioned recovery envelope, durable processing claims, a dedicated startup convergence worker, exact pre-acceptance replay, physical-result recovery, replay-safe post-physical commercial convergence, explicit `escrow_uid`, aggregate cold-cache routing, and duplicate-safe handling of ambiguous on-chain submission outcomes.
+
+The accepted completion boundary does not require repository-owned raw RPC/EAS event scanning. `alkahest-py==1.1.2` does not expose a bounded attestation query or its provider. Recovery adopts a matching attestation when a supported client query exists and otherwise leaves an ambiguous submission pending rather than blindly resubmitting. The upstream query capability is follow-up work and does not block POOLS-7.
+
+Root `make test` passed in the repository owner's environment. Strict OpenSpec validation was unavailable because neither validation environment contains the CLI; this was explicitly accepted for the section. Section 9 is complete and Section 10 may begin. Earlier progress notes below that described Section 9 as incomplete are preserved as implementation history and are superseded by this final record.

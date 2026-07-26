@@ -193,6 +193,84 @@ RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
+
+async def _build_vm_fulfillment_context(
+    *, escrow_uid: str, ssh_public_key: str,
+    order: str | dict[str, Any] | None, duration_seconds: int,
+    start_utc: str | None, listing_id: str | None,
+    seller_order_id: str | None, chain_configs: dict[str, Any] | None,
+) -> tuple[Any, str, dict[str, Any]]:
+    """Build the immutable VM request and its restart-recovery envelope."""
+    plan = build_vm_fulfillment_plan(
+        order=order, duration_seconds=duration_seconds, chain_configs=chain_configs,
+    )
+    vm_target: str | None = None
+    connectivity = None
+    try:
+        from market_storefront.services.fulfillment_service import (
+            _connectivity_settings_from_storefront_config,
+        )
+        connectivity = _connectivity_settings_from_storefront_config()
+    except Exception:
+        logger.exception(
+            "[PROVISIONING] Failed to resolve connectivity context for escrow %s",
+            escrow_uid,
+        )
+    request_payload: dict[str, Any] = {
+        "vm_target": vm_target, "ssh_pubkey": ssh_public_key,
+    }
+    if connectivity:
+        request_payload["connectivity"] = connectivity
+    context = {
+        "kind": "vm.storefront.fulfillment-context",
+        "schema_version": 1,
+        "payload": {
+            "escrow_uid": escrow_uid,
+            "listing_id": listing_id or plan.order_id,
+            "seller_order_id": seller_order_id,
+            "duration_seconds": int(duration_seconds),
+            "start_utc": start_utc,
+            "required_attributes": plan.required_attributes,
+            "fulfillment_request": {
+                "kind": "vm.fulfillment.request",
+                "schema_version": 1,
+                "payload": request_payload,
+            },
+        },
+    }
+    return plan, vm_target, context
+
+
+async def _reserve_capacity_for_obligation(
+    *, capacity: Any, held_reservation: dict[str, Any] | None,
+    escrow_uid: str, listing_id: str | None, order_id: str | None,
+    required_attributes: dict[str, Any], duration_seconds: int,
+    start_utc: str | None, stage_event: StageEventFn,
+) -> dict[str, Any]:
+    """Commit an accepted hold or create and commit an idempotent fallback."""
+    reserved = await _commit_capacity_hold(
+        capacity=capacity, held_reservation=held_reservation,
+        escrow_uid=escrow_uid, duration_seconds=duration_seconds,
+        start_utc=start_utc, stage_event=stage_event,
+    )
+    if reserved is None:
+        reserved = await capacity.reserve(
+            claim=required_attributes or None,
+            deal_ref={"listing_id": listing_id or order_id, "escrow_uid": escrow_uid},
+            lease_start_utc=start_utc,
+            lease_duration_seconds=duration_seconds,
+        )
+        if reserved:
+            await _commit_fresh_reservation(
+                capacity=capacity, reserved=reserved, escrow_uid=escrow_uid,
+                duration_seconds=duration_seconds, start_utc=start_utc,
+                stage_event=stage_event,
+            )
+    if not reserved:
+        raise RuntimeError("No available compute VM matched required attributes")
+    return reserved
+
+
 async def fulfill_vm_obligation(
     *,
     client: Any | None,
@@ -234,48 +312,39 @@ async def fulfill_vm_obligation(
     logger.info("[ALKAHEST] Order for fulfillment: %s", order)
 
     try:
-        plan = build_vm_fulfillment_plan(
-            order=order,
-            duration_seconds=duration_seconds,
+        plan, vm_target, recovery_context = await _build_vm_fulfillment_context(
+            escrow_uid=escrow_uid, ssh_public_key=ssh_public_key, order=order,
+            duration_seconds=duration_seconds, start_utc=start_utc,
+            listing_id=listing_id, seller_order_id=seller_order_id,
             chain_configs=chain_configs,
         )
         order_id = plan.order_id
         required_attributes = plan.required_attributes
+        await persist_escrow_fields_with_retry(
+            get_sqlite_client, escrow_uid=escrow_uid,
+            fulfillment_context=json.dumps(recovery_context, sort_keys=True),
+            fulfillment_phase="context_persisted",
+        )
 
-        reserved = await _commit_capacity_hold(
-            capacity=capacity,
-            held_reservation=held_reservation,
-            escrow_uid=escrow_uid,
-            duration_seconds=duration_seconds,
-            start_utc=start_utc,
+        reserved = await _reserve_capacity_for_obligation(
+            capacity=capacity, held_reservation=held_reservation,
+            escrow_uid=escrow_uid, listing_id=listing_id, order_id=order_id,
+            required_attributes=required_attributes,
+            duration_seconds=duration_seconds, start_utc=start_utc,
             stage_event=stage_event,
         )
-        if reserved is None:
-            reserved = await capacity.reserve(
-                claim=required_attributes or None,
-                deal_ref={
-                    "listing_id": listing_id or order_id,
-                    "escrow_uid": escrow_uid,
-                },
-                lease_start_utc=start_utc,
-                lease_duration_seconds=duration_seconds,
-            )
-            if reserved:
-                await _commit_fresh_reservation(
-                    capacity=capacity,
-                    reserved=reserved,
-                    escrow_uid=escrow_uid,
-                    duration_seconds=duration_seconds,
-                    start_utc=start_utc,
-                    stage_event=stage_event,
-                )
-        if not reserved:
-            raise RuntimeError("No available compute VM matched required attributes")
         reserved_capacity_reservation_id = (
             str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None
         )
         reserved_resource_id = str(reserved.get("resource_id"))
         reserved_vm_host = reserved.get("vm_host")
+        await persist_escrow_fields_with_retry(
+            get_sqlite_client,
+            escrow_uid=escrow_uid,
+            capacity_reservation_id=reserved_capacity_reservation_id,
+            settlement_resource_id=reserved_resource_id,
+            fulfillment_phase="capacity_reserved",
+        )
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
         stage_event(
@@ -344,7 +413,7 @@ async def fulfill_vm_obligation(
             vm_host=reserved_vm_host,
             vm_target=vm_target,
             capacity_reservation_id=reserved_capacity_reservation_id,
-            deal_ref={"escrow_uid": escrow_uid, "listing_id": listing_id or order_id},
+            escrow_uid=escrow_uid,
             on_job_submitted=_record_fulfillment_id,
         )
         authentication: dict[str, Any] | None = None

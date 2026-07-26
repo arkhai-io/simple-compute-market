@@ -557,3 +557,33 @@ def test_serialize_omits_fulfillment_id_when_none():
     }
     out = serialize_settlement_job(raw)
     assert "fulfillment_id" not in out
+
+@pytest.mark.asyncio
+async def test_fulfillment_context_and_processing_claim_round_trip(client):
+    await client.insert_escrow(
+        escrow_uid="0xresume", negotiation_id="neg-resume",
+        chain_name="anvil", escrow_address="0x" + "cc" * 20,
+    )
+    context = json.dumps({
+        "kind": "vm.storefront.fulfillment-context",
+        "schema_version": 1,
+        "payload": {"escrow_uid": "0xresume", "fulfillment_request": {}},
+    })
+    await client.update_escrow(
+        escrow_uid="0xresume",
+        fulfillment_context=context,
+        fulfillment_phase="context_persisted",
+    )
+    rows = await client.list_incomplete_primary_escrows(limit=10)
+    assert [row["escrow_uid"] for row in rows] == ["0xresume"]
+    assert rows[0]["fulfillment_context"] == context
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-a", lease_until="2999-01-01T00:00:00+00:00"
+    ) is True
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-b", lease_until="2999-01-01T00:00:00+00:00"
+    ) is False
+    await client.release_escrow_convergence(escrow_uid="0xresume", owner="worker-a")
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-b", lease_until="2999-01-01T00:00:00+00:00"
+    ) is True
