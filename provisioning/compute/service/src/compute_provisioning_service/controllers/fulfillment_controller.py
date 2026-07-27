@@ -133,6 +133,38 @@ class FulfillmentController:
             ) from exc
         return FulfillmentAcceptanceResponse(**result.__dict__)
 
+    @router.post(
+        "/{fulfillment_id}/begin-teardown",
+        response_model=FulfillmentAcceptanceResponse,
+    )
+    async def begin_teardown(self, fulfillment_id: str) -> FulfillmentAcceptanceResponse:
+        try:
+            result = await self._service.begin_fulfillment_teardown(fulfillment_id)
+        except SettlementEntityNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "fulfillment_not_found", "message": "No fulfillment exists for this identifier."},
+            ) from exc
+        except ProviderConfigInvalidError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "provider_config_invalid", "message": "The fulfillment provider configuration is invalid."},
+            ) from exc
+        except (FulfillmentConflictError, LookupError, ValueError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "fulfillment_conflict", "message": "The request conflicts with the durable fulfillment state."},
+            ) from exc
+        except ProviderNotFoundError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "fulfillment_provider_unavailable",
+                    "message": "The configured fulfillment provider is unavailable.",
+                },
+            ) from exc
+        return FulfillmentAcceptanceResponse(**result.__dict__)
+
     @router.get("/{fulfillment_id}/status", response_model=FulfillmentStatusResponse)
     def status(self, fulfillment_id: str) -> FulfillmentStatusResponse:
         try:

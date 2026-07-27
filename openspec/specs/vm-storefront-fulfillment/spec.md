@@ -41,6 +41,8 @@ Unsupported kinds or versions MUST remain operator-visible and MUST NOT be guess
 
 The VM storefront owns convergence from capacity reservation through physical fulfillment, credential delivery, lease registration required by the current teardown path, on-chain fulfillment, listing update, escrow readiness, and settlement-claim creation. The claims engine remains responsible for post-fulfillment claim submission and collection; it does not recover physical fulfillment.
 
+The storefront also carries the client plumbing to request early lease termination (see the Physical Provisioning specification's "Explicit early lease termination" requirement) ahead of any buyer-facing flow that decides when to call it. No such flow exists yet; this is infrastructure for one, not a requirement that early termination currently happens anywhere in this convergence ownership.
+
 #### Scenario: Physical success converges commercial delivery
 
 - **WHEN** physical fulfillment reaches an active result

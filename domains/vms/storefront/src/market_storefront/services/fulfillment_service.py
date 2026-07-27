@@ -18,6 +18,7 @@ from compute_provisioning import (
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
     LeaseRegistration,
+    LeaseTermination,
 )
 from market_fulfillment import VersionedEnvelope
 from market_storefront.services.vm_fulfillment_service import (
@@ -323,6 +324,36 @@ async def _register_vm_lease_with_settings(
             ),
             lease_end_utc=lease_end_dt,
         ))
+
+
+async def terminate_vm_lease(
+    *,
+    capacity_reservation_id: str,
+    reason: str | None = None,
+) -> None:
+    """Ask the provisioning service to begin tearing down a leased VM early.
+
+    Submits the same executor-dispatched release operation the lease
+    watchdog's own expiry sweep submits (`POST
+    /api/v1/contract/leases/{capacity_reservation_id}/terminate`) but
+    immediately, without waiting for a sweep cycle. Capacity is held until
+    the provisioning service confirms teardown; this call only requests
+    that teardown begin, it does not wait for it to finish.
+
+    No caller exists yet in this codebase — this function exists so a
+    future buyer-initiated early-termination flow has something to call
+    rather than needing to add provisioning-service surface area for it
+    later. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
+    """
+    async with ComputeProvisioningClient(
+        settings.provisioning.service_url,
+        admin_key=settings.admin_api_key,
+        timeout=10,
+    ) as client:
+        await client.terminate_lease(
+            capacity_reservation_id,
+            LeaseTermination(reason=reason),
+        )
 
 
 async def fulfill_compute_obligation(

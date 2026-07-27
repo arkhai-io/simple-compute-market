@@ -18,7 +18,9 @@ def _record(**overrides):
         "state": SettlementRecordState.dispatch_pending.value,
         "provider_metadata": {},
         "prepared_create_operation": None,
+        "prepared_teardown_operation": None,
         "fulfillment_id": "fulfillment-1",
+        "capacity_reservation_id": "reservation-1",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -83,3 +85,75 @@ def test_conflicting_acknowledgement_is_rejected():
 
     with pytest.raises(FulfillmentConflictError):
         tx.acknowledge_create("reservation-1", {"job_id": "job-2"})
+
+
+def test_begin_teardown_transitions_via_the_repository():
+    prepared = VersionedEnvelope(kind="teardown-test", schema_version=1, payload={"x": 1})
+    record = _record(state=SettlementRecordState.active.value)
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = record
+    repository.transition.return_value = SimpleNamespace(
+        state=SettlementRecordState.teardown_dispatch_pending.value
+    )
+    db = MagicMock()
+    tx = SqlAlchemyFulfillmentTransaction(db, MagicMock(), repository)
+
+    result = tx.begin_teardown("fulfillment-1", prepared)
+
+    repository.get_by_fulfillment_id.assert_called_once_with(db, "fulfillment-1")
+    repository.transition.assert_called_once_with(
+        db,
+        "reservation-1",
+        SettlementRecordState.teardown_dispatch_pending.value,
+        prepared_teardown_operation=prepared.model_dump(mode="json"),
+    )
+    assert result.state == SettlementRecordState.teardown_dispatch_pending.value
+
+
+def test_begin_teardown_reusing_an_identical_prepared_operation_is_idempotent():
+    prepared = VersionedEnvelope(kind="teardown-test", schema_version=1, payload={"x": 1})
+    record = _record(
+        state=SettlementRecordState.active.value,
+        prepared_teardown_operation=prepared.model_dump(mode="json"),
+    )
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = record
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    tx.begin_teardown("fulfillment-1", prepared)
+
+    repository.transition.assert_called_once_with(
+        tx.db,
+        "reservation-1",
+        SettlementRecordState.teardown_dispatch_pending.value,
+        prepared_teardown_operation=prepared.model_dump(mode="json"),
+    )
+
+
+def test_begin_teardown_conflicting_prepared_operation_is_rejected():
+    record = _record(
+        state=SettlementRecordState.active.value,
+        prepared_teardown_operation={"kind": "teardown-test", "schema_version": 1, "payload": {"x": 1}},
+    )
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = record
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(FulfillmentConflictError):
+        tx.begin_teardown(
+            "fulfillment-1",
+            VersionedEnvelope(kind="teardown-test", schema_version=1, payload={"x": 2}),
+        )
+    repository.transition.assert_not_called()
+
+
+def test_begin_teardown_unknown_fulfillment_id_raises_lookup_error():
+    repository = MagicMock()
+    repository.get_by_fulfillment_id.return_value = None
+    tx = SqlAlchemyFulfillmentTransaction(MagicMock(), MagicMock(), repository)
+
+    with pytest.raises(LookupError):
+        tx.begin_teardown(
+            "no-such-fulfillment",
+            VersionedEnvelope(kind="teardown-test", schema_version=1, payload={}),
+        )

@@ -412,8 +412,38 @@ async def client_and_queue(
         host_service=host_service,
     )
 
-    from compute_provisioning.release import ExecutorReleaseDispatcher
-    from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+    from market_fulfillment import (
+        FulfillmentOrchestrator,
+        ProviderRegistry,
+        SettlementRepository,
+        SqlAlchemyFulfillmentUnitOfWork,
+    )
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
+
+    # Fresh queue per test — caller can inject on_job_started via fixture params
+    job_queue = AsyncJobQueue(max_concurrent=2)
+
+    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+    )
+    fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+    )
+    fulfillment_service = FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        unit_of_work=fulfillment_unit_of_work,
+    )
+
+    from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+    from vm_provisioning_adapter.release import (
+        VM_EXECUTOR_KIND,
+        VmFulfillmentReleaseJobPort,
+        VmReleaseExecutor,
+    )
     from bare_metal_provisioning_adapter.release import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
@@ -423,7 +453,20 @@ async def client_and_queue(
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
                 release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
             ),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(
+                settlement_repository=SettlementRepository(),
+                session_factory=session_factory,
+                fulfillment_service_provider=lambda: fulfillment_service,
+            ),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
+    release_job_dispatcher = ReleaseJobDispatcher(
+        {
+            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+                fulfillment_service_provider=lambda: fulfillment_service,
+            ),
+            BARE_METAL_EXECUTOR_KIND: job_service,
         },
         default_executor_kind=VM_EXECUTOR_KIND,
     )
@@ -433,7 +476,7 @@ async def client_and_queue(
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_authority=site_authority,
-        release_jobs=None,
+        release_jobs=release_job_dispatcher,
         executor_release=release_dispatcher,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
@@ -441,9 +484,6 @@ async def client_and_queue(
             )
         ),
     )
-
-    # Fresh queue per test — caller can inject on_job_started via fixture params
-    job_queue = AsyncJobQueue(max_concurrent=2)
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.host_operations_service import (
@@ -470,6 +510,8 @@ async def client_and_queue(
             job_service=job_service,
             job_queue_provider=lambda: job_queue,
         ),
+        settlement_repository=SettlementRepository(),
+        fulfillment_service_provider=lambda: fulfillment_service,
     )
 
     system_service = SystemService(
@@ -479,27 +521,6 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         lease_lifecycle_service=lease_lifecycle_service,
-    )
-
-    from market_fulfillment import (
-        FulfillmentOrchestrator,
-        ProviderRegistry,
-        SqlAlchemyFulfillmentUnitOfWork,
-    )
-    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
-        AnsibleFulfillmentProvider,
-    )
-    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
-        job_service=job_service,
-        job_queue_provider=lambda: job_queue,
-    )
-    fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
-        session_factory=session_factory,
-        pool_service=resource_pool_service,
-    )
-    fulfillment_service = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
-        unit_of_work=fulfillment_unit_of_work,
     )
 
     # Override container providers

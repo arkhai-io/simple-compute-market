@@ -3361,3 +3361,286 @@ The correction pass restores the generated VM target as a single caller-owned id
 The VM settlement adapter no longer probes guessed Alkahest methods. Unknown-attestation discovery is unavailable in `alkahest-py==1.1.2`; ambiguous outcomes remain pending without resubmission. A supported future query capability can be injected explicitly. This limitation and its falsifiable scenarios are in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`.
 
 All requirements in the permanent VM storefront fulfillment specification now include repository-convention `#### Scenario:` blocks. Focused correction tests passed against installed review artifacts. Strict OpenSpec CLI validation remains waived because the executable is unavailable.
+
+## Section 10 design review (2026-07-27)
+
+### Current-state findings
+
+Repository inspection (not assumption) establishes the actual starting point for teardown cutover:
+
+- `FulfillmentProvider.prepare_teardown`/`dispatch_teardown` already exist on the provider interface and are implemented by `AnsibleFulfillmentProvider`.
+- The full durable teardown state machine already exists and already runs every cycle: `transitions.py` defines `teardown_dispatch_pending → tearing_down → torn_down/teardown_failed`, and `FulfillmentConvergenceWatchdog` (`provisioning/compute/service`) already implements `dispatch_pending_teardowns`, `converge_teardowns`, and `requeue_teardown_failures`, domain-neutral, alongside its create-side passes.
+- Nothing calls any of it. No `begin_fulfillment_teardown` (or equivalent) exists anywhere in the repository. This is the actual gap task 10.1 closes, not a formality.
+- Section 7's backfill compiler (`legacy_backfill.py`) already produces backfilled rows in these same teardown states with `prepared_teardown_operation`/`teardown_provider_metadata` pre-populated where a live target exists, so backfilled and native rows are already uniform once a native-row preparation path exists (10.2 is materially smaller than the proposal implied).
+- VM release today is driven entirely by `LeaseLifecycleService`/`LeaseWatchdog` (`provisioning/compute/src/compute_provisioning`), a generic, domain-neutral component shared with bare-metal through `ExecutorReleaseDispatcher`, keyed by `executor_kind`. It performs expiry detection (`list_time_bounded_reservations_due` against the site reservation ledger's `lease_end_utc`), submits one job through `ExecutorReleasePort.submit_release` (VM's implementation is `VmReleaseExecutor`, submitting an Ansible `vm_remove` job directly), polls that job through a single shared `ReleaseJobPort` (`job_service`/`AsyncJobQueue`, also genuinely exercised by bare-metal's `reclaim_access_for_reservation`, not just a `"direct-release"` sentinel), and on confirmed completion calls `_finish_release` → `record_release_success` (→ `CapacityLedgerService.release`, which is itself the authoritative capacity-table update — releasing a reservation from `HELD_RESERVATION_STATES` is what excludes it from committed pool capacity going forward) plus a best-effort, non-durable push (`StorefrontLifecycleEventSink.notify_capacity_released`) that cannot currently authenticate to the storefront.
+- `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` already exists on `ComputeContractController` and is already client-wrapped on `ComputeProvisioningClient.terminate_lease` — the exact client `_register_vm_lease_with_settings` already uses for `register_lease` today. (A second, VM-domain-branded surface, `POST /leases/{lease_id}/terminate` on `LeasesController`, also exists and calls the identical `LeaseLifecycleService.terminate_lease`; the storefront is not currently wired to that client, so the generic contract surface is the one this section uses.) Both already validate the reservation is `leased`, already call the same `submit_release` seam as the expiry sweep, and already document "capacity is released only after the delegated release job succeeds." Nothing in the VM storefront calls either yet.
+
+### Accepted decision: keep `LeaseLifecycleService` as the sole trigger and capacity-release owner
+
+An earlier draft of this design considered moving VM off `LeaseLifecycleService` entirely (a new fulfillment-aggregate-native expiry sweep, and/or moving capacity release into `kit/fulfillment` or the convergence watchdog). This is rejected. `LeaseLifecycleService` is already generic across the compute domain family (VM and bare-metal share one instance), already owns expiry detection, admin recovery endpoints (`retry_release`, `force_release`, `release_oversight`), and the only call site that performs the authoritative capacity-table release. There is no reason to duplicate any of that for VM specifically.
+
+What changes is narrow, confined to the release-submission/completion seam:
+
+1. **Submission.** `VmReleaseExecutor.submit_release` stops submitting an Ansible `vm_remove` job directly. It resolves the durable `fulfillment_id` for the reservation's `capacity_reservation_id` and calls the new `begin_fulfillment_teardown(fulfillment_id)`, which durably prepares the teardown envelope and transitions `active → teardown_dispatch_pending` — no provider I/O inline, mirroring how `begin_fulfillment` separates durable acceptance from dispatch. It returns `fulfillment_id` as the tracked "job id." `FulfillmentConvergenceWatchdog` — already implemented, already running — owns dispatch, retry, and status convergence through to `torn_down`/`teardown_failed`, entirely independently of `LeaseLifecycleService`'s own polling cadence. This is what "entirely from provisioning-owned watchdog handlers" (task 10.3, as originally drafted) actually refers to: the convergence watchdog already is that owner; it needed a caller, not new mechanics.
+2. **Completion.** `LeaseLifecycleService`'s `_process_releasing_reservation` calls one shared `ReleaseJobPort.get_job(job_id)`. Bare-metal genuinely needs this to keep resolving real, polled Ansible job status (confirmed: `reclaim_access_for_reservation` submits a real job, not only a `"direct-release"` sentinel), so the shared port cannot simply be repointed at fulfillment state. Instead, `release_jobs` becomes a small kind-routed dispatcher — the same shape as the existing `ExecutorReleaseDispatcher` for submission — routing `get_job` by the reservation's `executor_kind`: bare-metal's route is byte-for-byte unchanged (`job_service`/`AsyncJobQueue`); VM's route answers by reading the `SettlementRecord`'s teardown state for the given `fulfillment_id` (`torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `pending`), via a thin adapter over `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly.
+3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `provisioning-result-push-delivery` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
+
+### Accepted decision: no new API for early termination
+
+Storefront-initiated early lease termination reuses the existing `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` endpoint (`ComputeProvisioningClient.terminate_lease`) — the same client the storefront already uses for `register_lease`. No new provisioning-service surface is added. Two alternatives were considered and rejected:
+
+- Setting `lease_end_utc` to now/past and waiting for the next `LeaseLifecycleService` sweep — adds up to a full poll-interval of latency for what should be an immediate operator/buyer action, and repurposes a field whose meaning is "when this naturally expires" rather than "end this now." Reconstructing immediacy would mean also forcing a `check_leases` cycle, which only rebuilds what `terminate_lease` already does atomically.
+- The VM storefront calling `begin_fulfillment_teardown` directly — wrong layer. It would bypass the reservation ledger's `releasing` state entirely, which is what `_finish_release`, capacity release, and the admin recovery endpoints are keyed off; the storefront would end up duplicating `terminate_lease`'s bookkeeping to stay consistent.
+
+The only new work is VM-domain storefront-side: call `terminate_lease` from whatever business logic decides a lease should end before its natural expiry. The provisioning-service endpoint, its state validation, and its client wrapper are unchanged by this section.
+
+### `register_lease` field scope (resolves task 9.2's/10.5's deferred note)
+
+Fully traced, not assumed. `_register_vm_lease_with_settings` keeps writing `executor_kind` and `lease_end_utc` — both remain load-bearing: `LeaseLifecycleService` needs `executor_kind` to route submission/completion through the correct dispatcher entry, and `lease_end_utc` to find reservations due for release (`CapacityLedgerService.list_lease_due` filters on `state == leased` and `lease_end_utc IS NOT NULL`). Calling `register_lease`/`attach_lease` at all also remains mandatory regardless of which fields it carries, since `attach_lease` is what transitions the reservation into `leased` state in the first place — the state `list_lease_due` filters on.
+
+`executor_target` and `executor_ref` do not behave the same way and were investigated separately:
+
+- **`executor_target` (backs `CapacityReservation.vm_target`) is retained.** `vm_target` has exactly one write path in `kit/site/src/market_site/ledger.py`: `attach_lease`/`update_lease_fields`, both only from an explicitly supplied `vm_target`/`executor_target` argument. Nothing else ever populates it — unlike `vm_host`, there is no independent commit-time write. `LeasesController._lease_view` (the VM-domain lease API's list/get/terminate response shape) reads `reservation.get("vm_target")` directly with no fallback; dropping the write would silently empty that field for every future VM lease. The generic, bare-metal-shared `compute_contract_controller._lease_view` also depends on it indirectly: its `executor_target` resolution checks `vm_target` before falling back to `vm_host`, and since `vm_host` identifies the physical KVM host (which can run multiple VMs) rather than the specific VM, an empty `vm_target` would make that view silently report the wrong, host-level identity rather than merely a less specific one.
+- **`executor_ref` (backs `CapacityReservation.executor_ref`, `{"vm_host": ...}`) is dropped.** `reservation.vm_host` is already written independently of `register_lease`, at capacity-commit/rebind time, from the scheduled resource's own attributes (`ledger.py`'s `commit`/`rebind_capacity`: `reservation.vm_host = (resource.attributes or {}).get("vm_host")`) — this happens at `schedule_resource` time, before `register_lease` is ever called. `_sync_executor_fields`, already invoked by both `attach_lease` and `update_lease_fields`, already self-heals `executor_ref` from that independently-set `vm_host` whenever the explicit argument is omitted (`elif reservation.vm_host and not reservation.executor_ref: reservation.executor_ref = {"vm_host": reservation.vm_host}`). No reader observes any difference between an explicitly-passed and a self-healed `executor_ref`.
+
+Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_vm_lease_with_settings` stops passing `executor_ref` to `register_lease`, and continues passing `executor_target=vm_target`, `executor_kind`, and `lease_end_utc` exactly as today.
+
+### Permanent documentation destinations
+
+| Accepted decision | Permanent documentation destination |
+|---|---|
+| `begin_fulfillment_teardown` as the whole-fulfillment teardown entrypoint, and its idempotent treatment of already-prepared (backfilled) rows | `openspec/specs/fulfillment/spec.md` |
+| `LeaseLifecycleService` retained as sole VM/bare-metal release trigger and capacity-release owner; `ExecutorReleasePort`/`ReleaseJobPort` become the seam fulfillment-backed teardown crosses, not a replaced mechanism | `openspec/specs/physical-provisioning/spec.md`; `docs/development/ARCHITECTURE.md` only if the repository-wide service/worker map changes |
+| Kind-routed `ReleaseJobPort` dispatch (bare-metal via job queue, VM via fulfillment aggregate state) | `openspec/specs/physical-provisioning/spec.md` |
+| `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` (`ComputeProvisioningClient.terminate_lease`) as the storefront-facing early-termination call; no new endpoint | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the storefront-side call site |
+| Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `provisioning-result-push-delivery` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
+| `register_lease` field scope: `executor_kind`/`executor_target`/`lease_end_utc` retained (no independent write path exists for `vm_target`); `executor_ref` dropped (self-heals from the independently-written `vm_host`) | `openspec/specs/physical-provisioning/spec.md` |
+
+Implementation must confirm or correct each destination above against the actual accepted code shape before promotion; this table records intent, not a substitute for the design-promotion record task 12 requires at closure.
+
+### Addendum: pre-existing `LeaseState` serialization bug found and fixed during 10.7
+
+Not a design decision from this review — a defect in already-existing code, found incidentally while adding 10.7's regression test and fixed in the same pass (by agreement, rather than filed as a separate change) because it sat directly on the call path this section's design depends on. `compute_contract_controller._lease_view` passed the raw `market_site.ReservationState` value straight into `LeaseView.status: LeaseState` with no translation. `LeaseState` never had a `"leased"` member, and `attach_lease` always sets that literal raw state, so `ComputeProvisioningClient.register_lease` — the client `_register_vm_lease_with_settings` actually uses — failed its own response validation on every real call. No prior integration test caught it: existing lease-registration coverage used either the other client (`vm_provisioning_operator.ProvisioningClient`, whose controller already translates correctly) or mocked the client entirely.
+
+Fixed by giving `_lease_view` the same `reserved→pending, provisioning→pending, leased→active, ...` translation `leases_controller._LEASE_STATUS` already used, and adding `LeaseState.PROVISIONING_FAILED`/`LeaseState.FORCE_RELEASED` so the full nine-member `ReservationState` vocabulary is representable. `openspec/specs/compute-provisioning-contract/spec.md` should be checked for whether it documents `LeaseView`/`LeaseState`'s member set, and updated to describe the corrected (complete) vocabulary if so — this is a correctness fix to already-promoted behavior, not new design, so it belongs in that spec's existing description rather than a new requirement.
+
+## Section 10 completed design-promotion record
+
+| Decision | Destination |
+| --- | --- |
+| `begin_fulfillment_teardown` as the whole-fulfillment teardown entrypoint: valid only from `active`, idempotent across every already-tearing-down state including terminal `torn_down` and retryable `teardown_failed`, no inline dispatch, reuses an already-prepared operation (backfilled or retried) rather than re-preparing | `openspec/specs/fulfillment/spec.md` — new paragraph and two scenarios in "Durable settlement persistence", plus its `POST /fulfillment/{fulfillment_id}/begin-teardown` HTTP exposure |
+| `LeaseLifecycleService` retained, unchanged, as the sole release trigger and capacity-release owner for both VM and bare-metal; only the submission leaf (`VmReleaseExecutor`) and a new kind-routed completion-read seam (`ReleaseJobDispatcher`) cross into the fulfillment aggregate | `openspec/specs/physical-provisioning/spec.md` — new paragraph and three scenarios after "Site-backed release lifecycle" |
+| Explicit early lease termination reuses the existing `terminate_lease` release mechanism rather than adding a second termination code path; no lease-management migration to the storefront | `openspec/specs/physical-provisioning/spec.md` — new "Explicit early lease termination" requirement; `openspec/specs/vm-storefront-fulfillment/spec.md` — plumbing note on "Full settlement convergence ownership", explicit that no caller exists yet |
+| `register_lease` field scope: `executor_ref` was never sent on the storefront's actual call path in the first place (traced, not assumed); `executor_target`/`vm_target` has no independent write path and is retained; `executor_kind`/`lease_end_utc` remain load-bearing | `openspec/specs/physical-provisioning/spec.md` — new "Lease registration tolerates omitted identity hints" requirement, stated generically (not VM/`executor_ref`-specific) since the property — registration need not resupply what committed resource attributes already carry — is domain-neutral |
+| Kind-routed `ReleaseJobPort`/`ReleaseJobDispatcher`, mirroring the existing submission-side `ExecutorReleaseDispatcher` pattern; the `"direct-release"` sentinel is a per-executor "nothing to poll" signal, not a global on/off switch | `openspec/specs/physical-provisioning/spec.md` — same new paragraph/scenarios as the `LeaseLifecycleService` row above |
+| Circular-dependency break for `VmReleaseExecutor`/`VmFulfillmentReleaseJobPort` (`FulfillmentOrchestrator` needs `provider_registry` → `composed_adapters` → the VM adapter bundle these two classes live inside): a lazy module-level accessor (`_resolved_fulfillment_service()`) mirroring the container's existing `_resolved_job_queue()` pattern, passed via `providers.Object` rather than a DI dependency | `compute_provisioning_service/container.py` docstring on `_resolved_fulfillment_service`; not promoted to a subsystem spec — this is a composition-root wiring technique already established by precedent in the same file, not new cross-cutting design |
+| Pre-existing `LeaseState` serialization bug (missing `"leased"`, `"provisioning_failed"`, `"force_released"` members) found and fixed in the same pass, by agreement, rather than filed separately | `compute_provisioning/contracts.py` (`LeaseState` enum, now complete); `compute_contract_controller.py` (`_lease_view`'s translation table) — checked `openspec/specs/compute-provisioning-contract/spec.md` for existing `LeaseState` documentation to correct; found none, so no spec text needed updating |
+
+### Section 10 implementation confirmation (2026-07-27)
+
+Every decision above was implemented as recorded. Full test suite green throughout, run together at the end rather than only per-package: kit/fulfillment 148/148 (16 new), `compute_provisioning` kit 32/32 (7 new `ReleaseJobDispatcher` tests, 2 new teardown-path restart/worker-death tests), compute-provisioning-service unit+integration 515/515 (12 new/rewritten across `test_ledger_lease_lifecycle.py`, `test_compute_contract_api.py`, `test_provisioning_client_endpoint_coverage.py`, `test_leases_api.py`), VM storefront unit 629/629 (1 new). Two corrections found during implementation, not design changes: (1) the `"direct-release"` sentinel bug described in task 10.3's entry — a real production regression the new kind-routed dispatcher would have introduced, caught by an integration test rather than assumed safe; (2) the `LeaseState` bug described above — a genuine pre-existing defect on the call path this section's design depends on, found incidentally while adding 10.7's regression test, fixed with explicit sign-off rather than either silently patched or silently left. Neither changes what was decided in the design review; both are places implementation would otherwise have diverged from, or exposed a latent defect in, already-correct or already-existing behavior.
+
+Two design-review citations were themselves corrected during implementation and are recorded on their own task entries rather than repeated here: task 10.6's early-termination endpoint (the design review cited `vm_provisioning_operator.ProvisioningClient`'s `/leases/...` surface; the storefront actually uses `compute_provisioning.ComputeProvisioningClient`'s `/api/v1/contract/leases/...` surface — both call the identical underlying service, so no behavioral correction, only a citation correction), and task 10.7 (the design review assumed `executor_ref` needed to be dropped from an existing write; tracing found it was never written on this path at all, so 10.7 required no code change, only confirmation and a regression test).
+
+## Section 10 post-implementation review corrections (2026-07-27)
+
+This section supersedes the earlier statement that Section 10 was complete and
+ready for Section 11. The implemented direction remains accepted, but review
+found architectural, client-contract, end-to-end validation, and documentation
+promotion work that must be completed before the Section 10 gate can close.
+
+### Accepted correction: replace the module-global fulfillment-service bridge
+
+The lazy `resolved_fulfillment_service` bridge is not retained as an accepted
+composition technique. The import cycle is architectural evidence that the VM
+release adapter depends on a service that itself depends on the composed VM
+adapter registry. A module-global initialized later by the application container
+hides that dependency behind process initialization order and makes the adapter
+harder to compose or test independently.
+
+Planning will introduce a narrow fulfillment-teardown port owned by the shared
+compute-provisioning boundary. The VM release adapter depends only on operations
+needed at the release seam, such as beginning teardown and reading teardown
+status. The application composition root supplies an implementation after the
+fulfillment orchestrator and provider registry have been constructed, without a
+module-global service locator or lazy import. The exact carrier may be one port
+or two focused ports, but it must not expose the whole orchestrator merely to
+avoid naming the dependency.
+
+This correction invalidates the earlier Section 10 promotion-record row that
+classified `_resolved_fulfillment_service()` as an accepted implementation
+technique. That row remains historical evidence of what was implemented, but it
+is superseded by this decision and must not survive in the final promotion
+record.
+
+### Accepted correction: preserve teardown-submission failure taxonomy
+
+`VmReleaseExecutor.submit_release` must not collapse every exception into a
+`None` return. `LeaseLifecycleService` already distinguishes a delegate that
+intentionally reports no pollable job from a delegate that raises while trying
+to submit release. Unexpected persistence, composition, or programming failures
+must propagate to that existing `release_submit_error` path so the reservation
+records a useful failure reason and logs retain the originating traceback.
+
+Known domain outcomes may be translated deliberately. For example, a missing
+fulfillment aggregate may become a specific release-submission failure with a
+stable message, while an already-started teardown should return the existing
+`fulfillment_id` idempotently. The implementation plan must enumerate the known
+exceptions it translates and leave unexpected exceptions visible.
+
+### Accepted correction: complete the HTTP client contract
+
+`ComputeProvisioningClient` and `ComputeProvisioningClientProtocol` will expose
+`begin_fulfillment_teardown(fulfillment_id)`. An integration test must invoke
+`POST /fulfillment/{fulfillment_id}/begin-teardown` through that client rather
+than calling the controller or ASGI transport directly. The earlier task 10.2
+completion note, which deferred the client wrapper despite naming it in the
+accepted task, is inaccurate and is superseded.
+
+### Lease-state projection duplication: current finding and alternatives
+
+The implementation did not introduce a duplicate *diff*. It introduced a second
+copy of the same reservation-state-to-lease-state translation table:
+
+- `compute_provisioning_service.controllers.compute_contract_controller._LEASE_STATUS`
+- `vm_provisioning_adapter.controllers.leases_controller._LEASE_STATUS`
+
+The e2e `DealLease` helper also contains a third, partial projection
+(`{"leased": "active"}`) while reading raw capacity-reservation rows. The first
+two copies are currently identical; the problem is future drift, not an existing
+behavioral difference. The added regression test proves one copy accepts every
+reachable state but does not make the other copy authoritative.
+
+Two alternatives remain open for planning:
+
+1. Move the translation into the shared `compute_provisioning` contract package
+   as a pure projection helper consumed by both controllers. This removes the
+   duplicate and makes `LeaseState` translation part of the shared HTTP contract.
+2. Keep controller-owned projections separate because the response models differ,
+   but add one shared mapping constant or contract test that both controllers
+   consume. This preserves controller-local construction while eliminating
+   duplicated vocabulary.
+
+The first alternative is preferred unless package-boundary inspection reveals a
+real dependency violation. The VM adapter already depends on
+`compute_provisioning`, so current evidence does not show such a violation.
+Planning must decide the exact owner and update the e2e helper to consume a
+contract endpoint or the shared projection rather than maintaining a partial
+third mapping.
+
+### Accepted documentation invariant: retry ownership across two state machines
+
+The permanent physical-provisioning documentation must state this invariant:
+
+> Lease release and fulfillment teardown are separate durable state machines.
+> `LeaseLifecycleService` owns the reservation's `releasing`/`released` decision
+> and final capacity return. Fulfillment convergence owns dispatch, retry, and
+> recovery of `teardown_dispatch_pending`, `tearing_down`, and
+> `teardown_failed`. Retrying a lease release resumes or re-observes the same
+> fulfillment aggregate; it does not create a second teardown operation or make
+> the lease lifecycle responsible for resetting fulfillment teardown state.
+
+Capacity remains held while either state machine lacks confirmed teardown
+success, including while fulfillment is retryable after `teardown_failed`.
+
+### Static analysis of `e2e-tests/.../vms/test_full_deal.py`
+
+The current phases 10 and 11 are not compatible with the Section 10 cutover.
+They were written for the old direct-Ansible release path and still encode that
+path in names, control flow, and assertions.
+
+The important mismatches are:
+
+1. `DealLease.refresh()` reads `vm_remove_job_id` from the raw reservation. After
+   Section 10 this field aliases the generic release tracking identifier and, for
+   VM release, contains a `fulfillment_id`, not an Ansible queue job id.
+2. Stage 11a calls `SyncProvisioningClient.get_job(remove_job_id)`. That client
+   calls the VM job endpoint backed by `JobService`/`AsyncJobQueue`; a
+   `fulfillment_id` is not present there, so the assertion will fail with a
+   not-found response rather than report teardown progress.
+3. Stages 10a and 11b arm and resume a programmable mock rule for
+   `vm_action=vm_remove`, then call `wait_for_job(remove_job_id)`. The actual
+   Ansible teardown job is now created later by `FulfillmentConvergenceWatchdog`,
+   and its queue job id is provider metadata internal to the fulfillment
+   aggregate. The lease-facing identifier no longer gives the test direct access
+   to that job.
+4. `check_leases()` advances only `LeaseLifecycleService`. It initiates teardown
+   and later polls aggregate status, but it does not synchronously run the
+   fulfillment convergence watchdog. Pausing only the lease watchdog therefore
+   does not provide deterministic control over dispatch/convergence; the
+   independent fulfillment watchdog may advance between assertions.
+5. Stage comments still describe the new design as a future `vm_destroy` rework
+   and assert structural identity with the old direct job path. That statement is
+   now false: the observable lease invariant remains, but the execution and
+   status APIs are intentionally different.
+6. The scenario uses the legacy VM-branded `SyncProvisioningClient`, while the
+   new teardown endpoint is added to the shared `compute_provisioning` client.
+   This is not necessarily wrong for host/test controls, but teardown assertions
+   must use the client that owns the fulfillment contract or an explicit e2e
+   wrapper over it.
+
+The e2e scenario should be rewritten around public durable states rather than an
+internal Ansible job identifier. A deterministic composed path needs controls to
+pause or manually cycle fulfillment convergence independently of the lease
+watchdog. The preferred observable sequence is:
+
+1. expire or explicitly terminate the lease;
+2. run one lease lifecycle cycle and assert reservation `releasing`, fulfillment
+   `teardown_dispatch_pending`, and capacity held;
+3. run or release one fulfillment-convergence dispatch step and assert
+   `tearing_down`, with capacity still held;
+4. complete the provider mock operation and run convergence to `torn_down`;
+5. run one lease lifecycle cycle and assert reservation `released`, capacity
+   available, and the storefront release observation eventually converges.
+
+Planning must inventory the existing e2e test-control endpoints before adding a
+new one. If no deterministic fulfillment-convergence control exists, add a
+mock-profile/admin test control rather than sleeping against the 30-second
+background interval.
+
+### Teardown-submission error taxonomy example
+
+The desired distinction is illustrated by the following behavior, not a required
+exact API shape:
+
+```python
+async def submit_release(self, reservation: dict[str, Any]) -> str:
+    try:
+        fulfillment_id = self._settlements.require_fulfillment_id(
+            reservation["capacity_reservation_id"]
+        )
+        await self._teardown.begin_teardown(fulfillment_id)
+        return fulfillment_id
+    except SettlementEntityNotFoundError as exc:
+        raise ReleaseSubmissionError(
+            "no fulfillment aggregate exists for the reservation"
+        ) from exc
+    except FulfillmentStateConflictError:
+        # Preserve a deliberate domain conflict for LeaseLifecycleService's
+        # release_submit_error handling and operator diagnosis.
+        raise
+```
+
+An unavailable port, database exception, or programming error is not converted
+into `None`; it propagates and is recorded by `LeaseLifecycleService` as
+`release_submit_error`. `None` remains reserved for an executor contract that
+intentionally has no pollable release operation, if that behavior is still
+needed at all.
+
+### Documentation discrepancies found in review
+
+- Task 10.2 marks controller/client exposure complete while its own note says the
+  client is absent. The task must be reopened until the wrapper and client-based
+  integration test exist.
+- Task 10.4 and the completed promotion record present the module-global lazy
+  accessor as an accepted design. This is superseded by the narrow-port decision.
+- The completed promotion record is not final because retry ownership and the
+  fulfillment-id-as-release-tracking-id invariant are not yet mapped precisely
+  into permanent documentation.
+- The implementation confirmation says every decision was implemented and
+  Section 10 is complete. This review supersedes that conclusion.
+- Production comments and e2e stage documentation still use historical
+  direct-`vm_remove` wording and must be rewritten to describe current intent.
+
+Section 11 must not begin until the correction tasks appended to `tasks.md` are
+implemented, validated, and promoted into permanent documentation.

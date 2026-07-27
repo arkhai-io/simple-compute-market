@@ -281,6 +281,48 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_terminate_vm_lease_calls_the_same_client_as_registration(monkeypatch):
+    """No early-termination business flow calls this yet (POOLS-7 §10.6) --
+    this only confirms the plumbing: same client class registration uses,
+    correct endpoint-backing method, and the reason passed through."""
+    captured = {}
+
+    class FakeComputeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def terminate_lease(self, capacity_reservation_id, termination):
+            captured["capacity_reservation_id"] = capacity_reservation_id
+            captured["termination"] = termination
+
+    monkeypatch.setattr(
+        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "settings",
+        SimpleNamespace(
+            provisioning=SimpleNamespace(service_url="http://provisioning"),
+            admin_api_key="admin",
+        ),
+    )
+
+    await fulfillment_service.terminate_vm_lease(
+        capacity_reservation_id="reservation-1",
+        reason="buyer requested early termination",
+    )
+
+    assert captured["capacity_reservation_id"] == "reservation-1"
+    assert captured["termination"].reason == "buyer requested early termination"
+
+
+@pytest.mark.asyncio
 async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     client, monkeypatch,
 ):

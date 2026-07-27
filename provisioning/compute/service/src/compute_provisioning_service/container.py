@@ -5,6 +5,7 @@ from typing import Any
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
+from compute_provisioning.release import ReleaseJobDispatcher
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
@@ -36,6 +37,24 @@ def _resolved_job_queue():
     if resolved_job_queue is None:
         raise RuntimeError("Job queue is not initialised")
     return resolved_job_queue
+
+
+def _resolved_fulfillment_service():
+    """Lazily read the resolved `FulfillmentOrchestrator` singleton.
+
+    Passed as a plain callable (`providers.Object`, not a DI reference)
+    into `VmReleaseExecutor`/`VmFulfillmentReleaseJobPort`'s construction
+    to avoid a dependency cycle: `FulfillmentOrchestrator` depends on
+    `provider_registry`, which depends on `composed_adapters`, which
+    depends on the VM adapter bundle these two classes are part of.
+    Resolving lazily at call time, after the whole container has finished
+    wiring, breaks the cycle the same way the module-level
+    `resolved_X` globals below already do for controllers.
+    """
+
+    if resolved_fulfillment_service is None:
+        raise RuntimeError("Fulfillment service is not initialised")
+    return resolved_fulfillment_service
 
 
 def _make_engine():
@@ -81,6 +100,26 @@ def _release_dispatcher(composed_adapters):
     return composed_adapters.release_dispatcher
 
 
+def _make_release_job_dispatcher(vm_runtime, job_service):
+    """Route release-job status reads: VM through the fulfillment
+    aggregate, bare-metal through the shared job queue, unchanged.
+
+    ``vm_runtime.release_job_port()`` is used rather than reading it off
+    ``composed_adapters`` because ``ReleaseJobPort`` has no place in the
+    generic ``ExecutorAdapterBundle`` contract -- it is specific to
+    ``LeaseLifecycleService``'s polling loop, not a fulfillment-provider or
+    executor-adapter concern the bundle already models.
+    """
+
+    return ReleaseJobDispatcher(
+        {
+            "vm": vm_runtime.release_job_port(),
+            "bare_metal": job_service,
+        },
+        default_executor_kind=DEFAULT_EXECUTOR_KIND,
+    )
+
+
 def _make_compute_contract_service(site_authority, job_service, composed_adapters):
     return ComputeContractService(
         site_authority=site_authority,
@@ -90,13 +129,13 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg, site_authority, release_dispatcher, job_service, lifecycle_event_sink
+    cfg, site_authority, release_dispatcher, release_jobs, lifecycle_event_sink
 ):
     return LeaseLifecycleService(
         cfg,
         site_authority,
         executor_release=release_dispatcher,
-        release_jobs=job_service,
+        release_jobs=release_jobs,
         default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
@@ -135,11 +174,27 @@ class Container(containers.DeclarativeContainer):
     # Domain runtimes are loaded through adapter entry points. Generic
     # composition never imports concrete request/action/provider models.
     # ------------------------------------------------------------------
+
+    # Declared here, ahead of vm_runtime, because VmReleaseExecutor and
+    # VmFulfillmentReleaseJobPort (built inside vm_runtime) need it to
+    # resolve a reservation's fulfillment_id. Also supplies the concrete
+    # SettlementAbandonmentHook implementation the ledger calls when it
+    # reclaims capacity that might belong to a not-yet-dispatched
+    # settlement assignment (a lapsed hold, a terminal release, or a
+    # negotiation-driven resize) -- market_site defines the hook protocol
+    # but cannot import market_fulfillment to implement it.
+    settlement_repository = providers.Singleton(SettlementRepository)
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
         session_factory=session_factory,
         job_queue_provider=providers.Object(_resolved_job_queue),
+        settlement_repository=settlement_repository,
+        # A plain callable, not a DI reference to the `fulfillment_service`
+        # provider defined below -- see `_resolved_fulfillment_service`'s
+        # docstring for why a direct reference here would be circular.
+        fulfillment_service_provider=providers.Object(_resolved_fulfillment_service),
     )
 
     ansible_service = providers.Callable(
@@ -178,14 +233,6 @@ class Container(containers.DeclarativeContainer):
         session_factory=session_factory,
         handlers=providers.Dict(ansible=ansible_pool_config_handler),
     )
-
-    # Shared settlement/fulfillment aggregate repository. Also supplies the
-    # concrete SettlementAbandonmentHook implementation the ledger calls
-    # when it reclaims capacity that might belong to a not-yet-dispatched
-    # settlement assignment (a lapsed hold, a terminal release, or a
-    # negotiation-driven resize) -- market_site defines the hook protocol
-    # but cannot import market_fulfillment to implement it.
-    settlement_repository = providers.Singleton(SettlementRepository)
 
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
@@ -296,6 +343,12 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
+    release_job_dispatcher = providers.Singleton(
+        _make_release_job_dispatcher,
+        vm_runtime=vm_runtime,
+        job_service=job_service,
+    )
+
     compute_contract_service = providers.Factory(
         _make_compute_contract_service,
         site_authority=site_authority,
@@ -326,7 +379,7 @@ class Container(containers.DeclarativeContainer):
         cfg=config,
         site_authority=site_authority,
         release_dispatcher=release_dispatcher,
-        job_service=job_service,
+        release_jobs=release_job_dispatcher,
         lifecycle_event_sink=lifecycle_event_sink,
     )
 

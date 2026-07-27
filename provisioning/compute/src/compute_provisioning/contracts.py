@@ -57,6 +57,8 @@ class LeaseState(str, Enum):
     RELEASED = "released"
     RELEASE_FAILED = "release_failed"
     UNMANAGED = "unmanaged"
+    PROVISIONING_FAILED = "provisioning_failed"
+    FORCE_RELEASED = "force_released"
 
 
 class ExecutorActionEnvelope(VersionedContractModel):

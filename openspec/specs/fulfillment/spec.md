@@ -217,6 +217,20 @@ Either check rejects a retry whose stored values differ as a conflict; it does n
 
 Provider submission acknowledgement is a second short transaction. Identical metadata is idempotent; conflicting provider identity is rejected without rewriting the stored value. The gap between provider submission and acknowledgement is recovered by redispatching the persisted prepared operation with the same deterministic idempotency key.
 
+`begin_fulfillment_teardown` is the whole-fulfillment teardown entrypoint, addressed by `fulfillment_id`. It is valid only from `active`; a caller receives the current view without error for a fulfillment already at or past `teardown_dispatch_pending` (including terminal `torn_down` and the retryable `teardown_failed`), so a caller does not need to track whether it already asked for teardown before asking again. Unlike `begin_fulfillment`, it performs no synchronous dispatch attempt of its own: it prepares the teardown envelope — reusing one already captured on the row rather than re-preparing it, which is what makes a backfilled row's frozen-at-migration-time teardown envelope survive unchanged — and transitions the aggregate to `teardown_dispatch_pending`. The fulfillment convergence worker's teardown dispatch and status-convergence passes (see "Fulfillment convergence worker") own everything from there; nothing about them differs for a `begin_fulfillment_teardown`-initiated row versus a backfilled one, since both reach `teardown_dispatch_pending` through the same transition with the same prepared-operation shape.
+
+#### Scenario: Teardown requested for a fulfillment already tearing down
+
+- **WHEN** `begin_fulfillment_teardown` is called for a fulfillment already in `teardown_dispatch_pending`, `tearing_down`, `torn_down`, or `teardown_failed`
+- **THEN** it returns the current view without re-preparing or re-transitioning
+
+#### Scenario: Teardown requested for a fulfillment that was never active
+
+- **WHEN** `begin_fulfillment_teardown` is called for a fulfillment in any state other than `active` or one of the already-tearing-down states above
+- **THEN** it reports a conflict rather than beginning teardown
+
+`begin_fulfillment_teardown` is exposed over HTTP as `POST /fulfillment/{fulfillment_id}/begin-teardown`, returning the same fulfillment-acceptance view shape `/fulfillment/begin` returns, with the same `fulfillment_not_found`/`fulfillment_conflict` error-mapping convention.
+
 A fulfillment produces zero or more `ProvisionedResource` rows, each with a globally unique `provisioned_resource_id` and a denormalized `fulfillment_id`. Resource identities are resolved from validated provider metadata only after the provider reports create success; replay is idempotent for the same fulfillment-owned output identity, backed by the globally unique `provisioned_resource_id` primary key, not just an application-level existence check — a genuine concurrent insert race is resolved by re-reading and returning the winning row rather than raising. Confirmed teardown updates those existing rows rather than resolving or creating resource identities again. Per-resource teardown is not exposed unless a caller requires it; teardown addresses the whole fulfillment.
 
 There is no persisted `SettlementResult` model. A caller-facing fulfillment result is a read-time projection over the aggregate's state/failure fields and its `ProvisionedResource` children, not a value stored independently — there is no case needing it durable on its own absent a `SettlementResult` CRUD API, and persisting one would create a second place credential-adjacent data could live when credentials are already fetched live and never persisted.

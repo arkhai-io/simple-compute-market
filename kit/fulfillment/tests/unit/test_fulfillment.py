@@ -10,6 +10,7 @@ import pytest
 
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
+    FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentOrchestrator,
     FulfillmentResult,
@@ -41,6 +42,7 @@ def _record(**overrides):
         "resource_attributes": {"vm_host": "host-1"},
         "scheduling_requirements": {"resource_kind": "vm"},
         "prepared_create_operation": None,
+        "prepared_teardown_operation": None,
         "provider_metadata": {},
         "failure_reason": None,
         "failure_message": None,
@@ -79,6 +81,12 @@ class FakeTransaction:
         self.acknowledged.append(provider_metadata)
         self.record.provider_metadata = provider_metadata
         self.record.state = SettlementRecordState.dispatching.value
+        return self.record
+
+    def begin_teardown(self, fulfillment_id, prepared):
+        self.teardown_prepared = prepared
+        self.record.prepared_teardown_operation = prepared.model_dump(mode="json")
+        self.record.state = SettlementRecordState.teardown_dispatch_pending.value
         return self.record
 
     def get_by_fulfillment_id(self, fulfillment_id):
@@ -123,6 +131,11 @@ def _provider():
     )
     provider.dispatch_create = AsyncMock(
         return_value=FulfillmentResult({"job_id": "job-1"})
+    )
+    provider.prepare_teardown.return_value = VersionedEnvelope(
+        kind="vm.ansible.teardown.v1",
+        schema_version=1,
+        payload={"prepared": "teardown"},
     )
     provider.fetch_credentials = AsyncMock(
         return_value=VersionedEnvelope(
@@ -229,6 +242,122 @@ def test_get_fulfillment_status_unknown_id_raises_not_found():
 
     with pytest.raises(SettlementEntityNotFoundError):
         _orchestrator(uow, _provider()).get_fulfillment_status("no-such-fulfillment")
+
+
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_prepares_and_queues_a_native_active_fulfillment():
+    record = _record(
+        state=SettlementRecordState.active.value,
+        provider_metadata={"current_job_id": "job-1"},
+    )
+    tx = FakeTransaction(record)
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    acceptance = await _orchestrator(uow, provider).begin_fulfillment_teardown(
+        "fulfillment-1"
+    )
+
+    provider.prepare_teardown.assert_called_once()
+    settlement_result = provider.prepare_teardown.call_args.args[0]
+    assert settlement_result.capacity_reservation_id == "reservation-1"
+    assert settlement_result.fulfillment_id == "fulfillment-1"
+    assert settlement_result.provider_metadata == {"current_job_id": "job-1"}
+    assert tx.teardown_prepared.payload == {"prepared": "teardown"}
+    assert acceptance.state == SettlementRecordState.teardown_dispatch_pending.value
+    assert record.prepared_teardown_operation == {
+        "kind": "vm.ansible.teardown.v1",
+        "schema_version": 1,
+        "payload": {"prepared": "teardown"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_reuses_an_already_prepared_operation():
+    """A backfilled row already carries prepared_teardown_operation.
+
+    ``begin_fulfillment_teardown`` must not re-prepare it -- re-preparing
+    would call the provider with a live pool-config read instead of
+    dispatching from what was frozen at backfill time, breaking the same
+    "dispatch from what was accepted" invariant create-side preparation
+    already honors.
+    """
+
+    already_prepared = {
+        "kind": "vm.ansible.teardown.v1",
+        "schema_version": 1,
+        "payload": {"prepared": "from-backfill"},
+    }
+    record = _record(
+        state=SettlementRecordState.active.value,
+        prepared_teardown_operation=already_prepared,
+    )
+    tx = FakeTransaction(record)
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    acceptance = await _orchestrator(uow, provider).begin_fulfillment_teardown(
+        "fulfillment-1"
+    )
+
+    provider.prepare_teardown.assert_not_called()
+    assert tx.teardown_prepared.payload == {"prepared": "from-backfill"}
+    assert acceptance.state == SettlementRecordState.teardown_dispatch_pending.value
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.teardown_dispatch_pending.value,
+        SettlementRecordState.tearing_down.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.teardown_failed.value,
+    ],
+)
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_is_idempotent_once_already_initiated(state):
+    record = _record(state=state)
+    tx = FakeTransaction(record)
+    provider = _provider()
+    uow = FakeUnitOfWork(tx)
+
+    acceptance = await _orchestrator(uow, provider).begin_fulfillment_teardown(
+        "fulfillment-1"
+    )
+
+    assert acceptance.state == state
+    provider.prepare_teardown.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        SettlementRecordState.assigned.value,
+        SettlementRecordState.dispatch_pending.value,
+        SettlementRecordState.dispatching.value,
+        SettlementRecordState.failed.value,
+        SettlementRecordState.abandoned.value,
+    ],
+)
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_rejects_non_active_source_state(state):
+    record = _record(state=state)
+    uow = FakeUnitOfWork(FakeTransaction(record))
+
+    with pytest.raises(FulfillmentConflictError):
+        await _orchestrator(uow, _provider()).begin_fulfillment_teardown(
+            "fulfillment-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_unknown_id_raises_not_found():
+    uow = FakeUnitOfWork(FakeTransaction(_record()))
+
+    with pytest.raises(SettlementEntityNotFoundError):
+        await _orchestrator(uow, _provider()).begin_fulfillment_teardown(
+            "no-such-fulfillment"
+        )
 
 
 @pytest.mark.asyncio

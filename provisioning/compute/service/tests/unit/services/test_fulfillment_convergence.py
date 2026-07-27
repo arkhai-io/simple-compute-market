@@ -597,6 +597,119 @@ async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_sta
         assert record.claimed_by is None
 
 
+async def test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restart(tmp_path):
+    """Teardown-path counterpart to
+    test_fresh_watchdog_against_the_same_database_resumes_from_durable_state
+    (POOLS-7 §10.8): the claim/lease/resume machinery is shared between
+    dispatch_pending_creates and dispatch_pending_teardowns, but that
+    sharing was never itself asserted for the teardown path -- only
+    exercised through it incidentally, if at all."""
+
+    database = tmp_path / "restart-teardown.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    repo = SettlementRepository()
+
+    _active_row_ready_for_teardown(repo, factory)
+
+    # "Process one" claims the row and then disappears -- no further calls
+    # against this watchdog instance ever happen (simulating a crash right
+    # after the claim, before the provider call completes).
+    watchdog_one = FulfillmentConvergenceWatchdog(
+        session_factory=factory,
+        repository=repo,
+        provider_registry=ProviderRegistry(
+            {"ansible": _StubProvider(dispatch_teardown_error=RuntimeError("never gets here"))}
+        ),
+        settings=_settings(),
+    )
+    await watchdog_one.dispatch_pending_teardowns()
+    with factory() as db:
+        mid_crash = repo.get(db, "cr-1")
+        assert mid_crash.claimed_by == watchdog_one._worker_id
+        assert mid_crash.state == SettlementRecordState.teardown_dispatch_pending.value
+
+    # "Process two" -- a brand new watchdog instance, new worker id, same
+    # database file -- must not need anything from watchdog_one to recover
+    # once the lease naturally expires.
+    with factory() as db:
+        record = repo.get(db, "cr-1")
+        record.claim_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+    watchdog_two = FulfillmentConvergenceWatchdog(
+        session_factory=factory,
+        repository=repo,
+        provider_registry=ProviderRegistry(
+            {"ansible": _StubProvider(
+                dispatch_teardown_result=FulfillmentResult(provider_metadata={"teardown_job": "2"})
+            )}
+        ),
+        settings=_settings(),
+    )
+    assert watchdog_two._worker_id != watchdog_one._worker_id
+    await watchdog_two.dispatch_pending_teardowns()
+
+    with factory() as db:
+        record = repo.get(db, "cr-1")
+        assert record.state == SettlementRecordState.tearing_down.value
+        assert record.claimed_by is None
+        assert record.teardown_provider_metadata == {"teardown_job": "2"}
+
+
+async def test_worker_death_leaves_a_reclaimable_teardown_row_not_a_stuck_one(
+    session_factory, repo,
+):
+    """Teardown-path counterpart to
+    test_worker_death_leaves_a_reclaimable_row_not_a_stuck_one. Commit a
+    claim on a teardown_dispatch_pending row and never apply an outcome --
+    the same shape a crash between claim and provider call produces. No
+    operator intervention should be required for recovery."""
+
+    _active_row_ready_for_teardown(repo, session_factory)
+    long_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    with session_factory() as db:
+        repo.claim_pending(
+            db,
+            states=[SettlementRecordState.teardown_dispatch_pending.value],
+            limit=10,
+            lease_seconds=1,
+            worker_id="worker-that-died",
+            now=long_ago,
+        )
+
+    # While the lease is still live, a fresh claim attempt finds nothing --
+    # the row is not simply abandoned to whoever asks next.
+    with session_factory() as db:
+        still_claimed = repo.claim_pending(
+            db,
+            states=[SettlementRecordState.teardown_dispatch_pending.value],
+            limit=10,
+            lease_seconds=1,
+            worker_id="worker-b",
+            now=long_ago + timedelta(milliseconds=500),
+        )
+        assert still_claimed == []
+
+    # Once the lease has lapsed, no operator action is needed -- a fresh
+    # claim_pending call from a live worker just picks it up.
+    with session_factory() as db:
+        reclaimed = repo.claim_pending(
+            db,
+            states=[SettlementRecordState.teardown_dispatch_pending.value],
+            limit=10,
+            lease_seconds=60,
+            worker_id="worker-b",
+        )
+        assert len(reclaimed) == 1
+        assert reclaimed[0].claimed_by == "worker-b"
+
+
 async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_terminal_state(
     session_factory, repo
 ):

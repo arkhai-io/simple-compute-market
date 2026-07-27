@@ -7,21 +7,16 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any
 
 from market_site.authority import SiteAuthorityPort
 
-from .release import ExecutorReleasePort
+from .release import ExecutorReleasePort, ReleaseJobPort
 
 logger = logging.getLogger(__name__)
 
 CapacityReleasedNotifier = Callable[[dict[str, Any]], Awaitable[bool] | bool]
 ParseUtc = Callable[[Any], datetime | None]
-
-class ReleaseJobPort(Protocol):
-    """Read executor job outcomes without importing a concrete job runner."""
-
-    def get_job(self, job_id: str) -> Any: ...
 
 
 class LeaseLifecycleError(Exception):
@@ -353,14 +348,23 @@ class LeaseLifecycleService:
         lease_end = self._parse_utc(reservation.get("lease_end_utc")) or now
         past_grace = now >= lease_end + timedelta(seconds=grace_seconds)
         job_id = reservation.get("release_job_id") or reservation.get("vm_remove_job_id")
-        if job_id == "direct-release" and self._release_jobs is None:
+        # "direct-release" means the executor's submit_release reported
+        # nothing to poll -- e.g. no release delegate configured for that
+        # executor kind. This is independent of whether release_jobs is
+        # configured at all: a kind-routed dispatcher may hold a real port
+        # for one executor kind while another kind still submits this
+        # sentinel, and grace-period bookkeeping must not apply to a
+        # release that was never dispatched as a pollable job.
+        if job_id == "direct-release":
             if not await self._finish_release(reservation):
                 return "skipped"
             return "released"
 
         if job_id and self._release_jobs is not None:
             try:
-                job = self._release_jobs.get_job(job_id)
+                job = self._release_jobs.get_job(
+                    job_id, executor_kind=reservation.get("executor_kind")
+                )
                 if job.status == "succeeded":
                     if not await self._finish_release(reservation):
                         return "skipped"

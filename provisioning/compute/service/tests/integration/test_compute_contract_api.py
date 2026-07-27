@@ -213,3 +213,80 @@ async def test_unsupported_contract_major_reports_supported_version(client_and_q
         )
     assert response.status_code == 422
     assert "supported majors: 1" in response.text
+
+
+async def test_contract_lease_view_serializes_every_reachable_reservation_state():
+    """POOLS-7 §10 fix: `_lease_view`'s `status=str(reservation.get("state"))`
+    passed market_site's raw `ReservationState` values straight through
+    into `LeaseView.status: LeaseState`, whose members didn't cover them
+    -- most immediately, a freshly-registered lease is always raw state
+    `"leased"`, which `LeaseState` didn't have at all, so
+    `ComputeProvisioningClient.register_lease` (what the VM storefront
+    actually calls) failed with a 422 on every call. Confirms every
+    `ReservationState` member now round-trips through `_lease_view` into a
+    valid `LeaseState`, and specifically that `"leased"` maps to
+    `"active"`, matching `leases_controller._LEASE_STATUS`'s mapping for
+    the VM-domain-branded lease surface.
+    """
+    from compute_provisioning.contracts import LeaseState
+    from compute_provisioning_service.controllers.compute_contract_controller import (
+        _lease_view,
+    )
+    from market_site.db import ReservationState
+
+    expected = {
+        "reserved": LeaseState.PENDING,
+        "provisioning": LeaseState.PENDING,
+        "provisioning_failed": LeaseState.PROVISIONING_FAILED,
+        "leased": LeaseState.ACTIVE,
+        "releasing": LeaseState.RELEASING,
+        "released": LeaseState.RELEASED,
+        "release_failed": LeaseState.RELEASE_FAILED,
+        "unmanaged": LeaseState.UNMANAGED,
+        "force_released": LeaseState.FORCE_RELEASED,
+    }
+    assert {member.value for member in ReservationState} == set(expected)
+
+    for raw_state, want in expected.items():
+        view = _lease_view({
+            "capacity_reservation_id": "reservation-1",
+            "state": raw_state,
+            "lease_end_utc": "2099-01-01T00:00:00Z",
+        })
+        assert view.status == want, f"{raw_state!r} should map to {want!r}"
+
+
+async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heals(
+    client_and_queue,
+):
+    """POOLS-7 §10.7: the generic `/contract/leases` path -- the one
+    `ComputeProvisioningClient.register_lease` and the VM storefront
+    actually use, distinct from the VM-domain-branded `/leases` surface --
+    has no `executor_ref` field on its request contract at all. Confirms
+    that omission is harmless: `executor_ref` is expected to self-heal in
+    `market_site.ledger._sync_executor_fields` from the `vm_host` already
+    set on the reservation at commit time, and `executor_target` (backing
+    `vm_target`, which has no independent write path) is retained exactly
+    as sent.
+    """
+    from compute_provisioning import LeaseRegistration
+
+    reservation = _leased_vm_reservation()
+    transport = ASGITransport(app=app)
+    async with ComputeProvisioningClient(
+        "http://test", transport=transport
+    ) as client:
+        registration = LeaseRegistration(
+            capacity_reservation_id=reservation["capacity_reservation_id"],
+            deal_ref={"escrow_uid": "escrow-contract"},
+            executor_kind="vm",
+            executor_target="tenant-self-heal",
+            lease_end_utc=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        assert not hasattr(registration, "executor_ref")
+        await client.register_lease(registration)
+
+    ledger = _container_module.resolved_capacity_ledger_service
+    row = ledger.get_reservation(reservation["capacity_reservation_id"])
+    assert row["vm_target"] == "tenant-self-heal"
+    assert row["executor_ref"] == {"vm_host": "kvm1"}

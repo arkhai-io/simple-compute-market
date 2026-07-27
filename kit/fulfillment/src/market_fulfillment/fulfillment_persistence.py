@@ -48,6 +48,12 @@ class FulfillmentTransaction(Protocol):
         provider_metadata: dict[str, Any],
     ) -> Any: ...
 
+    def begin_teardown(
+        self,
+        fulfillment_id: str,
+        prepared: VersionedEnvelope[Any],
+    ) -> Any: ...
+
     def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None: ...
 
     def list_provisioned_resources(self, capacity_reservation_id: str) -> list[Any]: ...
@@ -145,6 +151,31 @@ class SqlAlchemyFulfillmentTransaction:
             capacity_reservation_id,
             SettlementRecordState.dispatching.value,
             provider_metadata=incoming,
+        )
+
+    def begin_teardown(
+        self,
+        fulfillment_id: str,
+        prepared: VersionedEnvelope[Any],
+    ) -> Any:
+        record = self._repository.get_by_fulfillment_id(self.db, fulfillment_id)
+        if record is None:
+            raise LookupError(fulfillment_id)
+
+        value = prepared.model_dump(mode="json")
+        if (
+            record.prepared_teardown_operation is not None
+            and record.prepared_teardown_operation != value
+        ):
+            raise FulfillmentConflictError(
+                "fulfillment already has a different prepared teardown operation"
+            )
+
+        return self._repository.transition(
+            self.db,
+            record.capacity_reservation_id,
+            SettlementRecordState.teardown_dispatch_pending.value,
+            prepared_teardown_operation=value,
         )
 
     def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None:

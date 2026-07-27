@@ -49,6 +49,36 @@ Compute lease lifecycle MUST use an injected site-authority port and MUST NOT re
 - **WHEN** an authorized operator force-releases after an unrecoverable executor failure
 - **THEN** the audit state distinguishes the operator override from successful physical teardown
 
+Release submission and release-completion reads are separate, independently kind-routed seams, because what "teardown complete" means differs by executor kind: bare-metal submits one job to a shared job queue and polls that job directly; VM teardown is a durable, multi-step fulfillment aggregate (see the Fulfillment specification's "Fulfillment convergence worker") with its own dispatch and status-convergence passes, running independently of the lease watchdog's own poll cadence. Compute lease lifecycle stays kind-agnostic on both sides: a release-job port is resolved by the reservation's executor kind the same way release submission already resolves an executor delegate by kind, so adding or changing one executor's completion semantics does not touch the generic watchdog or any other kind's path. For VM specifically, the release delegate resolves the fulfillment aggregate owning the reservation and begins its teardown (the whole-fulfillment teardown entrypoint described in the Fulfillment specification) rather than submitting provider work itself; the fulfillment identifier it returns is what the release-job port later polls, reading the aggregate's own teardown state rather than a job queue.
+
+#### Scenario: VM lease release begins durable fulfillment teardown
+
+- **WHEN** a VM lease is due for release, whether by watchdog-detected expiry or an explicit early-termination request
+- **THEN** the executor delegate begins the fulfillment aggregate's teardown and returns its fulfillment identifier as the job the lease lifecycle polls, rather than submitting provider work directly
+
+#### Scenario: Executor release delegate has nothing to poll
+
+- **WHEN** an executor's release delegate reports no pollable job for a submitted release (e.g. no release mechanism configured for that kind)
+- **THEN** the lease lifecycle treats it as immediately complete, independent of whether any other executor kind has a release-job port configured
+
+### Requirement: Explicit early lease termination
+
+An authorized caller MUST be able to end a lease before its natural expiry through the same release mechanism the watchdog's expiry sweep uses, rather than through a separate termination code path.
+
+#### Scenario: Caller terminates a lease before its natural end
+
+- **WHEN** an authorized caller requests termination of a lease whose end time has not yet passed
+- **THEN** release begins immediately through the reservation's registered executor delegate, without waiting for a watchdog cycle and without bypassing the release-job tracking a watchdog-detected expiry would also go through
+
+### Requirement: Lease registration tolerates omitted identity hints
+
+Lease registration MUST NOT require a caller to resupply identity information the executor's own committed resource attributes already carry. Registration MAY omit an executor-kind-specific physical-target hint; a release delegate resolving that hint later from the reservation's own attributes MUST produce the same outcome as if the hint had been supplied at registration.
+
+#### Scenario: Registration omits a physical-target hint already implied by the committed resource
+
+- **WHEN** a lease is registered without an executor-kind-specific physical-target hint, and the reservation's committed resource already carries the equivalent attribute
+- **THEN** release still resolves the correct physical target and no lease registration fails or degrades for the omission
+
 ### Requirement: Lifecycle dependency isolation
 Generic lease lifecycle and watchdog scheduling MUST depend on executor and site ports rather than concrete VM, bare-metal, storefront, or HTTP client implementations.
 

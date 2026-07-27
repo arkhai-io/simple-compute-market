@@ -11,11 +11,13 @@ from .envelopes import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
     CredentialFetchFailedError,
+    FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
     ProviderRegistry,
     ProvisionedResourceDescriptor,
+    SettlementResult,
 )
 from .results import (
     FulfillmentResultPayload,
@@ -25,6 +27,20 @@ from .results import (
 from .settlement_types import SettlementEntityNotFoundError, SettlementResource
 
 logger = logging.getLogger(__name__)
+
+# States a fulfillment reaches only after begin_fulfillment_teardown has
+# already run once. A repeat call in any of these states is an idempotent
+# no-op return, not a re-preparation or a conflict -- including terminal
+# torn_down and the retryable teardown_failed, which recovery may still
+# resolve by calling this same entrypoint again.
+_TEARDOWN_INITIATED_STATES = frozenset(
+    {
+        SettlementRecordState.teardown_dispatch_pending.value,
+        SettlementRecordState.tearing_down.value,
+        SettlementRecordState.torn_down.value,
+        SettlementRecordState.teardown_failed.value,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -195,6 +211,74 @@ class FulfillmentOrchestrator:
                 result.provider_metadata,
             )
             return self._view(acknowledged)
+
+    async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptance:
+        """Durably initiate whole-fulfillment teardown.
+
+        Performs no provider I/O itself: prepares the teardown envelope --
+        reusing one already captured on the row (backfilled rows, or a
+        retried call after a prior preparation) rather than re-preparing --
+        and transitions the aggregate to `teardown_dispatch_pending`.
+        `FulfillmentConvergenceWatchdog`'s dispatch and status-convergence
+        passes own everything downstream of that transition; there is no
+        synchronous dispatch attempt here, unlike `begin_fulfillment`,
+        because nothing depends on teardown completing before this call
+        returns.
+
+        Idempotent: a fulfillment already at or past
+        `teardown_dispatch_pending` (including terminal `torn_down` and the
+        retryable `teardown_failed`) returns its current view rather than
+        raising or re-preparing, so a caller does not need to track whether
+        it already asked for teardown before asking again.
+        """
+
+        with self._uow.transaction() as tx:
+            record = tx.get_by_fulfillment_id(fulfillment_id)
+            if record is None:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment {fulfillment_id!r}"
+                )
+            if record.state in _TEARDOWN_INITIATED_STATES:
+                return self._view(record)
+            if record.state != SettlementRecordState.active.value:
+                raise FulfillmentConflictError(
+                    f"fulfillment {fulfillment_id!r} is {record.state!r}; "
+                    "only an active fulfillment can begin teardown"
+                )
+
+            if record.prepared_teardown_operation:
+                prepared = VersionedEnvelope.model_validate(
+                    record.prepared_teardown_operation
+                )
+            else:
+                pool = tx.get_pool(record.pool_id)
+                if pool is None:
+                    raise LookupError(f"pool {record.pool_id!r} not found")
+                provider = self._providers.require(record.provider)
+                prepared = provider.prepare_teardown(
+                    self._settlement_result(tx, record),
+                    dict(pool.provider_config or {}),
+                )
+
+            updated = tx.begin_teardown(fulfillment_id, prepared)
+            return self._view(updated)
+
+    @staticmethod
+    def _settlement_result(tx: FulfillmentTransaction, record: Any) -> SettlementResult:
+        provisioned = tx.list_provisioned_resources(record.capacity_reservation_id)
+        return SettlementResult(
+            capacity_reservation_id=record.capacity_reservation_id,
+            fulfillment_id=record.fulfillment_id,
+            resource=FulfillmentOrchestrator._resource(record),
+            provisioned_resources=tuple(
+                {
+                    "provisioned_resource_id": resource.provisioned_resource_id,
+                    "status": resource.status,
+                }
+                for resource in provisioned
+            ),
+            provider_metadata=dict(record.provider_metadata or {}),
+        )
 
     def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatus:
         """Read current aggregate state -- no provider or Ansible call.

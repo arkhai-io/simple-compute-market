@@ -120,6 +120,14 @@ async def client_and_queue(
     from vm_provisioning_adapter.services.vm_operations_service import (
         VmOperationsService,
     )
+    from market_fulfillment import SettlementRepository
+
+    def _unused_fulfillment_service_provider():
+        raise RuntimeError(
+            "fulfillment_service is not wired in this fixture — "
+            "these tests do not exercise VM release/teardown"
+        )
+
     vm_runtime = VmProvisioningRuntime(
         config=mock_settings,
         session_factory=session_factory,
@@ -138,6 +146,8 @@ async def client_and_queue(
             job_service=job_service,
             job_queue_provider=lambda: job_queue,
         ),
+        settlement_repository=SettlementRepository(),
+        fulfillment_service_provider=_unused_fulfillment_service_provider,
     )
 
     app.container.vm_runtime.override(vm_runtime)

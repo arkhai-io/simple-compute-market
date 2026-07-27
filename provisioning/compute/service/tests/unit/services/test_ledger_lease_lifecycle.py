@@ -20,12 +20,27 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.models import Base
-from compute_provisioning.release import ExecutorReleaseDispatcher
+from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning_service.services.deal_event_sink import notify_storefront_capacity_released
-from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+from market_fulfillment import (
+    FulfillmentBase,
+    FulfillmentOrchestrator,
+    ProviderRegistry,
+    SettlementRecord,
+    SettlementRecordState,
+    SettlementRepository,
+    SqlAlchemyFulfillmentUnitOfWork,
+)
+from market_resource_pools import ResourcePoolService
+from market_resource_pools.db import Base as PoolsBase
+from vm_provisioning_adapter.release import (
+    VM_EXECUTOR_KIND,
+    VmFulfillmentReleaseJobPort,
+    VmReleaseExecutor,
+)
 from bare_metal_provisioning_adapter.release import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
@@ -41,12 +56,15 @@ def session_factory():
         poolclass=StaticPool,
     )
     # resource_pools must exist before Base's ansible_pool_configs FK resolves.
-    from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # Fulfillment aggregate tables — needed by tests exercising VM release,
+    # which now begins durable fulfillment teardown rather than submitting
+    # an Ansible job directly.
+    FulfillmentBase.metadata.create_all(bind=engine)
     return sessionmaker(bind=engine)
 
 
@@ -61,6 +79,75 @@ def ledger(session_factory) -> CapacityLedgerService:
         attributes={"vm_host": "kvm1"},
     )
     return svc
+
+
+def _fulfillment_service(session_factory, *, provider=None) -> FulfillmentOrchestrator:
+    resource_pool_service = ResourcePoolService(session_factory=session_factory, handlers={})
+    return FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"ansible": provider or MagicMock()}),
+        unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
+            session_factory=session_factory,
+            pool_service=resource_pool_service,
+            repository=SettlementRepository(),
+        ),
+    )
+
+
+def _create_active_fulfillment(
+    session_factory,
+    *,
+    capacity_reservation_id: str,
+    fulfillment_id: str = "fulfillment-1",
+) -> None:
+    """Persist a `SettlementRecord` in `active` state, already carrying a
+    prepared teardown envelope so `begin_fulfillment_teardown` needs no
+    real pool configuration or provider call to queue teardown -- these
+    tests exercise `LeaseLifecycleService`'s submission/polling behavior,
+    not `FulfillmentOrchestrator`'s own preparation logic (covered in
+    `kit/fulfillment`'s own test suite).
+    """
+
+    with session_factory() as db:
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id=capacity_reservation_id,
+                fulfillment_id=fulfillment_id,
+                market="vms",
+                scheduling_requirements={"resource_kind": "vm"},
+                settlement_resource_id="kvm1",
+                pool_id="pool-1",
+                provider="ansible",
+                resource_attributes={"vm_host": "kvm1"},
+                fulfillment_request={
+                    "kind": "vm.fulfillment.request",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                prepared_teardown_operation={
+                    "kind": "vm.ansible.teardown.v1",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                provider_metadata={"current_job_id": "job-1"},
+                state=SettlementRecordState.active.value,
+            )
+        )
+        db.commit()
+
+
+def _set_fulfillment_state(
+    session_factory, capacity_reservation_id: str, state: str, **fields,
+) -> None:
+    """Simulate `FulfillmentConvergenceWatchdog` having already converged
+    a teardown to a terminal (or in-flight) state, without running the
+    watchdog itself -- that worker has its own test suite."""
+
+    with session_factory() as db:
+        record = db.get(SettlementRecord, capacity_reservation_id)
+        record.state = state
+        for key, value in fields.items():
+            setattr(record, key, value)
+        db.commit()
 
 
 def _settings(**overrides):
@@ -88,17 +175,19 @@ def _lifecycle(
     session_factory,
     ledger,
     *,
-    job_service=None,
     executor_release=None,
     release_delegate=None,
+    fulfillment_service=None,
     **settings_overrides,
 ):
+    fulfillment_service = fulfillment_service or _fulfillment_service(session_factory)
     if executor_release is None:
         executors = {
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(),
             VM_EXECUTOR_KIND: VmReleaseExecutor(
-                job_service=job_service,
-                job_queue_provider=lambda: MagicMock(),
+                settlement_repository=SettlementRepository(),
+                session_factory=session_factory,
+                fulfillment_service_provider=lambda: fulfillment_service,
             ),
         }
         if release_delegate is not None:
@@ -107,12 +196,20 @@ def _lifecycle(
             executors,
             default_executor_kind=VM_EXECUTOR_KIND,
         )
+    release_jobs = ReleaseJobDispatcher(
+        {
+            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+                fulfillment_service_provider=lambda: fulfillment_service,
+            ),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
     settings = _settings(**settings_overrides)
     return LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
         executor_release=executor_release,
-        release_jobs=job_service,
+        release_jobs=release_jobs,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(settings, reservation)
         ),
@@ -164,8 +261,28 @@ def _just_expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe"
 async def test_expired_ledger_lease_releases_locally_and_notifies(
     session_factory, ledger,
 ):
-    reservation = _expired_reservation(ledger)
+    """Full lifecycle: submission (this cycle) through confirmed teardown
+    (simulated, since FulfillmentConvergenceWatchdog is tested separately)
+    to local release + notification (next cycle)."""
+
+    reservation = _just_expired_reservation(ledger)
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
     svc = _lifecycle(session_factory, ledger)
+
+    first = await svc.force_check_leases()
+    assert first["checked"] == 1
+    releasing = ledger.get_reservation(capacity_reservation_id)
+    assert releasing["state"] == "releasing"
+    assert releasing["release_job_id"] == "fulfillment-1"
+
+    # Convergence (FulfillmentConvergenceWatchdog, tested separately) has
+    # confirmed the VM torn down.
+    _set_fulfillment_state(
+        session_factory, capacity_reservation_id, SettlementRecordState.torn_down.value,
+    )
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -179,7 +296,7 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
-    released = ledger.get_reservation(reservation["capacity_reservation_id"])
+    released = ledger.get_reservation(capacity_reservation_id)
     assert released["state"] == "released"
     assert ledger.snapshot()[0]["available_units"] == 8
 
@@ -189,7 +306,7 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
     )
     sf.notify_capacity_released.assert_awaited_once()
     args, kwargs = sf.notify_capacity_released.await_args
-    assert args == (reservation["capacity_reservation_id"],)
+    assert args == (capacity_reservation_id,)
     assert "resource_id" not in kwargs
     sf.patch_resource.assert_not_awaited()
 
@@ -202,8 +319,17 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
 async def test_release_survives_unreachable_storefront(session_factory, ledger):
     """The local transaction is authoritative; notification is best-effort
     (the storefront converges through the capacity-event feed)."""
-    reservation = _expired_reservation(ledger)
+    reservation = _just_expired_reservation(ledger)
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
     svc = _lifecycle(session_factory, ledger)
+
+    await svc.force_check_leases()
+    _set_fulfillment_state(
+        session_factory, capacity_reservation_id, SettlementRecordState.torn_down.value,
+    )
 
     with patch(
         "storefront_client.StorefrontClient",
@@ -212,7 +338,7 @@ async def test_release_survives_unreachable_storefront(session_factory, ledger):
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
-    assert ledger.get_reservation(reservation["capacity_reservation_id"])["state"] == "released"
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
 
 
 @pytest.mark.asyncio
@@ -220,14 +346,18 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
     session_factory, ledger,
 ):
     reservation = _expired_reservation(ledger)
-    ledger.begin_releasing(reservation["capacity_reservation_id"], vm_remove_job_id="check-1")
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
+    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    _set_fulfillment_state(
+        session_factory,
+        capacity_reservation_id,
+        SettlementRecordState.tearing_down.value,
+    )
 
-    job_svc = MagicMock()
-    running = MagicMock()
-    running.status = "running"
-    job_svc.get_job.return_value = running
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -235,12 +365,12 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
     sf.notify_capacity_released = AsyncMock(return_value={})
 
     with patch("storefront_client.StorefrontClient", return_value=sf):
-        # lease ended 2020 + 300s grace — long past: still-running vm_remove
-        # job is marked failed; capacity remains held.
+        # lease ended 2020 + 300s grace — long past: still-in-progress
+        # teardown is marked failed; capacity remains held.
         summary = await svc.force_check_leases()
 
     assert summary["release_failed"] == 1
-    assert ledger.get_reservation(reservation["capacity_reservation_id"])["state"] == "release_failed"
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "release_failed"
     assert ledger.snapshot()[0]["available_units"] < 8
     sf.notify_capacity_released.assert_not_awaited()
 
@@ -248,38 +378,44 @@ async def test_releasing_reservation_past_grace_marks_release_failed(
 @pytest.mark.asyncio
 async def test_releasing_reservation_within_grace_skips(session_factory, ledger):
     reserved = ledger.reserve(claim={}, deal_ref={})
+    capacity_reservation_id = reserved["capacity_reservation_id"]
     soon_dt = datetime.now(timezone.utc) - timedelta(seconds=1)
     soon = soon_dt.isoformat()
     ledger.commit(
         resource_id="compute-kvm1-001",
-        capacity_reservation_id=reserved["capacity_reservation_id"],
+        capacity_reservation_id=capacity_reservation_id,
         lease_start_utc=(soon_dt - timedelta(seconds=3600)).isoformat(),
         lease_end_utc=soon,
     )
-    ledger.begin_releasing(reserved["capacity_reservation_id"], vm_remove_job_id="check-1")
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
+    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    _set_fulfillment_state(
+        session_factory,
+        capacity_reservation_id,
+        SettlementRecordState.tearing_down.value,
+    )
 
-    job_svc = MagicMock()
-    running = MagicMock()
-    running.status = "running"
-    job_svc.get_job.return_value = running
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
     summary = await svc.force_check_leases()
     assert summary["skipped"] == 1
-    assert ledger.get_reservation(reserved["capacity_reservation_id"])["state"] == "releasing"
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "releasing"
 
 
 @pytest.mark.asyncio
 async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
     reservation = _expired_reservation(ledger)
-    ledger.begin_releasing(reservation["capacity_reservation_id"], vm_remove_job_id="check-1")
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
+    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    _set_fulfillment_state(
+        session_factory, capacity_reservation_id, SettlementRecordState.torn_down.value,
+    )
 
-    job_svc = MagicMock()
-    done = MagicMock()
-    done.status = "succeeded"
-    job_svc.get_job.return_value = done
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -290,21 +426,26 @@ async def test_succeeded_vm_remove_releases_normally(session_factory, ledger):
         summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
-    assert ledger.get_reservation(reservation["capacity_reservation_id"])["state"] == "released"
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
 
 
 @pytest.mark.asyncio
 async def test_failed_vm_remove_marks_release_failed_without_notification(session_factory, ledger):
     reservation = _expired_reservation(ledger)
-    ledger.begin_releasing(reservation["capacity_reservation_id"], vm_remove_job_id="remove-1")
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
+    ledger.begin_releasing(capacity_reservation_id, vm_remove_job_id="fulfillment-1")
+    _set_fulfillment_state(
+        session_factory,
+        capacity_reservation_id,
+        SettlementRecordState.teardown_failed.value,
+        failure_reason="provider_reported_failure",
+        failure_message="cleanup script missing",
+    )
 
-    job_svc = MagicMock()
-    failed = MagicMock()
-    failed.status = "failed"
-    failed.error = "cleanup script missing"
-    job_svc.get_job.return_value = failed
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     sf = MagicMock()
     sf.__aenter__ = AsyncMock(return_value=sf)
@@ -315,69 +456,65 @@ async def test_failed_vm_remove_marks_release_failed_without_notification(sessio
         summary = await svc.force_check_leases()
 
     assert summary["release_failed"] == 1
-    assert ledger.get_reservation(reservation["capacity_reservation_id"])["state"] == "release_failed"
+    assert ledger.get_reservation(capacity_reservation_id)["state"] == "release_failed"
     assert ledger.snapshot()[0]["available_units"] < 8
     sf.notify_capacity_released.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_due_leased_reservation_submits_vm_remove_job(session_factory, ledger):
+async def test_due_leased_reservation_begins_fulfillment_teardown(session_factory, ledger):
     # Lease ended seconds ago — within grace, so the same cycle that
-    # submits the vm_remove job must NOT force-release it.
+    # begins teardown must NOT force-release it.
     reservation = _just_expired_reservation(ledger)
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
 
-    job_svc = MagicMock()
-    submit = MagicMock()
-    submit.job_id = "remove-42"
-    job_svc.submit = AsyncMock(return_value=submit)
-    running = MagicMock()
-    running.status = "running"
-    job_svc.get_job.return_value = running
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     summary = await svc.force_check_leases()
 
     assert summary["checked"] == 1
-    row = ledger.get_reservation(reservation["capacity_reservation_id"])
+    row = ledger.get_reservation(capacity_reservation_id)
     assert row["state"] == "releasing"
-    assert row["vm_remove_job_id"] == "remove-42"
-    assert row["release_job_id"] == "remove-42"
+    assert row["vm_remove_job_id"] == "fulfillment-1"
+    assert row["release_job_id"] == "fulfillment-1"
     assert row["executor_kind"] == "vm"
-    assert row["executor_target"] == "tenant-x"
-    params = job_svc.submit.await_args.args[0]
-    assert params.vm_action == "vm_remove"
-    assert params.vm_target == "tenant-x"
+
+    with session_factory() as db:
+        record = db.get(SettlementRecord, capacity_reservation_id)
+        assert record.state == SettlementRecordState.teardown_dispatch_pending.value
 
 
 @pytest.mark.asyncio
 async def test_missing_executor_kind_falls_back_to_vm_release(session_factory, ledger):
     reservation = _just_expired_reservation(ledger)
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory, capacity_reservation_id=capacity_reservation_id,
+    )
 
     from market_site.db import CapacityReservation
 
     with session_factory() as db:
-        row = db.get(CapacityReservation, reservation["capacity_reservation_id"])
+        row = db.get(CapacityReservation, capacity_reservation_id)
         row.executor_kind = None
         row.executor_target = None
         db.commit()
 
-    job_svc = MagicMock()
-    submit = MagicMock()
-    submit.job_id = "remove-legacy"
-    job_svc.submit = AsyncMock(return_value=submit)
-
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     summary = await svc.force_check_leases()
 
     assert summary["checked"] == 1
-    row = ledger.get_reservation(reservation["capacity_reservation_id"])
+    row = ledger.get_reservation(capacity_reservation_id)
     assert row["state"] == "releasing"
-    assert row["release_job_id"] == "remove-legacy"
-    params = job_svc.submit.await_args.args[0]
-    assert params.vm_action == "vm_remove"
-    assert params.vm_target == "tenant-x"
+    assert row["release_job_id"] == "fulfillment-1"
+
+    with session_factory() as db:
+        record = db.get(SettlementRecord, capacity_reservation_id)
+        assert record.state == SettlementRecordState.teardown_dispatch_pending.value
 
 
 @pytest.mark.asyncio
@@ -485,8 +622,7 @@ async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, l
         executor_target="target-1",
     )
 
-    job_svc = MagicMock()
-    svc = _lifecycle(session_factory, ledger, job_service=job_svc)
+    svc = _lifecycle(session_factory, ledger)
 
     summary = await svc.force_check_leases()
 
@@ -495,7 +631,6 @@ async def test_unknown_executor_kind_stays_held_and_retryable(session_factory, l
     assert row["state"] == "release_failed"
     assert row["failure_reason"] == "release_submit_failed"
     assert ledger.snapshot()[0]["available_units"] < 8
-    job_svc.submit.assert_not_called()
 
 
 @pytest.mark.asyncio

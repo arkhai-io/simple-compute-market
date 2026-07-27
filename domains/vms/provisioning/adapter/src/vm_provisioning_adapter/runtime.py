@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
-from vm_provisioning_adapter.release import VmReleaseExecutor
+from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -35,6 +35,8 @@ class VmProvisioningRuntime:
     job_service: AnsibleJobService
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
+    settlement_repository: Any
+    fulfillment_service_provider: Callable[[], Any]
 
     def fulfillment_provider(self, resource_pool_service):
         return AnsibleFulfillmentProvider(
@@ -52,12 +54,16 @@ class VmProvisioningRuntime:
                 self.vm_operations_service,
             ),
             release_executor=VmReleaseExecutor(
-                job_service=self.job_service,
-                job_queue_provider=self.job_queue_provider,
+                settlement_repository=self.settlement_repository,
+                session_factory=self.session_factory,
+                fulfillment_service_provider=self.fulfillment_service_provider,
             ),
             fulfillment_provider=self.fulfillment_provider(resource_pool_service),
             readiness_check=self.readiness,
         )
+
+    def release_job_port(self) -> VmFulfillmentReleaseJobPort:
+        return VmFulfillmentReleaseJobPort(self.fulfillment_service_provider)
 
     def system_service(self, *, lease_lifecycle_service):
         from vm_provisioning_adapter.services.system_service import SystemService
@@ -77,6 +83,8 @@ def build_vm_runtime(
     config,
     session_factory,
     job_queue_provider: Callable[[], Any],
+    settlement_repository,
+    fulfillment_service_provider: Callable[[], Any],
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -121,4 +129,6 @@ def build_vm_runtime(
             job_service=job_service,
             job_queue_provider=job_queue_provider,
         ),
+        settlement_repository=settlement_repository,
+        fulfillment_service_provider=fulfillment_service_provider,
     )
