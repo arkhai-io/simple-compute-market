@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 from compute_provisioning_service import container as _container_module
+from compute_provisioning import lease_state_for_reservation_state
 from market_site.ledger import parse_utc as _parse_utc
 from vm_provisioning_operator.models import (
     LeaseCreate,
@@ -44,18 +45,6 @@ router = APIRouter(prefix="/leases", tags=["leases"])
 admin_router = APIRouter(prefix="/admin/leases", tags=["admin", "leases"])
 _VM_EXECUTOR_KIND = "vm"
 
-_LEASE_STATUS = {
-    "reserved": "pending",
-    "provisioning": "pending",
-    "leased": "active",
-    "releasing": "releasing",
-    "released": "released",
-    "release_failed": "release_failed",
-    "unmanaged": "unmanaged",
-    "provisioning_failed": "provisioning_failed",
-    "force_released": "force_released",
-}
-
 
 def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
     now = datetime.now(timezone.utc)
@@ -68,7 +57,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseResponse:
         vm_target=str(reservation.get("vm_target") or ""),
         lease_start_utc=_parse_utc(reservation.get("lease_start_utc")),
         lease_end_utc=_parse_utc(reservation.get("lease_end_utc")) or now,
-        status=_LEASE_STATUS.get(str(reservation.get("state")), str(reservation.get("state"))),
+        status=lease_state_for_reservation_state(str(reservation.get("state"))).value,
         create_job_id=reservation.get("create_job_id"),
         vm_remove_job_id=reservation.get("vm_remove_job_id"),
         created_at=now,

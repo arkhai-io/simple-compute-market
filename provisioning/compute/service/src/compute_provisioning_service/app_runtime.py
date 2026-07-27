@@ -49,6 +49,9 @@ def resolve_request_path_services() -> None:
     # machinery on the request path (prevents asyncio.get_event_loop()
     # errors in AnyIO worker threads).
     _container_module.resolved_job_service = container.job_service()
+    fulfillment_service = container.fulfillment_service()
+    container.fulfillment_teardown_port().bind(fulfillment_service)
+    _container_module.resolved_fulfillment_service = fulfillment_service
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
@@ -71,7 +74,6 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
-    _container_module.resolved_fulfillment_service = container.fulfillment_service()
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )

@@ -61,6 +61,28 @@ class LeaseState(str, Enum):
     FORCE_RELEASED = "force_released"
 
 
+
+
+_RESERVATION_TO_LEASE_STATE: dict[str, LeaseState] = {
+    "reserved": LeaseState.PENDING,
+    "provisioning": LeaseState.PENDING,
+    "leased": LeaseState.ACTIVE,
+    "releasing": LeaseState.RELEASING,
+    "released": LeaseState.RELEASED,
+    "release_failed": LeaseState.RELEASE_FAILED,
+    "unmanaged": LeaseState.UNMANAGED,
+    "provisioning_failed": LeaseState.PROVISIONING_FAILED,
+    "force_released": LeaseState.FORCE_RELEASED,
+}
+
+def lease_state_for_reservation_state(state: str) -> LeaseState:
+    """Project an internal reservation state onto the public lease contract."""
+    try:
+        return _RESERVATION_TO_LEASE_STATE[state]
+    except KeyError as exc:
+        raise ValueError(f"unsupported reservation state for lease projection: {state!r}") from exc
+
+
 class ExecutorActionEnvelope(VersionedContractModel):
     capacity_reservation_id: str = Field(min_length=1)
     deal_ref: dict[str, Any]

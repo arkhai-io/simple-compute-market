@@ -39,22 +39,28 @@ def _resolved_job_queue():
     return resolved_job_queue
 
 
-def _resolved_fulfillment_service():
-    """Lazily read the resolved `FulfillmentOrchestrator` singleton.
+class DeferredFulfillmentTeardownPort:
+    """Cycle-safe narrow port bound once the fulfillment service is composed."""
 
-    Passed as a plain callable (`providers.Object`, not a DI reference)
-    into `VmReleaseExecutor`/`VmFulfillmentReleaseJobPort`'s construction
-    to avoid a dependency cycle: `FulfillmentOrchestrator` depends on
-    `provider_registry`, which depends on `composed_adapters`, which
-    depends on the VM adapter bundle these two classes are part of.
-    Resolving lazily at call time, after the whole container has finished
-    wiring, breaks the cycle the same way the module-level
-    `resolved_X` globals below already do for controllers.
-    """
+    def __init__(self) -> None:
+        self._service = None
 
-    if resolved_fulfillment_service is None:
-        raise RuntimeError("Fulfillment service is not initialised")
-    return resolved_fulfillment_service
+    def bind(self, service) -> None:
+        if self._service is not None and self._service is not service:
+            raise RuntimeError("fulfillment teardown port is already bound")
+        self._service = service
+
+    def _require_service(self):
+        if self._service is None:
+            raise RuntimeError("fulfillment teardown port is not bound")
+        return self._service
+
+    async def begin_teardown(self, fulfillment_id: str) -> str:
+        accepted = await self._require_service().begin_fulfillment_teardown(fulfillment_id)
+        return accepted.fulfillment_id
+
+    def get_status(self, fulfillment_id: str):
+        return self._require_service().get_fulfillment_status(fulfillment_id)
 
 
 def _make_engine():
@@ -185,16 +191,15 @@ class Container(containers.DeclarativeContainer):
     # but cannot import market_fulfillment to implement it.
     settlement_repository = providers.Singleton(SettlementRepository)
 
+    fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
         session_factory=session_factory,
         job_queue_provider=providers.Object(_resolved_job_queue),
         settlement_repository=settlement_repository,
-        # A plain callable, not a DI reference to the `fulfillment_service`
-        # provider defined below -- see `_resolved_fulfillment_service`'s
-        # docstring for why a direct reference here would be circular.
-        fulfillment_service_provider=providers.Object(_resolved_fulfillment_service),
+        teardown_port=fulfillment_teardown_port,
     )
 
     ansible_service = providers.Callable(

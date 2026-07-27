@@ -53,6 +53,7 @@ class ComputeProvisioningClientProtocol(Protocol):
     async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView: ...
     async def schedule_resource(self, request: FulfillmentScheduleRequest) -> FulfillmentScheduleResponse: ...
     async def begin_fulfillment(self, body: FulfillmentRequestBody) -> FulfillmentAcceptanceResponse: ...
+    async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptanceResponse: ...
     async def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatusResponse: ...
     async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]: ...
 
@@ -147,20 +148,25 @@ class ComputeProvisioningClient:
 
     async def schedule_resource(self, request: FulfillmentScheduleRequest) -> FulfillmentScheduleResponse:
         return FulfillmentScheduleResponse.model_validate(
-            await self._request("POST", "/fulfillment/schedule", request)
+            await self._request("POST", "/api/v1/fulfillment/schedule", request)
         )
 
     async def begin_fulfillment(self, body: FulfillmentRequestBody) -> FulfillmentAcceptanceResponse:
         return FulfillmentAcceptanceResponse.model_validate(
-            await self._request("POST", "/fulfillment/begin", body)
+            await self._request("POST", "/api/v1/fulfillment/begin", body)
+        )
+
+    async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptanceResponse:
+        return FulfillmentAcceptanceResponse.model_validate(
+            await self._request("POST", f"/api/v1/fulfillment/{fulfillment_id}/begin-teardown", {})
         )
 
     async def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatusResponse:
         return FulfillmentStatusResponse.model_validate(
-            await self._request("GET", f"/fulfillment/{fulfillment_id}/status")
+            await self._request("GET", f"/api/v1/fulfillment/{fulfillment_id}/status")
         )
 
     async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]:
         return VersionedEnvelope[dict[str, Any]].model_validate(
-            await self._request("GET", f"/fulfillment/{fulfillment_id}/result")
+            await self._request("GET", f"/api/v1/fulfillment/{fulfillment_id}/result")
         )

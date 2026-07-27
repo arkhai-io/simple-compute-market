@@ -121,3 +121,29 @@ async def test_client_maps_versioned_job_cancellation_endpoint():
     ) as client:
         cancelled = await client.cancel_job("job-1")
     assert cancelled.status.value == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_client_maps_versioned_fulfillment_teardown_endpoint():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == (
+            "/api/v1/fulfillment/fulfillment-1/begin-teardown"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "contract_version": COMPUTE_PROVISIONING_CONTRACT_VERSION,
+                "fulfillment_id": "fulfillment-1",
+                "capacity_reservation_id": "reservation-1",
+                "state": "teardown_dispatch_pending",
+            },
+        )
+
+    async with ComputeProvisioningClient(
+        "http://provisioner", transport=httpx.MockTransport(handler)
+    ) as client:
+        accepted = await client.begin_fulfillment_teardown("fulfillment-1")
+
+    assert accepted.fulfillment_id == "fulfillment-1"
+    assert accepted.state == "teardown_dispatch_pending"

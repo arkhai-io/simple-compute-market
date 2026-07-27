@@ -143,17 +143,26 @@ class FulfillmentController:
         except SettlementEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
-                detail={"code": "fulfillment_not_found", "message": "No fulfillment exists for this identifier."},
+                detail={
+                    "code": "fulfillment_not_found",
+                    "message": "No fulfillment exists for this identifier.",
+                },
             ) from exc
         except ProviderConfigInvalidError as exc:
             raise HTTPException(
                 status_code=422,
-                detail={"code": "provider_config_invalid", "message": "The fulfillment provider configuration is invalid."},
+                detail={
+                    "code": "provider_config_invalid",
+                    "message": "The fulfillment provider configuration is invalid.",
+                },
             ) from exc
         except (FulfillmentConflictError, LookupError, ValueError) as exc:
             raise HTTPException(
                 status_code=409,
-                detail={"code": "fulfillment_conflict", "message": "The request conflicts with the durable fulfillment state."},
+                detail={
+                    "code": "fulfillment_conflict",
+                    "message": "The request conflicts with the durable fulfillment state.",
+                },
             ) from exc
         except ProviderNotFoundError as exc:
             raise HTTPException(

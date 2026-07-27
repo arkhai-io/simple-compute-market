@@ -440,3 +440,15 @@ The cutover SHALL NOT submit a replacement create operation merely because an ex
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
 - Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
+
+
+### Requirement: Fulfillment teardown is available through the provisioning client
+
+The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfillment_id)` over `POST /fulfillment/{fulfillment_id}/begin-teardown`. Repeated requests for an already-started or completed teardown SHALL return the durable aggregate acceptance without creating a second teardown operation. Unknown identifiers and conflicting aggregate states SHALL retain the endpoint's documented HTTP error classification.
+
+#### Scenario: Client repeats teardown initiation
+
+- **GIVEN** an active fulfillment aggregate
+- **WHEN** the provisioning client begins teardown more than once
+- **THEN** every accepted response SHALL identify the same fulfillment aggregate
+- **AND** only one durable teardown operation SHALL exist

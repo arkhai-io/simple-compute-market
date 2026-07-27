@@ -232,6 +232,9 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
     from compute_provisioning_service.controllers.compute_contract_controller import (
         _lease_view,
     )
+    from vm_provisioning_adapter.controllers.leases_controller import (
+        _lease_view as _vm_lease_view,
+    )
     from market_site.db import ReservationState
 
     expected = {
@@ -254,6 +257,39 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
             "lease_end_utc": "2099-01-01T00:00:00Z",
         })
         assert view.status == want, f"{raw_state!r} should map to {want!r}"
+        vm_view = _vm_lease_view({
+            "capacity_reservation_id": "reservation-1",
+            "resource_id": "resource-1",
+            "state": raw_state,
+            "lease_end_utc": "2099-01-01T00:00:00Z",
+        })
+        assert vm_view.status == want.value
+
+
+@pytest.mark.asyncio
+async def test_begin_fulfillment_teardown_client_calls_endpoint_idempotently(
+    client_and_queue, monkeypatch
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    service = _container_module.resolved_fulfillment_service
+    begin = AsyncMock(return_value=SimpleNamespace(
+        fulfillment_id="fulfillment-client-teardown",
+        capacity_reservation_id="reservation-client-teardown",
+        state="teardown_dispatch_pending",
+    ))
+    monkeypatch.setattr(service, "begin_fulfillment_teardown", begin)
+
+    async with ComputeProvisioningClient(
+        "http://test", transport=ASGITransport(app=app)
+    ) as client:
+        first = await client.begin_fulfillment_teardown("fulfillment-client-teardown")
+        repeated = await client.begin_fulfillment_teardown("fulfillment-client-teardown")
+
+    assert first == repeated
+    assert first.state == "teardown_dispatch_pending"
+    assert begin.await_count == 2
 
 
 async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heals(

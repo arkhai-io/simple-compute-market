@@ -36,7 +36,7 @@ class VmProvisioningRuntime:
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
     settlement_repository: Any
-    fulfillment_service_provider: Callable[[], Any]
+    teardown_port: Any
 
     def fulfillment_provider(self, resource_pool_service):
         return AnsibleFulfillmentProvider(
@@ -56,14 +56,14 @@ class VmProvisioningRuntime:
             release_executor=VmReleaseExecutor(
                 settlement_repository=self.settlement_repository,
                 session_factory=self.session_factory,
-                fulfillment_service_provider=self.fulfillment_service_provider,
+                teardown_port=self.teardown_port,
             ),
             fulfillment_provider=self.fulfillment_provider(resource_pool_service),
             readiness_check=self.readiness,
         )
 
     def release_job_port(self) -> VmFulfillmentReleaseJobPort:
-        return VmFulfillmentReleaseJobPort(self.fulfillment_service_provider)
+        return VmFulfillmentReleaseJobPort(self.teardown_port)
 
     def system_service(self, *, lease_lifecycle_service):
         from vm_provisioning_adapter.services.system_service import SystemService
@@ -84,7 +84,7 @@ def build_vm_runtime(
     session_factory,
     job_queue_provider: Callable[[], Any],
     settlement_repository,
-    fulfillment_service_provider: Callable[[], Any],
+    teardown_port: Any,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -130,5 +130,5 @@ def build_vm_runtime(
             job_queue_provider=job_queue_provider,
         ),
         settlement_repository=settlement_repository,
-        fulfillment_service_provider=fulfillment_service_provider,
+        teardown_port=teardown_port,
     )

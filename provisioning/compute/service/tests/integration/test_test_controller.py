@@ -147,7 +147,7 @@ async def client_and_queue(
             job_queue_provider=lambda: job_queue,
         ),
         settlement_repository=SettlementRepository(),
-        fulfillment_service_provider=_unused_fulfillment_service_provider,
+        teardown_port=object(),
     )
 
     app.container.vm_runtime.override(vm_runtime)

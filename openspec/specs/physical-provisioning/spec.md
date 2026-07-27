@@ -233,3 +233,24 @@ Generic compute service modules may import `market_fulfillment`. `market_fulfill
 ### Requirement: VM lease migration uses current provider contracts
 
 When an existing VM lease is represented in the fulfillment aggregate, the selected resource SHALL resolve through the current host and resource-pool configuration. The VM target SHALL be derived from the consistent legacy VM/executor target fields, and known create or teardown job identifiers SHALL be retained in provider metadata. Any prepared teardown operation SHALL be produced by the current VM Ansible provider's `prepare_teardown` contract using the snapshotted pool configuration rather than by constructing provider payload JSON independently.
+
+
+### Requirement: VM release delegates to durable fulfillment teardown
+
+For VM reservations, lease release SHALL initiate teardown through a narrow fulfillment-teardown port. The VM release adapter SHALL use the durable `fulfillment_id` as the release tracking identifier and SHALL NOT submit or poll a provider job directly. Release-status lookup SHALL be selected by `executor_kind`; VM lookup SHALL read fulfillment aggregate state while bare-metal lookup MAY read its executor job service.
+
+#### Scenario: Unexpected teardown submission failure remains diagnosable
+
+- **WHEN** composition, persistence, or an unexpected implementation failure prevents VM teardown submission
+- **THEN** the failure SHALL propagate to lease lifecycle handling and be recorded as `release_submit_error` rather than being converted to an absent job identifier
+
+### Requirement: Lease release and fulfillment teardown have separate retry ownership
+
+Lease lifecycle SHALL own the reservation's `releasing` and terminal release states, final capacity return, and release notification. Fulfillment convergence SHALL own teardown dispatch, provider polling, retry, and recovery through `torn_down` or `teardown_failed`. An operator lease retry SHALL re-observe the same fulfillment aggregate and SHALL NOT create a second teardown operation. Capacity SHALL remain held until the fulfillment reaches `torn_down` or an explicit force-release occurs.
+
+#### Scenario: Failed teardown is requeued without duplicate teardown
+
+- **GIVEN** a VM reservation is `releasing` and its fulfillment is `teardown_failed`
+- **WHEN** fulfillment convergence requeues teardown and an operator retries lease release
+- **THEN** both paths SHALL continue using the same `fulfillment_id`
+- **AND** capacity SHALL remain unavailable until that aggregate reaches `torn_down`

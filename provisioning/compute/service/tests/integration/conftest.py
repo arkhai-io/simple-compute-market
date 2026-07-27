@@ -441,6 +441,7 @@ async def client_and_queue(
     from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
     from vm_provisioning_adapter.release import (
         VM_EXECUTOR_KIND,
+        FulfillmentServiceTeardownPort,
         VmFulfillmentReleaseJobPort,
         VmReleaseExecutor,
     )
@@ -456,7 +457,7 @@ async def client_and_queue(
             VM_EXECUTOR_KIND: VmReleaseExecutor(
                 settlement_repository=SettlementRepository(),
                 session_factory=session_factory,
-                fulfillment_service_provider=lambda: fulfillment_service,
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
             ),
         },
         default_executor_kind=VM_EXECUTOR_KIND,
@@ -464,7 +465,7 @@ async def client_and_queue(
     release_job_dispatcher = ReleaseJobDispatcher(
         {
             VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                fulfillment_service_provider=lambda: fulfillment_service,
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
             ),
             BARE_METAL_EXECUTOR_KIND: job_service,
         },
@@ -511,7 +512,7 @@ async def client_and_queue(
             job_queue_provider=lambda: job_queue,
         ),
         settlement_repository=SettlementRepository(),
-        fulfillment_service_provider=lambda: fulfillment_service,
+        teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
     )
 
     system_service = SystemService(

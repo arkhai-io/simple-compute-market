@@ -37,6 +37,7 @@ from market_fulfillment import (
 from market_resource_pools import ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from vm_provisioning_adapter.release import (
+    FulfillmentServiceTeardownPort,
     VM_EXECUTOR_KIND,
     VmFulfillmentReleaseJobPort,
     VmReleaseExecutor,
@@ -187,7 +188,7 @@ def _lifecycle(
             VM_EXECUTOR_KIND: VmReleaseExecutor(
                 settlement_repository=SettlementRepository(),
                 session_factory=session_factory,
-                fulfillment_service_provider=lambda: fulfillment_service,
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
             ),
         }
         if release_delegate is not None:
@@ -199,7 +200,7 @@ def _lifecycle(
     release_jobs = ReleaseJobDispatcher(
         {
             VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
-                fulfillment_service_provider=lambda: fulfillment_service,
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
             ),
         },
         default_executor_kind=VM_EXECUTOR_KIND,

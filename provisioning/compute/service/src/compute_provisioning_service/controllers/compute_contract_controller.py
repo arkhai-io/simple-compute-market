@@ -14,6 +14,7 @@ from compute_provisioning import (
     LeaseRetryRelease,
     LeaseTermination,
     LeaseView,
+    lease_state_for_reservation_state,
     ProvisioningJob,
     UnsupportedExecutorActionError,
 )

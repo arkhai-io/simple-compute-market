@@ -6,8 +6,7 @@ a reservation and asks it to begin teardown. `FulfillmentConvergenceWatchdog`
 (``compute_provisioning_service.services.fulfillment_convergence``) owns
 everything from there -- dispatch, retry, and status convergence through to
 ``torn_down``/``teardown_failed``. Completion is read back through
-``VmFulfillmentReleaseJobPort`` (``release_job_port.py``), not by polling an
-Ansible job the way this module used to submit one directly.
+``VmFulfillmentReleaseJobPort`` (``release_job_port.py``), not by polling a provider job directly.
 """
 
 from __future__ import annotations
@@ -15,11 +14,33 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from market_fulfillment import SettlementEntityNotFoundError, SettlementRecordState
 
 logger = logging.getLogger(__name__)
+
+
+class FulfillmentTeardownPort(Protocol):
+    async def begin_teardown(self, fulfillment_id: str) -> str: ...
+
+    def get_status(self, fulfillment_id: str) -> Any: ...
+
+
+class FulfillmentServiceTeardownPort:
+    """Adapt a fulfillment-service provider to the narrow teardown port."""
+
+    def __init__(self, service_provider: Callable[[], Any]) -> None:
+        self._service_provider = service_provider
+
+    async def begin_teardown(self, fulfillment_id: str) -> str:
+        accepted = await self._service_provider().begin_fulfillment_teardown(fulfillment_id)
+        return accepted.fulfillment_id
+
+    def get_status(self, fulfillment_id: str) -> Any:
+        return self._service_provider().get_fulfillment_status(fulfillment_id)
+
+
 VM_EXECUTOR_KIND = "vm"
 
 
@@ -39,11 +60,11 @@ class VmReleaseExecutor:
         *,
         settlement_repository,
         session_factory: Callable[[], Any],
-        fulfillment_service_provider: Callable[[], Any],
+        teardown_port: FulfillmentTeardownPort,
     ) -> None:
         self._settlement_repository = settlement_repository
         self._session_factory = session_factory
-        self._fulfillment_service_provider = fulfillment_service_provider
+        self._teardown_port = teardown_port
 
     async def submit_release(self, reservation: dict[str, Any]) -> str | None:
         capacity_reservation_id = reservation.get("capacity_reservation_id")
@@ -63,21 +84,7 @@ class VmReleaseExecutor:
             )
             return None
 
-        try:
-            fulfillment_service = self._fulfillment_service_provider()
-            acceptance = await fulfillment_service.begin_fulfillment_teardown(
-                fulfillment_id
-            )
-            return acceptance.fulfillment_id
-        except Exception as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] Failed to begin fulfillment teardown for %s "
-                "(fulfillment_id=%s): %s",
-                capacity_reservation_id,
-                fulfillment_id,
-                exc,
-            )
-            return None
+        return await self._teardown_port.begin_teardown(fulfillment_id)
 
     def _resolve_fulfillment_id(self, capacity_reservation_id: str) -> str | None:
         with self._session_factory() as db:
@@ -111,13 +118,12 @@ class VmFulfillmentReleaseJobPort:
     caller keeps polling.
     """
 
-    def __init__(self, fulfillment_service_provider: Callable[[], Any]) -> None:
-        self._fulfillment_service_provider = fulfillment_service_provider
+    def __init__(self, teardown_port: FulfillmentTeardownPort) -> None:
+        self._teardown_port = teardown_port
 
     def get_job(self, job_id: str) -> Any:
-        fulfillment_service = self._fulfillment_service_provider()
         try:
-            status = fulfillment_service.get_fulfillment_status(job_id)
+            status = self._teardown_port.get_status(job_id)
         except SettlementEntityNotFoundError:
             return _FulfillmentReleaseJob(
                 status="failed", error=f"no fulfillment {job_id!r}"
