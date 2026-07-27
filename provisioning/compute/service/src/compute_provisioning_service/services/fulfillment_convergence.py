@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from sqlalchemy.exc import OperationalError
 
+from market_fulfillment.ids import derive_provisioned_resource_id
 from market_fulfillment import (
     Backoff,
     ProviderOperationState,
@@ -321,11 +322,18 @@ class FulfillmentConvergenceWatchdog:
 
     def _apply_create_success(self, reservation_id: str, refs: tuple[str, ...]) -> None:
         def apply(db) -> None:
-            for ref in refs:
+            record = self._repository.get(db, reservation_id)
+            if record is None or record.fulfillment_id is None:
+                raise LookupError(reservation_id)
+            for provider_output_key in refs:
+                provisioned_resource_id = derive_provisioned_resource_id(
+                    identity_scope=f"fulfillment:{record.fulfillment_id}",
+                    provider_output_key=provider_output_key,
+                )
                 self._repository.add_provisioned_resource(
                     db,
                     capacity_reservation_id=reservation_id,
-                    domain_resource_ref=ref,
+                    provisioned_resource_id=provisioned_resource_id,
                 )
             self._repository.transition(
                 db, reservation_id, SettlementRecordState.active.value

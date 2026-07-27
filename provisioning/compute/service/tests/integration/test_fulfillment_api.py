@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -77,7 +78,14 @@ class FulfillmentApi:
     async def begin(
         self, capacity_reservation_id: str, market: str, fulfillment_request: dict
     ) -> dict:
-        resp = await self._client.post(
+        resp = await self.begin_raw(capacity_reservation_id, market, fulfillment_request)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def begin_raw(
+        self, capacity_reservation_id: str, market: str, fulfillment_request: dict
+    ) -> httpx.Response:
+        return await self._client.post(
             "/api/v1/fulfillment/begin",
             json={
                 "capacity_reservation_id": capacity_reservation_id,
@@ -85,13 +93,35 @@ class FulfillmentApi:
                 "fulfillment_request": fulfillment_request,
             },
         )
-        assert resp.status_code == 200, resp.text
-        return resp.json()
 
     async def get_job(self, job_id: str) -> dict:
         resp = await self._client.get(f"/api/v1/jobs/{job_id}/contract")
         assert resp.status_code == 200, resp.text
         return resp.json()
+
+    async def status(self, fulfillment_id: str) -> httpx.Response:
+        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    async def result(self, fulfillment_id: str) -> httpx.Response:
+        return await self._client.get(f"/api/v1/fulfillment/{fulfillment_id}/result")
+
+    async def schedule(
+        self,
+        capacity_reservation_id: str,
+        market: str,
+        *,
+        requirements: dict[str, Any] | None = None,
+        resource_id: str | None = None,
+    ) -> httpx.Response:
+        return await self._client.post(
+            "/api/v1/fulfillment/schedule",
+            json={
+                "capacity_reservation_id": capacity_reservation_id,
+                "market": market,
+                "requirements": requirements or {},
+                "resource_id": resource_id,
+            },
+        )
 
 
 @pytest.fixture
@@ -114,19 +144,15 @@ def _fulfillment_request(**overrides: Any) -> dict:
     return {"kind": "vm.fulfillment.request", "schema_version": 1, "payload": payload}
 
 
-async def _scheduled_reservation(pool_id: str = "pool-fulfillment-a") -> str:
-    """Register a pool + VM resource, reserve capacity, and schedule it.
+async def _reserved_capacity(pool_id: str) -> str:
+    """Register a pool + VM resource and reserve capacity against it.
 
-    Direct service calls, not HTTP: scheduling has no storefront-facing HTTP
-    endpoint yet (Section 9 scope), so preconditions this section's task
-    list does not own are set up the same way kit/fulfillment's own
-    scheduler tests do.
+    The reserve-only half of ``_scheduled_reservation`` below, factored out
+    so ``TestScheduleEndpoint`` can drive scheduling itself through HTTP
+    instead of the direct service call ``_scheduled_reservation`` uses.
     """
     resource_pool_service = _container_module.resolved_resource_pool_service
     capacity_ledger_service = _container_module.resolved_capacity_ledger_service
-    physical_settlement_scheduler = (
-        _container_module.resolved_physical_settlement_scheduler
-    )
 
     resource_pool_service.create_pool(
         PoolCreate(
@@ -145,10 +171,27 @@ async def _scheduled_reservation(pool_id: str = "pool-fulfillment-a") -> str:
     )
     reserved = capacity_ledger_service.reserve(
         claim={"gpu_count": 1},
-        deal_ref={"agreement_id": "agreement-fulfillment-1", "market": "vms"},
+        deal_ref={"agreement_id": f"agreement-{pool_id}", "market": "vms"},
     )
     assert reserved is not None
-    capacity_reservation_id = reserved["capacity_reservation_id"]
+    return reserved["capacity_reservation_id"]
+
+
+async def _scheduled_reservation(pool_id: str = "pool-fulfillment-a") -> str:
+    """Register a pool + VM resource, reserve capacity, and schedule it.
+
+    Direct service calls, not HTTP, for the reserve step (the storefront's
+    capacity reservation has no HTTP surface in this service; it lives at
+    the site authority). Scheduling itself now has an HTTP endpoint
+    (``POST /fulfillment/schedule``, see ``TestScheduleEndpoint`` below) but
+    this helper keeps calling the scheduler directly, matching
+    kit/fulfillment's own scheduler tests, so the many existing fixtures
+    built on top of it are unaffected by this section's addition.
+    """
+    physical_settlement_scheduler = (
+        _container_module.resolved_physical_settlement_scheduler
+    )
+    capacity_reservation_id = await _reserved_capacity(pool_id)
 
     physical_settlement_scheduler.schedule_resource(
         PhysicalSettlementRequest(
@@ -489,3 +532,183 @@ class TestAcknowledgementFailureRecovery:
             )
             assert len(jobs) == 1
             assert jobs[0].id == job_id
+
+
+class TestStatusAndResultQueries:
+    """Integration coverage for the pull-based `GET /fulfillment/{id}/status`
+    and `GET /fulfillment/{id}/result` endpoints, against the real HTTP
+    surface, a real SQLite-backed repository, and -- for the active-state
+    case -- a real `AnsibleFulfillmentProvider.fetch_credentials` read of a
+    `Credential` row inserted the same way the job-completion path would
+    have written one.
+    """
+
+    async def test_status_reflects_dispatching_state_after_begin(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-status"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-status-1")
+        )
+
+        resp = await fulfillment.status(begun["fulfillment_id"])
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["fulfillment_id"] == begun["fulfillment_id"]
+        assert body["capacity_reservation_id"] == capacity_reservation_id
+        assert body["state"] == "dispatching"
+        assert body["failure_reason"] is None
+
+    async def test_status_unknown_id_is_404(self, fulfillment: FulfillmentApi):
+        resp = await fulfillment.status("no-such-fulfillment")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+    async def test_result_on_a_non_active_fulfillment_has_no_outputs_or_credentials(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-result-pending"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-1")
+        )
+        assert begun["state"] == "dispatching"
+
+        resp = await fulfillment.result(begun["fulfillment_id"])
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["kind"] == "fulfillment.result.v1"
+        assert body["payload"]["state"] == "dispatching"
+        assert body["payload"]["provisioned_resources"] == []
+        assert body["payload"]["domain_result"] is None
+
+    async def test_result_unknown_id_is_404(self, fulfillment: FulfillmentApi):
+        resp = await fulfillment.result("no-such-fulfillment")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+    async def test_result_on_an_active_fulfillment_includes_live_credentials(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _scheduled_reservation(
+            pool_id="pool-fulfillment-result-active"
+        )
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-result-2")
+        )
+        fulfillment_id = begun["fulfillment_id"]
+
+        # The job pipeline (mocked Ansible, real job_service) already wrote
+        # real root/tenant Credential rows for this job when it succeeded
+        # during `begin`; this section is only responsible for exposing
+        # them through the pull endpoint, not for generating them.
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            SettlementRepository().add_provisioned_resource(
+                db,
+                capacity_reservation_id=capacity_reservation_id,
+                provisioned_resource_id="provisioned-vm-result-2",
+            )
+            SettlementRepository().transition(db, capacity_reservation_id, "active")
+            db.commit()
+
+        resp = await fulfillment.result(fulfillment_id)
+        assert resp.status_code == 200, resp.text
+        payload = resp.json()["payload"]
+        assert payload["state"] == "active"
+        assert [r["provisioned_resource_id"] for r in payload["provisioned_resources"]] == [
+            "provisioned-vm-result-2"
+        ]
+        domain_result = payload["domain_result"]
+        assert domain_result["kind"] == "vm.fulfillment.result.v1"
+        credentials = domain_result["payload"]["credentials"]
+        roles = {c["role"] for c in credentials}
+        assert roles == {"root", "tenant"}
+        for credential in credentials:
+            assert credential["password"]
+            assert credential["ssh_commands"]
+            # Every credential is associated with every produced output --
+            # correct for the single-resource-per-VM-fulfillment case this
+            # adapter handles today, but not a real per-credential mapping;
+            # see AnsibleFulfillmentProvider.fetch_credentials.
+            assert credential["provisioned_resource_ids"] == ["provisioned-vm-result-2"]
+        # ssh_key_path_host/key_type were silently
+        # dropped by fetch_credentials before this fix (present on the
+        # underlying job Credential row, never copied into
+        # VmFulfillmentCredential). At least one of the two roles carries
+        # each field non-null in this fixture's mocked Ansible output.
+        assert any(c.get("ssh_key_path_host") for c in credentials)
+        assert any(c.get("key_type") for c in credentials)
+        # VM identity/connection metadata beyond credentials, also
+        # previously dropped entirely by the new fulfillment path (only
+        # available through the legacy job result before this fix).
+        connection_info = domain_result["payload"]["connection_info"]
+        assert connection_info["vm_name"]
+        assert connection_info["host"]
+        assert connection_info["vm_ip_internal"]
+        assert connection_info["ssh_port"]
+
+
+class TestScheduleEndpoint:
+    """Integration coverage for `POST /fulfillment/schedule`,
+    the storefront-facing HTTP surface over
+    `PhysicalSettlementScheduler.schedule_resource`.
+    """
+
+    async def test_schedule_assigns_a_settlement_resource(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _reserved_capacity("pool-schedule-basic")
+
+        resp = await fulfillment.schedule(capacity_reservation_id, "vms")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["settlement_resource_id"] == "pool-schedule-basic-r1"
+        assert body["pool_id"] == "pool-schedule-basic"
+        assert body["provider"] == "ansible"
+
+    async def test_schedule_is_idempotent_for_an_equivalent_retry(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _reserved_capacity("pool-schedule-retry")
+
+        first = await fulfillment.schedule(capacity_reservation_id, "vms")
+        second = await fulfillment.schedule(capacity_reservation_id, "vms")
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert first.json() == second.json()
+
+    async def test_schedule_unknown_reservation_is_404(
+        self, fulfillment: FulfillmentApi
+    ):
+        resp = await fulfillment.schedule("no-such-reservation", "vms")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+
+    async def test_schedule_then_begin_uses_the_scheduled_resource(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _reserved_capacity("pool-schedule-then-begin")
+
+        scheduled = await fulfillment.schedule(capacity_reservation_id, "vms")
+        assert scheduled.status_code == 200, scheduled.text
+
+        begun = await fulfillment.begin(
+            capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-schedule-1")
+        )
+        assert begun["capacity_reservation_id"] == capacity_reservation_id
+        assert begun["state"] == "dispatching"
+
+    async def test_begin_without_scheduling_first_is_404(
+        self, fulfillment: FulfillmentApi
+    ):
+        capacity_reservation_id = await _reserved_capacity("pool-begin-unscheduled")
+
+        resp = await fulfillment.begin_raw(
+            capacity_reservation_id, "vms", _fulfillment_request()
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "fulfillment_not_found"

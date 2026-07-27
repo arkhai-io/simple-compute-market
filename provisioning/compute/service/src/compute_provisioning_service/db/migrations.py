@@ -314,18 +314,23 @@ def _existing_provisioned_resources_conflict(connection, capacity_reservation_id
     """Compare already-persisted ``ProvisionedResource`` rows against a draft.
 
     A candidate with no live target expects zero provisioned-resource rows;
-    a candidate with a live target expects exactly one, referencing that
-    target. Zero, several, or a differently-targeted row are all conflicts:
+    a candidate with a live target expects exactly one, whose
+    ``provisioned_resource_id`` equals ``expected_ref`` -- the same
+    deterministic derivation ``compile_legacy_vm_fulfillment_backfill`` used
+    to compute it, so a genuine re-run always recomputes the identical value.
+    Zero, several, or a differently-identified row are all conflicts:
     silently accepting any of them could mean losing track of, or
-    overwriting, which VM a reservation actually owns.
+    overwriting, which VM a reservation actually owns. Row count alone is
+    not sufficient here -- a single row with the wrong identity must still
+    be rejected, not treated as equivalent.
     """
     rows = connection.execute(text(
-        "SELECT domain_resource_ref FROM provisioned_resources WHERE capacity_reservation_id=:id"
+        "SELECT provisioned_resource_id FROM provisioned_resources WHERE capacity_reservation_id=:id"
     ), {"id": capacity_reservation_id}).mappings().all()
-    refs = [row["domain_resource_ref"] for row in rows]
+    ids = [row["provisioned_resource_id"] for row in rows]
     if expected_ref is None:
-        return len(refs) != 0
-    return refs != [expected_ref]
+        return len(ids) != 0
+    return ids != [expected_ref]
 
 
 def _apply_legacy_vm_lease_backfill(connection) -> None:
@@ -395,7 +400,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         except LegacyBackfillValidationError as exc:
             raise SchemaDriftError(str(exc)) from exc
 
-        target = draft.provisioned_resource_ref
+        target = draft.provisioned_resource_id
         if target and target in seen_targets:
             raise SchemaDriftError(f"duplicate legacy VM target {target}")
         if target:
@@ -411,7 +416,7 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
         if existing:
             if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
-                connection, draft.capacity_reservation_id, draft.provisioned_resource_ref
+                connection, draft.capacity_reservation_id, draft.provisioned_resource_id
             ):
                 raise SchemaDriftError(
                     f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
@@ -435,14 +440,14 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
             "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
             "state": draft.state,
         })
-        if draft.provisioned_resource_ref:
+        if draft.provisioned_resource_id:
             connection.execute(text(
                 """INSERT INTO provisioned_resources
-                (provisioned_resource_id, capacity_reservation_id, fulfillment_id, domain_resource_ref, status)
-                VALUES (:id,:rid,:fid,:target,'active')"""
+                (provisioned_resource_id, capacity_reservation_id, fulfillment_id, status)
+                VALUES (:id,:rid,:fid,'active')"""
             ), {
-                "id": str(uuid.uuid4()), "rid": draft.capacity_reservation_id,
-                "fid": draft.fulfillment_id, "target": draft.provisioned_resource_ref,
+                "id": draft.provisioned_resource_id, "rid": draft.capacity_reservation_id,
+                "fid": draft.fulfillment_id,
             })
 
 
@@ -762,6 +767,39 @@ def _migrate_capacity_model_cutover(engine: Engine) -> None:
     _migrate_retire_site_resources(engine)
 
 
+
+def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
+    """Remove the redundant provider-domain identifier from fulfillment outputs."""
+    if not _table_exists(engine, "provisioned_resources") or not _column_exists(
+        engine, "provisioned_resources", "domain_resource_ref"
+    ):
+        return
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE provisioned_resources_new (
+                provisioned_resource_id VARCHAR PRIMARY KEY,
+                capacity_reservation_id VARCHAR NOT NULL,
+                fulfillment_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(capacity_reservation_id) REFERENCES settlement_records(capacity_reservation_id) ON DELETE CASCADE
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO provisioned_resources_new (
+                provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                status, created_at, updated_at
+            )
+            SELECT provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                   status, created_at, updated_at
+            FROM provisioned_resources
+        """))
+        connection.execute(text("DROP TABLE provisioned_resources"))
+        connection.execute(text("ALTER TABLE provisioned_resources_new RENAME TO provisioned_resources"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_capacity_reservation_id ON provisioned_resources (capacity_reservation_id)"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_fulfillment_id ON provisioned_resources (fulfillment_id)"))
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -794,5 +832,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260724_002_drop_vm_leases_table",
         _migrate_drop_vm_leases_table,
+    ),
+    Migration(
+        "20260725_001_remove_provisioned_resource_domain_ref",
+        _migrate_remove_provisioned_resource_domain_ref,
     ),
 )

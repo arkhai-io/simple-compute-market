@@ -10,12 +10,19 @@ from .db import SettlementRecord, SettlementRecordState
 from .envelopes import VersionedEnvelope
 from .fulfillment_persistence import FulfillmentTransaction, FulfillmentUnitOfWork
 from .provider import (
+    CredentialFetchFailedError,
     FulfillmentCreateFailedError,
     FulfillmentValidationIssue,
     FulfillmentValidationResult,
     ProviderRegistry,
+    ProvisionedResourceDescriptor,
 )
-from .settlement_types import SettlementResource
+from .results import (
+    FulfillmentResultPayload,
+    ProvisionedResourceOutput,
+    build_fulfillment_result_envelope,
+)
+from .settlement_types import SettlementEntityNotFoundError, SettlementResource
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +32,22 @@ class FulfillmentAcceptance:
     fulfillment_id: str
     capacity_reservation_id: str
     state: str
+
+
+@dataclass(frozen=True)
+class FulfillmentStatus:
+    """The cheap, provider-free read `get_fulfillment_status` returns.
+
+    A direct projection of the durable aggregate's identity, state, and
+    failure fields -- no provisioned-resource outputs or credentials, which
+    belong to the heavier `get_fulfillment_result` read.
+    """
+
+    fulfillment_id: str
+    capacity_reservation_id: str
+    state: str
+    failure_reason: str | None
+    failure_message: str | None
 
 
 @dataclass(frozen=True)
@@ -172,3 +195,107 @@ class FulfillmentOrchestrator:
                 result.provider_metadata,
             )
             return self._view(acknowledged)
+
+    def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatus:
+        """Read current aggregate state -- no provider or Ansible call.
+
+        A read reflects current durable state on demand; there is no
+        separate outbox or delivery-acknowledgement state to consult. Uses
+        the read-only transaction (no SQLite writer-slot reservation), the
+        same primitive `validate_fulfillment` already uses.
+        """
+
+        with self._uow.read_transaction() as tx:
+            record = tx.get_by_fulfillment_id(fulfillment_id)
+            if record is None:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment {fulfillment_id!r}"
+                )
+            return FulfillmentStatus(
+                fulfillment_id=record.fulfillment_id,
+                capacity_reservation_id=record.capacity_reservation_id,
+                state=record.state,
+                failure_reason=record.failure_reason,
+                failure_message=record.failure_message,
+            )
+
+    async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[Any]:
+        """Read the caller-facing result projection as a `fulfillment.result.v1` envelope.
+
+        Provisioned-resource outputs and credentials are populated only when
+        the aggregate is `active`; every other state returns both empty
+        rather than an error, since the aggregate's identity, state, and
+        failure detail are still meaningful before or after `active`. The
+        read transaction is closed before the live credential fetch, which
+        performs provider I/O and must not run with a database transaction
+        open, matching the "no DB transaction open during provider I/O"
+        principle the convergence worker already establishes.
+        """
+
+        with self._uow.read_transaction() as tx:
+            record = tx.get_by_fulfillment_id(fulfillment_id)
+            if record is None:
+                raise SettlementEntityNotFoundError(
+                    f"no fulfillment {fulfillment_id!r}"
+                )
+
+            is_active = record.state == SettlementRecordState.active.value
+            outputs: tuple[ProvisionedResourceOutput, ...] = ()
+            if is_active:
+                outputs = tuple(
+                    ProvisionedResourceOutput(
+                        provisioned_resource_id=resource.provisioned_resource_id,
+                        status=resource.status,
+                    )
+                    for resource in tx.list_provisioned_resources(
+                        record.capacity_reservation_id
+                    )
+                )
+
+            fulfillment_id_value = record.fulfillment_id
+            capacity_reservation_id = record.capacity_reservation_id
+            state = record.state
+            failure_reason = record.failure_reason
+            failure_message = record.failure_message
+            provider_name = record.provider
+            provider_metadata = dict(record.provider_metadata or {})
+
+        domain_result: VersionedEnvelope[Any] | None = None
+        if is_active:
+            provider = self._providers.require(provider_name)
+            descriptors = tuple(
+                ProvisionedResourceDescriptor(
+                    provisioned_resource_id=output.provisioned_resource_id,
+                    status=output.status,
+                )
+                for output in outputs
+            )
+            try:
+                domain_result = await provider.fetch_credentials(
+                    provider_metadata,
+                    descriptors,
+                )
+            except Exception as exc:
+                if isinstance(exc, CredentialFetchFailedError):
+                    raise
+                logger.exception(
+                    "Unexpected credential fetch failure",
+                    extra={
+                        "fulfillment_id": fulfillment_id_value,
+                        "provider": provider_name,
+                    },
+                )
+                raise CredentialFetchFailedError(
+                    "the fulfillment provider could not produce its result"
+                ) from exc
+
+        payload = FulfillmentResultPayload(
+            fulfillment_id=fulfillment_id_value,
+            capacity_reservation_id=capacity_reservation_id,
+            state=state,
+            failure_reason=failure_reason,
+            failure_message=failure_message,
+            provisioned_resources=outputs,
+            domain_result=domain_result,
+        )
+        return build_fulfillment_result_envelope(payload)

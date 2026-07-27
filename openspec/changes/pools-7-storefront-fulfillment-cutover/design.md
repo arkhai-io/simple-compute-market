@@ -1207,13 +1207,23 @@ only the transport is:**
   push design, just triggered by the storefront's request instead of a
   background worker's schedule. This preserves "raw credentials MUST NOT
   be persisted" without needing an outbox at all.
-- **`credential_generation` still matters, for a different reason.**
-  Originally it prevented a stale push retry from clobbering a newer
-  credential set the storefront already received. In a pull model there's
-  no retry race to prevent, but a client that cached an earlier response
-  still benefits from knowing whether its cached credentials are stale
-  relative to a later rotation — `credential_generation` in the response
-  serves that purpose instead.
+- **`credential_generation` is dropped from this section's scope, not
+  carried forward.** (Revised 2026-07-25.) The original rationale assumed
+  a rotation source to detect staleness against. There isn't one: VM
+  tenant credentials are created once at provisioning time and never
+  rotated by this codebase — rotation, if it ever happens, is a
+  site-administrator, out-of-band action against the host, invisible to
+  the provisioning service. Since `get_fulfillment_result` always fetches
+  live and never caches, every response is authoritative at read time by
+  construction, so there is no cross-call credential staleness for a
+  generation counter to detect here. Shipping the field anyway (e.g. as a
+  constant) would overclaim a capability this system doesn't have and
+  invite a caller to build staleness logic against a signal that never
+  changes. If `provisioning-result-push-delivery` still needs a
+  `credential_generation` concept for its own retry-race problem (a stale
+  push overwriting a newer one — a real problem pull doesn't have), it
+  defines and justifies that field itself against its own transport, not
+  by inheriting this note.
 - **Durable, atomic result *persistence* is unaffected** — a terminal or
   otherwise reportable fulfillment transition still commits atomically
   with whatever `SettlementResult`-shaped data `get_fulfillment_result`
@@ -2596,3 +2606,758 @@ diagnostics event after each completed cycle and never one event per row.
 | **(2026-07-24, external code review)** Outcome-application ownership must be checked under an acquired SQLite write reservation, not a plain read — a plain SELECT does not open a SQLite-level transaction on its own, so the original check-then-write sequence left a real, empirically-confirmed gap where a worker whose lease had already been reclaimed could still commit a stale outcome on top of the new owner's claim | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `FulfillmentConvergenceWatchdog._with_owned_record` |
 | **(2026-07-24, external code review)** `teardown_failed` needed an actual periodic requeue-to-`teardown_dispatch_pending` step; the state comment and spec text documenting it as retryable predated any handler that actually performed the retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `FulfillmentConvergenceWatchdog.requeue_teardown_failures` |
 | **(2026-07-24, external code review)** `openspec/specs/fulfillment/architecture.md` still described scheduler assignments and the fulfillment registry as process-local with no durable Settlement Record — stale since Section 3, never corrected during that section's own promotion pass | `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |
+## Section 8 (pull-based status/result and live credentials) — resolved design decisions (discuss phase, resolved 2026-07-25)
+
+Nine items, resolved in discussion before Section 8 is planned (items 6-9 added
+2026-07-25 following implementation review; item 6 replaces an earlier, since-
+rejected proposal -- see "Section 8 review corrections accepted for planning"
+below):
+
+1. **Live credential fetch is stateless — no claim, lease, or rotation
+   bookkeeping.** `dev-branch-migration-notes.md`'s candidate shape
+   (`get_live_credentials(..., credential_generation=...)` guarded by a
+   claim/lease reused from Section 6, advancing generation via
+   `complete_credential_rotation` on `rotated=True`) is rejected. A
+   claim/lease exists to protect a mutation under concurrent access; a
+   live credential read that is never cached and never coordinates a
+   rotation has nothing for a lease to protect. `get_fulfillment_result`
+   calls a new stateless `FulfillmentProvider.fetch_credentials` directly.
+
+2. **`credential_generation` is dropped from Section 8 entirely**, not
+   shipped as a placeholder constant. See the revised "`SettlementResult`
+   delivery" note above for the reasoning: there is no rotation source in
+   this codebase for it to track. It was briefly considered whether this
+   was actually about API-level (storefront↔provisioning) credentials
+   rather than VM tenant credentials, or about the `site_resource_pools`/
+   `site_capacity_buckets` capacity-and-hosts projection's own
+   revision/digest identity (Section 2) moving toward an eventual
+   push/subscription delivery model — neither reading fits the field as
+   written in the original result-contract task (a value returned inline
+   in `get_fulfillment_result`, not a separate projection or an API-auth
+   concept), so both are noted here as considered and set aside rather
+   than silently dropped. The projection-push idea itself is real future
+   work but belongs with a `site_resource_pools`/`site_capacity_buckets`
+   delivery change if one is ever proposed, not with Section 8.
+
+3. **Credential fetch is gated to `active` state only.** Every other
+   lifecycle state returns the result envelope with empty/null credential
+   and provisioned-resource-output fields and no provider call — a
+   fulfillment that hasn't produced a resource yet, or has already torn
+   one down, has no credentials a provider call could meaningfully return.
+
+4. **Live credential-fetch failure is its own stable-error-taxonomy
+   category** (`credential_fetch_failed`), distinct from create/status/
+   teardown failure. This is a different handling loop for the storefront:
+   a transient fetch failure on an otherwise-healthy `active` fulfillment
+   means "retry the read," not "the workload failed."
+
+5. **The result contract is a real versioned envelope**, `fulfillment.result.v1`,
+   per the existing "Versioned envelopes" requirement's own scope statement
+   that it applies to "settlement/fulfillment result payloads once those
+   values cross a durable or cross-domain boundary." Defining it now, not
+   deferred, so `provisioning-result-push-delivery` can reuse the same
+   shape unchanged, matching what that change's proposal already assumes.
+
+6. **Credential/resource association is domain-specific and many-to-many.**
+   The initial per-`ProvisionedResource` proposal keyed by
+   `domain_resource_ref` was rejected during review because it both assumed
+   one credential belongs to one output and introduced a second generic
+   resource identifier without a present consumer. The generic fulfillment
+   envelope owns stable `provisioned_resource_id` values. A versioned domain
+   result payload may associate one credential with many provisioned
+   resources and one provisioned resource with many credentials by those
+   fulfillment-owned IDs. For the VM domain, this association belongs in a
+   VM-specific type such as `VmFulfillmentCredential`, not in a universal
+   credential model.
+7. **`domain_resource_ref` is removed rather than renamed.** Multiple outputs
+   from one fulfillment are already distinguished by globally unique
+   `provisioned_resource_id` values. Provider-operational identifiers such as
+   `vm_host`, `vm_target`, and executor job IDs remain in versioned provider
+   metadata or prepared teardown input. Buyer-facing domain attributes remain
+   in the versioned domain result payload. A second domain-native identifier
+   should be introduced only when a concrete cross-boundary use case requires
+   one.
+8. **Credential reads are all-or-nothing and fresh.** If any credential fetch
+   required to build an active result fails, the whole result request fails as
+   `credential_fetch_failed`; Section 8 does not define partial-result error
+   entries. Every active result read performs a fresh provider lookup. Durable
+   fulfillment state and persisted provisioned-resource outputs are stable
+   unless the aggregate changes, but credential equality across reads is not
+   guaranteed and the read itself never mutates fulfillment state.
+9. **Expected provider failures are classified at the adapter boundary, with a
+   defensive orchestration fallback.** Adapters translate known metadata,
+   provider, and credential-store failures into `CredentialFetchFailedError`.
+   The orchestration layer also wraps unexpected provider exceptions in the
+   same public category while recording safe diagnostic context and never
+   logging credential material.
+
+### Section 8 review corrections accepted for planning (2026-07-25)
+
+The initial implementation review found that the generic result contract was
+still VM-shaped, that the proposed per-resource credential boundary could not
+represent credential reuse, and that `domain_resource_ref` duplicated the
+fulfillment-owned output identity without a demonstrated consumer. The accepted
+correction is to keep the outer `fulfillment.result.v1` transport envelope
+provider-neutral while moving credential structure and resource association into
+a versioned domain payload. The VM payload will use `VmFulfillmentCredential`
+and represent a many-to-many relationship through `provisioned_resource_id`.
+`domain_resource_ref` will be removed from the generic durable/result model;
+provider-operational VM identity remains in provider metadata and prepared
+teardown input.
+The review also confirms all-or-nothing credential-fetch failure for v1, fresh
+credential lookup on every active read without an equality/idempotency guarantee,
+adapter-owned expected exception translation with a defensive orchestration
+fallback, and the requirement to prove restart and repeated-read behavior with
+dedicated tests rather than inference from one-shot reads.
+
+**Former task 8.5 (per-caller ownership enforcement) is out of scope for
+this section.** `StorefrontAuthMiddleware` gates the whole service behind
+one shared `admin_api_key` with no per-request caller identity — by its
+own docstring, "the provisioning service is an internal dependency of a
+single storefront." An ownership check has no second caller identity to
+compare against under that model. Real per-caller enforcement is deferred
+to a new prerequisite change, `add-storefront-principal-authentication`
+(proposed 2026-07-25; see its `proposal.md`/`design.md`), which gives the
+provisioning service real per-request principal identity and an
+`owner_principal` column on `SettlementRecord`. That change's candidate
+starting shape is this file's own "Flagged as new, unscoped, cross-cutting
+work: Multi-principal storefront authentication and per-record ownership"
+note above (`configured_storefront_principals`, `request.state.
+storefront_principal`, `owner_principal` column) — re-evaluated against
+its own accepted contracts before being treated as a starting point, per
+that note's own caveat. Section 8 ships task 8.5 as an existence-only
+check (reject unknown identifiers) structured so the later
+`owner_principal` comparison can replace it without reshaping the
+endpoint, and `provisioning-result-push-delivery` gains a second, direct
+dependency on `add-storefront-principal-authentication` alongside its
+existing dependency on this change.
+
+### Section 8 completed design-promotion record
+
+| Decision | Destination |
+| --- | --- |
+| Provider-neutral `fetch_credentials` contract, no claim/lease/rotation bookkeeping | `openspec/specs/fulfillment/spec.md#requirement-provider-contract`; `FulfillmentProvider` protocol docstring |
+| `active`-only credential-fetch gating and non-`active` empty-envelope behavior | `openspec/specs/fulfillment/spec.md` |
+| `fulfillment.result.v1` envelope shape | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
+| `credential_fetch_failed` stable error category | `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy` |
+| Many-to-many credential/output association via `provisioned_resource_id`; `VmFulfillmentCredential` VM-domain payload; `domain_resource_ref` removed | `openspec/specs/fulfillment/spec.md`; `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload` for the VM payload and credential fields |
+| No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
+| Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |
+
+### Section 8 implementation confirmation (2026-07-25)
+
+All six discuss-phase decisions and the ownership-check split were implemented as recorded; each destination cell above now contains the corresponding promoted text. One correction found during implementation, not a design change: the discuss-phase text assumed `AnsibleFulfillmentProvider.fetch_credentials` would need an async HTTP call through `vm_provisioning_operator.client` to a separate adapter service. In fact `AnsibleFulfillmentProvider` and `AnsibleJobService` (which owns `get_credentials`) run in the same process/service already -- the call is a local, synchronous DB read, wrapped in an `async def` only to satisfy the provider-neutral interface (the same shape `get_status`/`get_job` already has). No design implication beyond the implementation itself; recorded here so a future reader of the discuss-phase note above isn't misled by the superseded assumption.
+
+**Superseded by review, 2026-07-25:** the paragraph above predates the "Section 8 review corrections accepted for planning" section further up this file. Item 6's original credential-per-`ProvisionedResource`/`domain_resource_ref` boundary was implemented as first written, then rejected on review and replaced by the many-to-many `provisioned_resource_id`/`VmFulfillmentCredential` design items 6-9 now describe. "All six discuss-phase decisions... implemented as recorded" is therefore only accurate for items 1-5 and the ownership-check split; item 6 was implemented, reviewed, and reimplemented, not implemented once and left standing. See `tasks.md`'s 8.9/8.10 notes for what the corrected implementation actually shipped.
+
+`get_fulfillment_result` was implemented as `async def` (the discuss-phase note did not specify sync/async for the orchestrator method itself, only for `fetch_credentials`); the read transaction closes before the awaited provider call, per the no-transaction-open-during-provider-I/O principle already established for the convergence worker.
+
+
+## Section 9 (cut over storefront orchestration) — design review (discuss phase, opened 2026-07-25)
+
+Read against current code, not assumed from `proposal.md`'s "Why" narrative or
+`tasks.md`'s 9.1–9.7 task text, both of which predate this review and are
+partly stale.
+
+### 1. Task 9.1's premise is partly already satisfied
+
+`proposal.md`'s "Why" says the storefront reserves with
+`required_attributes=("vm_host",)`. Current code
+(`vm_job_spec_service.compute_capacity_claim_from_order`) already builds a
+pool/resource/dimension-shaped claim (`pool_id` or `resource_id`, plus a
+`dimensions` map) — the POOLS-4 claim shape 9.1 asks for is implemented.
+What 9.1 actually still needs: the reservation response's `vm_host` (a
+concrete, feasibility-verified host bound at `reserve()` time — this is
+correct, current, "Option A" behavior per this file's "`SiteResource` is
+retired" section, not a bug) is today read directly by
+`vm_fulfillment_service.py` and handed straight to the executor. Task 9.2,
+not 9.1, is where that direct hand-off must be replaced by an explicit
+`schedule_resource` call that confirms or fairness-reassigns the settlement
+resource before `begin_fulfillment`. 9.1's own text should be corrected to
+say this rather than describing the claim-shape work as still to do.
+
+### 2. `schedule_resource` has no HTTP endpoint
+
+`kit/fulfillment/src/market_fulfillment/scheduler.py`'s
+`PhysicalSettlementScheduler.schedule_resource` is composed into
+`compute_provisioning_service/container.py` but
+`fulfillment_controller.py` exposes only `/validate`, `/begin`,
+`/{id}/status`, `/{id}/result` — no `/schedule` route. `begin_fulfillment`
+requires an already-scheduled `SettlementRecord` (raises `LookupError` /
+404 `fulfillment_not_found` otherwise per its own controller mapping), so
+the storefront cannot reach the scheduling step at all today, over HTTP,
+regardless of what 9.2's storefront-side code does. This blocks 9.2 and is
+not called out as its own task anywhere in Sections 1–8.
+
+**Proposed resolution:** add `POST /fulfillment/schedule` to
+`fulfillment_controller.py`, wrapping `PhysicalSettlementScheduler.schedule_resource`
+the same way `/begin` wraps `FulfillmentOrchestrator.begin_fulfillment` —
+same error-mapping conventions (404/409/422 per the existing
+`SettlementEntityNotFoundError`/`FulfillmentConflictError`/etc. taxonomy).
+The "thin convenience operation" this file already describes (composing
+schedule+begin for callers that don't need the placement preview) can be a
+second route or a query flag on `/begin`, not a replacement for exposing
+`schedule_resource` on its own — 9.2's design explicitly wants the preview
+available separately when commercially material.
+
+### 3. No shared client-side contract for the fulfillment HTTP surface
+
+Unlike every other endpoint family this service exposes (`ExecutorActionEnvelope`,
+`ProvisioningJob`, `LeaseRegistration`, `LeaseView`, ... all defined once in
+`provisioning/compute/src/compute_provisioning/contracts.py` and consumed by
+both the server and `ComputeProvisioningClient`), `FulfillmentRequestBody`,
+`FulfillmentAcceptanceResponse`, `FulfillmentStatusResponse`, and
+`FulfillmentValidationResponse` are defined only inside
+`compute_provisioning_service/controllers/fulfillment_controller.py` —
+server-only, nothing shared. `ComputeProvisioningClient` has no
+`schedule`/`begin`/`get_fulfillment_status`/`get_fulfillment_result` methods
+at all today.
+
+**Proposed resolution:** move these four models (plus a new
+`FulfillmentScheduleRequest`/`FulfillmentScheduleResponse` pair for the new
+route) into `compute_provisioning.contracts`, matching the established
+pattern, and have `fulfillment_controller.py` import them from there
+instead of declaring local duplicates. Add corresponding methods to
+`ComputeProvisioningClient`. Open sub-question: `contracts.py` has its own
+`COMPUTE_PROVISIONING_CONTRACT_VERSION`/`VersionedContractModel` scheme,
+independent of `market_fulfillment`'s `VersionedEnvelope`/`fulfillment.result.v1`
+versioning. The fulfillment response models should carry a
+`contract_version` field for consistency with every sibling contract in this
+file, without conflating it with the *inner* envelope's own
+`schema_version` — two different, deliberately independent version axes,
+not one collapsed into the other.
+
+### 4. Site-routing durability is incomplete for the new calls
+
+`core_storefront/aggregation.py`'s `AggregateCapacityClient._reservation_sites`
+is an in-memory, process-local cache mapping `capacity_reservation_id` →
+site name, explicitly documented as cold after a restart (falls back to
+fanning out to every site). `schedule_resource`/`begin_fulfillment`/
+`get_fulfillment_status`/`get_fulfillment_result` have no existing home on
+`AggregateCapacityClient` (it only implements the six `CapacityClient`
+protocol methods) and therefore no routing mechanism of their own yet.
+
+**Proposed resolution:** extend `AggregateCapacityClient` (or a sibling
+aggregator reusing its `_reservation_sites` cache and `_route_order` fallback)
+with the four new calls, so in-process routing matches `commit`/`release`'s
+existing pattern. Separately, amend task 9.3: it currently says to persist
+`capacity_reservation_id`, the selected settlement resource, and
+`fulfillment_id` for restart recovery, but not which site owns them. Since
+the site authority URL and the fulfillment HTTP surface are the same
+deployed service (confirmed: `_capacity_settings()`'s `sites` map already is
+the provisioning-service base URL), persisting the site name alongside the
+other three values in the storefront's own durable workflow row is cheap and
+avoids relying on a blind fan-out for a call that mutates state
+(`begin_fulfillment`) — fan-out would still be *correct* here given
+schedule/begin's idempotent-retry contract, but persisting the site is
+simpler and matches 9.3's own restart-safety goal directly.
+
+### 5. Naming collision: `fulfillment_uid` vs. `fulfillment_id`
+
+The storefront's existing schema already uses `fulfillment_uid` for the
+on-chain settlement-claim identity (Alkahest escrow arbitration target —
+`groups/escrow.py`, `claims_runtime.py`, `listing_service.py`). `kit/fulfillment`'s
+`fulfillment_id` (this change's durable physical-provisioning aggregate
+identity, `ARCHITECTURE.md`'s "Shared vocabulary and identities" table) is a
+different concept that will now be persisted in the same escrow-scoped
+workflow row per task 9.3. `ARCHITECTURE.md`'s vocabulary table lists
+`fulfillment_id` but has no entry for `fulfillment_uid` at all today.
+
+**Proposed resolution:** when 9.3 adds storage for the new identity, name
+the column/field something unambiguous — e.g. `provisioning_fulfillment_id`
+— rather than `fulfillment_id` bare, and add `fulfillment_uid` to
+`ARCHITECTURE.md`'s vocabulary table alongside `fulfillment_id` with a
+one-line disambiguation, since both now legitimately coexist on the same
+row and the table's job is exactly to prevent this kind of collision from
+being silently discovered later.
+
+### 6. `register_lease` (`/api/v1/contract/leases`) sequencing
+
+`fulfillment_service.py`'s `_register_vm_lease_with_settings` calls the
+legacy `POST /api/v1/contract/leases` endpoint via `ComputeProvisioningClient`
+today. This is exactly the legacy-lease bookkeeping Section 7's backfill
+migrates *from* and Section 11 removes the schema for. Once 9.2 wires a real
+`begin_fulfillment` call, the durable `SettlementRecord` it creates
+supersedes what `register_lease` records — leaving both call sites active
+between 9.2 landing and Section 11's cleanup would write two
+partially-overlapping durable records per fulfillment with nothing keeping
+them consistent.
+
+**Proposed resolution:** remove the `register_lease` call site as part of
+9.2/9.6 (when direct executor dispatch is replaced), not deferred to 11.1's
+generic schema removal — 11.1 should drop the now-provably-unused
+table/endpoint, not be the first point where the *call site* stops being
+exercised.
+
+### 7. Minor, non-blocking observations
+
+- `fulfillment_service.py`'s `_do_shutdown` already unconditionally raises
+  `NotImplementedError` in production (the provisioning service was never
+  given a `schedule_expiry` endpoint); it's caught and logged by
+  `_schedule_shutdown_best_effort`'s own try/except, so this is inert
+  log-spam today, not a live bug 9.x introduces or must fix. It is Section
+  10's concern (teardown cutover), not Section 9's — noted here only so it
+  isn't mistaken for new breakage once 9.x starts touching this file.
+- `PhysicalSettlementScheduler`'s `default_resource_kind="compute.gpu"` is
+  already composed at the VM composition root
+  (`compute_provisioning_service/container.py`), so the storefront does not
+  need to supply `resource_kind` explicitly in the ordinary VM path. It does
+  need to supply `market`; no canonical value is documented anywhere, but
+  `provisioning/compute/service/tests/integration/test_fulfillment_api.py`
+  already uses `"vms"`, matching the `domains/vms` package name. Proposed:
+  adopt `"vms"` as the VM domain's `market` value for schedule/begin calls,
+  and record it once `ARCHITECTURE.md`'s vocabulary section once decided.
+
+### Resolved (2026-07-25)
+
+1. **Contract placement:** fulfillment wire models move into
+   `compute_provisioning.contracts`, matching every other endpoint family.
+   Confirmed — not the alternative (storefront importing `market_fulfillment`
+   types directly).
+2. **New tasks vs. folding into 9.2:** the missing `/fulfillment/schedule`
+   route and the shared client contracts get their own explicit subtasks in
+   `tasks.md`'s Section 9 list, ahead of the existing 9.1–9.7, rather than
+   being absorbed silently into 9.2's text. Confirmed.
+
+### Resolved (2026-07-25, continued)
+
+3. **`fulfillment_uid` vs. `fulfillment_id`:** keep `fulfillment_id` bare
+   rather than renaming to `provisioning_fulfillment_id`. The existing
+   `_uid`/`_id` suffix distinction from `fulfillment_uid` is tried first as
+   sufficient disambiguation; add both terms to `ARCHITECTURE.md`'s "Shared
+   vocabulary and identities" table with a one-line note distinguishing
+   them (on-chain settlement-claim identity vs. physical-provisioning
+   aggregate identity). Revisit the name later if this proves confusing in
+   practice — not committed permanently, chosen as the first thing to try.
+
+4. **Site-routing for schedule/begin/status/result:** do not add these
+   methods to `AggregateCapacityClient`/`RemoteCapacityClient` — those are
+   deliberately scoped to the `CapacityClient` protocol's
+   `/api/v1/capacity` site-ledger surface only (`RemoteCapacityClient`'s own
+   docstring: "speaks one site authority's `/api/v1/capacity` HTTP
+   surface"). Instead:
+   - Add a new sibling aggregator (name TBD at planning time, e.g.
+     `AggregateComputeProvisioningClient`) mapping site name →
+     `ComputeProvisioningClient` instance, routing the four new calls the
+     same way `AggregateCapacityClient` routes `commit`/`release` — owning
+     site first (cache hit), fan-out to the rest on a cold cache.
+   - Reuse the *same* `_reservation_sites` mapping instance
+     `AggregateCapacityClient` already populates at `reserve()` time, rather
+     than maintaining a second, independently-populated cache. This
+     requires promoting `_reservation_sites` from `AggregateCapacityClient`-
+     private state to a shared object the composition root
+     (`market_storefront/services/capacity_client.py`) constructs once and
+     passes to both aggregators.
+   - `ComputeProvisioningClient` itself is **not** renamed and **not**
+     split. Checked directly: every model in
+     `compute_provisioning/contracts.py` (`ExecutorActionEnvelope` through
+     `LifecycleEvent`) is free of dimension/shape coupling (`ram_gb`,
+     `vcpu_count`, `gpu_count`, `dimensions` do not appear anywhere in that
+     file; `deal_ref`/`parameters` are opaque dicts, `executor_kind`/
+     `action_kind` are plain strings). `openspec/specs/physical-provisioning/spec.md`'s
+     "Compute-owned caller contract" requirement already documents
+     `fulfillment` as one of the generic, executor-neutral surfaces this
+     package is meant to cover, alongside job/lease/capacity — the new
+     methods are a documented fit, not scope creep.
+   - Non-blocking naming observation, not resolved here: "compute" as a
+     package/service boundary name encodes a "has a physical resource"
+     commitment (VM, bare-metal, future kube-pod-style executors per
+     `ARCHITECTURE.md`'s runtime service map) that is narrower than fully
+     domain-agnostic (excludes apicredits, correctly) but the exact
+     intended boundary of that commitment (would it fit an electricity
+     market? would each unit in a non-physical market like NFTs be a
+     "physical_resource"?) has not been reviewed and is out of scope for
+     Section 9. Left as a flag for a future change, not a blocker here.
+
+5. **`register_lease` removal timing — corrected, not safe for 9.2/9.6:**
+   traced further than the original proposal. `register_lease` does not
+   write a separate, superseded table — it attaches `executor_kind`/
+   `executor_target`/`executor_ref` directly onto the *same*
+   `CapacityReservation` row via `attach_lease_reservation`. Today's legacy
+   teardown path reads exactly those fields:
+   `LeaseWatchdog` → `LeaseLifecycleService._run_release_delegate` →
+   `VmReleaseExecutor.submit_release(reservation)`, which pulls `vm_host`
+   and `executor_target` off the row and silently no-ops (leaking the VM)
+   if they're missing. Removing the `register_lease` call site in 9.2/9.6 —
+   before Section 10 replaces `VmReleaseExecutor` (task 10.5) — would strand
+   every VM fulfilled through the new path with no teardown mechanism at
+   all. **Decision: `register_lease` stays active through all of Section 9;
+   its removal is sequenced with Section 10, specifically task 10.5.** This
+   dependency will be noted explicitly on 10.5 when Section 10 is planned.
+
+6. **`market` value:** adopt `"vms"` for the VM domain's schedule/begin
+   calls (matching the existing integration test and the `domains/vms`
+   package name), pending no objection — not separately contested during
+   this review.
+
+This closes the Section 9 discuss-phase design review. Remaining follow-up
+work (adding explicit tasks for the `/fulfillment/schedule` endpoint and
+shared client contracts, the new sibling aggregator, and the 10.5
+dependency note) belongs to the plan phase, not this document.
+
+### Section 9 completed design-promotion record
+
+| Decision | Destination |
+| --- | --- |
+| `POST /fulfillment/schedule` HTTP contract (request/response shape, 404/409/422 error mapping, schedule-before-begin requirement) | `openspec/specs/fulfillment/spec.md` (new scenarios under "Scheduling and assignment") |
+| `schedule_resource`/`begin_fulfillment`/`get_fulfillment_status`/`get_fulfillment_result` as generic `ComputeProvisioningClient` methods, not split into a separate client/class | `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance` |
+| Sibling aggregator (`AggregateFulfillmentClient`) pattern and shared `reservation_sites` cache, not an extension of `AggregateCapacityClient`/`RemoteCapacityClient` | `core_storefront/aggregation.py` and `market_storefront/services/capacity_client.py` docstrings — no dedicated subsystem spec exists for storefront-side capacity aggregation at all (checked); recorded as code-owned rationale, not promoted into a new spec file for this one mechanism |
+| `fulfillment_id`/`fulfillment_uid` disambiguation | `docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities" |
+| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects |
+| Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring |
+| Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/add-buyer-vm-connectivity-terms/proposal.md`; registered in `openspec/changes/README.md` |
+| `register_lease` removal sequencing (Section 10 task 10.5, not 9.2/9.6) | Noted on both `tasks.md`'s 9.2 and 10.5 entries |
+| `capacity_reservation_id`/`settlement_resource_id`/`fulfillment_id` persisted on the shared `escrows` table, a prerequisite for future restart recovery — **not itself restart recovery**; nothing yet reads these values back to resume an in-progress fulfillment after a crash (see the Section 9 status note below) | `core_storefront/sqlite_client.py` schema/docstrings; no subsystem spec covers storefront-side escrow persistence as its own capability, so this is recorded as code-owned schema documentation, matching the existing `fulfillment_uid`/`provisioning_job_id` precedent on the same table |
+
+### Section 9 implementation confirmation (2026-07-26)
+
+Every decision above was implemented as recorded, with four corrections
+found during implementation, not design changes: (1) the legacy VM
+provisioning path never sent `vm_ram`/`vm_vcpus`/`vm_disk_size` at all
+(relied on Ansible inventory defaults), while the new `VmFulfillmentRequirements`
+initially made them required — traced against the actual Ansible role and
+made optional with the three-tier precedence above, rather than either
+silently breaking every ordinary fulfillment or inventing plausible-looking
+required values; (2) `VmFulfillmentCredential` and the new fulfillment
+result payload were both missing real data the legacy path carried
+(`ssh_key_path_host`/`key_type` on credentials; `vm_name`/`host`/`timestamp`/
+`tenant_user`/`vm_ip_internal`/`ssh_port` as connection metadata) — both
+gaps traced to their actual source (`job_service.get_credentials`/
+`AnsibleJob.result`) and fixed, not assumed acceptable to drop; (3) the
+`on_job_submitted` callback in `vm_fulfillment_service.py` was found
+persisting a durable `fulfillment_id` value into the `provisioning_job_id`
+column (a column whose entire meaning is an ephemeral executor job id) —
+renamed the callback and its column target to match what it actually
+receives; (4) `domains/vms/storefront/Makefile`'s `reinit` target was
+missing `arkhai-kit-fulfillment` (a genuinely new dependency for that
+project) and, on a real `make test` run rather than this session's own
+sandbox verification, was found also missing `arkhai-kit-site`/
+`arkhai-kit-resource-pools` (kit/fulfillment's own transitive dependencies,
+never previously forced to refresh in that project's venv) — both fixed.
+None of the four change what was decided above; all are places the
+implementation would otherwise have silently diverged from, or failed to
+apply, an already-correct decision.
+
+### Section 9 reconciled status (2026-07-26, after external code review)
+
+An external review of the completed 9.0–9.8 work found the design-promotion
+record above overclaiming one decision ("restart-safe... resumption") and
+several documentation-compliance gaps (a too-narrow reference sweep that
+missed non-`POOLS-7`-prefixed change-document and section-number references;
+a stale `proposal.md`). Those mechanical issues are fixed as of this note.
+The review's substantive finding is not mechanical and is not yet resolved:
+
+**Accepted (discuss-phase decisions, still standing):** the sibling
+aggregator over `AggregateCapacityClient`/`AggregateFulfillmentClient`
+architecture; `schedule_resource` → `begin_fulfillment` → poll
+status/result as the fulfillment-cutover shape; `VmConnectivitySettings`/
+`VmConnectionInfo` as separate request/result-side models; the three-tier
+VM sizing precedence; `register_lease` removal sequenced with Section 10;
+`fulfillment_id` kept bare (not renamed) alongside `fulfillment_uid`.
+
+**Implemented and verified:** the HTTP schedule endpoint and shared client
+contracts; the storefront cutover itself (`_do_provision`); durable
+identifier *persistence* (writes, not resumption — see below); status/
+credential delivery parity with the legacy path, including four real data
+gaps found and fixed (VM sizing, credential fields, result connection
+metadata, an `on_job_submitted`/`provisioning_job_id` naming bug); site
+routing with cold-cache fan-out; a real `make test` environment gap
+(missing transitive `reinit` dependencies) found and fixed.
+
+**Not implemented, contrary to what "restart-safe... resumption" language
+in an earlier version of this record implied:** nothing reads the
+persisted `capacity_reservation_id`/`settlement_resource_id`/
+`fulfillment_id` back to resume an in-progress fulfillment after a
+storefront restart or crash. `_do_provision` always runs
+schedule→begin→poll→result from the top; there is no separate resume path
+that skips straight to polling an existing `fulfillment_id`. This matters
+concretely, not just formally: `capacity.reserve()` is not idempotent by
+request content the way `schedule_resource`/`begin_fulfillment` are — it
+mints a fresh `capacity_reservation_id` on every call — so a naive
+"re-invoke the same call after a crash" retry would reserve a second
+capacity allocation rather than resume the first. Persistence-write
+failures are currently best-effort (logged, not escalated, not retried),
+which is the same class of gap: the identifiers this section added exist
+to prevent orphaned work, but a failed write to them is not itself
+detected or recovered from.
+
+**Fixed since the review (2026-07-26):** identity-persistence writes now
+retry a bounded number of times and escalate loudly (ERROR, not WARNING)
+on final failure rather than a single silent attempt (`persist_escrow_fields_with_retry`
+in `vm_fulfillment_service.py`). `fulfillment_id` is now exposed on all
+three buyer-facing settlement response models. `physical-provisioning/spec.md`'s
+VM fulfillment result payload and Ansible fulfillment adapter requirements
+now document the sizing precedence, connectivity forwarding, and
+credential/connection-metadata field changes made in this section. A
+broader documentation-reference sweep (not just the `POOLS-7`/`pools-7`
+prefix originally checked) found and fixed several more change-document
+and section-number references this section's own comment cleanup had
+missed.
+
+**Still not fixed -- the substantive finding stands:** persistence
+retrying and escalating on failure is not the same as *implementing
+recovery*. Nothing yet reads a persisted `fulfillment_id` back to resume
+an in-progress fulfillment after a restart or crash. This remains the
+open item below.
+
+**Validation still required before Section 9 is considered closed:**
+a real fresh-process/fresh-composition restart test (not just persistence
+round-tripping and cold-cache fan-out, which prove prerequisites for
+recovery, not recovery itself); a crash-window matrix across the
+schedule/begin/poll/result/store/complete sequence; stricter exception
+classification in the aggregator's fan-out (a genuine "wrong site" 404
+versus auth/validation/timeout/5xx currently route identically).
+
+**Open discuss-phase questions this raises:**
+
+1. **Resolved and implemented (2026-07-26):** `capacity.reserve()`
+   (`CapacityLedgerService.reserve` in `kit/site/src/market_site/ledger.py`)
+   is now idempotent by `deal_ref["escrow_uid"]`: a repeat call for an
+   escrow_uid with an existing reservation in any held state returns that
+   reservation instead of admitting a second one, using the existing
+   `_find_reservation(db, escrow_uid=...)` lookup (already used by
+   `get_reservation_by_escrow` and `commit`/`release`'s own lookups, just
+   not previously called from within `reserve()` itself). No new
+   caller-supplied identity parameter was needed -- `deal_ref` already
+   carried `escrow_uid` on every call site. Promoted into
+   `openspec/specs/site-capacity/spec.md`'s "Reservation lifecycle"
+   requirement, which already stated reservation "MUST... be idempotent
+   for retries" -- `commit`/`release` already satisfied that; `reserve()`
+   itself did not, until now. 6 new tests in `kit/site/tests/unit/test_ledger.py`.
+2. **Resolved and implemented (2026-07-26):** a failed identity-persistence
+   write is now retried a bounded number of times and escalated loudly
+   (ERROR, not silently logged) rather than proceeding on a single silent
+   attempt. See `persist_escrow_fields_with_retry`.
+3. Which component owns scanning for and resuming incomplete escrow
+   fulfillments after restart (storefront startup, a dedicated watchdog, or
+   the existing settlement-job runner) — under investigation, not yet
+   decided.
+4. **Resolved and implemented (2026-07-26):** the buyer-facing settlement
+   status response now exposes `fulfillment_id` (`SettleResponse`,
+   `SettleStatusResponse`, `SettleWaitResponse`), now that
+   `provisioning_job_id` is permanently empty for the new path.
+5. Which permanent subsystem specification should own storefront
+   fulfillment-progress and recovery semantics generally — under
+   investigation, not yet decided.
+
+Section 9 is not considered closed pending resolution of questions 3
+and 5, and the validation gaps above.
+
+
+
+## Section 9 fulfillment-resume design decisions (2026-07-26)
+
+### Accepted commercial-delivery priority
+
+Once a deal has been accepted, commercial delivery takes priority over local
+bookkeeping durability. Storefront persistence writes MUST be retried and
+exhausted retries MUST be logged loudly with safe lifecycle identifiers, but a
+local SQLite persistence failure MUST NOT by itself cause the storefront to
+abandon a VM that can still be provisioned and delivered under the accepted
+deal. Fail-closed persistence behavior is appropriate only before deal
+acceptance. After acceptance, recovery reconciles the local record against the
+capacity, fulfillment, credential, chain, and claim authorities using their
+available idempotent or queryable boundaries.
+
+This priority is durable VM-storefront behavior and must be promoted into the
+VM-domain storefront/adapter specification during Section 9 implementation.
+
+### Accepted recovery model
+
+Section 9 will use a VM-storefront-scoped durable convergence state machine.
+The existing foreground settlement job and a new dedicated startup background
+worker will call the same convergence implementation. The foreground behavior
+remains blocking in Section 9; converting initiation and convergence into the
+normal asynchronous product flow is deferred to a separate future OpenSpec
+change.
+
+The recovery worker owns full settlement convergence through physical
+fulfillment, result and credential persistence, lease registration, on-chain
+fulfillment, escrow readiness, and claim creation. It is not part of the claims
+engine and does not stop after physical result retrieval.
+
+The storefront will persist a versioned VM fulfillment-context envelope on the
+escrow record before physical fulfillment acceptance. The envelope preserves
+the immutable inputs required to make an equivalent scheduling/acceptance retry,
+including the generated VM target and normalized fulfillment request, without
+adding VM-specific columns for every request field to the shared escrow schema.
+Unknown envelope kinds or schema versions fail visibly rather than being guessed
+into the current model.
+
+A dedicated periodic worker, registered through the existing storefront startup
+background-task mechanism, will sweep nonterminal primary escrows. It must also
+consider rows lacking persisted lifecycle identifiers because accepted deals can
+survive a failed local write. The worker reconciles from the earliest safe
+boundary supported by the surviving context and external authorities. Persisted
+`fulfillment_id` skips scheduling and acceptance; a missing identifier uses the
+persisted request envelope to make equivalent retries.
+
+Aggregate fulfillment routing retains parity with the existing aggregate
+capacity-client fallback behavior for this section. Typed fallback/error
+classification across both aggregate clients is deferred as one aggregation-wide
+concern rather than changed for only one sibling.
+
+`deal_ref` will be removed from the new `_do_provision` fulfillment seam and
+`escrow_uid` passed explicitly. The legacy `vm_host` compatibility parameter is
+deferred to Section 10.
+
+### On-chain fulfillment idempotency assessment
+
+Repository inspection does not establish `submit_compute_fulfillment` as
+idempotent. The helper serializes wallet transactions with `chain_tx_lock` and
+then calls `client.string_obligation.do_obligation(connection_details,
+escrow_uid)`. It does not provide a deterministic idempotency key, query for an
+existing matching fulfillment, persist a transaction intent before submission,
+or reconcile a transaction receipt after an ambiguous return. The demo-mode
+path also generates a fresh random fulfillment identifier on every call.
+
+No higher storefront layer currently deduplicates this call before submission.
+The local `fulfillment_uid` write happens only after `do_obligation` returns, so
+a process failure after the chain accepts the transaction but before the local
+write leaves an external-commit/local-persistence ambiguity. The Ansible layer
+cannot close this chain-side gap.
+
+Therefore Section 9 must not assume that retrying
+`submit_compute_fulfillment` is safe. Planning must include chain reconciliation
+before resubmission: query authoritative chain state for an existing fulfillment
+attestation matching the escrow, seller, obligation schema, and expected
+connection-details payload, and reuse its UID when exactly one valid match
+exists. If the current Alkahest client does not expose such a query, Section 9
+must add a narrow adapter/query surface or retain the escrow in a visible
+operator-recovery state rather than blindly create another attestation.
+
+### Permanent documentation disposition
+
+The accepted storefront convergence, versioned recovery-context, aggregate
+routing, and delivery-over-bookkeeping decisions belong in VM-domain
+storefront/adapter-scoped permanent documentation. A standalone recovery spec or
+an aggregation spec folder is not introduced solely for Section 9. The active
+change documents retain the design alternatives and migration plan; production
+code and permanent documentation must describe only the resulting current
+behavior.
+
+## Section 9 recovery design conclusion and planning record (2026-07-26)
+
+The remaining Section 9 recovery design is accepted and ready for implementation planning.
+
+### Delivery priority after deal acceptance
+
+Once a deal has been accepted, commercial delivery takes priority over local bookkeeping durability. Storefront-local persistence writes MUST be retried and failures MUST be logged with sufficient safe identifiers for operator diagnosis, but an exhausted local metadata write MUST NOT by itself cause the storefront to abandon a VM it can still build and deliver. Recovery therefore reconciles durable local evidence with the capacity, fulfillment, credential, chain, listing, and claims authorities rather than assuming every prior local checkpoint succeeded.
+
+This priority is VM storefront settlement behavior and will be promoted to the permanent VM storefront/adapter-scoped specification. It does not weaken pre-acceptance validation or permit accepting a deal when required durable preconditions are unavailable.
+
+### Selected recovery architecture
+
+The selected design is a durable VM storefront convergence state machine with a versioned recovery-context envelope on the escrow row.
+
+The ordinary foreground settlement task remains blocking in this section and continues to attempt the complete fulfillment sequence. Section 9 does not implement the separately deferred initiate/converge product redesign. Instead, the foreground task and a new dedicated startup worker invoke the same idempotent convergence operations so interrupted work can continue after restart.
+
+The worker is registered through `start_storefront_background_task`, owns its own `SQLiteClient`, and periodically sweeps nonterminal primary VM escrows. It is separate from `claims_engine_loop`, because claims processing begins after fulfillment and has a different authority and retry boundary.
+
+Recovery owns full settlement convergence, not physical polling alone. It continues through physical result retrieval, credential delivery, lease registration required by the still-active Section 10 compatibility path, on-chain fulfillment reconciliation/submission, listing update, escrow readiness, and claim creation.
+
+### Versioned VM fulfillment context
+
+Before the first externally visible physical-fulfillment mutation, the storefront persists a versioned VM-domain recovery envelope containing the immutable information needed to reproduce an equivalent request and finish settlement. The envelope uses one shared escrow column rather than adding VM-specific columns to the generic escrow schema.
+
+The envelope includes, at minimum, the accepted listing/order references needed by the VM storefront, the generated `vm_target`, the exact normalized physical `fulfillment_request`, lease timing inputs, the SSH key and connectivity inputs required to reproduce that request, and chain-reconciliation context. Secret response credentials are not placed in this request envelope.
+
+The envelope has a stable kind and positive schema version. Readers reject unknown kinds or unsupported versions visibly instead of guessing. Permanent documentation will define the envelope's ownership, lifecycle, and redaction requirements; the exact Python carrier remains VM-domain-owned.
+
+### Reconciliation from the earliest safe boundary
+
+The convergence operation scans every nonterminal primary VM escrow, including rows where no capacity or fulfillment identity was persisted.
+
+- When no capacity reservation is recorded, it invokes escrow-idempotent reservation recovery.
+- When no settlement resource is recorded, it invokes equivalent scheduling.
+- When no `fulfillment_id` is recorded, it invokes equivalent `begin_fulfillment` with the exact request preserved in the recovery envelope.
+- When `fulfillment_id` exists, it skips schedule/begin work and resumes status/result convergence directly.
+- Nonterminal physical state leaves the escrow pending for a later sweep.
+- Terminal physical failure applies the existing commercial failure policy.
+- Active physical state converges all downstream settlement effects before marking the escrow ready.
+
+Each recovered identifier or checkpoint is persisted with bounded retry. Persistence exhaustion is loud but does not abort a live deliverable operation after deal acceptance.
+
+### Shared convergence implementation
+
+Foreground and recovery execution MUST NOT maintain independent copies of the settlement sequence. Section 9 extracts shared phase operations from the existing storefront fulfillment path and uses them from both callers.
+
+The shared implementation preserves the current blocking storefront behavior. Moving ordinary fulfillment initiation and convergence into separate user-visible phases is deferred to a new future OpenSpec change rather than Section 10 or 11.
+
+`escrow_uid` is passed explicitly through the durable fulfillment path. The opaque `deal_ref` parameter is removed from `_do_provision` and retained only at compatibility or commercial-boundary adapters where required. The existing `vm_host` compatibility parameter is not changed in Section 9; its removal or reshaping is Section 10 work.
+
+### Concurrency and replay
+
+The foreground task and startup worker may observe the same escrow. Correctness therefore relies on durable, cross-process coordination plus replay-safe phase operations, not a process-local lock.
+
+Implementation will first inventory existing escrow update/claim primitives and use the narrowest durable mechanism that prevents simultaneous phase execution. A renewable escrow processing lease is preferred if no suitable compare-and-set primitive already exists. The lease must expire after process death and must not become a permanent ownership record.
+
+External side effects are reconciled against their owning authorities before replay whenever local persistence may have been lost.
+
+### On-chain fulfillment is reconciliation, not blind retry
+
+Repository and available Alkahest surfaces do not establish `string_obligation.do_obligation` as idempotent. `chain_tx_lock` serializes wallet nonce use only. The obligation's `refUID` references the escrow but is not a uniqueness constraint, and a successful transaction followed by loss of its returned UID creates an ambiguous local state.
+
+Before submitting an on-chain compute fulfillment when no local `fulfillment_uid` is available, the VM settlement adapter queries chain truth for existing matching attestations. Raw EAS/RPC event scanning and attestation decoding belong in `kit/alkahest`; matching the VM string-obligation schema, escrow reference, storefront attester, recipient semantics, connection-details payload, and active state belongs in the VM settlement adapter.
+
+RPC/event-based reconciliation is authoritative. A hosted indexer may be added later as an optimization but cannot be the correctness boundary.
+
+Reconciliation outcomes are:
+
+- zero valid matches: submit the fulfillment, then persist the returned UID;
+- exactly one valid match: adopt and persist its UID;
+- multiple identical valid matches: select the earliest valid attestation deterministically, log the duplicate condition loudly, and continue commercial delivery;
+- conflicting matches: do not submit another fulfillment and place the escrow into operator-visible reconciliation failure/pending state.
+
+A failed or timed-out submission returns to reconciliation before any retry. The recovery context records a bounded chain scan origin, preferably a block observed before first submission or another authoritative lower bound already available from the accepted escrow.
+
+### Aggregate routing policy
+
+`AggregateFulfillmentClient` retains the same broad site-fallback policy already used by `AggregateCapacityClient.commit` and `release`. Section 9 does not introduce stricter error classification for only one sibling. Typed retryability and failure classification are deferred as an aggregation-wide concern and must correct both clients together.
+
+Aggregate capacity and fulfillment routing, including cold-cache fan-out and storefront recovery use, are documented together in the VM storefront/adapter-scoped permanent specification. A new aggregation subsystem spec is not created solely for these sibling classes.
+
+### Permanent documentation destinations
+
+| Accepted decision | Permanent documentation destination |
+|---|---|
+| Commercial delivery takes priority over storefront-local bookkeeping durability after deal acceptance | VM storefront/adapter-scoped specification, storefront fulfillment recovery requirement |
+| Versioned VM fulfillment-context envelope and redaction/version rules | VM storefront/adapter-scoped specification; generic envelope principles remain in `openspec/specs/fulfillment/spec.md` |
+| Dedicated storefront startup recovery worker and full settlement convergence ownership | VM storefront/adapter-scoped specification; `docs/development/ARCHITECTURE.md` only for repository-wide worker/service-flow updates |
+| Shared foreground/recovery convergence implementation and explicit `escrow_uid` | VM storefront/adapter-scoped specification and current code docstrings |
+| Duplicate-safe ambiguous on-chain submission handling | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`; a supported generic bounded attestation query is deferred to `alkahest-py` or `kit/alkahest` |
+| Aggregate capacity/fulfillment routing parity and cold-cache fallback | VM storefront/adapter-scoped specification |
+| `vm_host` compatibility seam retained until teardown cutover | Section 10 plan and the permanent VM teardown documentation updated by that section |
+| Two-phase ordinary initiate/converge redesign deferred | New future OpenSpec change; no production comment or permanent current-state claim until implemented |
+
+The implementation planning tasks below must resolve the exact existing permanent-spec file or create the broader VM storefront/adapter specification before implementation begins. A recovery-only specification is not created.
+
+
+## Section 9 final implementation and promotion record (2026-07-26)
+
+Section 9 is complete. The implementation uses a versioned VM fulfillment context, durable escrow processing claims, a dedicated storefront startup worker, shared foreground/restart convergence operations, exact replay before fulfillment acceptance, direct resumption after a durable fulfillment ID, and replay-safe downstream convergence through credentials, lease registration, on-chain fulfillment, listing update, escrow readiness, and claim creation.
+
+The accepted operational priority is permanently documented in `openspec/specs/vm-storefront-fulfillment/spec.md`: once a deal is accepted, commercial delivery takes priority over storefront-local bookkeeping durability. Failed checkpoint writes are retried and loudly reported but do not cause abandonment of an otherwise deliverable VM.
+
+The Alkahest investigation established that `alkahest-py==1.1.2` contains internal log-scanning machinery but exposes neither its provider nor a bounded `refUID` attestation query. Section 9 therefore implements the strongest supported safety boundary: adopt a matching attestation when an exposed query is available; otherwise never blindly resubmit after an ambiguous transaction outcome, keep the escrow pending, and surface operator reconciliation. Raw repository-owned RPC/EAS scanning is deferred because it would depend on external ABI, address, and network assumptions that belong behind a supported Alkahest abstraction.
+
+Validation completed through the supplied offline wheelhouse and the repository owner's root `make test`. The final local run included 627 VM storefront unit tests (1 skipped), 145 VM storefront integration tests, both Alkahest integration tests, and all other repository suites. Strict OpenSpec validation was unavailable in both environments because the CLI was not installed; this was explicitly accepted and is not an open Section 9 defect. Section 10 may begin.
+
+| Material decision | Permanent destination |
+|---|---|
+| Accepted-deal commercial delivery priority | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-accepted-deal-delivery-priority` |
+| Versioned fulfillment context and restart convergence | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-versioned-fulfillment-context` and `#requirement-foreground-and-restart-convergence` |
+| Full storefront settlement convergence ownership | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-full-settlement-convergence-ownership` |
+| Physical fulfillment replay and direct resumption | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-physical-fulfillment-resumption` |
+| Aggregate routing parity during recovery | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-aggregate-site-routing` |
+| Duplicate-safe ambiguous on-chain handling and upstream query deferral | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety` |
+| `vm_host` compatibility seam removal | Section 10 task 10.5 and its permanent teardown documentation |
+
+
+## Section 9 post-completion correction and promotion record (2026-07-26)
+
+The correction pass restores the generated VM target as a single caller-owned identity and proves that the exact value survives context persistence, production-model validation, physical fulfillment submission, and lease registration. The permanent contract and its scenarios are in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-versioned-fulfillment-context`.
+
+The VM settlement adapter no longer probes guessed Alkahest methods. Unknown-attestation discovery is unavailable in `alkahest-py==1.1.2`; ambiguous outcomes remain pending without resubmission. A supported future query capability can be injected explicitly. This limitation and its falsifiable scenarios are in `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-ambiguous-on-chain-submission-safety`.
+
+All requirements in the permanent VM storefront fulfillment specification now include repository-convention `#### Scenario:` blocks. Focused correction tests passed against installed review artifacts. Strict OpenSpec CLI validation remains waived because the executable is unavailable.

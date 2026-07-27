@@ -60,7 +60,7 @@ The change remains taskless until POOLS-7 finalizes result envelopes and the ope
 ## Open Questions
 
 - Which reverse authentication mechanism satisfies hosted, local Compose, and Helm deployments without one shared symmetric secret?
-- Where is storefront-owner binding created and rotated, and which service is authoritative for its public destination?
+- Where is storefront-owner binding created and rotated, and which service is authoritative for its public destination? (Partially scoped out 2026-07-25: `add-storefront-principal-authentication` owns *identity* — which storefront a record belongs to, expressed as `owner_principal` — as a new hard dependency of this change. This change still owns the reverse-direction *transport* authentication mechanism itself, which that change does not decide.)
 - Can ephemeral access material be regenerated deterministically, or does delivery require a bounded encrypted transient store?
 
 ## Permanent Documentation Promotion

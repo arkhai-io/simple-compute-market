@@ -196,6 +196,8 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `result_id` | One durable settlement/fulfillment result |
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
 
+`fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
+
 `site_id` is owned at the storefront aggregation boundary and bound to a configured provisioning connection. Provisioning-local capacity persistence is already scoped by its database authority and does not duplicate that storefront-owned identity on every pool, resource, or reservation row. Counterparties cannot self-assert the routing identity used by the storefront.
 | `pool_id` | Globally unique pool identity with explicit site ownership where required |
 

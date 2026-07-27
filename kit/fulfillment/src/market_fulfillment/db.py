@@ -165,25 +165,9 @@ class ProvisionedResource(Base):
         index=True,
     )
     fulfillment_id = Column(String, nullable=False, index=True)
-    domain_resource_ref = Column(String, nullable=True)
     status = Column(String, nullable=False, default="active")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    __table_args__ = (
-        # Durable backstop against a genuine concurrent double-insert racing
-        # add_provisioned_resource's query-then-insert dedup check, which
-        # remains the primary idempotency mechanism -- this constraint does
-        # not replace it, it closes the gap between that check and its
-        # insert. NULL domain_resource_ref values are not mutually unique
-        # under standard SQL NULL semantics; this is not a gap in practice
-        # since resolve_provisioned_resources requires a non-empty resource
-        # reference and never returns one to persist as NULL.
-        UniqueConstraint(
-            "capacity_reservation_id",
-            "domain_resource_ref",
-            name="uq_provisioned_resources_reservation_domain_ref",
-        ),
-    )

@@ -292,7 +292,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
             "FROM settlement_records WHERE capacity_reservation_id='pre-existing-alloc'"
         )).mappings().one()
         resource = connection.execute(text(
-            "SELECT domain_resource_ref FROM provisioned_resources "
+            "SELECT provisioned_resource_id FROM provisioned_resources "
             "WHERE capacity_reservation_id='pre-existing-alloc'"
         )).mappings().one()
     assert settlement == {
@@ -301,7 +301,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "settlement_resource_id": "kvm1",
         "provider": "ansible",
     }
-    assert resource["domain_resource_ref"] == "vm-active"
+    assert resource["provisioned_resource_id"]
 
     # New fulfillment tables are mounted by current metadata and initialization
     # remains safe to run repeatedly.
@@ -362,6 +362,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260722_001_pools7_capacity_model_cutover",
         "20260724_001_legacy_vm_leases_to_fulfillment",
         "20260724_002_drop_vm_leases_table",
+        "20260725_001_remove_provisioned_resource_domain_ref",
     }
 
 
@@ -414,7 +415,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 11
+    assert migration_count == 12
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +441,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260724_002_drop_vm_leases_table'"
+                "'20260725_001_remove_provisioned_resource_domain_ref'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

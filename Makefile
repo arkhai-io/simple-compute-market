@@ -44,7 +44,7 @@ dist-bare-metal: ## Build arkhai-bare-metal wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_bare_metal-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-bare-metal produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-storefront: ## Build arkhai-vms-storefront wheel into .dist/
+dist-storefront: dist-kits ## Build arkhai-vms-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_vms_storefront-*-none-any.whl > /dev/null 2>&1 || \
@@ -60,7 +60,7 @@ dist-provisioning-operator-client: dist-compute-provisioning ## Build arkhai-vms
 	-mkdir -p $(DIST_DIR)
 	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
 
-dist-compute-provisioning: ## Build arkhai-compute-provisioning wheel into .dist/
+dist-compute-provisioning: dist-kits ## Build arkhai-compute-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd provisioning/compute && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \

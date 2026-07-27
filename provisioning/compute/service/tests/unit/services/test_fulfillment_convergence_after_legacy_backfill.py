@@ -61,6 +61,9 @@ class _StubAnsibleProvider(FulfillmentProvider):
     def resolve_provisioned_resources(self, provider_metadata):
         return (provider_metadata.get("vm_target") or "vm-resolved",)
 
+    async def fetch_credentials(self, provider_metadata, provisioned_resources):
+        return VersionedEnvelope(kind="vm.fulfillment.result.v1", schema_version=1, payload={"credentials": []})
+
 
 def _settings(**overrides):
     defaults = dict(
@@ -179,7 +182,8 @@ async def test_converge_creates_observes_backfilled_dispatching_row(
     )
     with session_factory() as db:
         resources = repo.list_provisioned_resources(db, "reservation-provisioning")
-    assert [r.domain_resource_ref for r in resources] == ["vm-resolved"]
+    assert len(resources) == 1
+    assert resources[0].status == "active"
 
 
 async def test_dispatch_pending_teardowns_observes_backfilled_row(

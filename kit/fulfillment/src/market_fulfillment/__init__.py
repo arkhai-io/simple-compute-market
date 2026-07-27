@@ -21,6 +21,7 @@ from .db import (
 )
 from .envelopes import VersionedEnvelope, envelope
 from .ids import (
+    derive_provisioned_resource_id,
     new_capacity_reservation_id,
     new_fulfillment_id,
     new_provisioned_resource_id,
@@ -28,7 +29,15 @@ from .ids import (
     new_settlement_resource_id,
 )
 from .recovery_diagnostics import RecoveryDiagnostics, RecoveryStateDiagnostics
+from .results import (
+    FULFILLMENT_RESULT_KIND,
+    FULFILLMENT_RESULT_SCHEMA_VERSION,
+    FulfillmentResultPayload,
+    ProvisionedResourceOutput,
+    build_fulfillment_result_envelope,
+)
 from .provider import (
+    CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentError,
@@ -45,10 +54,11 @@ from .provider import (
     ProviderOperationState,
     ProviderRegistry,
     ProviderStatus,
+    ProvisionedResourceDescriptor,
     ProviderUnavailableError,
 )
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction
-from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator
+from .fulfillment import FulfillmentAcceptance, FulfillmentOrchestrator, FulfillmentStatus
 from .fulfillment_persistence import (
     FulfillmentAcceptanceDecision, FulfillmentTransaction, FulfillmentUnitOfWork,
     SqlAlchemyFulfillmentTransaction, SqlAlchemyFulfillmentUnitOfWork,
@@ -87,16 +97,21 @@ __all__ = [
     "FulfillmentAcceptanceDecision",
     "FulfillmentOrchestrator",
     "FulfillmentAcceptance",
+    "FulfillmentStatus",
+    "CredentialFetchFailedError",
     "FulfillmentConflictError",
     "FulfillmentCreateFailedError",
     "FulfillmentError",
     "FulfillmentProvider",
     "FulfillmentRequestInvalidError",
     "FulfillmentResult",
+    "FulfillmentResultPayload",
     "FulfillmentStatusFailedError",
     "FulfillmentTeardownFailedError",
     "FulfillmentValidationIssue",
     "FulfillmentValidationResult",
+    "FULFILLMENT_RESULT_KIND",
+    "FULFILLMENT_RESULT_SCHEMA_VERSION",
     "InvalidSettlementTransitionError",
     "LegacyBackfillValidationError",
     "LegacyFulfillmentBackfillDraft",
@@ -106,6 +121,8 @@ __all__ = [
     "ProviderRegistry",
     "ProviderStatus",
     "ProviderUnavailableError",
+    "ProvisionedResourceDescriptor",
+    "ProvisionedResourceOutput",
     "RecoveryDiagnostics",
     "RecoveryStateDiagnostics",
     "ProvisionedResource",
@@ -132,7 +149,9 @@ __all__ = [
     "SettlementResource",
     "SettlementSchedulingPolicy",
     "VersionedEnvelope",
+    "build_fulfillment_result_envelope",
     "envelope",
+    "derive_provisioned_resource_id",
     "new_capacity_reservation_id",
     "new_fulfillment_id",
     "new_provisioned_resource_id",

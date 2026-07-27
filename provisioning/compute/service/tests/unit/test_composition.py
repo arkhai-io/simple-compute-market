@@ -72,6 +72,9 @@ class FakeProvider(FulfillmentProvider):
     def resolve_provisioned_resources(self, provider_metadata):
         return ()
 
+    async def fetch_credentials(self, provider_metadata, provisioned_resources):
+        return VersionedEnvelope(kind="vm.fulfillment.result.v1", schema_version=1, payload={"credentials": []})
+
 
 def contribution(kind: str, *actions: str) -> ExecutorAdapterContribution:
     return ExecutorAdapterContribution(

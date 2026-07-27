@@ -319,9 +319,11 @@ def test_conflicting_duplicate_rejects_missing_provisioned_resource_row():
         _apply_backfill(engine)
 
 
-def test_conflicting_duplicate_rejects_provisioned_resource_with_different_target():
-    """An existing ProvisionedResource row pointing at a different VM target
-    than the one the lease actually describes is a conflict."""
+def test_conflicting_duplicate_rejects_provisioned_resource_with_different_identity():
+    """An existing ProvisionedResource row whose identity doesn't match the
+    deterministic id this lease recomputes is a conflict, not something an
+    opaque identity should let through -- opacity means the value isn't a
+    VM target string, it does not mean the value goes uncompared."""
     engine = _bootstrap_engine()
     _insert_host(engine)
     _insert_vm_lease(
@@ -332,13 +334,12 @@ def test_conflicting_duplicate_rejects_provisioned_resource_with_different_targe
 
     with engine.begin() as connection:
         connection.execute(text(
-            "UPDATE provisioned_resources SET domain_resource_ref='vm-different' "
+            "UPDATE provisioned_resources SET provisioned_resource_id='different-output' "
             "WHERE capacity_reservation_id='reservation-1'"
         ))
 
     with pytest.raises(SchemaDriftError, match="conflicting settlement aggregate"):
         _apply_backfill(engine)
-
 
 def test_conflicting_duplicate_rejects_multiple_provisioned_resource_rows():
     """Exactly one ProvisionedResource row is expected for a live-target
@@ -355,10 +356,8 @@ def test_conflicting_duplicate_rejects_multiple_provisioned_resource_rows():
     with engine.begin() as connection:
         connection.execute(text(
             """INSERT INTO provisioned_resources
-            (provisioned_resource_id, capacity_reservation_id, fulfillment_id,
-             domain_resource_ref, status)
-            SELECT 'extra-resource', capacity_reservation_id, fulfillment_id,
-                   'vm-active-extra', 'active'
+            (provisioned_resource_id, capacity_reservation_id, fulfillment_id, status)
+            SELECT 'extra-resource', capacity_reservation_id, fulfillment_id, 'active'
             FROM settlement_records WHERE capacity_reservation_id='reservation-1'"""
         ))
 

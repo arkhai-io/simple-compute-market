@@ -48,6 +48,10 @@ class FulfillmentTransaction(Protocol):
         provider_metadata: dict[str, Any],
     ) -> Any: ...
 
+    def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None: ...
+
+    def list_provisioned_resources(self, capacity_reservation_id: str) -> list[Any]: ...
+
 
 class FulfillmentUnitOfWork(Protocol):
     @contextmanager
@@ -142,6 +146,12 @@ class SqlAlchemyFulfillmentTransaction:
             SettlementRecordState.dispatching.value,
             provider_metadata=incoming,
         )
+
+    def get_by_fulfillment_id(self, fulfillment_id: str) -> Any | None:
+        return self._repository.get_by_fulfillment_id(self.db, fulfillment_id)
+
+    def list_provisioned_resources(self, capacity_reservation_id: str) -> list[Any]:
+        return self._repository.list_provisioned_resources(self.db, capacity_reservation_id)
 
 
 class SqlAlchemyFulfillmentUnitOfWork:

@@ -22,18 +22,30 @@ class SettleRequest(BaseModel):
 
 
 class SettleResponse(BaseModel):
-    """Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning)."""
+    """Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning).
+
+    ``fulfillment_id`` is the durable fulfillment path's identity, always
+    ``None`` until ``begin_fulfillment`` returns one; ``provisioning_job_id``
+    is the legacy ephemeral executor-job identity and is always ``None``
+    for a fulfillment that went through the durable path instead.
+    """
     escrow_uid: str
     status: str
     provisioning_job_id: str | None = None
+    fulfillment_id: str | None = None
     model_config = {"extra": "allow"}
 
 
 class SettleStatusResponse(BaseModel):
-    """Response for GET /api/v1/settle/{escrow_uid}/status."""
+    """Response for GET /api/v1/settle/{escrow_uid}/status.
+
+    See ``SettleResponse`` for the ``fulfillment_id``/``provisioning_job_id``
+    distinction.
+    """
     escrow_uid: str
     status: str
     provisioning_job_id: str | None = None
+    fulfillment_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
     model_config = {"extra": "allow"}
 
@@ -104,8 +116,15 @@ class SettleWaitResponse(BaseModel):
     Mirrors the registry-agent wait pattern: ``ready`` indicates whether a
     terminal state was reached before the timeout; ``status`` is the raw
     settlement job status (``ready`` | ``failed`` | ``provisioning``).
+
+    ``provisioning_job_id`` is the legacy ephemeral executor-job identity;
+    it is always ``None`` for a fulfillment that went through the durable
+    fulfillment path (there is no executor job id in that architecture).
+    ``fulfillment_id`` is that path's durable identity and is the field a
+    caller should prefer once available.
     """
     ready: bool
     status: str
     provisioning_job_id: str | None = None
+    fulfillment_id: str | None = None
     elapsed_ms: int

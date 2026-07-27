@@ -19,6 +19,7 @@ from market_fulfillment.backfill import (
     LegacyBackfillValidationError,
     LegacyFulfillmentBackfillDraft,
 )
+from market_fulfillment.ids import derive_provisioned_resource_id
 from market_fulfillment.provider import SettlementResult
 from market_fulfillment.settlement_types import SettlementResource
 
@@ -159,6 +160,12 @@ def compile_legacy_vm_fulfillment_backfill(
 
     prepared_teardown = None
     if target:
+        # Retries reproduce the same fulfillment-owned opaque ID from the
+        # stable legacy reservation identity and provider output key.
+        provisioned_resource_id = derive_provisioned_resource_id(
+            identity_scope=f"legacy-reservation:{candidate.capacity_reservation_id}",
+            provider_output_key=target,
+        )
         resource = SettlementResource(
             settlement_resource_id=candidate.vm_host,
             pool_id=candidate.pool_id,
@@ -170,7 +177,7 @@ def compile_legacy_vm_fulfillment_backfill(
             capacity_reservation_id=candidate.capacity_reservation_id,
             fulfillment_id=fulfillment_id,
             resource=resource,
-            provisioned_resources=({"domain_resource_ref": target},),
+            provisioned_resources=({"provisioned_resource_id": provisioned_resource_id},),
             provider_metadata=metadata,
         )
         envelope = prepare_historical_vm_teardown(
@@ -194,5 +201,5 @@ def compile_legacy_vm_fulfillment_backfill(
         provider_metadata=metadata,
         teardown_provider_metadata=teardown_metadata,
         prepared_teardown_operation=prepared_teardown,
-        provisioned_resource_ref=target,
+        provisioned_resource_id=provisioned_resource_id if target else None,
     )
