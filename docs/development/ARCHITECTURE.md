@@ -307,6 +307,10 @@ Schema changes are additive by default. Non-additive changes use expand/contract
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
+## Operator lifecycle controls
+
+Long-running lifecycle workers may expose authenticated one-cycle controls when deterministic recovery, testability, or customer-issue diagnosis requires them. A manual cycle must invoke the same production handler as the timer-driven worker; it must not implement alternate lifecycle transitions. Diagnostic responses are bounded and may expose aggregate state counts, claim ages, and failure counts, but not credentials or unbounded provider payloads.
+
 ## Testing strategy
 
 Tests belong at the lowest level that can prove the behavior:

@@ -182,6 +182,7 @@ class SystemService:
         session_factory: "Optional[sessionmaker[Session]]" = None,
         job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
         lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
+        fulfillment_convergence_watchdog: Any | None = None,
     ) -> None:
         self._ansible = ansible_service
         self._settings = settings
@@ -189,6 +190,7 @@ class SystemService:
         self._session_factory = session_factory
         self._job_queue_provider = job_queue_provider
         self._lease_lifecycle_service = lease_lifecycle_service
+        self._fulfillment_convergence_watchdog = fulfillment_convergence_watchdog
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -394,6 +396,12 @@ class SystemService:
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
+    async def force_fulfillment_convergence(self) -> dict:
+        """Run one production fulfillment convergence cycle."""
+        if self._fulfillment_convergence_watchdog is None:
+            return {"error": "fulfillment_convergence_watchdog not initialised"}
+        return await self._fulfillment_convergence_watchdog.run_cycle()
+
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""
         if self._lease_lifecycle_service is None:

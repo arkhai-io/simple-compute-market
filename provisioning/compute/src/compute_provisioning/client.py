@@ -56,6 +56,7 @@ class ComputeProvisioningClientProtocol(Protocol):
     async def begin_fulfillment_teardown(self, fulfillment_id: str) -> FulfillmentAcceptanceResponse: ...
     async def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatusResponse: ...
     async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]: ...
+    async def run_fulfillment_convergence_cycle(self) -> dict[str, Any]: ...
 
 
 class ComputeProvisioningClient:
@@ -145,6 +146,12 @@ class ComputeProvisioningClient:
 
     async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView:
         return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{capacity_reservation_id}/force-release", request))
+
+    async def run_fulfillment_convergence_cycle(self) -> dict[str, Any]:
+        """Run one production fulfillment convergence cycle."""
+        return await self._request(
+            "POST", "/api/v1/system/fulfillment-convergence/run-cycle", {}
+        )
 
     async def schedule_resource(self, request: FulfillmentScheduleRequest) -> FulfillmentScheduleResponse:
         return FulfillmentScheduleResponse.model_validate(

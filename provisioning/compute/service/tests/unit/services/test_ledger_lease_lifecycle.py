@@ -692,3 +692,121 @@ async def test_admin_force_release_unmanaged_releases_capacity_and_notifies(sess
     events, _ = ledger.events_after(0)
     assert events[-1]["kind"] == "released"
     sf.notify_capacity_released.assert_awaited_once()
+
+
+class _UnavailableTeardownPort:
+    async def begin_teardown(self, fulfillment_id: str) -> str:
+        raise RuntimeError("fulfillment teardown service unavailable")
+
+    def get_status(self, fulfillment_id: str):
+        raise AssertionError("status should not be read during submission")
+
+
+class _FailingSettlementRepository:
+    def get(self, db, capacity_reservation_id: str):
+        raise OSError("settlement repository unavailable")
+
+
+@pytest.mark.asyncio
+async def test_vm_release_missing_aggregate_records_submit_failed(session_factory, ledger):
+    reservation = _just_expired_reservation(ledger, escrow="0xmissing-aggregate")
+    svc = _lifecycle(session_factory, ledger)
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_reservation(reservation["capacity_reservation_id"])
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_failed"
+    assert row["failure_message"] == "release delegate did not return a job id"
+    assert ledger.snapshot()[0]["available_units"] < 8
+
+
+@pytest.mark.asyncio
+async def test_vm_release_invalid_fulfillment_state_records_submit_error(
+    session_factory, ledger,
+):
+    reservation = _just_expired_reservation(ledger, escrow="0xinvalid-state")
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        fulfillment_id="fulfillment-invalid-state",
+    )
+    _set_fulfillment_state(
+        session_factory,
+        capacity_reservation_id,
+        SettlementRecordState.failed.value,
+    )
+    svc = _lifecycle(session_factory, ledger)
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_reservation(capacity_reservation_id)
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_error"
+    assert "failed" in row["failure_message"]
+    assert ledger.snapshot()[0]["available_units"] < 8
+
+
+@pytest.mark.asyncio
+async def test_vm_release_unavailable_teardown_port_records_submit_error(
+    session_factory, ledger,
+):
+    reservation = _just_expired_reservation(ledger, escrow="0xport-unavailable")
+    capacity_reservation_id = reservation["capacity_reservation_id"]
+    _create_active_fulfillment(
+        session_factory,
+        capacity_reservation_id=capacity_reservation_id,
+        fulfillment_id="fulfillment-port-unavailable",
+    )
+    executor = VmReleaseExecutor(
+        settlement_repository=SettlementRepository(),
+        session_factory=session_factory,
+        teardown_port=_UnavailableTeardownPort(),
+    )
+    svc = _lifecycle(
+        session_factory,
+        ledger,
+        executor_release=ExecutorReleaseDispatcher(
+            {VM_EXECUTOR_KIND: executor},
+            default_executor_kind=VM_EXECUTOR_KIND,
+        ),
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_reservation(capacity_reservation_id)
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_error"
+    assert row["failure_message"] == "fulfillment teardown service unavailable"
+    assert ledger.snapshot()[0]["available_units"] < 8
+
+
+@pytest.mark.asyncio
+async def test_vm_release_repository_failure_records_submit_error(session_factory, ledger):
+    reservation = _just_expired_reservation(ledger, escrow="0xrepo-failure")
+    executor = VmReleaseExecutor(
+        settlement_repository=_FailingSettlementRepository(),
+        session_factory=session_factory,
+        teardown_port=_UnavailableTeardownPort(),
+    )
+    svc = _lifecycle(
+        session_factory,
+        ledger,
+        executor_release=ExecutorReleaseDispatcher(
+            {VM_EXECUTOR_KIND: executor},
+            default_executor_kind=VM_EXECUTOR_KIND,
+        ),
+    )
+
+    summary = await svc.force_check_leases()
+
+    assert summary["release_failed"] == 1
+    row = ledger.get_reservation(reservation["capacity_reservation_id"])
+    assert row["state"] == "release_failed"
+    assert row["failure_reason"] == "release_submit_error"
+    assert row["failure_message"] == "settlement repository unavailable"
+    assert ledger.snapshot()[0]["available_units"] < 8

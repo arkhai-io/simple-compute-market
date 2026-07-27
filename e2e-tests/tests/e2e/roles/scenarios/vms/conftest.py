@@ -95,9 +95,9 @@ class DealState:
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
-    # Phase 10-11 — lease expiry lifecycle
-    _lease_expiry_armed: bool = False
-    remove_job_id: Optional[str] = None
+    # Phase 10-11 — explicit interruption and fulfillment teardown lifecycle
+    _termination_requested: bool = False
+    fulfillment_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
     # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
@@ -433,11 +433,10 @@ class DealLease:
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` uses the lease vocabulary:
-    active / releasing / released / forced.
+    ``status`` and ``release_job_id`` come from the authoritative compute
+    provisioning lease contract.  For VM release, ``release_job_id`` is the
+    durable fulfillment id rather than an Ansible queue job id.
     """
-
-    _LEASE_STATUS = {"leased": "active"}
 
     def __init__(self, provisioning_client, escrow_uid: str) -> None:
         self._client = provisioning_client
@@ -455,19 +454,19 @@ class DealLease:
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
     def refresh(self) -> dict:
-        """Current lease fields in lease vocabulary."""
+        """Current lease fields from the public compute lease contract."""
+        lease = self._client.get_lease(self.lease_id)
         row = self._client.get_capacity_reservation(self.lease_id)
+        data = lease.model_dump(mode="json") if hasattr(lease, "model_dump") else dict(lease)
         return {
-            "id": row.get("capacity_reservation_id"),
+            "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "vm_host": row.get("vm_host"),
             "vm_target": row.get("vm_target"),
-            "status": self._LEASE_STATUS.get(
-                str(row.get("state")), str(row.get("state")),
-            ),
-            "vm_remove_job_id": row.get("vm_remove_job_id"),
-            "create_job_id": row.get("create_job_id"),
+            "status": data.get("status"),
+            "fulfillment_id": data.get("release_job_id"),
+            "create_job_id": data.get("create_job_id"),
         }
 
     def backdate(self, lease_end_utc: str) -> dict:

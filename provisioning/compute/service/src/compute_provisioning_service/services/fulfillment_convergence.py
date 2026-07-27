@@ -78,13 +78,28 @@ class FulfillmentConvergenceWatchdog:
                 logger.exception("[FULFILLMENT_CONVERGENCE] Unhandled cycle error")
                 await asyncio.sleep(interval)
 
-    async def run_cycle(self) -> None:
+    async def run_cycle(self) -> dict[str, object]:
+        """Run one production convergence cycle and return bounded diagnostics.
+
+        Timer-driven and operator-triggered cycles use this same method.  The
+        returned snapshots contain only aggregate lifecycle counts and claim
+        ages; prepared operations, provider payloads, and credentials are never
+        included.
+        """
+        before = self.diagnostics_snapshot()
         await self.requeue_teardown_failures()
         await self.dispatch_pending_creates()
         await self.converge_creates()
         await self.dispatch_pending_teardowns()
         await self.converge_teardowns()
-        self._log_diagnostics()
+        after = self.diagnostics_snapshot()
+        self._log_diagnostics(after)
+        return {"before": before, "after": after}
+
+    def diagnostics_snapshot(self) -> dict[str, object]:
+        """Return bounded operator-facing recovery diagnostics."""
+        with self._session_factory() as db:
+            return self._repository.recovery_diagnostics(db).as_log_fields()
 
     async def requeue_teardown_failures(self) -> None:
         """Move retryable ``teardown_failed`` rows back to
@@ -107,15 +122,14 @@ class FulfillmentConvergenceWatchdog:
                 SettlementRecordState.teardown_dispatch_pending.value,
             )
 
-    def _log_diagnostics(self) -> None:
+    def _log_diagnostics(self, diagnostics: dict[str, object] | None = None) -> None:
         try:
-            with self._session_factory() as db:
-                diagnostics = self._repository.recovery_diagnostics(db)
+            diagnostics = diagnostics or self.diagnostics_snapshot()
             logger.info(
                 "[FULFILLMENT_CONVERGENCE] recovery diagnostics",
                 extra={
                     "event": "fulfillment_recovery_diagnostics",
-                    "recovery_diagnostics": diagnostics.as_log_fields(),
+                    "recovery_diagnostics": diagnostics,
                 },
             )
         except Exception:  # noqa: BLE001

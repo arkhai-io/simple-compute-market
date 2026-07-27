@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import create_engine
@@ -1101,3 +1102,27 @@ async def test_run_cycle_emits_one_zero_value_diagnostics_event_when_empty(
         state["oldest_row_age_seconds"] is None
         for state in payload["per_state"].values()
     )
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_returns_bounded_before_after_diagnostics(monkeypatch):
+    watchdog = object.__new__(FulfillmentConvergenceWatchdog)
+    snapshots = iter([
+        {"per_state": {"teardown_dispatch_pending": {"total": 1}}, "failed_count": 0, "teardown_failed_count": 0},
+        {"per_state": {"tearing_down": {"total": 1}}, "failed_count": 0, "teardown_failed_count": 0},
+    ])
+    monkeypatch.setattr(watchdog, "diagnostics_snapshot", lambda: next(snapshots))
+    for name in (
+        "requeue_teardown_failures",
+        "dispatch_pending_creates",
+        "converge_creates",
+        "dispatch_pending_teardowns",
+        "converge_teardowns",
+    ):
+        monkeypatch.setattr(watchdog, name, AsyncMock())
+    monkeypatch.setattr(watchdog, "_log_diagnostics", lambda diagnostics=None: None)
+
+    result = await watchdog.run_cycle()
+
+    assert result["before"]["per_state"]["teardown_dispatch_pending"]["total"] == 1
+    assert result["after"]["per_state"]["tearing_down"]["total"] == 1

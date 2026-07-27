@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 
@@ -200,6 +200,21 @@ class SystemController:
             }
         """
         return await self._system_service.force_check_leases()
+
+    @_system_router.post(
+        "/fulfillment-convergence/run-cycle",
+        summary="Run one fulfillment convergence cycle (admin)",
+    )
+    async def run_fulfillment_convergence_cycle(self) -> dict:
+        """Run exactly one cycle of the production fulfillment watchdog.
+
+        The response contains bounded before/after aggregate diagnostics.
+        It never exposes prepared operations, provider payloads, or credentials.
+        """
+        result = await self._system_service.force_fulfillment_convergence()
+        if "error" in result:
+            raise HTTPException(status_code=503, detail=result["error"])
+        return result
 
     @_system_router.post(
         "/lease-watchdog/pause",

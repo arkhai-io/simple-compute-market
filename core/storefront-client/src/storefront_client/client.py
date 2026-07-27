@@ -527,6 +527,19 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    async def admin_interrupt_deal(
+        self, escrow_uid: str, *, reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None, dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Interrupt an active interruptible deal through the admin control plane."""
+        body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interrupted_at_utc is not None:
+            body["interrupted_at_utc"] = interrupted_at_utc
+        return await self._post(
+            f"/api/v1/admin/deals/{escrow_uid}/interrupt",
+            body, extra_headers=self._admin_headers(),
+        )
+
     async def admin_import_resources(
         self, csv_content: bytes, filename: str = "resources.csv"
     ) -> ImportResourcesResponse:
@@ -1282,6 +1295,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /admin/resume  (admin key required)"""
         return AdminPauseResponse.from_dict(
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
+        )
+
+    def admin_interrupt_deal(
+        self, escrow_uid: str, *, reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None, dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Interrupt an active interruptible deal through the admin control plane."""
+        body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interrupted_at_utc is not None:
+            body["interrupted_at_utc"] = interrupted_at_utc
+        return self._post(
+            f"/api/v1/admin/deals/{escrow_uid}/interrupt",
+            body, extra_headers=self._admin_headers(),
         )
 
     def admin_import_resources(

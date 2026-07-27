@@ -1757,6 +1757,7 @@ class CapacityLedgerService:
             "create_job_id": reservation.create_job_id,
             "vm_remove_job_id": reservation.vm_remove_job_id,
             "failure_reason": reservation.failure_reason,
+            "failure_message": reservation.failure_message,
             "released_at": reservation.released_at,
         }
 

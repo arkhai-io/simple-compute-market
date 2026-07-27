@@ -433,9 +433,22 @@ async def client_and_queue(
         session_factory=session_factory,
         pool_service=resource_pool_service,
     )
+    fulfillment_provider_registry = ProviderRegistry(
+        {"ansible": ansible_fulfillment_provider}
+    )
     fulfillment_service = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        provider_registry=fulfillment_provider_registry,
         unit_of_work=fulfillment_unit_of_work,
+    )
+    from compute_provisioning_service.services.fulfillment_convergence import (
+        FulfillmentConvergenceWatchdog,
+    )
+    fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=fulfillment_provider_registry,
+        settings=mock_settings,
+        worker_id="integration-fulfillment-watchdog",
     )
 
     from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
@@ -522,6 +535,7 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
     # Override container providers
@@ -559,6 +573,9 @@ async def client_and_queue(
         capacity_reservation_watchdog
     )
     _container_module.resolved_fulfillment_service = fulfillment_service
+    _container_module.resolved_fulfillment_convergence_watchdog = (
+        fulfillment_convergence_watchdog
+    )
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

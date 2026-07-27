@@ -590,6 +590,16 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/system/check-leases — run one lifecycle cycle now."""
         return await self._post("/api/v1/system/check-leases", {})
 
+    async def get_fulfillment_status(self, fulfillment_id: str) -> dict:
+        """GET the durable fulfillment lifecycle state."""
+        return await self._get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    async def run_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/run-cycle."""
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/run-cycle", {}
+        )
+
     async def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
         return await self._post("/api/v1/system/lease-watchdog/pause", {})
@@ -1065,6 +1075,14 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         checked, released, release_failed, skipped counts.
         """
         return self._post("/api/v1/system/check-leases", {})
+
+    def get_fulfillment_status(self, fulfillment_id: str) -> dict:
+        """GET the durable fulfillment lifecycle state."""
+        return self._get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    def run_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/run-cycle."""
+        return self._post("/api/v1/system/fulfillment-convergence/run-cycle", {})
 
     def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""

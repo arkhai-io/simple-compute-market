@@ -96,6 +96,27 @@ class TestSystemClientEndpointCoverage:
         assert resumed["paused"] is False
 
 
+class TestFulfillmentConvergenceClientCoverage:
+    async def test_run_cycle_uses_composed_watchdog_and_returns_bounded_diagnostics(
+        self, client_and_queue, monkeypatch
+    ):
+        from unittest.mock import AsyncMock
+
+        client, _ = client_and_queue
+        watchdog = _container_module.resolved_fulfillment_convergence_watchdog
+        expected = {
+            "before": {"per_state": {}, "failed_count": 0, "teardown_failed_count": 0},
+            "after": {"per_state": {}, "failed_count": 0, "teardown_failed_count": 0},
+        }
+        run_cycle = AsyncMock(return_value=expected)
+        monkeypatch.setattr(watchdog, "run_cycle", run_cycle)
+
+        result = await client.run_fulfillment_convergence_cycle()
+
+        assert result == expected
+        run_cycle.assert_awaited_once_with()
+
+
 class TestCapacityClientEndpointCoverage:
     async def test_capacity_read_and_truncate_methods_use_client_contract(self, client_and_queue):
         client, _ = client_and_queue
