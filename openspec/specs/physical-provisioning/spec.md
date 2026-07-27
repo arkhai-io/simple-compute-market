@@ -121,6 +121,10 @@ Service composition MUST reject duplicate executor/action kinds, duplicate fulfi
 
 The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `vm_host` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
+`vm_ram`, `vm_vcpus`, and `vm_disk_size` on the fulfillment request are optional, resolved through a three-tier precedence: the caller-supplied value if present; otherwise the pool's configured default (`default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` on the pool's provider configuration); otherwise left unset, in which case the Ansible playbook/inventory `group_vars` resolve it exactly as when these fields did not exist on the request. Units match the Ansible role: `vm_ram` is MB (`virt-install --ram`), `vm_disk_size` is a `qemu-img`-style string (for example `"80G"`).
+
+The fulfillment request MAY carry a `connectivity` field (FRP relay address, domain, and dashboard credential) which the adapter forwards to the Ansible job unchanged. This is opaque connectivity metadata the adapter never interprets or validates beyond passing it through; it is not a sizing/feasibility requirement.
+
 #### Scenario: Pool configuration changes after create dispatch
 
 - **WHEN** an operator edits provider configuration after an Ansible create job is accepted
@@ -136,14 +140,31 @@ The VM Ansible fulfillment adapter MUST execute only against the scheduler-selec
 - **WHEN** teardown begins for an accepted VM fulfillment
 - **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
 
+#### Scenario: Buyer omits sizing and the pool has no configured default
+
+- **WHEN** a fulfillment request omits `vm_ram`/`vm_vcpus`/`vm_disk_size` and the resolved pool has no `default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` configured
+- **THEN** the adapter dispatches without those fields set, and the Ansible playbook/inventory resolves them as it did before this precedence existed
+
+#### Scenario: Pool default is used when the buyer does not specify sizing
+
+- **WHEN** a fulfillment request omits sizing and the resolved pool has `default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` configured
+- **THEN** the adapter dispatches with the pool's configured defaults
+
 ### Requirement: VM fulfillment result payload
 
-`AnsibleFulfillmentProvider.fetch_credentials` (see `openspec/specs/fulfillment/spec.md#requirement-provider-contract`) returns a `vm.fulfillment.result.v1` versioned envelope, defined in `vm_provisioning_adapter/fulfillment_results.py`, nested inside the generic `fulfillment.result.v1` envelope's `domain_result` field. Its payload carries `provisioned_resources` (each output's `provisioned_resource_id` and `status`, mirroring the fulfillment-owned identity the kit already exposes) and `credentials`: a tuple of `role`, `password`, `ssh_commands`, and `provisioned_resource_ids` — the output identities that credential is associated with, expressed this way so a fulfillment with more than one provisioned resource can eventually express which credential belongs to which output rather than a single flat list. Today every VM fulfillment produces exactly one `ProvisionedResource`, so every credential's `provisioned_resource_ids` names that one output; this is a real limitation, not yet a genuine many-to-many resolution, since the adapter has no way to attribute an individual credential to a specific output when more than one exists. Credentials are sourced from `AnsibleJobService.get_credentials(job_id)` and are never persisted by this adapter or by the fulfillment kit — they exist only in the response constructed for one `get_fulfillment_result` call.
+`AnsibleFulfillmentProvider.fetch_credentials` (see `openspec/specs/fulfillment/spec.md#requirement-provider-contract`) returns a `vm.fulfillment.result.v1` versioned envelope, defined in `vm_provisioning_adapter/fulfillment_results.py`, nested inside the generic `fulfillment.result.v1` envelope's `domain_result` field. Its payload carries `provisioned_resources` (each output's `provisioned_resource_id` and `status`, mirroring the fulfillment-owned identity the kit already exposes) and `credentials`: a tuple of `role`, `password`, `ssh_commands`, `ssh_key_path_host`, `key_type`, and `provisioned_resource_ids` — the output identities that credential is associated with, expressed this way so a fulfillment with more than one provisioned resource can eventually express which credential belongs to which output rather than a single flat list. Today every VM fulfillment produces exactly one `ProvisionedResource`, so every credential's `provisioned_resource_ids` names that one output; this is a real limitation, not yet a genuine many-to-many resolution, since the adapter has no way to attribute an individual credential to a specific output when more than one exists. Credentials are sourced from `AnsibleJobService.get_credentials(job_id)` and are never persisted by this adapter or by the fulfillment kit — they exist only in the response constructed for one `get_fulfillment_result` call.
+
+The payload also carries an optional `connection_info` object (`vm_name`, `host`, `timestamp`, `tenant_user`, `vm_ip_internal`, `ssh_port`) — structured VM identity/connection metadata, best-effort read from the same job's parsed Ansible result alongside credentials. A missing or unreadable result must not fail an otherwise-successful credential fetch, so every `connection_info` field, and `connection_info` itself, is optional. Each credential's `ssh_commands` already carries a ready-to-use connection string (host, port, and tenant user baked in), so `connection_info` is not required to connect — it exists for callers that want the pieces separately rather than parsing a command string.
 
 #### Scenario: Result query on an active VM fulfillment includes the domain payload
 
 - **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose VM fulfillment is `active`
 - **THEN** the envelope's `domain_result` is a `vm.fulfillment.result.v1` payload whose `credentials` reflect a live `AnsibleJobService.get_credentials` read for the recorded job, and whose `provisioned_resources` mirror the fulfillment kit's own `ProvisionedResource` rows
+
+#### Scenario: Job result carries connection metadata
+
+- **WHEN** the recorded job's parsed result includes VM identity/connection fields
+- **THEN** `domain_result`'s `connection_info` carries them, without failing the credential fetch if any individual field is absent
 
 ### Requirement: Clean ownership cutover
 
@@ -161,6 +182,7 @@ After callers and deployments migrate, generic provisioning service and client p
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
+- VM sizing precedence (buyer-specified, pool default, unset), connectivity forwarding, and result credential/connection-metadata fields: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py` (`TestSizingPrecedence`, `TestConnectivity`), plus end-to-end HTTP coverage in `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 
 `PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Process-local state is not a durable mechanism-neutral recovery guarantee.
 

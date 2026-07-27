@@ -343,6 +343,7 @@ def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
     }
     for field in (
         "fulfillment_uid",
+        "fulfillment_id",
         "chain_name",
         "escrow_address",
         "provisioning_job_id",

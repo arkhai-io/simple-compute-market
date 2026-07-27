@@ -278,6 +278,90 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     assert version_after == version_before
 
 
+def test_reserve_is_idempotent_by_escrow_uid(seeded: CapacityLedgerService):
+    """A repeat reserve() call for the same escrow_uid (e.g. a caller
+    retrying after a crash, before it durably recorded the first
+    reservation's identity elsewhere) must return the existing held
+    reservation rather than minting a second one and double-consuming
+    capacity."""
+    first = seeded.reserve(
+        claim={"gpu_count": 3},
+        deal_ref={"listing_id": "lst-1", "escrow_uid": "0xidempotent"},
+    )
+    assert first is not None
+    assert seeded.snapshot()[0]["available_units"] == 5
+
+    second = seeded.reserve(
+        claim={"gpu_count": 3},
+        deal_ref={"listing_id": "lst-1", "escrow_uid": "0xidempotent"},
+    )
+    assert second is not None
+    assert second["capacity_reservation_id"] == first["capacity_reservation_id"]
+    # Capacity was not consumed a second time.
+    assert seeded.snapshot()[0]["available_units"] == 5
+
+
+def test_reserve_idempotent_hit_includes_resource_id(seeded: CapacityLedgerService):
+    """The idempotent-hit payload must be byte-compatible with a fresh
+    reservation's payload for callers that read resource_id directly
+    (e.g. vm_fulfillment_service.py)."""
+    first = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xres"})
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xres"})
+    assert second["resource_id"] == first["resource_id"] == "compute-kvm1-001"
+    assert second["vm_host"] == first["vm_host"] == "kvm1"
+
+
+def test_reserve_idempotency_finds_a_committed_reservation_too(
+    seeded: CapacityLedgerService,
+):
+    """Idempotency must not be limited to the TTL-hold (``reserved``)
+    state -- a caller retrying after the first attempt already progressed
+    to a committed lease must still find it, not double-reserve."""
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xcommitted"})
+    seeded.commit(
+        resource_id=reserved["resource_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_end_utc="2099-01-01 00:00",
+    )
+    retried = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xcommitted"})
+    assert retried["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+    assert retried["state"] == "leased"
+
+
+def test_reserve_without_escrow_uid_is_never_idempotent(seeded: CapacityLedgerService):
+    """No escrow_uid means no idempotency key -- every call reserves
+    fresh, matching pre-existing behavior for callers that don't supply
+    one."""
+    first = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+    assert first["capacity_reservation_id"] != second["capacity_reservation_id"]
+    assert seeded.snapshot()[0]["available_units"] == 6
+
+
+def test_reserve_after_hold_expiry_reserves_fresh_for_the_same_escrow_uid(
+    seeded: CapacityLedgerService,
+):
+    """An escrow_uid whose prior hold already expired (moved out of
+    HELD_RESERVATION_STATES by _expire_stale_holds) must not be treated
+    as an idempotent hit -- a genuinely new attempt after expiry reserves
+    fresh, exactly as it did before this idempotency check existed."""
+    from market_site.db import CapacityReservation
+
+    first = seeded.reserve(
+        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xexpired"}, ttl_seconds=60,
+    )
+    with seeded._session_factory() as db:
+        row = db.get(CapacityReservation, first["capacity_reservation_id"])
+        row.hold_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        db.commit()
+
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xexpired"})
+    assert second is not None
+    assert second["capacity_reservation_id"] != first["capacity_reservation_id"]
+
+
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
     first = seeded.reserve(
         claim={"gpu_count": 8},

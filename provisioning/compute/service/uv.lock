@@ -207,6 +207,7 @@ name = "arkhai-compute-provisioning"
 version = "0.5.0"
 source = { editable = "../" }
 dependencies = [
+    { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
     { name = "httpx" },
@@ -215,6 +216,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },
     { name = "arkhai-kit-resource-pools", editable = "../../../kit/resource-pools" },
     { name = "arkhai-kit-site", editable = "../../../kit/site" },
     { name = "httpx", specifier = ">=0.27" },

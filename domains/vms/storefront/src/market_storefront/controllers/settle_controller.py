@@ -214,12 +214,14 @@ class AdminSettleController:
             elapsed_ms = int((time.monotonic() - start) * 1000)
             status = (job or {}).get("status", "")
             job_id = (job or {}).get("provisioning_job_id")
+            fulfillment_id = (job or {}).get("fulfillment_id")
 
             if status in _terminal:
                 return SettleWaitResponse(
                     ready=True,
                     status=status,
                     provisioning_job_id=job_id,
+                    fulfillment_id=fulfillment_id,
                     elapsed_ms=elapsed_ms,
                 )
 
@@ -232,9 +234,11 @@ class AdminSettleController:
         job = await self._db.load_escrow(escrow_uid=escrow_uid)
         status = (job or {}).get("status", "unknown")
         job_id = (job or {}).get("provisioning_job_id")
+        fulfillment_id = (job or {}).get("fulfillment_id")
         return SettleWaitResponse(
             ready=False,
             status=status,
             provisioning_job_id=job_id,
+            fulfillment_id=fulfillment_id,
             elapsed_ms=elapsed_ms,
         )

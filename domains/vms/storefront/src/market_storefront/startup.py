@@ -222,6 +222,22 @@ def _start_claims_engine() -> None:
 
 
 
+def _start_fulfillment_resume() -> None:
+    from market_storefront.services.fulfillment_resume_runtime import (
+        fulfillment_resume_loop,
+    )
+
+    start_storefront_background_task(
+        StorefrontBackgroundTask(
+            name="fulfillment_resume",
+            task_factory=fulfillment_resume_loop,
+            log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
+            log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
+        ),
+        logger=logger,
+    )
+
+
 def _start_capacity_events_poller() -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
@@ -273,6 +289,7 @@ async def _startup_tasks() -> None:
                 _start_negotiation_watchdog,
             ),
             StorefrontStartupStep("claims_engine", _start_claims_engine),
+            StorefrontStartupStep("fulfillment_resume", _start_fulfillment_resume),
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",

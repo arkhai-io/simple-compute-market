@@ -7,12 +7,29 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class VmConnectivitySettings(BaseModel):
+    """Buyer-reachability configuration, forwarded to the provider as-is.
+
+    Deliberately not part of ``VmFulfillmentRequirements``' flat field set:
+    these aren't sizing/feasibility requirements the provisioning server
+    (or, in principle, a future scheduler) would ever reason about — they're
+    opaque connectivity metadata the VM provider forwards verbatim to
+    Ansible. Storefront-configured for now; a negotiated, buyer-specified
+    second source for this same field is a plausible future addition, not
+    yet implemented.
+    """
+
+    frp_server_addr: str | None = None
+    frp_domain: str | None = None
+    frp_dashboard_password: str | None = None
+
+
 class VmFulfillmentRequirements(BaseModel):
     vm_target: str = Field(min_length=1)
     image_setup_type: str = "scratch"
-    vm_ram: int = Field(gt=0)
-    vm_vcpus: int = Field(gt=0)
-    vm_disk_size: str = Field(min_length=1)
+    vm_ram: int | None = Field(default=None, gt=0)
+    vm_vcpus: int | None = Field(default=None, gt=0)
+    vm_disk_size: str | None = Field(default=None, min_length=1)
     vm_os_variant: str | None = None
     ssh_pubkey: str = Field(min_length=1)
     gpu_provisioned: bool | None = None
@@ -20,6 +37,7 @@ class VmFulfillmentRequirements(BaseModel):
     vm_gpu_device: str | None = None
     vm_gpu_devices: list[str] | None = None
     vm_gpu_partition_size: str | None = None
+    connectivity: VmConnectivitySettings | None = None
 
 
 class AnsiblePoolConfig(BaseModel):
@@ -28,10 +46,25 @@ class AnsiblePoolConfig(BaseModel):
     ``inventory_group`` is not consumed here: concrete placement belongs to
     ``PhysicalSettlementScheduler``. Treating an inventory group as placement
     would create a second, conflicting scheduler inside the Ansible adapter.
+
+    ``default_vm_ram``/``default_vm_vcpus``/``default_vm_disk_size`` are the
+    middle tier of a three-tier sizing precedence: buyer-specified in the
+    fulfillment request, else this pool default, else left unset and
+    resolved by the Ansible playbook/inventory ``group_vars``, the only tier
+    that existed before pool-level defaults did. Optional because most
+    pools have no buyer-facing sizing negotiated yet; VM shape
+    configurability is being wired up incrementally rather than assumed
+    everywhere at once. Units match ``VmFulfillmentRequirements``:
+    ``default_vm_ram`` is MB, matching ``virt-install --ram``;
+    ``default_vm_disk_size`` is a `qemu-img`-style string like ``"80G"``.
     """
+
 
     playbook_path: str = Field(min_length=1)
     extra_vars: dict[str, Any] = Field(default_factory=dict)
+    default_vm_ram: int | None = Field(default=None, gt=0)
+    default_vm_vcpus: int | None = Field(default=None, gt=0)
+    default_vm_disk_size: str | None = Field(default=None, min_length=1)
 
 
 class AnsiblePreparedJobParameters(BaseModel):
