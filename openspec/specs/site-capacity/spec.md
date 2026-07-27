@@ -68,9 +68,19 @@ A capacity reservation MUST expose its identity, lifecycle state, hold expiry, r
 ### Requirement: Reservation lifecycle
 Capacity reservation MUST use a hold/commit/release lifecycle keyed by durable allocation identity, support expiry of uncommitted holds, and be idempotent for retries.
 
+`reserve()` itself is idempotent by `deal_ref`'s `escrow_uid` when present: a repeat call for an escrow_uid with an existing reservation in any held state (`reserved`, `provisioning`, `leased`, `releasing`, `release_failed`, `unmanaged`) returns that reservation rather than admitting a second one. This closes the retry gap `commit`/`release` already closed for their own calls: a caller retrying `reserve()` itself after a crash — before it durably recorded the first reservation's identity elsewhere — does not double-reserve capacity for the same deal. An escrow_uid whose prior reservation already expired or was released is not matched (it has moved out of the held states), so a genuinely new attempt after expiry still admits fresh.
+
 #### Scenario: Two buyers reserve the same final unit
 - **WHEN** concurrent requests race at one site
 - **THEN** the authoritative ledger commits at most one reservation
+
+#### Scenario: Reserve is retried for the same deal before its identity is durably recorded elsewhere
+- **WHEN** `reserve()` is called again with the same `deal_ref.escrow_uid` while the first reservation is still in a held state
+- **THEN** the existing reservation is returned and no additional capacity is admitted
+
+#### Scenario: Reserve is retried after the prior hold expired
+- **WHEN** `reserve()` is called again with an `escrow_uid` whose only prior reservation has already expired or been released
+- **THEN** a new reservation is admitted, exactly as if no prior attempt had occurred
 
 ### Requirement: Multi-site aggregation
 A storefront MAY aggregate multiple site clients as soft state but MUST route each reserve to one authority and MUST NOT create cross-site hard-state capacity of its own.

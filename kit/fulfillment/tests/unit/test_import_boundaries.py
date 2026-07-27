@@ -77,6 +77,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "scheduling.py": set(),
         "round_robin_policy.py": set(),
         "envelopes.py": {"pydantic", "typing"},
+        "results.py": {"pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
         "provider.py": set(),
@@ -86,6 +87,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "db.py": {"sqlalchemy"},
         "settlement_repository.py": {"sqlalchemy"},
         "backoff.py": set(),
+        "backfill.py": set(),
         "recovery_diagnostics.py": set(),
     }
     violations = []
@@ -100,7 +102,7 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
             top_level = module_name.split(".")[0]
             is_local = module_name.startswith(".") or top_level == "market_fulfillment"
             is_stdlib_or_typing = top_level in {
-                "__future__", "abc", "contextlib", "dataclasses", "datetime", "decimal", "enum", "logging", "random", "threading", "typing",
+                "__future__", "abc", "contextlib", "dataclasses", "datetime", "decimal", "enum", "logging", "random", "threading", "typing", "uuid",
             }
             if is_local or is_stdlib_or_typing:
                 continue

@@ -142,6 +142,37 @@ def _create_pre_migration_tables(engine):
         ))
         connection.execute(text(
             """
+            CREATE TABLE vm_leases (
+                id VARCHAR PRIMARY KEY,
+                resource_id VARCHAR NOT NULL,
+                escrow_uid VARCHAR NOT NULL UNIQUE,
+                vm_host VARCHAR NOT NULL,
+                vm_target VARCHAR NOT NULL,
+                lease_start_utc TIMESTAMP,
+                lease_end_utc TIMESTAMP NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'pending',
+                create_job_id VARCHAR,
+                vm_remove_job_id VARCHAR,
+                allocation_id VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            INSERT INTO vm_leases (
+                id, resource_id, escrow_uid, vm_host, vm_target, lease_end_utc,
+                status, create_job_id, allocation_id
+            ) VALUES (
+                'lease-active', 'pre-existing-gpu', 'escrow-active', 'kvm1',
+                'vm-active', '2099-01-01T00:00:00Z', 'leased', 'job-1',
+                'pre-existing-alloc'
+            )
+            """
+        ))
+        connection.execute(text(
+            """
             CREATE TABLE capacity_events (
                 version INTEGER NOT NULL,
                 kind VARCHAR NOT NULL,
@@ -255,6 +286,23 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     cursor_pk = inspector.get_pk_constraint("scheduling_cursors")
     assert cursor_pk["constrained_columns"] == ["resource_kind"]
 
+    with engine.begin() as connection:
+        settlement = connection.execute(text(
+            "SELECT capacity_reservation_id, state, settlement_resource_id, provider "
+            "FROM settlement_records WHERE capacity_reservation_id='pre-existing-alloc'"
+        )).mappings().one()
+        resource = connection.execute(text(
+            "SELECT provisioned_resource_id FROM provisioned_resources "
+            "WHERE capacity_reservation_id='pre-existing-alloc'"
+        )).mappings().one()
+    assert settlement == {
+        "capacity_reservation_id": "pre-existing-alloc",
+        "state": "active",
+        "settlement_resource_id": "kvm1",
+        "provider": "ansible",
+    }
+    assert resource["provisioned_resource_id"]
+
     # New fulfillment tables are mounted by current metadata and initialization
     # remains safe to run repeatedly.
     run_migrations(
@@ -310,9 +358,11 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260707_001_site_allocations_executor_fields",
         "20260713_001_ansible_jobs_contract_fields",
         "20260713_002_resource_pools_and_hosts_pool_id",
-        "20260718_001_drop_vm_leases_table",
         "20260720_001_multidimensional_capacity",
         "20260722_001_pools7_capacity_model_cutover",
+        "20260724_001_legacy_vm_leases_to_fulfillment",
+        "20260724_002_drop_vm_leases_table",
+        "20260725_001_remove_provisioned_resource_domain_ref",
     }
 
 
@@ -365,7 +415,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 10
+    assert migration_count == 12
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +441,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260722_001_pools7_capacity_model_cutover'"
+                "'20260725_001_remove_provisioned_resource_domain_ref'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

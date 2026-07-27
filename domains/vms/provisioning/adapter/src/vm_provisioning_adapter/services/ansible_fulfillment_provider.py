@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from compute_provisioning.contracts import ExecutorActionEnvelope
 from market_fulfillment import (
+    CredentialFetchFailedError,
+    ProvisionedResourceDescriptor,
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -18,6 +20,11 @@ from market_fulfillment import (
     SettlementResource,
     SettlementResult,
     VersionedEnvelope,
+)
+from vm_provisioning_adapter.fulfillment_results import (
+    VmConnectionInfo,
+    VmFulfillmentCredential,
+    build_vm_fulfillment_result,
 )
 from vm_provisioning_adapter.models.fulfillment_model import (
     AnsibleFulfillmentMetadata,
@@ -109,14 +116,15 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
         config = self._pool_config(pool_config)
+        connectivity = requirements.connectivity
         params = AnsibleJobParams(
             vm_host=self._vm_host(resource),
             vm_action="create",
             vm_target=requirements.vm_target,
             image_setup_type=requirements.image_setup_type,
-            vm_ram=requirements.vm_ram,
-            vm_vcpus=requirements.vm_vcpus,
-            vm_disk_size=requirements.vm_disk_size,
+            vm_ram=requirements.vm_ram or config.default_vm_ram,
+            vm_vcpus=requirements.vm_vcpus or config.default_vm_vcpus,
+            vm_disk_size=requirements.vm_disk_size or config.default_vm_disk_size,
             vm_os_variant=requirements.vm_os_variant,
             ssh_pubkey=requirements.ssh_pubkey,
             gpu_provisioned=requirements.gpu_provisioned,
@@ -124,6 +132,9 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             vm_gpu_device=requirements.vm_gpu_device,
             vm_gpu_devices=requirements.vm_gpu_devices,
             vm_gpu_partition_size=requirements.vm_gpu_partition_size,
+            frp_server_addr=connectivity.frp_server_addr if connectivity else None,
+            frp_domain=connectivity.frp_domain if connectivity else None,
+            frp_dashboard_password=connectivity.frp_dashboard_password if connectivity else None,
             escrow_uid=capacity_reservation_id,
             playbook_path=config.playbook_path,
         )
@@ -306,4 +317,76 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
                 ProviderOperationState.unknown,
             ),
             job.error,
+        )
+
+    async def fetch_credentials(
+        self,
+        provider_metadata: dict[str, Any],
+        provisioned_resources: tuple[ProvisionedResourceDescriptor, ...],
+    ) -> VersionedEnvelope[Any]:
+        """Fetch live credentials for the job that created this fulfillment's resource.
+
+        Declared async to satisfy the provider-neutral interface, which must
+        accommodate providers whose credential store is a real network
+        dependency; this adapter's own credential store is the local
+        ``AnsibleJobService`` database, so no ``await`` is needed internally
+        -- the same shape ``get_status`` already has with ``get_job``.
+        """
+
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+            job_id = metadata.current_job_id
+        except Exception as exc:
+            raise CredentialFetchFailedError(
+                f"invalid provider metadata: {exc}"
+            ) from exc
+
+        try:
+            response = self._job_service.get_credentials(job_id)
+        except LookupError as exc:
+            raise CredentialFetchFailedError(f"job {job_id} not found") from exc
+        except Exception as exc:
+            raise CredentialFetchFailedError(str(exc)) from exc
+
+        # Best-effort: the job's parsed result payload carries VM
+        # identity/connection metadata (VmConnectionInfo's fields) beyond
+        # what credentials alone provide. A missing or unreadable result
+        # must not fail an otherwise-successful credential fetch -- every
+        # field on VmConnectionInfo is optional for exactly this reason.
+        result: dict[str, Any] = {}
+        try:
+            job = self._job_service.get_job(job_id)
+            if isinstance(job.result, dict):
+                result = job.result
+        except Exception as exc:
+            logger.warning(
+                "Could not read job %s result for fulfillment metadata: %s",
+                job_id, exc,
+            )
+
+        output_ids = tuple(
+            resource.provisioned_resource_id for resource in provisioned_resources
+        )
+        connection_info = VmConnectionInfo(
+            vm_name=result.get("vm_name"),
+            host=result.get("host"),
+            timestamp=result.get("timestamp"),
+            tenant_user=result.get("tenant_user"),
+            vm_ip_internal=result.get("vm_ip_internal"),
+            ssh_port=result.get("ssh_port"),
+        )
+        return build_vm_fulfillment_result(
+            provisioned_resources,
+            tuple(
+                VmFulfillmentCredential(
+                    role=credential.role,
+                    password=credential.password,
+                    ssh_commands=credential.ssh_commands,
+                    ssh_key_path_host=credential.ssh_key_path_host,
+                    key_type=credential.key_type,
+                    provisioned_resource_ids=output_ids,
+                )
+                for credential in response.credentials
+            ),
+            connection_info=connection_info,
         )

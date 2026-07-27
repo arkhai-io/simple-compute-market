@@ -599,15 +599,34 @@ class CapacityLedgerService:
         lease_start_utc: str | None = None,
         lease_duration_seconds: int | None = None,
     ) -> dict[str, Any] | None:
-        """Atomically check-and-reserve capacity matching ``claim``."""
+        """Atomically check-and-reserve capacity matching ``claim``.
+
+        Idempotent by ``deal_ref["escrow_uid"]`` when present: a repeat
+        call for the same escrow_uid returns the existing held reservation
+        (``reserved``/``provisioning``/``leased``/etc. -- anything in
+        ``HELD_RESERVATION_STATES``) rather than minting a second one. This
+        closes the gap a caller retrying ``reserve()`` after a crash would
+        otherwise hit -- without it, a retry before the first reservation's
+        identity was durably recorded elsewhere would reserve a second,
+        orphaned unit of capacity for the same deal. An escrow_uid whose
+        prior reservation already expired or was released is not found
+        here (``_expire_stale_holds`` above already moved it out of
+        ``HELD_RESERVATION_STATES``), so a genuinely new attempt after
+        expiry still reserves fresh, correctly.
+        """
         requested = _requested_dimensions(claim, unit_claim_keys=self._unit_claim_keys)
         deal = dict(deal_ref or {})
+        escrow_uid = deal.get("escrow_uid")
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
             lease_duration_seconds=lease_duration_seconds,
         )
         with self._lock, self._session_factory() as db:
             self._expire_stale_holds(db)
+            if escrow_uid:
+                existing = self._find_reservation(db, escrow_uid=escrow_uid)
+                if existing is not None:
+                    return self._reservation_payload_for_reserve(db, existing)
             match = self._find_candidate(db, claim, requested, window_start, window_end)
             if match is None:
                 return None
@@ -1740,6 +1759,25 @@ class CapacityLedgerService:
             "failure_reason": reservation.failure_reason,
             "released_at": reservation.released_at,
         }
+
+    def _reservation_payload_for_reserve(
+        self, db: Session, reservation: CapacityReservation,
+    ) -> dict[str, Any]:
+        """``_reservation_payload`` plus ``resource_id``, matching the shape
+        ``reserve()``'s fresh-reservation path returns (via
+        ``_match_payload``), so an idempotent-hit return is byte-compatible
+        with a fresh one for callers that read ``resource_id`` (for
+        example ``vm_fulfillment_service.py``'s
+        ``reserved.get("resource_id")``). ``resource_id`` is resolved via
+        the same backing-resource lookup ``get_reservation_backing_resource_id``
+        already exposes, not duplicated here.
+        """
+        payload = self._reservation_payload(reservation)
+        payload["resource_id"] = self._backing_resource_id(
+            db, reservation.capacity_reservation_id,
+        )
+        payload.setdefault("member_id", None)
+        return payload
 
     @staticmethod
     def _sync_executor_fields(

@@ -24,6 +24,18 @@ POOLS-7 reconciles these paths by cutting the storefront over to durable
 physical-resource scheduling and fulfillment managed by the provisioning
 service.
 
+**Status note (2026-07-25, Section 9 design review):** the paragraph above
+is this proposal's original motivating rationale and is kept as written for
+that history, but two of its factual claims no longer describe current
+code and should not be read as current: `vm_fulfillment_service.py`
+reserves with a pool/resource/dimension-shaped claim today (POOLS-4
+landed), not `required_attributes=("vm_host",)` — the reservation
+response's `vm_host` is still read and dispatched to directly, which is the
+actual remaining gap; and `PhysicalSettlementScheduler.select_resource`/
+`FulfillmentProvider.create` were renamed to `schedule_resource`/
+`FulfillmentOrchestrator.begin_fulfillment` by Sections 3-8. See `design.md`'s
+"Section 9 design review" for the current, verified state.
+
 ## Current Rebaseline
 
 The shared fulfillment package, multidimensional capacity model, shared feasibility predicate, two provisioning projection families, pull projection endpoints, and storefront in-memory projection loading/polling are now implemented. The production cutover is not: scheduling and fulfillment state remain process-local, provider dispatch is not durably recoverable, the storefront still calls the VM executor path directly, credentials remain persisted, teardown bypasses the provider lifecycle, and pull fulfillment status/results do not exist.
@@ -116,6 +128,37 @@ capacity-reservation-against-a-pooled-view reshape, not just VM.
 - `market-platform-compute-30-extract-service` — implemented related change;
   it was not a behavioral prerequisite, but was selected to land first, so
   this plan now targets the extracted service and adapter paths.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [x] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+Each implemented section carries its own itemized design-promotion record in `design.md`, mapping every accepted decision to its exact permanent destination heading; this list is a proposal-level summary, not a substitute for those records.
+
+- Kit dependency layers, package ownership, wheel/reinit conventions: `docs/development/ARCHITECTURE.md#package-and-dependency-layers`; `openspec/specs/fulfillment/spec.md` (new subsystem specification, added in this change).
+- Capacity-reservation/resource-pool schema cutover, projection naming, and storefront projection caching: `openspec/specs/site-capacity/spec.md`, `openspec/specs/resource-pool-management/spec.md`, `openspec/specs/storefront-publication/spec.md` — see design.md's "Design promotion record" (Section 2).
+- Durable settlement/fulfillment aggregate persistence, identity, and equivalence rules: `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` — see design.md's "Section 3 correction design-promotion record".
+- Atomic scheduling transaction and concurrency contract: `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`; `docs/development/ARCHITECTURE.md#deterministic-database-concurrency-tests` — see design.md's Section 4 entries (4.8.3, 4.14.4).
+- Fulfillment acceptance, provider preparation, and envelope/transaction shape: `openspec/specs/fulfillment/spec.md`, `openspec/specs/fulfillment/architecture.md`, `openspec/specs/resource-pool-management/spec.md` — see design.md's "Section 5 design-promotion record".
+- Recovery/convergence claim semantics, provider-call transaction boundary, and convergence worker contract: `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` — see design.md's "Section 6 implementation promotion record".
+- Legacy-lease-to-fulfillment cutover: lease-state mapping, atomicity, provider-owned teardown preparation, and the compiler/migration split: `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover`, `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover`, `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts`, `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover`, `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` — see design.md's "Section 7 implementation promotion record".
+- Section 8 (pull-based status/result queries and live credentials) is implemented at the source level; its design-promotion record is `design.md`'s "Section 8 completed design-promotion record," promoted into `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload`. The repository-standard wheel-based validation and `openspec validate --all --strict` this section's own text said would gate Section 9's start (tracked as task 8.15) were never actually confirmed closed before Section 9 work began — recorded here plainly rather than silently dropped, since the plan's own stated gate was not honored procedurally, whatever the practical risk turned out to be.
+- Section 9 (storefront orchestration cutover and restart convergence) is complete after the 9.19–9.24 correction pass. Tasks 9.0–9.24 implement durable recovery context, a startup convergence worker, full post-physical settlement convergence, aggregate routing, and duplicate-safe ambiguous on-chain handling. Its permanent behavior is documented in `openspec/specs/vm-storefront-fulfillment/spec.md`, with supporting fulfillment and architecture updates recorded in `design.md`'s completed promotion records. Root `make test` passed. Strict OpenSpec validation was unavailable in both validation environments and was explicitly waived for this section. Sections 10–11 (teardown/reclamation and obsolete-schema removal) have not started; their promotion records do not exist yet and will be added as those sections implement.
+
+## Section 7 cutover boundary
+
+Section 7 is a pre-release, all-or-nothing migration of legacy VM leases into
+the durable fulfillment lifecycle. Existing hosts and site capacity are already
+covered by Section 2 migrations. The migration joins legacy leases to supporting
+capacity-reservation and resource-pool data, preserves every known active create
+or teardown Ansible operation, and aborts rather than speculatively replaying a
+create operation whose prior job identity cannot be established. POOLS-only
+reservation states were never shipped and do not require compatibility handling.
 
 ## Non-Goals
 

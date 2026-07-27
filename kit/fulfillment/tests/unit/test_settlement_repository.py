@@ -385,7 +385,7 @@ def test_add_provisioned_resource_requires_accepted_fulfillment(session_factory,
 
     with session_factory() as db:
         with pytest.raises(SettlementEntityNotFoundError):
-            repo.add_provisioned_resource(db, capacity_reservation_id="cr-1")
+            repo.add_provisioned_resource(db, capacity_reservation_id="cr-1", provisioned_resource_id="provisioned-1")
 
 
 def test_add_and_list_provisioned_resources(session_factory, repo):
@@ -408,7 +408,7 @@ def test_add_and_list_provisioned_resources(session_factory, repo):
 
     with session_factory() as db:
         repo.add_provisioned_resource(
-            db, capacity_reservation_id="cr-1", domain_resource_ref="vm-123"
+            db, capacity_reservation_id="cr-1", provisioned_resource_id="provisioned-vm-123"
         )
         db.commit()
 
@@ -416,7 +416,7 @@ def test_add_and_list_provisioned_resources(session_factory, repo):
         resources = repo.list_provisioned_resources(db, "cr-1")
         assert len(resources) == 1
         assert resources[0].fulfillment_id == fulfillment_id
-        assert resources[0].domain_resource_ref == "vm-123"
+        assert resources[0].provisioned_resource_id == "provisioned-vm-123"
 
 
 # ----------------------------------------------------------------------
@@ -682,7 +682,7 @@ def test_mark_provisioned_resources_torn_down_updates_status(session_factory, re
             fulfillment_request=envelope("vm.fulfillment_request", 1, {}),
         )
         repo.add_provisioned_resource(
-            db, capacity_reservation_id="cr-1", domain_resource_ref="vm-1"
+            db, capacity_reservation_id="cr-1", provisioned_resource_id="provisioned-vm-1"
         )
         db.commit()
 
@@ -809,10 +809,10 @@ def test_recovery_diagnostics_counts_terminal_failures(session_factory, repo):
 
 
 def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
-    """Task 6.7: the (capacity_reservation_id, domain_resource_ref) unique
+    """Task 6.7: the provisioned_resource_id primary-key
     constraint (6.3.4) is a genuine backstop, not just app-level dedup --
     two real threads racing add_provisioned_resource for the same
-    reservation/ref must still produce exactly one row."""
+    stable output identity must still produce exactly one row."""
 
     database = tmp_path / "add_provisioned_resource.db"
     engine = create_engine(
@@ -844,7 +844,7 @@ def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
             repo.add_provisioned_resource(
                 thread_db,
                 capacity_reservation_id="cr-1",
-                domain_resource_ref="vm-42",
+                provisioned_resource_id="provisioned-vm-42",
             )
             thread_db.commit()
 
@@ -856,7 +856,7 @@ def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
     with factory() as db:
         resources = repo.list_provisioned_resources(db, "cr-1")
         assert len(resources) == 1
-        assert resources[0].domain_resource_ref == "vm-42"
+        assert resources[0].provisioned_resource_id == "provisioned-vm-42"
 
 
 def test_concurrent_claim_pending_never_returns_the_same_row_to_two_workers(tmp_path):

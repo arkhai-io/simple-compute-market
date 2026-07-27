@@ -7,7 +7,9 @@ persisted service databases across image upgrades.
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -242,6 +244,211 @@ def _migrate_multidimensional_capacity(engine: Engine) -> None:
     _add_column_if_missing(engine, "site_resources", "capacity", "JSON")
     _add_column_if_missing(engine, "site_allocations", "dimensions", "JSON")
     _add_column_if_missing(engine, "capacity_events", "dimensions", "JSON")
+
+
+
+def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
+    """Atomically preserve nonterminal VM leases in the fulfillment aggregate.
+
+    A tracked provider job is authoritative during cutover. Per-candidate
+    derivation and provider-envelope preparation are delegated to
+    ``compile_legacy_vm_fulfillment_backfill``, a pure function with no
+    database session; this function owns only enumeration, cross-candidate
+    identity/target deduplication, comparison against already-persisted
+    rows, and the single atomic write.
+    """
+    if not _table_exists(engine, "vm_leases"):
+        return
+
+    from market_fulfillment.db import Base as FulfillmentBase
+
+    FulfillmentBase.metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        _apply_legacy_vm_lease_backfill(connection)
+
+
+def _normalize_json_column(value):
+    """Return a JSON column's value as a Python object regardless of whether
+    the driver already decoded it or returned the stored text."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _existing_settlement_row_conflicts(existing, draft) -> bool:
+    """Compare an already-persisted settlement row against a compiled draft.
+
+    Equivalence covers every field a provider operation depends on for
+    correctness, not only coarse placement fields: provider metadata
+    (including the tracked create job), teardown provider metadata
+    (including the active teardown job), the prepared teardown envelope,
+    and resource attributes. A row matching on state/resource/pool/provider
+    alone but differing in tracked job identity is a conflict, not an
+    equivalent rerun.
+    """
+    expected = (
+        draft.state,
+        draft.settlement_resource_id,
+        draft.pool_id,
+        draft.provider,
+        draft.resource_attributes,
+        draft.provider_metadata,
+        draft.teardown_provider_metadata,
+        draft.prepared_teardown_operation,
+    )
+    actual = (
+        existing["state"],
+        existing["settlement_resource_id"],
+        existing["pool_id"],
+        existing["provider"],
+        _normalize_json_column(existing["resource_attributes"]),
+        _normalize_json_column(existing["provider_metadata"]),
+        _normalize_json_column(existing["teardown_provider_metadata"]),
+        _normalize_json_column(existing["prepared_teardown_operation"]),
+    )
+    return actual != expected
+
+
+def _existing_provisioned_resources_conflict(connection, capacity_reservation_id, expected_ref) -> bool:
+    """Compare already-persisted ``ProvisionedResource`` rows against a draft.
+
+    A candidate with no live target expects zero provisioned-resource rows;
+    a candidate with a live target expects exactly one, whose
+    ``provisioned_resource_id`` equals ``expected_ref`` -- the same
+    deterministic derivation ``compile_legacy_vm_fulfillment_backfill`` used
+    to compute it, so a genuine re-run always recomputes the identical value.
+    Zero, several, or a differently-identified row are all conflicts:
+    silently accepting any of them could mean losing track of, or
+    overwriting, which VM a reservation actually owns. Row count alone is
+    not sufficient here -- a single row with the wrong identity must still
+    be rejected, not treated as equivalent.
+    """
+    rows = connection.execute(text(
+        "SELECT provisioned_resource_id FROM provisioned_resources WHERE capacity_reservation_id=:id"
+    ), {"id": capacity_reservation_id}).mappings().all()
+    ids = [row["provisioned_resource_id"] for row in rows]
+    if expected_ref is None:
+        return len(ids) != 0
+    return ids != [expected_ref]
+
+
+def _apply_legacy_vm_lease_backfill(connection) -> None:
+    """Enumerate all historical VM lease candidates, compile them before
+    writing, reject conflicts, and persist the population atomically.
+
+    Takes an open connection rather than an engine: the caller owns the
+    transaction boundary this enumeration and write run inside.
+    """
+    from market_fulfillment.backfill import LegacyBackfillValidationError
+    from vm_provisioning_adapter.legacy_backfill import (
+        LegacyVmLeaseCandidate,
+        compile_legacy_vm_fulfillment_backfill,
+    )
+
+    rows = connection.execute(text(
+        """
+        SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
+               vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
+               vl.vm_remove_job_id, cr.capacity_reservation_id,
+               cr.executor_target, h.pool_id, rp.provider,
+               apc.playbook_path, apc.inventory_group, apc.extra_vars
+        FROM vm_leases vl
+        LEFT JOIN capacity_reservations cr
+          ON cr.capacity_reservation_id = vl.allocation_id
+        LEFT JOIN hosts h ON h.name = vl.vm_host
+        LEFT JOIN resource_pools rp ON rp.id = h.pool_id
+        LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
+        WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
+        ORDER BY vl.id
+        """
+    )).mappings().all()
+
+    seen_reservations: set[str] = set()
+    seen_targets: set[str] = set()
+    drafts = []
+    for row in rows:
+        reservation_id = row["capacity_reservation_id"] or row["allocation_id"]
+        if not reservation_id:
+            raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no reservation identity")
+        if reservation_id in seen_reservations:
+            raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
+        seen_reservations.add(reservation_id)
+
+        extra_vars = row["extra_vars"] or {}
+        if isinstance(extra_vars, str):
+            extra_vars = json.loads(extra_vars)
+        candidate = LegacyVmLeaseCandidate(
+            lease_id=str(row["lease_id"]),
+            capacity_reservation_id=reservation_id,
+            status=row["status"],
+            vm_host=row["vm_host"],
+            pool_id=row["pool_id"],
+            provider=row["provider"],
+            playbook_path=row["playbook_path"],
+            inventory_group=row["inventory_group"],
+            extra_vars=extra_vars,
+            vm_target=row["vm_target"],
+            executor_target=row["executor_target"],
+            create_job_id=row["create_job_id"],
+            vm_remove_job_id=row["vm_remove_job_id"],
+        )
+        try:
+            draft = compile_legacy_vm_fulfillment_backfill(
+                candidate, fulfillment_id=str(uuid.uuid4())
+            )
+        except LegacyBackfillValidationError as exc:
+            raise SchemaDriftError(str(exc)) from exc
+
+        target = draft.provisioned_resource_id
+        if target and target in seen_targets:
+            raise SchemaDriftError(f"duplicate legacy VM target {target}")
+        if target:
+            seen_targets.add(target)
+        drafts.append(draft)
+
+    for draft in drafts:
+        existing = connection.execute(text(
+            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider, "
+            "resource_attributes, provider_metadata, teardown_provider_metadata, "
+            "prepared_teardown_operation "
+            "FROM settlement_records WHERE capacity_reservation_id=:id"
+        ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
+        if existing:
+            if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
+                connection, draft.capacity_reservation_id, draft.provisioned_resource_id
+            ):
+                raise SchemaDriftError(
+                    f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
+                )
+            continue
+
+        connection.execute(text(
+            """INSERT INTO settlement_records (
+                capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
+                settlement_resource_id, pool_id, provider, resource_attributes,
+                prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
+            ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,:provider,:attributes,
+                      :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
+        ), {
+            "rid": draft.capacity_reservation_id, "fid": draft.fulfillment_id,
+            "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": draft.settlement_resource_id,
+            "pool_id": draft.pool_id, "provider": draft.provider,
+            "attributes": json.dumps(draft.resource_attributes),
+            "prepared_teardown": json.dumps(draft.prepared_teardown_operation) if draft.prepared_teardown_operation is not None else None,
+            "metadata": json.dumps(draft.provider_metadata),
+            "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
+            "state": draft.state,
+        })
+        if draft.provisioned_resource_id:
+            connection.execute(text(
+                """INSERT INTO provisioned_resources
+                (provisioned_resource_id, capacity_reservation_id, fulfillment_id, status)
+                VALUES (:id,:rid,:fid,'active')"""
+            ), {
+                "id": draft.provisioned_resource_id, "rid": draft.capacity_reservation_id,
+                "fid": draft.fulfillment_id,
+            })
 
 
 def _migrate_drop_vm_leases_table(engine: Engine) -> None:
@@ -560,6 +767,39 @@ def _migrate_capacity_model_cutover(engine: Engine) -> None:
     _migrate_retire_site_resources(engine)
 
 
+
+def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
+    """Remove the redundant provider-domain identifier from fulfillment outputs."""
+    if not _table_exists(engine, "provisioned_resources") or not _column_exists(
+        engine, "provisioned_resources", "domain_resource_ref"
+    ):
+        return
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE provisioned_resources_new (
+                provisioned_resource_id VARCHAR PRIMARY KEY,
+                capacity_reservation_id VARCHAR NOT NULL,
+                fulfillment_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(capacity_reservation_id) REFERENCES settlement_records(capacity_reservation_id) ON DELETE CASCADE
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO provisioned_resources_new (
+                provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                status, created_at, updated_at
+            )
+            SELECT provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                   status, created_at, updated_at
+            FROM provisioned_resources
+        """))
+        connection.execute(text("DROP TABLE provisioned_resources"))
+        connection.execute(text("ALTER TABLE provisioned_resources_new RENAME TO provisioned_resources"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_capacity_reservation_id ON provisioned_resources (capacity_reservation_id)"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_fulfillment_id ON provisioned_resources (fulfillment_id)"))
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -578,15 +818,23 @@ _MIGRATIONS: tuple[Migration, ...] = (
         _migrate_resource_pools_and_hosts_pool_id,
     ),
     Migration(
-        "20260718_001_drop_vm_leases_table",
-        _migrate_drop_vm_leases_table,
-    ),
-    Migration(
         "20260720_001_multidimensional_capacity",
         _migrate_multidimensional_capacity,
     ),
     Migration(
         "20260722_001_pools7_capacity_model_cutover",
         _migrate_capacity_model_cutover,
+    ),
+    Migration(
+        "20260724_001_legacy_vm_leases_to_fulfillment",
+        _migrate_legacy_vm_leases_to_fulfillment,
+    ),
+    Migration(
+        "20260724_002_drop_vm_leases_table",
+        _migrate_drop_vm_leases_table,
+    ),
+    Migration(
+        "20260725_001_remove_provisioned_resource_domain_ref",
+        _migrate_remove_provisioned_resource_domain_ref,
     ),
 )

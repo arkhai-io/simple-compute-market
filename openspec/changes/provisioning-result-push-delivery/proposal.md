@@ -27,7 +27,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- Hard-depends on `pools-7-storefront-fulfillment-cutover` durable Settlement Record, fulfillment result, and pull APIs.
+- Hard-depends on `pools-7-storefront-fulfillment-cutover` durable Settlement Record, fulfillment result, and pull APIs — including the `fulfillment.result.v1` envelope Section 8 defines, which this change reuses rather than redesigns.
+- Hard-depends on `add-storefront-principal-authentication` (proposed 2026-07-25) for the owner/site identity half of "operator-trusted owner/site credential bindings" — that change resolves *which storefront owns this record*; this change still separately owns *how provisioning authenticates itself back to that storefront* (the reverse-transport mechanism), which remains this change's own open decision.
 - Uses the many-to-many storefront/provisioner ownership model proven by `market-platform-compute-40-multi-domain-proof`, but Compute-40 does not block on push delivery.
 - May share one generic outbox/receiver transport with the existing capacity-release callback; event-specific state transitions remain capability-owned.
 

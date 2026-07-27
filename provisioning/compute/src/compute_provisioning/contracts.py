@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from market_fulfillment import VersionedEnvelope
+
 COMPUTE_PROVISIONING_CONTRACT_VERSION = "1.0"
 SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS = frozenset({1})
 
@@ -159,4 +161,59 @@ class LifecycleEvent(VersionedContractModel):
     event_kind: str = Field(min_length=1)
     payload: dict[str, Any]
     occurred_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment scheduling and acceptance.
+#
+# These wrap `kit/fulfillment`'s `PhysicalSettlementScheduler.schedule_resource`
+# and `FulfillmentOrchestrator`'s validate/begin/status/result surface —
+# domain-neutral scheduling and fulfillment behavior owned by the kit, mirrored
+# here as this service's versioned wire contract the same way every other
+# endpoint family in this file is. `contract_version` (via
+# `VersionedContractModel`) is this file's own wire-compatibility axis; it is
+# deliberately independent of `market_fulfillment`'s own
+# `VersionedEnvelope`/`schema_version` on `fulfillment_request` and the result
+# envelope, not collapsed into it.
+# ---------------------------------------------------------------------------
+
+
+class FulfillmentScheduleRequest(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    market: str = Field(min_length=1)
+    requirements: dict[str, Any] = Field(default_factory=dict)
+    resource_id: str | None = None
+
+
+class FulfillmentScheduleResponse(VersionedContractModel):
+    settlement_resource_id: str
+    pool_id: str
+    resource_kind: str
+    provider: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class FulfillmentRequestBody(VersionedContractModel):
+    capacity_reservation_id: str = Field(min_length=1)
+    market: str = Field(min_length=1)
+    fulfillment_request: VersionedEnvelope[Any]
+
+
+class FulfillmentAcceptanceResponse(VersionedContractModel):
+    fulfillment_id: str
+    capacity_reservation_id: str
+    state: str
+
+
+class FulfillmentStatusResponse(VersionedContractModel):
+    fulfillment_id: str
+    capacity_reservation_id: str
+    state: str
+    failure_reason: str | None = None
+    failure_message: str | None = None
+
+
+class FulfillmentValidationResponse(VersionedContractModel):
+    valid: bool
+    issues: list[dict[str, Any]]
 

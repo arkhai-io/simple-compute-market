@@ -10,6 +10,12 @@ import httpx
 from .contracts import (
     CredentialEnvelope,
     ExecutorActionEnvelope,
+    FulfillmentAcceptanceResponse,
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+    FulfillmentValidationResponse,
     JobAccepted,
     LeaseForceRelease,
     LeaseRegistration,
@@ -18,6 +24,7 @@ from .contracts import (
     LeaseView,
     ProvisioningJob,
 )
+from market_fulfillment import VersionedEnvelope
 
 
 class ComputeProvisioningError(Exception):
@@ -44,6 +51,10 @@ class ComputeProvisioningClientProtocol(Protocol):
     async def terminate_lease(self, capacity_reservation_id: str, request: LeaseTermination) -> LeaseView: ...
     async def retry_lease_release(self, capacity_reservation_id: str, request: LeaseRetryRelease) -> LeaseView: ...
     async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView: ...
+    async def schedule_resource(self, request: FulfillmentScheduleRequest) -> FulfillmentScheduleResponse: ...
+    async def begin_fulfillment(self, body: FulfillmentRequestBody) -> FulfillmentAcceptanceResponse: ...
+    async def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatusResponse: ...
+    async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]: ...
 
 
 class ComputeProvisioningClient:
@@ -133,3 +144,23 @@ class ComputeProvisioningClient:
 
     async def force_release_lease(self, capacity_reservation_id: str, request: LeaseForceRelease) -> LeaseView:
         return LeaseView.model_validate(await self._request("POST", f"/api/v1/contract/leases/{capacity_reservation_id}/force-release", request))
+
+    async def schedule_resource(self, request: FulfillmentScheduleRequest) -> FulfillmentScheduleResponse:
+        return FulfillmentScheduleResponse.model_validate(
+            await self._request("POST", "/fulfillment/schedule", request)
+        )
+
+    async def begin_fulfillment(self, body: FulfillmentRequestBody) -> FulfillmentAcceptanceResponse:
+        return FulfillmentAcceptanceResponse.model_validate(
+            await self._request("POST", "/fulfillment/begin", body)
+        )
+
+    async def get_fulfillment_status(self, fulfillment_id: str) -> FulfillmentStatusResponse:
+        return FulfillmentStatusResponse.model_validate(
+            await self._request("GET", f"/fulfillment/{fulfillment_id}/status")
+        )
+
+    async def get_fulfillment_result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]:
+        return VersionedEnvelope[dict[str, Any]].model_validate(
+            await self._request("GET", f"/fulfillment/{fulfillment_id}/result")
+        )

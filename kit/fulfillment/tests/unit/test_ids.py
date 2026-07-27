@@ -3,6 +3,7 @@
 import uuid
 
 from market_fulfillment import (
+    derive_provisioned_resource_id,
     new_capacity_reservation_id,
     new_fulfillment_id,
     new_provisioned_resource_id,
@@ -10,7 +11,7 @@ from market_fulfillment import (
     new_settlement_resource_id,
 )
 
-_FACTORIES = [
+_RANDOM_FACTORIES = [
     new_capacity_reservation_id,
     new_fulfillment_id,
     new_provisioned_resource_id,
@@ -20,7 +21,7 @@ _FACTORIES = [
 
 
 def test_every_factory_returns_a_parseable_uuid_string():
-    for factory in _FACTORIES:
+    for factory in _RANDOM_FACTORIES:
         value = factory()
         assert isinstance(value, str)
         parsed = uuid.UUID(value)
@@ -29,7 +30,7 @@ def test_every_factory_returns_a_parseable_uuid_string():
 
 
 def test_every_factory_is_globally_unique_across_calls():
-    for factory in _FACTORIES:
+    for factory in _RANDOM_FACTORIES:
         first = factory()
         second = factory()
         assert first != second
@@ -42,3 +43,19 @@ def test_close_in_time_ids_sort_close_together():
     # motivated choosing UUIDv7 over uuid4 (ids.py module docstring).
     ordered = [new_fulfillment_id() for _ in range(5)]
     assert ordered == sorted(ordered)
+
+
+def test_derived_provisioned_resource_id_is_stable_and_scoped():
+    first = derive_provisioned_resource_id(
+        identity_scope="fulfillment:f-1", provider_output_key="vm-1"
+    )
+    assert first == derive_provisioned_resource_id(
+        identity_scope="fulfillment:f-1", provider_output_key="vm-1"
+    )
+    assert first != derive_provisioned_resource_id(
+        identity_scope="fulfillment:f-2", provider_output_key="vm-1"
+    )
+    assert first != derive_provisioned_resource_id(
+        identity_scope="fulfillment:f-1", provider_output_key="vm-2"
+    )
+    assert uuid.UUID(first).version == 5

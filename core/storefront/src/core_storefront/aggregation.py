@@ -133,6 +133,7 @@ class AggregateCapacityClient:
         *,
         placement: PlacementPolicy | None = None,
         bus: CapacityEventBus | None = None,
+        reservation_sites: dict[str, str] | None = None,
     ) -> None:
         if not sites:
             raise ValueError("AggregateCapacityClient needs at least one site")
@@ -141,12 +142,29 @@ class AggregateCapacityClient:
         self._bus = bus or CapacityEventBus()
         # capacity_reservation_id → site name, learned at reserve time. A cache,
         # not a ledger: misses (process restart) fall back to asking
-        # every site, and the answer is re-learned.
-        self._reservation_sites: dict[str, str] = {}
+        # every site, and the answer is re-learned. Externally-owned when
+        # ``reservation_sites`` is supplied, so a sibling aggregator over a
+        # different per-site client (e.g. the compute-provisioning
+        # fulfillment surface) can share the exact same learned mapping
+        # instead of maintaining an independent copy — see
+        # ``market_storefront/services/capacity_client.py``.
+        self._reservation_sites: dict[str, str] = (
+            reservation_sites if reservation_sites is not None else {}
+        )
 
     @property
     def site_names(self) -> list[str]:
         return list(self._sites)
+
+    @property
+    def reservation_sites(self) -> dict[str, str]:
+        """The learned ``capacity_reservation_id`` → site name mapping.
+
+        Exposed so a sibling aggregator over a different per-site client
+        can be constructed with this exact dict instance (see
+        ``reservation_sites=`` on ``__init__``), not a copy.
+        """
+        return self._reservation_sites
 
     def site(self, name: str) -> CapacityClient:
         return self._sites[name]
