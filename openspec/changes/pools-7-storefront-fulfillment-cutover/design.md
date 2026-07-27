@@ -3598,46 +3598,6 @@ new one. If no deterministic fulfillment-convergence control exists, add a
 mock-profile/admin test control rather than sleeping against the 30-second
 background interval.
 
-### Accepted e2e design decisions for the composed VM teardown path
-
-The detailed full-deal teardown scenario will use **explicit early termination**
-as its trigger rather than lease expiration. The timing mechanics are similar, but
-explicit termination makes external interference and ownership clearer: an
-external actor requests termination, lease lifecycle records `releasing`, and
-fulfillment convergence owns provider teardown. Expiration-entry coverage remains
-valuable as a separate, smaller assertion that expiration enters the same durable
-release path; it is not the trigger for the canonical composed teardown scenario.
-
-The e2e environment will expose **mock/admin one-cycle controls** that mirror the
-existing test design philosophy. At minimum the test must be able to advance the
-lease lifecycle and fulfillment convergence independently. These controls must
-invoke the same application handlers used by the real watchdogs rather than
-implement alternate behavior. They may expose additional diagnostic state when
-that materially improves test clarity or customer-issue debugging. Such controls
-must remain explicitly admin/test-profile surfaces and must not weaken normal
-production authorization or lifecycle ownership.
-
-Correctness assertions will use observable durable service state. Admin APIs may
-step workers and expose diagnostics, but the test must not treat an internal
-provider job id as the lease-facing release identifier. The composed scenario
-must prove all normal outcomes of a complete fulfillment lifecycle:
-
-1. explicit termination enters reservation `releasing`;
-2. fulfillment enters `teardown_dispatch_pending`;
-3. fulfillment enters `tearing_down`;
-4. capacity remains held through pending, running, and retryable failure states;
-5. provider completion converges fulfillment to `torn_down`;
-6. lease lifecycle converges the reservation to `released`;
-7. capacity becomes available and can be reserved again;
-8. storefront state eventually observes the release and reaches its expected
-   terminal state.
-
-The test should preserve staged phases, but phase names and assertions must be
-expressed in terms of durable lifecycle states rather than the former direct
-`vm_remove` Ansible job. Planning must inventory the current admin/test-control
-surface and determine the smallest additions needed to observe and step this
-sequence clearly.
-
 ### Teardown-submission error taxonomy example
 
 The desired distinction is illustrated by the following behavior, not a required
@@ -3685,98 +3645,43 @@ needed at all.
 Section 11 must not begin until the correction tasks appended to `tasks.md` are
 implemented, validated, and promoted into permanent documentation.
 
-## Section 10 e2e planning resolution (2026-07-27)
+## Section 10 rebuilt design-promotion record (2026-07-27)
 
-### Existing controls and smallest required addition
+Supersedes the "Section 10 completed design-promotion record" above and the
+review findings immediately preceding this entry. Written after tasks
+10.9–10.13 and 10.15 were independently verified against the actual code and
+test suite (the prior "implemented" note for 10.9–10.13 was written without
+running tests at all, blocked by an unavailable dependency in that review
+environment) — three of the five were found not to meet their own stated
+acceptance criteria and were completed properly rather than left as
+inaccurate `[x]` marks. See `tasks.md`'s "Section 10 correction
+implementation, verified and completed" entry for what was found wrong and
+fixed in each case.
 
-Static inventory establishes that the VM provisioning service already exposes an
-authenticated one-cycle lease lifecycle endpoint (`POST
-/api/v1/system/check-leases`) plus lease-watchdog pause/resume controls. Its mock
-profile separately exposes programmable provider-operation rules, resume gates,
-and provider-job wait/drain endpoints. Those controls remain valid for advancing
-lease policy and controlling the internal provider operation.
+| Decision | Destination | Status |
+| --- | --- | --- |
+| `begin_fulfillment_teardown` whole-fulfillment entrypoint, idempotent across already-tearing-down states, HTTP exposure | `openspec/specs/fulfillment/spec.md` | Unchanged from the original promotion; verified still accurate |
+| Narrow `FulfillmentTeardownPort`/`DeferredFulfillmentTeardownPort` composition-root-bound port replacing the module-global lazy accessor | `openspec/specs/physical-provisioning/spec.md`, "VM release delegates to durable fulfillment teardown" | Supersedes the original promotion's row calling the module-global lazy accessor an accepted technique — that row is retracted, not merely amended |
+| Kind-routed `ReleaseJobPort`/`ReleaseJobDispatcher`; `"direct-release"` sentinel is per-executor, not global | `openspec/specs/physical-provisioning/spec.md`, "Site-backed release lifecycle" | Unchanged from the original promotion; verified still accurate |
+| Unexpected teardown-submission failures propagate to `release_submit_error` undiminished; known idempotent outcomes (already-tearing-down) never reach an exception at all | `openspec/specs/physical-provisioning/spec.md`, "VM release delegates to durable fulfillment teardown" scenario | Verified with the four tests task 10.10 required (missing aggregate, invalid aggregate state, unavailable teardown port, unexpected repository failure); the existing bare-propagation code needed no change, only the tests proving it |
+| `begin_fulfillment_teardown` client method on `ComputeProvisioningClient`/`ComputeProvisioningClientProtocol` | `openspec/specs/fulfillment/spec.md` | The client method itself was already correct; its test rebuilt (task 10.11) to exercise the real endpoint and real aggregate rather than a monkeypatched orchestrator, plus 404/409 error-mapping coverage that hadn't existed |
+| One authoritative `lease_state_for_reservation_state` projection, consumed by both lease-facing controllers | Code contract (`compute_provisioning.contracts`); no `compute-provisioning-contract/spec.md` prose needed — confirmed that spec doesn't document `LeaseState`'s member set | Actually completed (task 10.12) — `compute_contract_controller.py` had imported the shared function but kept its own separate, un-migrated dict; removed. The e2e `DealLease` helper's own partial mapping is explicitly deferred with task 10.14, not folded into this row |
+| Lease release and fulfillment teardown as separate retry-owning state machines; operator lease retry re-observes rather than duplicates teardown | `openspec/specs/physical-provisioning/spec.md`, "Lease release and fulfillment teardown have separate retry ownership" | Verified accurate as written (task 10.13) |
+| Migration-produced backfill reaches the current teardown path through the real entrypoint, not a substituted row | `openspec/specs/fulfillment/spec.md`'s existing backfilled/native equivalence language ("VM lease migration uses current provider contracts") | New (task 10.15); no additional spec prose needed — the existing requirement already describes the invariant the new test proves |
+| `LeaseState` enum completeness (`"leased"`, `"provisioning_failed"`, `"force_released"`) and the URL-prefix fix on `ComputeProvisioningClient`'s pre-existing fulfillment methods | Code-level fixes from the original Section 10 pass, confirmed still correct on re-verification | Unchanged from the original promotion |
+| VM full-deal e2e teardown phases (stale Ansible-job/`vm_remove` assumptions, no deterministic convergence control) | No permanent-spec impact — e2e implementation detail | Explicitly deferred (task 10.14, repository-owner direction, 2026-07-27): Section 10 completes without executing the full e2e suite; this work, and the `DealLease` helper cleanup that rides with it, resume in the final POOLS-7 review loop after Section 11 |
 
-`FulfillmentConvergenceWatchdog` already owns one production `run_cycle()` method
-that invokes requeue, create dispatch/convergence, teardown dispatch/convergence,
-and diagnostics in the production order. It is composed as a singleton, but no
-HTTP or client boundary currently invokes one cycle deterministically. The
-smallest coherent addition is therefore an authenticated admin endpoint and
-client wrapper over that exact singleton method. A separate pause/resume gate is
-not required for the accepted staged test because no assertion will depend on the
-background interval: each important transition is driven by an explicit cycle,
-and provider completion remains held by the existing mock rule.
+Two lightweight consolidations made while rebuilding this record, neither a
+design change: (1) the "Site-backed release lifecycle" paragraph added in the
+original Section 10 promotion overlapped with task 10.13's newer, more
+formal "VM release delegates to durable fulfillment teardown" requirement —
+trimmed the one duplicated sentence and cross-referenced rather than
+restructuring either; (2) confirmed no other permanent-documentation
+destination in this table needs a corresponding correction beyond what's
+listed — the discrepancies the review found were implementation/test gaps,
+not documentation-vs-code mismatches, except where noted above.
 
-The endpoint may return bounded lifecycle counts and recovery diagnostics useful
-for e2e clarity and customer debugging. It must not expose prepared provider
-payloads, credentials, or unbounded row data. Manual invocation and timer-driven
-invocation must execute identical convergence semantics.
-
-### Canonical trigger and state oracles
-
-The detailed composed scenario uses storefront-driven explicit early
-termination/interruption. The current storefront admin interruption API is the
-first candidate because it already truncates the provisioning lease through the
-normal control plane; planning must verify that the full-deal listing is eligible
-for interruption and amend the fixture rather than bypassing storefront policy.
-Lease expiration remains a separate, smaller test proving that expiration enters
-the same reservation `releasing` path.
-
-The scenario records and observes identifiers according to their authority:
-
-- `fulfillment_id` is the lease-facing durable teardown tracking identifier;
-- an internal provider/Ansible job id is used only by the mock-provider gate and
-  is never passed to lease or fulfillment status methods;
-- reservation state is observed through the provisioning lease/capacity
-  contract;
-- fulfillment state is observed through the compute-provisioning fulfillment
-  client;
-- storefront terminal state is observed through the storefront's durable deal,
-  escrow, or listing API selected during implementation inventory;
-- capacity reusability is proven by a second public reservation attempt, followed
-  by explicit cleanup.
-
-### Required success and retry sequence
-
-The canonical staged sequence is:
-
-1. request explicit termination through the storefront control plane;
-2. invoke one lease lifecycle cycle;
-3. observe reservation `releasing`, fulfillment
-   `teardown_dispatch_pending`, and capacity still held;
-4. invoke one fulfillment convergence cycle;
-5. observe fulfillment `tearing_down` and capacity still held;
-6. release the provider mock gate and invoke convergence until one deterministic
-   cycle observes provider success;
-7. observe fulfillment `torn_down`;
-8. invoke one lease lifecycle cycle;
-9. observe reservation `released`, storefront terminal convergence, capacity
-   availability, and successful re-reservation.
-
-A companion failure branch drives provider teardown to `teardown_failed`, proves
-reservation/capacity remain held, observes the failed row in bounded admin
-recovery diagnostics, then drives requeue and successful retry on the same
-`fulfillment_id`. This e2e branch proves composition; detailed retry permutations
-remain in watchdog unit/integration tests.
-
-### Documentation and test ownership
-
-Permanent fulfillment documentation owns convergence equivalence between timer
-and manual cycles, retry/requeue behavior, and native/backfilled aggregate
-semantics. Permanent physical-provisioning documentation owns trigger convergence,
-release tracking, and the capacity-hold-until-`torn_down` rule. VM storefront
-fulfillment documentation owns the present termination request flow when that
-behavior is not already stated. Admin endpoint paths, mock rules, phase numbering,
-and e2e helper structure remain implementation/test documentation and are not
-promoted into normative subsystem specifications.
-
-The planning checklist is tasks 10.14.1–10.14.12. No parent or subtask may be
-marked complete when its stated test or cross-file acceptance criterion remains
-unmet.
-
-### Section 10 e2e implementation findings (2026-07-27)
-
-The implementation inventory confirmed that the VM provisioning system controller already provides authenticated one-cycle lease servicing at `POST /api/v1/system/check-leases`, lease-watchdog pause/resume, and mock-profile provider gates under `/test/*`. `FulfillmentConvergenceWatchdog.run_cycle()` was independently callable from the composed singleton but had no operator HTTP or client surface. The implemented control therefore adds `POST /api/v1/system/fulfillment-convergence/run-cycle` at the same authenticated system boundary. Timer-driven and manual convergence execute the same production handler. Its response is limited to aggregate before/after recovery diagnostics and does not expose prepared operation envelopes, provider payloads, or credentials.
-
-The full-deal scenarios now model external interference through the storefront interruption control plane instead of mutating `lease_end_utc` directly. The lease-facing release identifier is named and observed as `fulfillment_id`; provider queue job identities remain internal to the fulfillment provider adapter. The detailed path advances lease servicing and fulfillment convergence independently and asserts capacity remains held until fulfillment is `torn_down` and the subsequent lease cycle records `released`.
-
-The storefront `fulfillment.capacity_released` stage event is the current durable storefront-side release oracle used by the e2e scenario. Successful re-reservation of the same resource provides the final capacity-reuse assertion. Failure/retry composition and the separate expiration-entry scenario remain open acceptance work; code presence for the successful path does not complete those tasks.
+**Section 10 is complete under this record.** Section 11 may begin. The one
+carried-forward obligation is task 10.14, tracked explicitly rather than
+folded into "done" — deferred by direction, not discovered to be
+unnecessary.

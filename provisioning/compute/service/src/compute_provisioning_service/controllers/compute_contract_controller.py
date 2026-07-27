@@ -31,25 +31,6 @@ from compute_provisioning_service.services.compute_contract_service import (
 
 router = APIRouter(tags=["compute-contract"])
 
-# Translates market_site's raw ReservationState vocabulary (reserved,
-# provisioning, leased, ...) into this contract's LeaseState vocabulary.
-# Mirrors vm_provisioning_adapter.controllers.leases_controller._LEASE_STATUS
-# -- kept as a second copy rather than a shared import because the two
-# controllers sit in different packages and this mapping is small and
-# stable; if it drifts, the regression test in
-# tests/integration/test_compute_contract_api.py catches it.
-_LEASE_STATUS = {
-    "reserved": "pending",
-    "provisioning": "pending",
-    "leased": "active",
-    "releasing": "releasing",
-    "released": "released",
-    "release_failed": "release_failed",
-    "unmanaged": "unmanaged",
-    "provisioning_failed": "provisioning_failed",
-    "force_released": "force_released",
-}
-
 
 def _lease_view(reservation: dict[str, Any]) -> LeaseView:
     def parsed(value: Any) -> datetime | None:
@@ -73,7 +54,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
         lease_start_utc=parsed(reservation.get("lease_start_utc")),
         lease_end_utc=parsed(reservation.get("lease_end_utc")),
         create_job_id=reservation.get("create_job_id"),
-        status=_LEASE_STATUS.get(raw_state, raw_state),
+        status=lease_state_for_reservation_state(raw_state).value,
         release_job_id=reservation.get("release_job_id"),
         failure_reason=reservation.get("failure_reason"),
         failure_message=reservation.get("failure_message"),

@@ -65,7 +65,7 @@ class VmProvisioningRuntime:
     def release_job_port(self) -> VmFulfillmentReleaseJobPort:
         return VmFulfillmentReleaseJobPort(self.teardown_port)
 
-    def system_service(self, *, lease_lifecycle_service, fulfillment_convergence_watchdog):
+    def system_service(self, *, lease_lifecycle_service):
         from vm_provisioning_adapter.services.system_service import SystemService
 
         return SystemService(
@@ -75,7 +75,6 @@ class VmProvisioningRuntime:
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
-            fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
         )
 
 

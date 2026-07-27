@@ -267,29 +267,109 @@ async def test_contract_lease_view_serializes_every_reachable_reservation_state(
 
 
 @pytest.mark.asyncio
-async def test_begin_fulfillment_teardown_client_calls_endpoint_idempotently(
-    client_and_queue, monkeypatch
-):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
+def _create_fulfillment_aggregate(
+    capacity_reservation_id: str,
+    *,
+    fulfillment_id: str,
+    state: str = "active",
+) -> None:
+    """Persist a real `SettlementRecord` for the client-contract tests below.
 
-    service = _container_module.resolved_fulfillment_service
-    begin = AsyncMock(return_value=SimpleNamespace(
-        fulfillment_id="fulfillment-client-teardown",
-        capacity_reservation_id="reservation-client-teardown",
-        state="teardown_dispatch_pending",
-    ))
-    monkeypatch.setattr(service, "begin_fulfillment_teardown", begin)
+    POOLS-7 §10.11 review finding: the original test only monkeypatched
+    `FulfillmentOrchestrator.begin_fulfillment_teardown` and never
+    exercised the real aggregate at all, so it could not have caught a
+    routing, serialization, or state-machine regression in the endpoint
+    itself -- only that the client reaches *some* handler. This helper
+    lets the tests below drive the real orchestrator instead.
+    """
+
+    from market_fulfillment import SettlementRecord, SettlementRecordState
+
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id=capacity_reservation_id,
+                fulfillment_id=fulfillment_id,
+                market="vms",
+                scheduling_requirements={"resource_kind": "vm"},
+                settlement_resource_id="kvm1",
+                pool_id="pool-1",
+                provider="ansible",
+                resource_attributes={"vm_host": "kvm1"},
+                fulfillment_request={
+                    "kind": "vm.fulfillment.request",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                prepared_teardown_operation={
+                    "kind": "vm.ansible.teardown.v1",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                provider_metadata={"current_job_id": "job-1"},
+                state=getattr(SettlementRecordState, state).value,
+            )
+        )
+        db.commit()
+
+
+async def test_begin_fulfillment_teardown_client_drives_the_real_aggregate_idempotently(
+    client_and_queue,
+):
+    reservation = _leased_vm_reservation()
+    fulfillment_id = "fulfillment-client-teardown"
+    _create_fulfillment_aggregate(
+        reservation["capacity_reservation_id"], fulfillment_id=fulfillment_id,
+    )
 
     async with ComputeProvisioningClient(
         "http://test", transport=ASGITransport(app=app)
     ) as client:
-        first = await client.begin_fulfillment_teardown("fulfillment-client-teardown")
-        repeated = await client.begin_fulfillment_teardown("fulfillment-client-teardown")
+        first = await client.begin_fulfillment_teardown(fulfillment_id)
+        repeated = await client.begin_fulfillment_teardown(fulfillment_id)
 
-    assert first == repeated
+    assert first.fulfillment_id == fulfillment_id
     assert first.state == "teardown_dispatch_pending"
-    assert begin.await_count == 2
+    assert repeated.state == "teardown_dispatch_pending"
+
+    from market_fulfillment import SettlementRecord
+
+    with _container_module.resolved_session_factory() as db:
+        record = db.get(SettlementRecord, reservation["capacity_reservation_id"])
+        assert record.state == "teardown_dispatch_pending"
+
+
+async def test_begin_fulfillment_teardown_client_maps_unknown_fulfillment_to_404(
+    client_and_queue,
+):
+    async with ComputeProvisioningClient(
+        "http://test", transport=ASGITransport(app=app)
+    ) as client:
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.begin_fulfillment_teardown("no-such-fulfillment")
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_409(
+    client_and_queue,
+):
+    reservation = _leased_vm_reservation()
+    fulfillment_id = "fulfillment-client-conflict"
+    _create_fulfillment_aggregate(
+        reservation["capacity_reservation_id"],
+        fulfillment_id=fulfillment_id,
+        state="failed",
+    )
+
+    async with ComputeProvisioningClient(
+        "http://test", transport=ASGITransport(app=app)
+    ) as client:
+        with pytest.raises(ComputeProvisioningError) as exc_info:
+            await client.begin_fulfillment_teardown(fulfillment_id)
+
+    assert exc_info.value.status_code == 409
 
 
 async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heals(
