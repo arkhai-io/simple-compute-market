@@ -254,3 +254,9 @@ Lease lifecycle SHALL own the reservation's `releasing` and terminal release sta
 - **WHEN** fulfillment convergence requeues teardown and an operator retries lease release
 - **THEN** both paths SHALL continue using the same `fulfillment_id`
 - **AND** capacity SHALL remain unavailable until that aggregate reaches `torn_down`
+
+### Requirement: Provisioning shape comes from committed capacity
+
+A fulfillment provider MUST derive reservation-governed resource shape from the committed reservation dimensions carried by the scheduled settlement resource. It MUST NOT use caller-supplied fulfillment fields as fallback values for that shape.
+
+For an Ansible-backed VM pool, provider configuration identifies both the playbook and a registered requirement delegate. The adapter resolves the delegate through an allowlisted registry. The delegate validates that the committed canonical VM dimensions are representable by the playbook and translates them into the playbook's variable names, units, and derived values. Resource-pool configuration MUST NOT load arbitrary Python import paths.

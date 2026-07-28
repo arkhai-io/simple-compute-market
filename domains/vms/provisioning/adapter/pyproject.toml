@@ -31,10 +31,3 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = ["pytest>=9.0.2"]
-
-[tool.uv.sources]
-arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
-arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../client", editable = true }
-arkhai-vms = { path = "../../domain", editable = true }
-arkhai-bare-metal = { path = "../../../bare_metal", editable = true }

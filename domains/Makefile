@@ -2,9 +2,15 @@
 	dist-provisioning-adapters dist-apicredits-domain dist-apicredits-service \
 	dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app \
 	dist-apicredits-buyer dist-buyer \
-	test-provisioning-iac test-storefront test-vms-buyer test-apicredits test-apicredits-middleware
+	test-provisioning-iac test-provisioning-adapter test-storefront test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= ../.dist
+
+
+dist: dist-vms dist-bare-metal dist-storefront dist-provisioning-operator-client \
+	dist-provisioning-adapters dist-apicredits-domain dist-apicredits-service \
+	dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app \
+	dist-apicredits-buyer dist-buyer ## Build every domains-scoped wheel
 
 # ---------------------------------------------------------------------------
 # Dist -- leaf wheel-build recipes for domains/-scoped packages, mirroring
@@ -107,3 +113,7 @@ test-apicredits: ## Full apicredits domain test suite
 # Compatibility alias for the cross-language middleware parity suite.
 test-apicredits-middleware:
 	cd apicredits && $(MAKE) test-middleware
+
+
+test-provisioning-adapter: ## VM provisioning adapter tests against built wheels
+	cd vms/provisioning/adapter && $(MAKE) test DIST_DIR=$(abspath $(DIST_DIR))

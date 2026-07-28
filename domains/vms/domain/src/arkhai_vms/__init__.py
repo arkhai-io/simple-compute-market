@@ -6,7 +6,6 @@ from arkhai_vms.compute_requirements import (
     GPU_COUNT_DIMENSION,
     RAM_GB_DIMENSION,
     VCPU_COUNT_DIMENSION,
-    vm_fulfillment_fields_from_dimensions,
 )
 from arkhai_vms.provision_terms import (
     VM_PROVISION_KIND,
@@ -47,5 +46,4 @@ __all__ = [
     "provision_payload",
     "provision_ssh_public_key",
     "provision_start_utc",
-    "vm_fulfillment_fields_from_dimensions",
 ]

@@ -82,12 +82,10 @@ class TestOpaqueReservationBoundary:
                 "accounting, not durable storefront-facing reservation identity"
             )
 
-    async def test_full_obligation_fulfillment_never_needs_resource_id_or_vm_host(
+    async def test_commit_accepts_the_opaque_reservation_response_without_placement_fields(
         self, site_app,
     ):
-        """The real regression test: reserve, then commit, using only what
-        the wire contract actually returns -- no resource_id, no vm_host --
-        exactly the shape `fulfill_vm_obligation` now works under."""
+        """Commit accepts the opaque reservation response without placement fields."""
         app, ledger = site_app
         client = _client(app)
 

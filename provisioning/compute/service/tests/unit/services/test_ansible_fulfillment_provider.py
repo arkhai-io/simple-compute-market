@@ -50,7 +50,7 @@ def _resource(**overrides) -> SettlementResource:
 
 
 def _pool_config(**overrides) -> dict:
-    values = {"playbook_path": "playbooks/vm-operations.yaml", "extra_vars": {}}
+    values = {"playbook_path": "playbooks/vm-operations.yaml", "requirement_delegate": "vm_management_v1", "extra_vars": {}}
     values.update(overrides)
     return values
 
@@ -379,3 +379,23 @@ class TestPreparedEnvelope:
         contract = job_service.submit.await_args.kwargs["contract"]
         assert contract.deal_ref == {}
         assert contract.idempotency_key == "alloc-1:create"
+
+
+class TestRequirementDelegateRegistry:
+    def test_unknown_delegate_is_rejected(self, provider):
+        with pytest.raises(ProviderConfigInvalidError, match="unknown Ansible requirement delegate"):
+            provider.prepare_create(
+                capacity_reservation_id="alloc-1",
+                request=_request(),
+                resource=_resource(dimensions={"ram_gb": 4}),
+                pool_config=_pool_config(requirement_delegate="not_registered"),
+            )
+
+    def test_invalid_dimension_is_rejected_by_delegate(self, provider):
+        with pytest.raises(ProviderConfigInvalidError, match="ram_gb"):
+            provider.prepare_create(
+                capacity_reservation_id="alloc-1",
+                request=_request(),
+                resource=_resource(dimensions={"ram_gb": "4.5"}),
+                pool_config=_pool_config(),
+            )

@@ -800,6 +800,15 @@ def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
         connection.execute(text("CREATE INDEX ix_provisioned_resources_capacity_reservation_id ON provisioned_resources (capacity_reservation_id)"))
         connection.execute(text("CREATE INDEX ix_provisioned_resources_fulfillment_id ON provisioned_resources (fulfillment_id)"))
 
+
+def _migrate_ansible_pool_requirement_delegate(engine: Engine) -> None:
+    _add_column_if_missing(
+        engine,
+        "ansible_pool_configs",
+        "requirement_delegate",
+        "VARCHAR NOT NULL DEFAULT 'vm_management_v1'",
+    )
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -836,5 +845,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260725_001_remove_provisioned_resource_domain_ref",
         _migrate_remove_provisioned_resource_domain_ref,
+    ),
+    Migration(
+        "20260728_001_ansible_pool_requirement_delegate",
+        _migrate_ansible_pool_requirement_delegate,
     ),
 )

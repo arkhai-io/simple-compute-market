@@ -394,6 +394,18 @@ dev = [
 ]
 
 [[package]]
+name = "arkhai-vms"
+version = "0.2.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-core" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_vms-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms-provisioning-adapter"
 version = "0.1.0"
 source = { editable = "../../../domains/vms/provisioning/adapter" }
@@ -403,6 +415,7 @@ dependencies = [
     { name = "arkhai-compute-provisioning-service" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-vms" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "cryptography" },
     { name = "dependency-injector" },
@@ -412,12 +425,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-bare-metal", editable = "../../../domains/bare_metal" },
-    { name = "arkhai-compute-provisioning", editable = "../" },
-    { name = "arkhai-compute-provisioning-service", editable = "." },
+    { name = "arkhai-bare-metal", specifier = ">=0.2.0" },
+    { name = "arkhai-compute-provisioning", specifier = ">=0.5.0" },
+    { name = "arkhai-compute-provisioning-service", specifier = ">=0.1.0" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
-    { name = "arkhai-vms-provisioning-operator-client", editable = "../../../domains/vms/provisioning/client" },
+    { name = "arkhai-vms", specifier = ">=0.2.0" },
+    { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.3.0" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "dependency-injector", specifier = ">=4.41.0" },
     { name = "pydantic", specifier = ">=2.7" },

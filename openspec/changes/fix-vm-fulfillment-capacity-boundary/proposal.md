@@ -11,10 +11,13 @@ A fourth reviewed item (durable teardown lacking a current full-deal e2e proof) 
 - Stop persisting the literal string `"None"` as `settlement_resource_id` when a reservation response omits `resource_id`, before `schedule_resource()` has run and established the real value.
 - Document, at the code sites this change touches, why `resource_id`-only reservation lookup (no `capacity_reservation_id`) exists with no current caller, and what future caller shape would use it — see Non-Goals and `design.md`.
 - Derive `VmFulfillmentRequirements`' shape fields (`vm_gpu_count`, `gpu_provisioned`, `vm_vcpus`, `vm_ram`, `vm_disk_size`) from the reservation's own committed `CapacityReservationDebit.dimensions` at fulfillment-request construction time, instead of the storefront re-transmitting a separately-computed copy that is never authoritative and can only ever redundantly restate what the reservation already carries.
-- Share VM compute-requirement field definitions between the storefront and provisioning adapter through `arkhai_vms` (already a dependency of both), rather than each side maintaining an independently-named vocabulary for the same dimensions.
-- Fix the corrupted shell line in `vm-management/tasks/vm-create.yml`'s GPU-attachment-discovery task (and its identical, unreferenced copy in `roles/vm-management/backup/original-main.yml`).
+- Keep canonical VM reservation dimensions in `arkhai_vms`, while moving playbook-specific names, unit conversions, representability checks, and derived variables behind a registered requirement delegate selected by resource-pool provider configuration alongside the playbook.
+- Resolve requirement delegates through an explicit adapter-owned registry; resource-pool configuration does not load arbitrary Python import paths.
+- Fix the corrupted shell line in `vm-management/tasks/vm-create.yml`'s GPU-attachment-discovery task and delete the unreferenced `roles/vm-management/backup/original-main.yml` duplicate after confirming it has no consumer.
 - Add a reusable shell-logic test harness (fake-binary `PATH` shimming + real `bash` execution) to `domains/vms/provisioning/iac/tests`, since the existing test file only asserts substrings against YAML text and would not have caught this class of bug.
-- Add integration coverage that exercises the real `RemoteCapacityClient` → `kit/site` HTTP boundary end to end for VM obligation fulfillment, rather than only in-process fakes that could mask a wire-contract mismatch the way this one was masked.
+- Add integration coverage that exercises the real `RemoteCapacityClient` → `kit/site` HTTP boundary across reserve, commit, scheduling, and `begin_fulfillment()`, rather than stopping at commit or using in-process fakes that could mask a wire-contract mismatch.
+- Consolidate root distribution ownership so the root invokes the aggregate domain distribution target and `domains/Makefile` owns domain artifacts and their test entry points or explicit exemptions.
+- Remove relative editable internal sources from the VM provisioning adapter and install its internal dependencies from `.dist` wheels through the repository's `reinit` pattern.
 
 ## Capabilities
 
