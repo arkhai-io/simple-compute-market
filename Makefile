@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: test-domain-dist-reinit review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: test-vm-capacity-boundary  test-domain-dist-reinit review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -105,7 +105,7 @@ dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-test: test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-kits
+test: test-core test-provisioning test-provisioning-iac test-domain-dist-reinit test-registry test-storefront test-vms-buyer test-apicredits test-kits test-vm-capacity-boundary
 
 test-core:
 	cd core && make test
@@ -417,6 +417,12 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	echo "Creating $$OUTFILE ..."; \
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
+
+test-vm-capacity-boundary: ## Run the storefront-owned cross-service capacity/fulfillment boundary test
+	cd provisioning/compute/service && \
+	PYTHONPATH="$(CURDIR)/core/storefront/src:$(CURDIR)/domains/vms/storefront/src" \
+	uv run --find-links ../../../.dist pytest \
+	../../../domains/vms/storefront/tests/cross_service/test_capacity_fulfillment_boundary.py -v
 
 test-domain-dist-reinit: dist-clean dist ## Prove the VM adapter installs and tests only from freshly built .dist wheels.
 	cd domains/vms/provisioning/adapter && $(MAKE) test DIST_DIR=$(DIST_DIR)

@@ -49,21 +49,21 @@
 
 ## 6. Permanent documentation and closeout
 
-- [ ] 6.1 Update `openspec/specs/site-capacity/spec.md` to state that committed reservation dimensions are the authoritative admitted shape exposed to scheduling and that callers cannot replace that shape during fulfillment.
-- [ ] 6.2 Update `openspec/specs/physical-provisioning/spec.md` to define the requirement-delegate boundary: a resource pool selects a registered delegate and playbook; the delegate validates compatibility and translates canonical dimensions into provider-specific inputs; arbitrary class import paths are forbidden; committed dimensions have strict precedence over caller fields.
-- [ ] 6.3 Update the appropriate permanent resource-pool/provider-configuration specification to document the new delegate identifier field, registry validation, snapshot behavior, and failure semantics. If no existing subsystem specification owns provider configuration, identify and amend that ownership explicitly before implementation closeout rather than placing the rule only in `ARCHITECTURE.md`.
-- [ ] 6.4 Amend `docs/development/ARCHITECTURE.md` only if implementation reveals a repository-wide rule not already covered there. The expected package-specific delegate mechanics belong in subsystem specifications, not the repository-wide architecture document.
-- [ ] 6.5 Remove temporary, migration-oriented, speculative, and change-history comments from production code. Production comments describe current invariants and may reference only stable permanent documentation.
-- [ ] 6.6 Complete the design-promotion record below with exact headings after promotion and verify production code contains no `openspec/changes` references.
-- [ ] 6.7 Update all task checkboxes to reflect actual implementation and validation status; preserve already-completed work and amend tasks whose delivered behavior changed during review.
+- [x] 6.1 Update `openspec/specs/site-capacity/spec.md` to state that committed reservation dimensions are the authoritative admitted shape exposed to scheduling and that callers cannot replace that shape during fulfillment.
+- [x] 6.2 Update `openspec/specs/physical-provisioning/spec.md` to define the requirement-delegate boundary: a resource pool selects a registered delegate and playbook; the delegate validates compatibility and translates canonical dimensions into provider-specific inputs; arbitrary class import paths are forbidden; committed dimensions have strict precedence over caller fields.
+- [x] 6.3 Update the appropriate permanent resource-pool/provider-configuration specification to document the new delegate identifier field, registry validation, snapshot behavior, and failure semantics. If no existing subsystem specification owns provider configuration, identify and amend that ownership explicitly before implementation closeout rather than placing the rule only in `ARCHITECTURE.md`.
+- [x] 6.4 Amend `docs/development/ARCHITECTURE.md` only if implementation reveals a repository-wide rule not already covered there. The expected package-specific delegate mechanics belong in subsystem specifications, not the repository-wide architecture document. **No amendment required:** existing wheel-consumption and package-boundary guidance already covers the repository-wide concerns; delegate mechanics are documented in subsystem specifications.
+- [x] 6.5 Remove temporary, migration-oriented, speculative, and change-history comments from production code. Production comments describe current invariants and may reference only stable permanent documentation. **Verified:** the new delegate implementation uses present-tense contract documentation and contains no active-change references or speculative unit commentary.
+- [x] 6.6 Complete the design-promotion record below with exact headings after promotion and verify production code contains no `openspec/changes` references. **Verified:** repository production sources contain no reference to `openspec/changes/fix-vm-fulfillment-capacity-boundary`.
+- [x] 6.7 Update all task checkboxes to reflect actual implementation and validation status; preserve already-completed work and amend tasks whose delivered behavior changed during review.
 
 ### Design-promotion record
 
 | Material decision | Permanent documentation destination |
 |---|---|
-| Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md` — exact heading to be recorded in 6.6 |
-| Physical providers translate canonical dimensions through a pool-selected registered requirement delegate | `openspec/specs/physical-provisioning/spec.md` — exact heading to be recorded in 6.6 |
-| Delegate identifier, registry validation, and provider-config snapshot semantics | Owning resource-pool/provider-configuration subsystem spec — exact file and heading to be recorded in 6.3/6.6 |
+| Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md` — “Committed dimensions remain authoritative through scheduling” |
+| Physical providers translate canonical dimensions through a pool-selected registered requirement delegate | `openspec/specs/physical-provisioning/spec.md` — “Provisioning shape comes from committed capacity” and “Ansible fulfillment adapter” |
+| Delegate identifier, registry validation, and provider-config snapshot semantics | `openspec/specs/resource-pool-management/spec.md` — “Registered requirement delegates” |
 | Internal packages are consumed from `.dist` wheels rather than relative editable sibling paths | Existing `docs/development/ARCHITECTURE.md` packaging/dependency section; amend only if the current text is insufficient |
 | Root build composition delegates domain artifact ownership to `domains/Makefile` | Existing repository build guidance in `AGENTS.md`/`ARCHITECTURE.md`; no new permanent rule unless implementation finds a gap |
 

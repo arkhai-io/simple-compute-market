@@ -91,4 +91,5 @@ The following corrections were accepted during code review and are part of this 
 |---|---|
 | Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md`, “Committed dimensions remain authoritative through scheduling” |
 | Providers derive shape from scheduled reservation dimensions rather than caller retransmission | `openspec/specs/physical-provisioning/spec.md`, “Provisioning shape comes from committed capacity” |
-| Ansible pools select an allowlisted requirement delegate alongside the playbook | `openspec/specs/physical-provisioning/spec.md`, “Provisioning shape comes from committed capacity” |
+| Ansible pools select an allowlisted requirement delegate alongside the playbook | `openspec/specs/resource-pool-management/spec.md`, “Registered requirement delegates”; `openspec/specs/physical-provisioning/spec.md`, “Provisioning shape comes from committed capacity” |
+| Delegate validation and accepted-operation snapshot semantics | `openspec/specs/resource-pool-management/spec.md`, “Registered requirement delegates” |

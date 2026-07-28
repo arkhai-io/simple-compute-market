@@ -28,6 +28,10 @@ packages = ["src/vm_provisioning_adapter"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.23",
+]

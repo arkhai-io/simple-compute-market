@@ -151,7 +151,7 @@ Service composition MUST reject duplicate executor/action kinds, duplicate fulfi
 
 The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `vm_host` and `vm_target`, and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
-`vm_ram`, `vm_vcpus`, and `vm_disk_size` on the fulfillment request are optional, resolved through a three-tier precedence: the caller-supplied value if present; otherwise the pool's configured default (`default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` on the pool's provider configuration); otherwise left unset, in which case the Ansible playbook/inventory `group_vars` resolve it exactly as when these fields did not exist on the request. Units match the Ansible role: `vm_ram` is MB (`virt-install --ram`), `vm_disk_size` is a `qemu-img`-style string (for example `"80G"`).
+Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
 The fulfillment request MAY carry a `connectivity` field (FRP relay address, domain, and dashboard credential) which the adapter forwards to the Ansible job unchanged. This is opaque connectivity metadata the adapter never interprets or validates beyond passing it through; it is not a sizing/feasibility requirement.
 
@@ -170,15 +170,20 @@ The fulfillment request MAY carry a `connectivity` field (FRP relay address, dom
 - **WHEN** teardown begins for an accepted VM fulfillment
 - **THEN** the adapter targets the recorded `vm_host` and `vm_target` from fulfillment metadata
 
-#### Scenario: Buyer omits sizing and the pool has no configured default
+#### Scenario: A committed dimension is present
 
-- **WHEN** a fulfillment request omits `vm_ram`/`vm_vcpus`/`vm_disk_size` and the resolved pool has no `default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` configured
-- **THEN** the adapter dispatches without those fields set, and the Ansible playbook/inventory resolves them as it did before this precedence existed
+- **WHEN** the scheduled settlement resource carries a committed VM dimension
+- **THEN** the adapter translates that value through the pool-selected requirement delegate and ignores any conflicting caller-supplied sizing field
 
-#### Scenario: Pool default is used when the buyer does not specify sizing
+#### Scenario: A committed dimension is absent and the pool has a default
 
-- **WHEN** a fulfillment request omits sizing and the resolved pool has `default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` configured
-- **THEN** the adapter dispatches with the pool's configured defaults
+- **WHEN** the committed reservation omits a VM dimension and the resolved pool configures the corresponding default
+- **THEN** the adapter uses the pool default for that dimension
+
+#### Scenario: A committed dimension and pool default are both absent
+
+- **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
+- **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
 
 ### Requirement: VM fulfillment result payload
 
@@ -212,7 +217,7 @@ After callers and deployments migrate, generic provisioning service and client p
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
-- VM sizing precedence (buyer-specified, pool default, unset), connectivity forwarding, and result credential/connection-metadata fields: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py` (`TestSizingPrecedence`, `TestConnectivity`), plus end-to-end HTTP coverage in `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
+- VM sizing precedence (committed reservation, pool default, unset), connectivity forwarding, and result credential/connection-metadata fields: `provisioning/compute/service/tests/unit/services/test_ansible_fulfillment_provider.py` (`TestSizingPrecedence`, `TestConnectivity`), plus end-to-end HTTP coverage in `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 
 `PhysicalSettlementScheduler` and the process-local fulfillment-provider coordination implemented by the extracted service are baseline contracts. Process-local state is not a durable mechanism-neutral recovery guarantee.
 

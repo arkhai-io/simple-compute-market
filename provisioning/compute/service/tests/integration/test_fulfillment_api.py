@@ -52,7 +52,6 @@ from market_fulfillment import (
 )
 from market_resource_pools import PoolCreate, PoolUpdate
 from market_site.router import make_capacity_router
-from core_storefront.capacity_remote import RemoteCapacityClient
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
@@ -722,57 +721,6 @@ class TestScheduleEndpoint:
 
         begun = await fulfillment.begin(
             capacity_reservation_id, "vms", _fulfillment_request(vm_target="vm-schedule-1")
-        )
-        assert begun["capacity_reservation_id"] == capacity_reservation_id
-        assert begun["state"] == "dispatching"
-
-    async def test_real_capacity_wire_reserve_commit_schedule_begin_needs_no_placement_fields(
-        self, fulfillment: FulfillmentApi
-    ):
-        pool_id = "pool-real-capacity-boundary"
-        resource_pool_service = _container_module.resolved_resource_pool_service
-        capacity_ledger_service = _container_module.resolved_capacity_ledger_service
-        resource_pool_service.create_pool(
-            PoolCreate(
-                id=pool_id,
-                label=pool_id,
-                provider="ansible",
-                provider_config=_PROVIDER_CONFIG,
-            )
-        )
-        capacity_ledger_service.register_resource(
-            resource_id=f"{pool_id}-r1",
-            resource_type="compute.gpu",
-            total_units=1,
-            pool_id=pool_id,
-            attributes={"vm_host": "kvm-real-boundary"},
-            capacity={"gpu_count": 1, "vcpu_count": 4, "ram_gb": 8, "disk_gb": 80},
-        )
-
-        remote = RemoteCapacityClient(
-            "http://test/site", transport=ASGITransport(app=app)
-        )
-        reservation = await remote.reserve(
-            claim={"pool_id": pool_id, "gpu_count": 1},
-            deal_ref={"agreement_id": "agreement-real-boundary", "market": "vms"},
-        )
-        assert reservation is not None
-        assert {"resource_id", "capacity_bucket_id", "backing_resource_id"}.isdisjoint(
-            reservation
-        )
-        capacity_reservation_id = reservation["capacity_reservation_id"]
-        await remote.commit(
-            resource_id=None,
-            capacity_reservation_id=capacity_reservation_id,
-            idempotency_ref="agreement-real-boundary",
-        )
-
-        scheduled = await fulfillment.schedule(capacity_reservation_id, "vms")
-        assert scheduled.status_code == 200, scheduled.text
-        begun = await fulfillment.begin(
-            capacity_reservation_id,
-            "vms",
-            _fulfillment_request(vm_target="caller-value-is-not-placement"),
         )
         assert begun["capacity_reservation_id"] == capacity_reservation_id
         assert begun["state"] == "dispatching"
