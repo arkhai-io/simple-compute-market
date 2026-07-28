@@ -105,7 +105,18 @@ class ReservationResponse(BaseModel):
 
 
 class CommitRequest(BaseModel):
-    resource_id: str
+    # Optional: CapacityLedgerService.commit() ignores this value whenever
+    # capacity_reservation_id is supplied, which every caller of this
+    # endpoint does -- capacity_reservation_id arrives as this route's own
+    # path parameter, not from this body, so a caller-supplied resource_id
+    # can never reach the ledger's resource_id-only reservation lookup
+    # (used only when a caller has a resource_id but no
+    # capacity_reservation_id at all -- see CapacityLedgerService._find_reservation).
+    # An ordinary pool-scoped reservation, per the opaque-reservation
+    # boundary this endpoint's own reserve() response already enforces
+    # (resource_id is stripped from what callers receive), has no
+    # resource_id to supply here in the first place.
+    resource_id: Optional[str] = None
     lease_start_utc: Optional[str] = Field(
         default=None,
         description="Lease start. Omit/null means now.",

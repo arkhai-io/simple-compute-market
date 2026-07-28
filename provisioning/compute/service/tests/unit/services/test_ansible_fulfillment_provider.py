@@ -128,15 +128,23 @@ class TestCreate:
 
 
 class TestSizingPrecedence:
-    """vm_ram/vm_vcpus/vm_disk_size are optional on the
-    fulfillment request; buyer-specified wins, else the pool's configured
-    default, else left unset (Ansible/inventory group_vars resolve it,
-    unchanged from before these fields existed on the request)."""
+    """vm_ram/vm_vcpus/vm_disk_size/gpu_provisioned/vm_gpu_count are derived
+    from the reservation's own committed dimensions (SettlementResource
+    .dimensions), never from the caller-supplied fulfillment request: a
+    reservation's hold is placed with the terminal, negotiated shape
+    already, so a caller-supplied copy could only ever restate it, never
+    legitimately override it. Precedence: reservation dimensions, else
+    the pool's configured default (RAM/vCPU/disk only -- GPU has no
+    pool-level default), else left unset (Ansible/inventory group_vars
+    resolve it)."""
 
-    async def test_buyer_specified_sizing_wins_over_pool_default(self, provider, job_service):
-        request = _request()  # already carries vm_ram=4096, vm_vcpus=2, vm_disk_size="40G"
+    async def test_reservation_dimensions_win_over_pool_default(self, provider, job_service):
+        request = _request()
+        resource = _resource(dimensions={
+            "gpu_count": 1, "vcpu_count": 2, "ram_gb": 4, "disk_gb": 40,
+        })
         prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=request, resource=_resource(),
+            capacity_reservation_id="alloc-1", request=request, resource=resource,
             pool_config=_pool_config(
                 default_vm_ram=8192, default_vm_vcpus=4, default_vm_disk_size="80G",
             ),
@@ -144,15 +152,17 @@ class TestSizingPrecedence:
         await provider.dispatch_create(prepared)
 
         submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
-        assert submitted_params.vm_ram == 4096
+        assert submitted_params.vm_ram == 4096  # 4 GB -> MiB
         assert submitted_params.vm_vcpus == 2
         assert submitted_params.vm_disk_size == "40G"
+        assert submitted_params.gpu_provisioned is True
+        assert submitted_params.vm_gpu_count == 1
 
-    async def test_pool_default_used_when_buyer_omits_sizing(self, provider, job_service):
+    async def test_pool_default_used_when_reservation_has_no_dimensions(self, provider, job_service):
         request = _request()
-        del request.payload["vm_ram"], request.payload["vm_vcpus"], request.payload["vm_disk_size"]
+        resource = _resource(dimensions={})
         prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=request, resource=_resource(),
+            capacity_reservation_id="alloc-1", request=request, resource=resource,
             pool_config=_pool_config(
                 default_vm_ram=8192, default_vm_vcpus=4, default_vm_disk_size="80G",
             ),
@@ -163,12 +173,14 @@ class TestSizingPrecedence:
         assert submitted_params.vm_ram == 8192
         assert submitted_params.vm_vcpus == 4
         assert submitted_params.vm_disk_size == "80G"
+        assert submitted_params.gpu_provisioned is None
+        assert submitted_params.vm_gpu_count is None
 
-    async def test_sizing_left_unset_when_neither_buyer_nor_pool_specify_it(self, provider, job_service):
+    async def test_sizing_left_unset_when_neither_dimensions_nor_pool_specify_it(self, provider, job_service):
         request = _request()
-        del request.payload["vm_ram"], request.payload["vm_vcpus"], request.payload["vm_disk_size"]
+        resource = _resource(dimensions={})
         prepared = provider.prepare_create(
-            capacity_reservation_id="alloc-1", request=request, resource=_resource(), pool_config=_pool_config(),
+            capacity_reservation_id="alloc-1", request=request, resource=resource, pool_config=_pool_config(),
         )
         await provider.dispatch_create(prepared)
 
@@ -176,6 +188,33 @@ class TestSizingPrecedence:
         assert submitted_params.vm_ram is None
         assert submitted_params.vm_vcpus is None
         assert submitted_params.vm_disk_size is None
+        assert submitted_params.gpu_provisioned is None
+        assert submitted_params.vm_gpu_count is None
+
+    async def test_request_supplied_sizing_is_ignored_even_when_present(self, provider, job_service):
+        """Regression test for the fix itself: a fulfillment request
+        carrying vm_ram/vm_vcpus/vm_disk_size directly (the old trusted
+        path -- ``_request()``'s payload still carries these, matching
+        what a pre-fix caller could have sent) must not influence the
+        submitted job at all once a reservation's own dimensions
+        disagree. Only the committed reservation is trusted."""
+        request = _request()  # payload carries vm_ram=4096, vm_vcpus=2, vm_disk_size="40G"
+        resource = _resource(dimensions={
+            "gpu_count": 0, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 200,
+        })
+        prepared = provider.prepare_create(
+            capacity_reservation_id="alloc-1", request=request, resource=resource,
+            pool_config=_pool_config(),
+        )
+        await provider.dispatch_create(prepared)
+
+        submitted_params: AnsibleJobParams = job_service.submit.await_args.args[0]
+        # The reservation's committed shape wins, not the request payload's.
+        assert submitted_params.vm_vcpus == 8
+        assert submitted_params.vm_ram == 32 * 1024
+        assert submitted_params.vm_disk_size == "200G"
+        assert submitted_params.gpu_provisioned is False
+        assert submitted_params.vm_gpu_count == 0
 
 
 class TestConnectivity:

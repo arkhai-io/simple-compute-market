@@ -100,3 +100,11 @@ class SettlementResource(BaseModel):
     resource_kind: str
     provider: str
     attributes: dict[str, Any] = Field(default_factory=dict)
+    # The reservation's own committed dimensions (see SettlementRequirement
+    # .dimensions), carried forward from scheduling so a provider can
+    # derive request-shape fields (VM GPU/CPU/RAM/disk, for example) from
+    # what was actually reserved rather than trusting a second,
+    # independently-computed copy the caller supplies alongside the
+    # fulfillment request. Opaque to this kit -- dimension keys and units
+    # are entirely domain-defined.
+    dimensions: dict[str, Any] = Field(default_factory=dict)

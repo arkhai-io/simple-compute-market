@@ -33,22 +33,13 @@ dist-storefront-client: ## Build arkhai-core-storefront-client wheel into .dist/
 		(echo "ERROR: arkhai-core-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: ## Build arkhai-vms wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/vms/domain && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_vms-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-vms produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-vms DIST_DIR=$(DIST_DIR)
 
 dist-bare-metal: ## Build arkhai-bare-metal wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/bare_metal && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_bare_metal-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-bare-metal produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-bare-metal DIST_DIR=$(DIST_DIR)
 
 dist-storefront: dist-kits ## Build arkhai-vms-storefront wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/vms/storefront && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_vms_storefront-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-vms-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-storefront DIST_DIR=$(DIST_DIR)
 
 dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -57,8 +48,7 @@ dist-policy: ## Build arkhai-kit-policy wheel into .dist/
 		(echo "ERROR: arkhai-kit-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-provisioning-operator-client: dist-compute-provisioning ## Build arkhai-vms-provisioning-operator-client wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/vms/provisioning/client && uv build --wheel --out-dir $(DIST_DIR)
+	$(MAKE) -C domains dist-provisioning-operator-client DIST_DIR=$(DIST_DIR)
 
 dist-compute-provisioning: dist-kits ## Build arkhai-compute-provisioning wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -66,10 +56,8 @@ dist-compute-provisioning: dist-kits ## Build arkhai-compute-provisioning wheel 
 	@ls $(DIST_DIR)/arkhai_compute_provisioning-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute-provisioning produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-provisioning-adapters: dist-kits dist-compute-provisioning dist-bare-metal dist-provisioning-operator-client ## Build VM and bare-metal provisioning adapter wheels.
-	-mkdir -p $(DIST_DIR)
-	cd domains/vms/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
-	cd domains/bare_metal/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
+dist-provisioning-adapters: dist-kits dist-compute-provisioning ## Build VM and bare-metal provisioning adapter wheels.
+	$(MAKE) -C domains dist-provisioning-adapters DIST_DIR=$(DIST_DIR)
 
 dist-compute-provisioning-service: dist-kits dist-compute-provisioning dist-provisioning-adapters ## Build the extracted compute service wheel.
 	-mkdir -p $(DIST_DIR)
@@ -78,40 +66,22 @@ dist-compute-provisioning-service: dist-kits dist-compute-provisioning dist-prov
 		(echo "ERROR: compute provisioning service produced a platform-specific wheel" && exit 1)
 
 dist-apicredits-domain: ## Build arkhai-apicredits-domain wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_domain-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-domain produced a platform-specific wheel — must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-apicredits-domain DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-service: ## Build arkhai-apicredits-service wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits/service && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-apicredits-service DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-storefront: dist-apicredits-domain ## Build arkhai-apicredits-storefront wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits/storefront && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
+dist-apicredits-storefront: ## Build arkhai-apicredits-storefront wheel into .dist/
+	$(MAKE) -C domains dist-apicredits-storefront DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-middleware: ## Build arkhai-apicredits-middleware wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits/middleware/python && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_middleware-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-middleware produced a platform-specific wheel — must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-apicredits-middleware DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-sample-app: ## Build arkhai-apicredits-sample-app wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits/sample-app && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_sample_app-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-sample-app produced a platform-specific wheel — must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-apicredits-sample-app DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-buyer: dist-apicredits-domain ## Build arkhai-apicredits-buyer wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/apicredits/buyer && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_buyer-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
+dist-apicredits-buyer: ## Build arkhai-apicredits-buyer wheel into .dist/
+	$(MAKE) -C domains dist-apicredits-buyer DIST_DIR=$(DIST_DIR)
 
 dist-registry-client: ## Build arkhai-core-registry-client wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -161,10 +131,7 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 		(echo "ERROR: arkhai-kit-config produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-buyer: ## Build arkhai-vms-buyer (the `market` CLI) wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd domains/vms/buyer && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-vms-buyer produced a platform-specific wheel — must build inside Docker" && exit 1)
+	$(MAKE) -C domains dist-buyer DIST_DIR=$(DIST_DIR)
 
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
@@ -181,23 +148,23 @@ test-provisioning:
 	cd provisioning/compute/service && make test
 
 test-provisioning-iac:
-	cd domains/vms/provisioning/iac && make validate-tests
+	$(MAKE) -C domains test-provisioning-iac
 
 test-registry:
 	cd core/registry && make reinit && make test
 
 test-storefront:
-	cd domains/vms/storefront && make reinit && make test
+	$(MAKE) -C domains test-storefront
 
 test-vms-buyer:
-	cd domains/vms/buyer && make test
+	$(MAKE) -C domains test-vms-buyer
 
 test-apicredits:
-	cd domains/apicredits && make test
+	$(MAKE) -C domains test-apicredits
 
 # Compatibility alias for the cross-language middleware parity suite.
 test-apicredits-middleware:
-	cd domains/apicredits && make test-middleware
+	$(MAKE) -C domains test-apicredits-middleware
 
 test-kits:
 	cd kit && make test

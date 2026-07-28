@@ -244,7 +244,7 @@ class AggregateCapacityClient:
     async def commit(
         self,
         *,
-        resource_id: str,
+        resource_id: str | None = None,
         capacity_reservation_id: str | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,

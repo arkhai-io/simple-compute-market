@@ -448,7 +448,7 @@
         GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
         if [ -n "$GPU_DEVICES" ]; then
           while read -r pci_addr; do
-            [ -z "$pci_addr" ] && continueThen remove all task that contains installation of GPU driver that is not
+            [ -z "$pci_addr" ] && continue
             normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
             ATTACHED_GPUS_LIST="$ATTACHED_GPUS_LIST $normalized_pci"
             GPU_MODEL=$(lspci -s ${normalized_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
