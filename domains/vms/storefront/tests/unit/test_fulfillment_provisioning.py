@@ -490,3 +490,76 @@ async def test_generated_vm_target_survives_context_fulfillment_and_lease_regist
         "lease": persisted_vm_target,
     }
     assert result["status"] == "fulfilled"
+
+
+@pytest.mark.asyncio
+async def test_post_provision_commit_and_lease_registration_do_not_require_resource_id(
+    monkeypatch,
+):
+    """Regression test for the opaque-reservation post-provision gap.
+
+    ``kit/site``'s ``/reservations`` endpoint strips ``resource_id``,
+    ``capacity_bucket_id``, and ``backing_resource_id`` from every
+    reservation response -- the capacity boundary negotiates on pooled
+    capacity, not a pinned physical resource, so ``reserve()`` legitimately
+    returns without them. The previous test above exercises a ``reserve()``
+    double that (unrealistically) still supplies ``resource_id``/``vm_host``,
+    so it cannot catch a regression where the post-provision lease-window
+    refresh or lease registration is gated on those fields being present.
+    This test uses the real, opaque shape and asserts both calls still fire.
+    """
+    plan = SimpleNamespace(
+        order_id="listing-1",
+        required_attributes={"vcpu_count": 2},
+    )
+    monkeypatch.setattr(vfs, "build_vm_fulfillment_plan", lambda **_: plan)
+
+    sqlite_client = SimpleNamespace(
+        update_escrow=AsyncMock(),
+        update_listing=AsyncMock(),
+        store_credential=AsyncMock(),
+    )
+    capacity = SimpleNamespace(
+        reserve=AsyncMock(return_value={
+            "capacity_reservation_id": "reservation-1",
+            # No resource_id/vm_host -- the real opaque-reservation shape.
+        }),
+        commit=AsyncMock(),
+    )
+
+    async def provision_vm(
+        ssh_public_key: str, *, vm_target: str, on_job_submitted, **_: object,
+    ) -> dict[str, object]:
+        await on_job_submitted("fulfillment-1")
+        return {"vm_name": vm_target, "authentication": {}}
+
+    register_lease = AsyncMock()
+
+    result = await vfs.fulfill_vm_obligation(
+        client=None,
+        escrow_uid="escrow-1",
+        ssh_public_key="ssh-ed25519 test",
+        order={"listing_id": "listing-1"},
+        get_sqlite_client=lambda: sqlite_client,
+        capacity=capacity,
+        stage_event=lambda *args, **kwargs: None,
+        provision_vm=provision_vm,
+        schedule_shutdown=AsyncMock(),
+        register_lease=register_lease,
+    )
+    await asyncio.sleep(0)
+
+    assert result["status"] == "fulfilled"
+    # `commit()` is also called earlier, atomically, when there is no
+    # pre-existing TTL hold to refresh (`_reserve_capacity_for_obligation` ->
+    # `_commit_fresh_reservation`); this test only asserts the *post-provision*
+    # lease-window-refresh call this regression targets is not skipped.
+    assert capacity.commit.await_count >= 1
+    post_provision_commit = capacity.commit.await_args
+    assert post_provision_commit.kwargs["capacity_reservation_id"] == "reservation-1"
+    assert post_provision_commit.kwargs["resource_id"] is None
+
+    register_lease.assert_awaited_once()
+    assert register_lease.await_args.kwargs["capacity_reservation_id"] == "reservation-1"
+    assert register_lease.await_args.kwargs["resource_id"] is None
+    assert register_lease.await_args.kwargs["vm_host"] is None

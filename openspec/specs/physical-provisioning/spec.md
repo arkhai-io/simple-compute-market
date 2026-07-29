@@ -262,6 +262,6 @@ Lease lifecycle SHALL own the reservation's `releasing` and terminal release sta
 
 ### Requirement: Provisioning shape comes from committed capacity
 
-A fulfillment provider MUST derive reservation-governed resource shape from the committed reservation dimensions carried by the scheduled settlement resource. It MUST NOT use caller-supplied fulfillment fields as fallback values for that shape.
+A fulfillment provider MUST derive reservation-governed resource shape from the dimensions carried by the scheduled settlement resource -- which reflect what was actually scheduled, bounded by but not necessarily equal to the capacity reservation (see `openspec/specs/site-capacity/spec.md#requirement-committed-dimensions-remain-authoritative-through-scheduling`). It MUST NOT use caller-supplied fulfillment fields as fallback values for that shape.
 
 For an Ansible-backed VM pool, provider configuration identifies both the playbook and a registered requirement delegate. The adapter resolves the delegate through an allowlisted registry. The delegate validates that the committed canonical VM dimensions are representable by the playbook and translates them into the playbook's variable names, units, and derived values. Resource-pool configuration MUST NOT load arbitrary Python import paths.

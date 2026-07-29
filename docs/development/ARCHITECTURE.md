@@ -209,6 +209,10 @@ Commercial agreement identity does not cross the generic provisioning boundary m
 
 The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
 
+Negotiation is a conversation of counter-offers over what capacity is being sold, not over which specific physical resource serves it. A buyer and seller negotiate pooled capacity ("4 GPUs", not "host `kvm-17`"); a counter-offer that changes the requested shape (fewer/more units, a different dimension mix) is a negotiation event, and a durable shape change is expressed by resizing the reservation for that negotiation, never by mutating an existing reservation or committed settlement assignment in place (see "Capacity reservation" below, and `openspec/specs/site-capacity/spec.md`'s reservation-supersede requirement). Today's negotiation rounds exchange hard counters; the same model extends to richer forms (a buyer asking what shape a given price can buy, or what price a given shape costs) without changing this premise.
+
+Physical resource identity (`resource_id`, `vm_host`, and equivalent per-domain identifiers) is an optional pinning/telemetry pathway, not the unit buyers and sellers negotiate over. It is deliberately not exposed across the capacity-reservation boundary (`openspec/specs/site-capacity/spec.md`'s opaque-reservation requirement) for exactly this reason: the storefront and buyer should not need to know or care which physical resource ultimately serves a deal in the ordinary case. Code that makes ordinary fulfillment depend on a physical resource identity being present is very likely encoding the wrong unit of negotiation.
+
 ```text
 registry listing
     ↓
@@ -242,6 +246,10 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 3. Settlement commits or recreates the reservation before physical execution.
 4. Fulfillment runs against the committed reservation.
 5. Lease expiry or early termination invokes physical teardown before capacity release.
+
+A reservation whose negotiated shape changes is superseded, never mutated: `CapacityLedgerService.resize_reservation` atomically releases the old reservation and admits a new one under a new `capacity_reservation_id`, so the reservation's committed dimensions always reflect the shape actually being negotiated. Scheduling (see "Fulfillment" below) MAY further narrow within a reservation's bound for a placement or pricing check against a candidate shape; a scheduling narrower than the reservation reports back exactly what it scheduled, not the reservation's original shape, since that is what gets provisioned if accepted (`openspec/specs/site-capacity/spec.md`'s committed-dimensions-through-scheduling requirement). As of this writing, `resize_reservation` has no negotiation-side caller — this describes the intended negotiation model, not yet-implemented wiring between negotiation and reservation resizing.
+
+
 
 ### Fulfillment
 

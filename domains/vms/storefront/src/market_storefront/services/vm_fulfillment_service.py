@@ -336,14 +336,23 @@ async def fulfill_vm_obligation(
         reserved_capacity_reservation_id = (
             str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None
         )
-        # Not coerced with str(...): resource_id/vm_host are opaque
-        # placement details the capacity boundary does not guarantee at
-        # this point (schedule_resource(), called by provision_vm below,
-        # is what actually selects/confirms the settlement resource) --
-        # str(None) would silently become the three-character string
-        # "None", which is worse than an absent value if anything ever
-        # persisted it. Kept only as best-effort stage_event telemetry.
+        # Not coerced with str(...): resource_id is an opaque placement
+        # detail the capacity boundary does not guarantee at this point
+        # (schedule_resource(), called by provision_vm below, is what
+        # actually selects/confirms the settlement resource) -- str(None)
+        # would silently become the three-character string "None", which
+        # is worse than an absent value if anything ever persisted it.
+        # Kept only as best-effort stage_event telemetry.
         reserved_resource_id = reserved.get("resource_id")
+        # vm_host is unconditionally stripped from the reservation
+        # response (kit/site's opaque-reservation boundary -- see
+        # openspec/specs/site-capacity/spec.md); reserved.get("vm_host")
+        # is therefore always None. Kept as a variable, not deleted,
+        # because provision_vm/register_lease/schedule_shutdown already
+        # treat it as an accepted-but-unused compatibility parameter
+        # (documented on _do_provision and _register_vm_lease_with_settings)
+        # -- removing it from every call site is a larger signature change
+        # than stripping it from the API response requires.
         reserved_vm_host = reserved.get("vm_host")
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
@@ -358,7 +367,6 @@ async def fulfill_vm_obligation(
             pool_id=reserved.get("pool_id"),
             member_id=reserved.get("member_id"),
             resource_id=reserved_resource_id,
-            vm_host=reserved_vm_host,
             required_attributes=required_attributes,
             capacity_reservation_id=reserved_capacity_reservation_id,
             allocated_gpu_count=reserved.get("allocated_gpu_count"),
@@ -377,7 +385,6 @@ async def fulfill_vm_obligation(
                 escrow_uid=escrow_uid,
                 resource_id=reserved_resource_id,
                 capacity_reservation_id=reserved_capacity_reservation_id,
-                vm_host=reserved_vm_host,
                 lease_start_utc=start_dt.isoformat(),
                 delay_seconds=delay_seconds,
             )
@@ -408,7 +415,6 @@ async def fulfill_vm_obligation(
                 listing_id=order_id,
                 escrow_uid=escrow_uid,
                 resource_id=reserved_resource_id,
-                vm_host=reserved_vm_host,
                 fulfillment_id=fulfillment_id,
             )
 
@@ -468,7 +474,16 @@ async def fulfill_vm_obligation(
         duration_seconds=duration_seconds,
     )
 
-    if reserved_resource_id:
+    if reserved_capacity_reservation_id:
+        # capacity_reservation_id is the durable identity commit() actually
+        # needs; resource_id is accepted only for a resource-id-only lookup
+        # path with no current caller (see CapacityLedgerService.commit's
+        # docstring) and is never guaranteed present -- the opaque
+        # capacity-reservation boundary negotiates on pooled capacity, not a
+        # specific physical resource, so a real reservation response
+        # legitimately omits it. Gating this refresh on resource_id would
+        # skip the lease-window refresh for every ordinary pool-scoped
+        # reservation, which is the common case, not an edge case.
         try:
             await capacity.commit(
                 resource_id=reserved_resource_id,
@@ -479,8 +494,8 @@ async def fulfill_vm_obligation(
             )
         except Exception as lease_err:
             logger.warning(
-                "[LOCAL DB] Failed to mark resource %s as leased after provisioning: %s",
-                reserved_resource_id,
+                "[LOCAL DB] Failed to mark reservation %s as leased after provisioning: %s",
+                reserved_capacity_reservation_id,
                 lease_err,
             )
 
@@ -521,7 +536,16 @@ async def fulfill_vm_obligation(
                 cred_err,
             )
 
-    if reserved_resource_id and reserved_vm_host and vm_target and escrow_uid:
+    if reserved_capacity_reservation_id and vm_target and escrow_uid:
+        # register_lease's downstream LeaseRegistration call does not read
+        # resource_id/vm_host at all (executor_ref self-heals from the
+        # commit-time-written reservation.vm_host instead -- see
+        # openspec/specs/physical-provisioning/spec.md's lease-registration
+        # requirement). Requiring them here would make lease registration,
+        # and therefore the watchdog's ability to auto-release this VM,
+        # depend on the negotiation having pinned a specific physical
+        # resource -- which is the exception, not the ordinary pool-scoped
+        # capacity-reservation case this path exists to serve.
         try:
             await register_lease(
                 resource_id=reserved_resource_id,
@@ -534,15 +558,15 @@ async def fulfill_vm_obligation(
             )
             logger.info(
                 "[LEASE] Registered lease with provisioning service "
-                "(resource=%s escrow=%s expires=%s)",
-                reserved_resource_id, escrow_uid, lease_end_utc,
+                "(reservation=%s escrow=%s expires=%s)",
+                reserved_capacity_reservation_id, escrow_uid, lease_end_utc,
             )
         except Exception as lease_err:
             logger.warning(
                 "[LEASE] Failed to register lease with provisioning service "
-                "(resource=%s escrow=%s): %s - watchdog will not auto-release "
+                "(reservation=%s escrow=%s): %s - watchdog will not auto-release "
                 "this resource",
-                reserved_resource_id,
+                reserved_capacity_reservation_id,
                 escrow_uid,
                 lease_err,
             )
@@ -557,10 +581,9 @@ async def fulfill_vm_obligation(
         except Exception as shutdown_err:
             logger.warning(
                 "[LEASE] Failed to schedule VM expiry with provisioning service "
-                "(resource=%s escrow=%s vm=%s/%s): %s",
+                "(resource=%s escrow=%s vm=%s): %s",
                 reserved_resource_id,
                 escrow_uid,
-                reserved_vm_host,
                 vm_target,
                 shutdown_err,
             )
@@ -577,12 +600,11 @@ async def fulfill_vm_obligation(
         logger.error(
             "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
             "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
-            "vm_host=%s error=%s",
+            "error=%s",
             escrow_uid,
             order_id,
             reserved_resource_id,
             reserved_capacity_reservation_id,
-            reserved_vm_host,
             error,
         )
         stage_event(
@@ -591,7 +613,6 @@ async def fulfill_vm_obligation(
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
             capacity_reservation_id=reserved_capacity_reservation_id,
-            vm_host=reserved_vm_host,
             error=str(error),
         )
         return {
@@ -636,7 +657,6 @@ async def fulfill_vm_obligation(
         fulfillment_uid=fulfillment_uid,
         resource_id=reserved_resource_id,
         capacity_reservation_id=reserved_capacity_reservation_id,
-        vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,
         seller_order_id=seller_order_id,
         order_id=order_id,

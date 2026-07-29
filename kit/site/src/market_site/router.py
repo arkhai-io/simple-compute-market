@@ -205,7 +205,7 @@ def make_capacity_router(
         if reservation is not None:
             reservation = {
                 key: value for key, value in reservation.items()
-                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id"}
+                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id", "vm_host"}
             }
         return ReservationResponse(reservation=reservation)
 

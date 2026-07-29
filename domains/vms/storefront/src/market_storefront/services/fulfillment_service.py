@@ -298,14 +298,22 @@ async def _apply_fulfillment_failure_policy_adapter(
 
 async def _register_vm_lease_with_settings(
     *,
-    resource_id: str,
+    resource_id: str | None = None,
     capacity_reservation_id: str | None,
     escrow_uid: str,
-    vm_host: str,
+    vm_host: str | None = None,
     vm_target: str,
     lease_end_utc: str,
     lease_start_utc: str | None = None,
 ) -> None:
+    # resource_id/vm_host are accepted for call-site compatibility with
+    # fulfill_vm_obligation's opaque reservation result, but LeaseRegistration
+    # never reads either: the reservation's executor_ref/vm_host is already
+    # written independently at capacity-commit/rebind time and self-heals
+    # from that value when not explicitly supplied. Requiring a caller to
+    # have a physical resource identity in hand before it can register a
+    # lease at all would reintroduce physical-node pinning into what is
+    # meant to be a pool-scoped capacity negotiation.
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
     )

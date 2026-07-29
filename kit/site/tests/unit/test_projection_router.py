@@ -42,6 +42,14 @@ def test_public_reservation_hides_private_accounting_identity():
     assert reservation["capacity_reservation_id"]
     assert "resource_id" not in reservation
     assert "capacity_bucket_id" not in reservation
+    assert "backing_resource_id" not in reservation
+    # vm_host is real, physical-placement data (populated from the
+    # matched resource's attributes at reserve() time -- see
+    # openspec/specs/site-capacity/spec.md's opaque-reservation
+    # requirement) and must not leak across this boundary either, even
+    # though it's domain-specific (VM) rather than a generic accounting
+    # identifier like the three above.
+    assert "vm_host" not in reservation
 
 
 def test_projection_versions_are_independent_and_snapshots_are_canonical():

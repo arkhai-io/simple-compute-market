@@ -324,6 +324,51 @@ def test_schedule_request_narrower_than_reservation_is_permitted(services):
     assert resource.settlement_resource_id == "r1"
 
 
+def test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation(services):
+    """Pins intended behavior: scheduled dimensions, not the reservation's own
+    dimensions unconditionally, are what a fulfillment provider receives.
+
+    A negotiation may narrow a scheduling request without (yet) resizing the
+    underlying reservation -- e.g. a placement/pricing check against a
+    candidate counter-offer shape. What gets provisioned if that shape is
+    accepted is the narrower, scheduled shape, not the original reservation's
+    full amount. `_resource_from_record` (scheduler.py) correctly populates
+    `SettlementResource.dimensions` from `record.scheduling_requirements`
+    (the possibly-narrowed request), not from the reservation's own
+    dimensions. See `openspec/specs/site-capacity/spec.md`'s "Committed
+    dimensions remain authoritative through scheduling" requirement and
+    `docs/development/ARCHITECTURE.md`'s "Capacity reservation" section for
+    the normative statement of this and the surrounding negotiation model.
+
+    No VM caller in this repository currently sends a narrower
+    ``requirements.dimensions`` to ``schedule_resource`` (confirmed:
+    ``_do_provision`` builds ``FulfillmentScheduleRequest`` with no
+    ``requirements`` at all, so every VM schedule call falls back to the
+    full reservation dimensions today); negotiation-driven reservation
+    resizing (`resize_reservation`) has no caller yet either. This test
+    exercises the scheduler contract directly so it holds once either
+    caller exists, rather than waiting to be proven by a real negotiation
+    path landing first.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    committed_dimensions = {"gpu_count": 4, "ram_gb": 128}
+    capacity_reservation_id = _reserve_multi(ledger, committed_dimensions)
+    narrowed_dimensions = {"gpu_count": 2, "ram_gb": 64}
+
+    resource = scheduler.schedule_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": narrowed_dimensions},
+    ))
+
+    observed = {key: str(value) for key, value in resource.dimensions.items()}
+    assert observed == {key: str(value) for key, value in narrowed_dimensions.items()}
+    assert observed != {key: str(value) for key, value in committed_dimensions.items()}
+
+
 def test_schedule_request_equal_to_reservation_is_permitted(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
