@@ -18,6 +18,7 @@
 - [ ] 3.2 Advance revision/digest on projected metadata changes and prove credentials/provider secrets are redacted.
 - [ ] 3.3 Preserve backward compatibility when older producers omit additive metadata.
 - [ ] 3.4 Add producer/router/client/cache contract tests for old and new payloads.
+- [ ] 3.5 Project the pool's configured VM size defaults (`default_vm_ram`, `default_vm_vcpus`, `default_vm_disk_size` -- `AnsiblePoolConfig`, currently persisted provisioning-service-side with no consumer outside the fulfillment-time three-tier precedence) as additive, allowlisted pool metadata, so a storefront can resolve a full four-dimension shape (GPU/vCPU/RAM/disk) at negotiation time instead of only GPU count. This is the identified prerequisite for negotiation round-0 payload enrichment (see `openspec/changes/negotiation-driven-capacity-resize`, opened 2026-07-29); that change's storefront-side consumption is explicitly out of scope here and depends on this projection existing first.
 
 ## 4. Map projections into commercial inventory
 

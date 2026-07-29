@@ -147,13 +147,19 @@ class CapacityClient(Protocol):
     async def commit(
         self,
         *,
-        resource_id: str,
+        resource_id: str | None = None,
         capacity_reservation_id: str | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
-        """Confirm a reservation into an active lease."""
+        """Confirm a reservation into an active lease.
+
+        ``resource_id`` is optional: the opaque capacity-reservation
+        boundary does not guarantee a caller has one (``reserve()``'s
+        response does not carry it), and ``capacity_reservation_id`` alone
+        is sufficient to identify which reservation to commit.
+        """
         ...
 
     async def release(

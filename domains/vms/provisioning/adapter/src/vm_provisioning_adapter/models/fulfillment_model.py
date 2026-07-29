@@ -41,26 +41,10 @@ class VmFulfillmentRequirements(BaseModel):
 
 
 class AnsiblePoolConfig(BaseModel):
-    """Provider-owned execution config, deliberately excluding placement.
-
-    ``inventory_group`` is not consumed here: concrete placement belongs to
-    ``PhysicalSettlementScheduler``. Treating an inventory group as placement
-    would create a second, conflicting scheduler inside the Ansible adapter.
-
-    ``default_vm_ram``/``default_vm_vcpus``/``default_vm_disk_size`` are the
-    middle tier of a three-tier sizing precedence: buyer-specified in the
-    fulfillment request, else this pool default, else left unset and
-    resolved by the Ansible playbook/inventory ``group_vars``, the only tier
-    that existed before pool-level defaults did. Optional because most
-    pools have no buyer-facing sizing negotiated yet; VM shape
-    configurability is being wired up incrementally rather than assumed
-    everywhere at once. Units match ``VmFulfillmentRequirements``:
-    ``default_vm_ram`` is MB, matching ``virt-install --ram``;
-    ``default_vm_disk_size`` is a `qemu-img`-style string like ``"80G"``.
-    """
-
+    """Validated, snapshotted Ansible provider configuration."""
 
     playbook_path: str = Field(min_length=1)
+    requirement_delegate: str = "vm_management_v1"
     extra_vars: dict[str, Any] = Field(default_factory=dict)
     default_vm_ram: int | None = Field(default=None, gt=0)
     default_vm_vcpus: int | None = Field(default=None, gt=0)

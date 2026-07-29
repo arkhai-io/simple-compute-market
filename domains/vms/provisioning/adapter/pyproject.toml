@@ -8,6 +8,7 @@ dependencies = [
     "arkhai-compute-provisioning>=0.5.0",
     "arkhai-compute-provisioning-service>=0.1.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
+    "arkhai-vms>=0.2.0",
     "arkhai-bare-metal>=0.2.0",
     "arkhai-kit-resource-pools>=0.1.0",
     "arkhai-kit-fulfillment>=0.1.0",
@@ -27,12 +28,10 @@ packages = ["src/vm_provisioning_adapter"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
-
-[tool.uv.sources]
-arkhai-compute-provisioning = { path = "../../../../provisioning/compute", editable = true }
-arkhai-compute-provisioning-service = { path = "../../../../provisioning/compute/service", editable = true }
-arkhai-vms-provisioning-operator-client = { path = "../client", editable = true }
-arkhai-bare-metal = { path = "../../../bare_metal", editable = true }
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=0.23",
+]

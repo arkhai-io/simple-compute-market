@@ -414,6 +414,55 @@ def test_commit_marks_leased_and_sets_window(seeded: CapacityLedgerService):
         )
 
 
+def test_commit_with_no_resource_id_behaves_identically_to_supplying_it(
+    seeded: CapacityLedgerService,
+):
+    """commit() already ignores resource_id whenever capacity_reservation_id
+    is supplied -- confirms that holds for every caller, not just callers
+    that omit it explicitly, and stays true if it is ever omitted entirely
+    rather than passed as None."""
+    with_resource_id = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb1"})
+    without_resource_id = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb2"})
+
+    committed_with = seeded.commit(
+        resource_id=with_resource_id["resource_id"],
+        capacity_reservation_id=with_resource_id["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb1",
+    )
+    committed_without = seeded.commit(
+        resource_id=None,
+        capacity_reservation_id=without_resource_id["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb2",
+    )
+
+    assert committed_with["state"] == committed_without["state"] == "leased"
+    assert (
+        committed_with["lease_start_utc"]
+        == committed_without["lease_start_utc"]
+        == "2099-01-01T00:00:00+00:00"
+    )
+    assert (
+        committed_with["lease_end_utc"]
+        == committed_without["lease_end_utc"]
+        == "2099-01-01T01:00:00Z"
+    )
+
+    # And omitting the keyword argument entirely (not even passing None)
+    # is the same call, since resource_id already defaults to None.
+    third = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb3"})
+    committed_omitted = seeded.commit(
+        capacity_reservation_id=third["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb3",
+    )
+    assert committed_omitted["state"] == "leased"
+
+
 def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
     reserved = seeded.reserve(
         claim={"gpu_count": 8}, deal_ref={"escrow_uid": "0xttl"}, ttl_seconds=60,

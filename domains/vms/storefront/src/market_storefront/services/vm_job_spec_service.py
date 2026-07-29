@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Callable
 
+from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
 from domains.vms.listings import extract_compute_from_order
 from domains.vms.listings.models import Listing
 
@@ -16,10 +17,11 @@ _REQUIRED_COMPUTE_KEYS = (
     "gpu_model",
 )
 
-# checked against a resource's multidimensional capacity with full
-# held/available accounting, forwarded only when the listing declares
-# them so older listings without a shape keep working unchanged.
-_DIMENSION_COMPUTE_KEYS = ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
+# _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
+# arkhai_vms.compute_requirements -- the same shared vocabulary the
+# provisioning adapter derives its Ansible fulfillment fields from, so
+# the two sides cannot independently drift on which dimension keys mean
+# what.
 
 
 def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict[str, Any]:

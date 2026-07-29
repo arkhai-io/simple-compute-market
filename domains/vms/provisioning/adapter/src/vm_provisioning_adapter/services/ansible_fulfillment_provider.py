@@ -34,6 +34,7 @@ from vm_provisioning_adapter.models.fulfillment_model import (
     VmFulfillmentRequirements,
 )
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
 
 if TYPE_CHECKING:
     from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
@@ -116,19 +117,22 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
             ) from exc
 
         config = self._pool_config(pool_config)
+        derived = resolve_requirement_delegate(
+            config.requirement_delegate
+        ).translate(resource.dimensions)
         connectivity = requirements.connectivity
         params = AnsibleJobParams(
             vm_host=self._vm_host(resource),
             vm_action="create",
             vm_target=requirements.vm_target,
             image_setup_type=requirements.image_setup_type,
-            vm_ram=requirements.vm_ram or config.default_vm_ram,
-            vm_vcpus=requirements.vm_vcpus or config.default_vm_vcpus,
-            vm_disk_size=requirements.vm_disk_size or config.default_vm_disk_size,
+            vm_ram=derived.get("vm_ram", config.default_vm_ram),
+            vm_vcpus=derived.get("vm_vcpus", config.default_vm_vcpus),
+            vm_disk_size=derived.get("vm_disk_size", config.default_vm_disk_size),
             vm_os_variant=requirements.vm_os_variant,
             ssh_pubkey=requirements.ssh_pubkey,
-            gpu_provisioned=requirements.gpu_provisioned,
-            vm_gpu_count=requirements.vm_gpu_count,
+            gpu_provisioned=derived.get("gpu_provisioned"),
+            vm_gpu_count=derived.get("vm_gpu_count"),
             vm_gpu_device=requirements.vm_gpu_device,
             vm_gpu_devices=requirements.vm_gpu_devices,
             vm_gpu_partition_size=requirements.vm_gpu_partition_size,

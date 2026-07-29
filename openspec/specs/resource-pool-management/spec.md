@@ -95,9 +95,31 @@ Pool YAML import MUST treat the supplied definitions as authoritative, validate 
 - **WHEN** an operator exports the current pool state and validates or imports that YAML without editing it
 - **THEN** the document remains valid and represents the same complete pool and provider configuration state
 
+
+### Requirement: Registered requirement delegates
+
+An Ansible resource pool MUST persist a `requirement_delegate` identifier alongside its playbook configuration. The identifier MUST resolve through the VM provisioning adapter's allowlisted delegate registry; resource-pool configuration MUST NOT contain or load arbitrary Python import paths. The selected delegate owns compatibility validation and translation from canonical committed VM dimensions to the selected playbook's variable names, units, and derived values.
+
+Pool create, replace, patch, import, and validation operations MUST reject an unknown delegate identifier as invalid provider configuration before committing any change. Existing pools and omitted identifiers MUST resolve to the repository's documented default delegate. Fulfillment acceptance MUST snapshot the resolved delegate output together with the playbook and other provider inputs so later pool edits do not alter an accepted operation.
+
+#### Scenario: Pool names an unknown requirement delegate
+
+- **WHEN** an operator creates, updates, imports, or validates an Ansible pool whose `requirement_delegate` is not registered
+- **THEN** provider-config validation rejects the operation before persistence or fulfillment dispatch
+
+#### Scenario: Pool omits the requirement delegate
+
+- **WHEN** an existing or newly submitted Ansible pool omits `requirement_delegate`
+- **THEN** normalization selects the documented default delegate and canonical export includes the resolved identifier
+
+#### Scenario: Delegate configuration changes after fulfillment acceptance
+
+- **WHEN** an operator changes a pool's delegate or playbook after fulfillment has accepted and persisted prepared provider input
+- **THEN** retries and dispatch use the snapshotted prepared input rather than re-reading the live pool configuration
+
 ## Evidence
 
-- Pool persistence, provider validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
+- Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `domains/vms/provisioning/service/src/tests/integration/test_pools_api.py`.
 - Migration ordering, legacy host backfill, and schema-drift rejection: `domains/vms/provisioning/service/src/tests/unit/test_database.py`.
 

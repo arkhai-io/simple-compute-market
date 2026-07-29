@@ -39,6 +39,7 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from compute_provisioning_service import container as _container_module
@@ -50,9 +51,16 @@ from market_fulfillment import (
     VersionedEnvelope,
 )
 from market_resource_pools import PoolCreate, PoolUpdate
+from market_site.router import make_capacity_router
 
 _PLAYBOOK_PATH = "playbooks/vm-operations.yaml"
 _PROVIDER_CONFIG = {"playbook_path": _PLAYBOOK_PATH, "extra_vars": {"region": "eu"}}
+
+# Exercise the real site-capacity wire contract and fulfillment API in one ASGI app.
+app.include_router(
+    make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),
+    prefix="/site/api/v1",
+)
 
 
 class FulfillmentApi:
@@ -144,7 +152,7 @@ def _fulfillment_request(**overrides: Any) -> dict:
     return {"kind": "vm.fulfillment.request", "schema_version": 1, "payload": payload}
 
 
-async def _reserved_capacity(pool_id: str) -> str:
+async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = None) -> str:
     """Register a pool + VM resource and reserve capacity against it.
 
     The reserve-only half of ``_scheduled_reservation`` below, factored out
@@ -168,16 +176,19 @@ async def _reserved_capacity(pool_id: str) -> str:
         total_units=4,
         pool_id=pool_id,
         attributes={"vm_host": "kvm-fulfillment-1"},
+        capacity={"gpu_count": 4, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 2000},
     )
     reserved = capacity_ledger_service.reserve(
-        claim={"gpu_count": 1},
+        claim=claim or {"gpu_count": 1},
         deal_ref={"agreement_id": f"agreement-{pool_id}", "market": "vms"},
     )
     assert reserved is not None
     return reserved["capacity_reservation_id"]
 
 
-async def _scheduled_reservation(pool_id: str = "pool-fulfillment-a") -> str:
+async def _scheduled_reservation(
+    pool_id: str = "pool-fulfillment-a", *, claim: dict[str, Any] | None = None,
+) -> str:
     """Register a pool + VM resource, reserve capacity, and schedule it.
 
     Direct service calls, not HTTP, for the reserve step (the storefront's
@@ -191,7 +202,7 @@ async def _scheduled_reservation(pool_id: str = "pool-fulfillment-a") -> str:
     physical_settlement_scheduler = (
         _container_module.resolved_physical_settlement_scheduler
     )
-    capacity_reservation_id = await _reserved_capacity(pool_id)
+    capacity_reservation_id = await _reserved_capacity(pool_id, claim=claim)
 
     physical_settlement_scheduler.schedule_resource(
         PhysicalSettlementRequest(
@@ -205,7 +216,17 @@ class TestBeginPersistsPreparedCreateInput:
     async def test_persisted_prepared_operation_contains_every_create_field(
         self, fulfillment: FulfillmentApi
     ):
-        capacity_reservation_id = await _scheduled_reservation()
+        # vm_ram/vm_vcpus/vm_disk_size below are asserted from the
+        # *reservation's* committed dimensions now, not from
+        # _fulfillment_request()'s payload (which still carries them, but
+        # they are deliberately ignored: the provider derives shape from
+        # the committed reservation, never from the caller-supplied
+        # request).
+        capacity_reservation_id = await _scheduled_reservation(
+            claim={"dimensions": {
+                "gpu_count": 1, "vcpu_count": 4, "ram_gb": 8, "disk_gb": 80,
+            }},
+        )
 
         result = await fulfillment.begin(
             capacity_reservation_id, "vms", _fulfillment_request()
@@ -235,6 +256,8 @@ class TestBeginPersistsPreparedCreateInput:
             assert params["escrow_uid"] == capacity_reservation_id
             assert params["playbook_path"] == _PLAYBOOK_PATH
             assert params["provider_extra_vars"] == {"region": "eu"}
+            assert params["gpu_provisioned"] is True
+            assert params["vm_gpu_count"] == 1
 
             metadata = record.provider_metadata
             assert metadata["vm_host"] == "kvm-fulfillment-1"

@@ -145,12 +145,19 @@ class RemoteCapacityClient:
     async def commit(
         self,
         *,
-        resource_id: str,
+        resource_id: str | None = None,
         capacity_reservation_id: str | None = None,
         lease_start_utc: str | None = None,
         lease_end_utc: str | None = None,
         idempotency_ref: str | None = None,
     ) -> None:
+        # resource_id is not required by the wire contract (CommitRequest)
+        # or the ledger method behind it -- capacity_reservation_id is what
+        # identifies the reservation, and the site authority resolves the
+        # backing resource internally. A caller working from the opaque
+        # capacity-reservation boundary (reserve()'s response no longer
+        # carries resource_id) has nothing to supply here; passing None is
+        # correct, not a degraded call.
         if not capacity_reservation_id:
             raise ValueError(
                 "remote capacity commit requires the capacity_reservation_id the "

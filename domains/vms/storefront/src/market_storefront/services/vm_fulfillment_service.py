@@ -127,7 +127,7 @@ async def _commit_capacity_hold(
     )
     try:
         await capacity.commit(
-            resource_id=str(held_reservation.get("resource_id")),
+            resource_id=held_reservation.get("resource_id"),
             capacity_reservation_id=str(held_reservation["capacity_reservation_id"]),
             lease_start_utc=lease_start_utc,
             lease_end_utc=lease_end_utc,
@@ -162,14 +162,14 @@ async def _commit_fresh_reservation(
     """Promote a settlement-time fallback reservation before provisioning."""
     capacity_reservation_id = reserved.get("capacity_reservation_id")
     resource_id = reserved.get("resource_id")
-    if not capacity_reservation_id or not resource_id:
+    if not capacity_reservation_id:
         raise RuntimeError("Reserved capacity is missing reservation identity")
     lease_start_utc, lease_end_utc = _lease_window_strings(
         start_utc=start_utc,
         duration_seconds=duration_seconds,
     )
     await capacity.commit(
-        resource_id=str(resource_id),
+        resource_id=resource_id,
         capacity_reservation_id=str(capacity_reservation_id),
         lease_start_utc=lease_start_utc,
         lease_end_utc=lease_end_utc,
@@ -336,17 +336,21 @@ async def fulfill_vm_obligation(
         reserved_capacity_reservation_id = (
             str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None
         )
-        reserved_resource_id = str(reserved.get("resource_id"))
+        # Not coerced with str(...): resource_id/vm_host are opaque
+        # placement details the capacity boundary does not guarantee at
+        # this point (schedule_resource(), called by provision_vm below,
+        # is what actually selects/confirms the settlement resource) --
+        # str(None) would silently become the three-character string
+        # "None", which is worse than an absent value if anything ever
+        # persisted it. Kept only as best-effort stage_event telemetry.
+        reserved_resource_id = reserved.get("resource_id")
         reserved_vm_host = reserved.get("vm_host")
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
             escrow_uid=escrow_uid,
             capacity_reservation_id=reserved_capacity_reservation_id,
-            settlement_resource_id=reserved_resource_id,
             fulfillment_phase="capacity_reserved",
         )
-        if not reserved_vm_host:
-            raise RuntimeError("Reserved resource missing vm_host")
         stage_event(
             "provision", "resource_reserved",
             listing_id=order_id,

@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 
 from compute_provisioning import PoolConfigValidationProblem
 from compute_provisioning_service.db.models import AnsiblePoolConfig
+from vm_provisioning_adapter.requirement_delegates import (
+    DEFAULT_REQUIREMENT_DELEGATE,
+    registered_requirement_delegate_names,
+)
 
 # The DB # column is still NOT NULL with no migration this round.
 # This is a compatibility placeholder only — nothing reads it.
@@ -16,7 +20,7 @@ _UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
 
 class AnsiblePoolConfigHandler:
     provider = "ansible"
-    _FIELDS = frozenset({"playbook_path", "extra_vars"})
+    _FIELDS = frozenset({"playbook_path", "requirement_delegate", "extra_vars"})
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
         normalized, problems = self.validate_config_problems(config)
@@ -38,6 +42,9 @@ class AnsiblePoolConfigHandler:
                 )
             )
         playbook_path = config.get("playbook_path")
+        requirement_delegate = config.get(
+            "requirement_delegate", DEFAULT_REQUIREMENT_DELEGATE
+        )
         extra_vars = config.get("extra_vars", {})
         if not isinstance(playbook_path, str) or not playbook_path.strip():
             problems.append(
@@ -45,6 +52,22 @@ class AnsiblePoolConfigHandler:
                     path="playbook_path",
                     code="required_field",
                     message="provider_config.playbook_path is required for provider='ansible'",
+                )
+            )
+        if not isinstance(requirement_delegate, str) or not requirement_delegate.strip():
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="requirement_delegate",
+                    code="required_field",
+                    message="provider_config.requirement_delegate is required for provider='ansible'",
+                )
+            )
+        elif requirement_delegate not in registered_requirement_delegate_names():
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="requirement_delegate",
+                    code="unknown_value",
+                    message=f"unknown Ansible requirement delegate '{requirement_delegate}'",
                 )
             )
         if not isinstance(extra_vars, dict):
@@ -59,6 +82,7 @@ class AnsiblePoolConfigHandler:
             return None, tuple(problems)
         return {
             "playbook_path": playbook_path,
+            "requirement_delegate": requirement_delegate,
             "extra_vars": dict(extra_vars),
         }, ()
 
@@ -72,6 +96,7 @@ class AnsiblePoolConfigHandler:
             return {}
         return {
             "playbook_path": row.playbook_path,
+            "requirement_delegate": row.requirement_delegate,
             "extra_vars": row.extra_vars or {},
         }
 
@@ -88,6 +113,7 @@ class AnsiblePoolConfigHandler:
             row = AnsiblePoolConfig(pool_id=pool_id)
             db.add(row)
         row.playbook_path = normalized["playbook_path"]
+        row.requirement_delegate = normalized["requirement_delegate"]
         row.inventory_group = _UNUSED_INVENTORY_GROUP_COMPAT_VALUE
         row.extra_vars = normalized["extra_vars"]
 

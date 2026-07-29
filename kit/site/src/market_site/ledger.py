@@ -866,6 +866,18 @@ class CapacityLedgerService:
         Idempotent: committing an already-leased reservation records the
         derived lease window and clears any TTL hold. ``lease_end_utc=None``
         commits an open-ended hold (no lease tail — the watchdog never sees it).
+
+        ``resource_id`` is used only when ``capacity_reservation_id`` is
+        omitted — it selects which currently-held reservation to commit by
+        looking up the resource's backing bucket instead (see
+        ``_find_reservation``). No current caller does this: every real
+        caller already has and supplies ``capacity_reservation_id``, so
+        ``resource_id`` is ignored. This is deliberate future-facing surface
+        for a caller that knows a physical resource but not the reservation
+        holding it (e.g. a direct-resource-reservation admin/recovery path),
+        not dead code to remove — but it is not what backs ordinary
+        pool-scoped or resource-pinned-claim reservations, both of which
+        always carry ``capacity_reservation_id`` by the time they commit.
         """
         window_start, window_end = _lease_window(
             lease_start_utc=lease_start_utc,
@@ -974,6 +986,20 @@ class CapacityLedgerService:
         ``old_capacity_reservation_id`` does not name a currently
         held/leased reservation, or if the new shape has no eligible
         candidate.
+
+        No caller uses this method yet. When one is added: resize before
+        ``schedule_resource()`` runs for the affected reservation, not
+        after. VM fulfillment-request shape derivation
+        (``AnsibleFulfillmentProvider.prepare_create``) trusts the
+        reservation's committed ``dimensions`` as authoritative precisely
+        because nothing currently changes them once a hold exists
+        (``compute_capacity_claim_from_order`` computes the claim from the
+        terminal, post-negotiation order at acceptance time, so the initial
+        reservation and any later shape-derivation always agree by
+        construction). A caller that resizes *after* scheduling would
+        silently break that invariant: the already-scheduled
+        ``SettlementResource.dimensions`` would keep reflecting the old
+        shape.
         """
         requested = _requested_dimensions(new_claim, unit_claim_keys=self._unit_claim_keys)
         deal = dict(deal_ref or {})
@@ -1566,6 +1592,20 @@ class CapacityLedgerService:
         escrow_uid: str | None = None,
         resource_id: str | None = None,
     ) -> CapacityReservation | None:
+        """Look up a held/leased reservation.
+
+        ``resource_id`` (used only when both ``capacity_reservation_id`` and
+        ``escrow_uid`` are absent) finds the most recently created held
+        reservation currently debited against the named resource's bucket —
+        "which reservation currently holds this physical resource" rather
+        than "the reservation with this ID". No current caller reaches this
+        branch: it exists for a future caller that has a resource identity
+        but not a reservation identity (e.g. admin/recovery tooling, or a
+        not-yet-built direct-resource-reservation path). Ordinary
+        reservations, pool-scoped or resource-pinned, always carry their
+        own ``capacity_reservation_id`` by commit time and use that branch
+        instead.
+        """
         if capacity_reservation_id:
             return db.get(CapacityReservation, capacity_reservation_id)
         q = db.query(CapacityReservation).filter(

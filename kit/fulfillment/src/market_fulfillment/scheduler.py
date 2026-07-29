@@ -51,6 +51,7 @@ def _resource_from_record(record: Any) -> SettlementResource:
         resource_kind=record.scheduling_requirements.get("resource_kind"),
         provider=record.provider,
         attributes=dict(record.resource_attributes or {}),
+        dimensions=dict((record.scheduling_requirements or {}).get("dimensions") or {}),
     )
 
 

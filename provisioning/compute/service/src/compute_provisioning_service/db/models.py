@@ -102,6 +102,9 @@ class AnsiblePoolConfig(Base):
 
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), primary_key=True)
     playbook_path = Column(String, nullable=False)
+    requirement_delegate = Column(
+        String, nullable=False, default="vm_management_v1", server_default="vm_management_v1"
+    )
     inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
 

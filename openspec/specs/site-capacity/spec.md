@@ -233,3 +233,7 @@ A site authority SHALL expose `site_resource_pools` from authoritative domain in
 #### Scenario: Storefront refreshes grouped capacity
 - **WHEN** the capacity-bucket projection revision changes
 - **THEN** the storefront can replace that projection independently without receiving physical-resource identifiers or using a group as an allocation target
+
+### Requirement: Committed dimensions remain authoritative through scheduling
+
+The committed capacity-reservation dimensions are the authoritative admitted resource shape. Scheduling MUST carry those opaque dimensions with the selected settlement resource so the domain fulfillment provider can interpret them without the caller retransmitting an independently computed shape.

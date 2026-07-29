@@ -1,0 +1,10 @@
+from arkhai_vms import (
+    DIMENSION_KEYS, DISK_GB_DIMENSION, GPU_COUNT_DIMENSION,
+    RAM_GB_DIMENSION, VCPU_COUNT_DIMENSION,
+)
+
+
+def test_canonical_dimension_vocabulary():
+    assert DIMENSION_KEYS == (
+        GPU_COUNT_DIMENSION, VCPU_COUNT_DIMENSION, RAM_GB_DIMENSION, DISK_GB_DIMENSION
+    )

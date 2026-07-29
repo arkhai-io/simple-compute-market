@@ -93,6 +93,9 @@ class FulfillmentOrchestrator:
             ),
             provider=record.provider,
             attributes=dict(record.resource_attributes or {}),
+            dimensions=dict(
+                (record.scheduling_requirements or {}).get("dimensions") or {}
+            ),
         )
 
     @staticmethod
