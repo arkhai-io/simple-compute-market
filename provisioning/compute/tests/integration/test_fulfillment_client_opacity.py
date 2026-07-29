@@ -1,26 +1,20 @@
-"""Opaque capacity/fulfillment boundary, exercised against a mock transport.
+"""Opaque fulfillment boundary, exercised against a mock transport.
 
-Replaces the "fast, always-run" half of what
-``domains/vms/storefront/tests/cross_service/test_capacity_fulfillment_boundary.py``
-used to prove alone, via a special execution environment (PYTHONPATH trick
-running a storefront-owned test file inside the provisioning service's own
-process, to avoid either production package depending on the other).
-
-This test needs no such trick: ``RemoteCapacityClient`` and
-``ComputeProvisioningClient`` both already declare an
-``httpx.AsyncBaseTransport`` test seam for exactly this purpose (see each
-class's ``transport`` constructor parameter). Driving them against a
-``httpx.MockTransport`` that returns responses built from the same shared,
-typed contract models (``compute_provisioning.contracts``) both a real
-client and a real server already validate against proves the client's wire
-behavior -- specifically, that it never needs or sends physical-placement
-fields -- without importing ``compute_provisioning_service`` at all.
+Covers `ComputeProvisioningClient` -- the client class this same package
+defines -- proving `schedule_resource`/`begin_fulfillment` never *send* a
+placement field. Lives here, not in `core/storefront`, because fulfillment
+scheduling is a physical-resource-domain concept (VM, bare-metal today),
+not a universal one `core` should know about. See the companion
+`RemoteCapacityClient` test in
+`core/storefront/tests/integration/test_capacity_client_opacity.py` for
+the capacity-reservation half of this same boundary, and that test's
+docstring for why the two were split apart.
 
 What this test does *not* prove: that a real server actually implements
 this contract correctly end to end. That is a genuine two-real-services
 proof and belongs in the e2e suite
-(``refactor-e2e-fulfillment-lifecycle`` Section 3) -- see
-``openspec/changes/refactor-e2e-fulfillment-lifecycle/design.md``.
+(`refactor-e2e-fulfillment-lifecycle` Section 3) -- see
+`openspec/changes/refactor-e2e-fulfillment-lifecycle/design.md`.
 """
 
 from __future__ import annotations
@@ -37,7 +31,6 @@ from compute_provisioning.contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
 )
-from core_storefront.capacity_remote import RemoteCapacityClient
 
 _CAPACITY_RESERVATION_ID = "resv-mock-001"
 _SETTLEMENT_RESOURCE_ID = "settlement-resource-mock-001"
@@ -59,22 +52,6 @@ class _RecordingHandler:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
-
-        if path == "/api/v1/capacity/reservations" and request.method == "POST":
-            # Mirrors kit/site's router.py: the reservation response never
-            # carries resource_id/capacity_bucket_id/backing_resource_id/
-            # vm_host (openspec/specs/site-capacity/spec.md's opaque-
-            # reservation requirement).
-            return httpx.Response(
-                200,
-                json={"reservation": {"capacity_reservation_id": _CAPACITY_RESERVATION_ID}},
-            )
-
-        if (
-            path == f"/api/v1/capacity/reservations/{_CAPACITY_RESERVATION_ID}/commit"
-            and request.method == "POST"
-        ):
-            return httpx.Response(200, json={"reservation": None})
 
         if path == "/api/v1/fulfillment/schedule" and request.method == "POST":
             response = FulfillmentScheduleResponse(
@@ -110,27 +87,17 @@ def _fulfillment_request(**overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_reserve_commit_schedule_begin_send_no_placement_fields() -> None:
-    """The opaque capacity/fulfillment boundary holds from the client side.
+async def test_schedule_begin_send_no_placement_fields() -> None:
+    """The opaque fulfillment boundary holds from the client side.
 
-    Proves ``RemoteCapacityClient``/``ComputeProvisioningClient`` never
-    *send* ``resource_id`` as a required or populated field across
-    reserve/commit/schedule/begin -- the same invariant the retired
-    cross-service test proved by exercising a real server, now proved from
-    the client's own request bodies against a mock instead.
+    Proves `ComputeProvisioningClient` never *sends* `resource_id` as a
+    required or populated field across schedule/begin -- the same
+    invariant the retired cross-service test proved by exercising a real
+    server, now proved from the client's own request bodies against a
+    mock instead.
     """
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
-
-    capacity = RemoteCapacityClient("http://capacity.test", transport=transport)
-    reservation = await capacity.reserve(claim={"pool_id": "pool-mock", "gpu_count": 1})
-    assert reservation == {"capacity_reservation_id": _CAPACITY_RESERVATION_ID}
-
-    await capacity.commit(
-        resource_id=None,
-        capacity_reservation_id=_CAPACITY_RESERVATION_ID,
-        idempotency_ref="agreement-mock-boundary",
-    )
 
     provisioning = ComputeProvisioningClient("http://provisioning.test", transport=transport)
     scheduled = await provisioning.schedule_resource(
@@ -157,9 +124,6 @@ async def test_reserve_commit_schedule_begin_send_no_placement_fields() -> None:
     assert accepted.fulfillment_id == _FULFILLMENT_ID
     assert accepted.state == "dispatching"
 
-    # The actual proof: not one request body across all four calls named a
-    # physical placement identifier, even though every call had the
-    # opportunity to (commit/schedule both accept an optional resource_id).
     for sent in handler.requests:
         if sent.content:
             import json

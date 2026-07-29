@@ -116,7 +116,13 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         {"gpu_count": 3, "vm_host": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
-    assert reserved["vm_host"] == "kvm1"
+    # vm_host is intentionally opaque across this boundary (see
+    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
+    # private to the site authority" requirement) -- the claim above
+    # already proves vm_host-attribute matching selected the right
+    # resource, evidenced by the unit counts below, not by reading a
+    # physical-placement field back off the reservation.
+    assert "vm_host" not in reserved
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
@@ -175,7 +181,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
 
     assert reserved is not None
     assert "resource_id" not in reserved
-    assert reserved["vm_host"] is None
+    assert "vm_host" not in reserved
 
 
 @pytest.mark.asyncio

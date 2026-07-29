@@ -21,7 +21,7 @@ packages = ["src/compute_provisioning"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [
