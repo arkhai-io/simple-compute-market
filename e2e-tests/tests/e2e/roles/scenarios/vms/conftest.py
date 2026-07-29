@@ -82,8 +82,6 @@ class DealState:
     _provision_job_evaluated: bool = False
     # Phase 8 — settlement
     settlement_submitted: bool = False
-    provisioning_job_id: Optional[str] = None
-    reserved_resource_id: Optional[str] = None
     # Phase 9 — provisioning completion
     provisioning_result_injected: bool = False
     lease_id: Optional[str] = None
@@ -97,7 +95,21 @@ class DealState:
     seller_listing_final_status: Optional[str] = None
     # Phase 10-11 — explicit interruption and fulfillment teardown lifecycle
     _termination_requested: bool = False
+    # Durable fulfillment identity, captured at settlement (stage 08b) from
+    # the settle-status response's ``fulfillment_id`` -- the buyer-facing
+    # path no longer surfaces a raw Ansible ``provisioning_job_id`` (always
+    # None for a fulfillment on the durable path; see
+    # ``core_storefront.models.settle_models.SettleStatusResponse``).
+    # Reused through phases 9-11 for status polling and teardown.
     fulfillment_id: Optional[str] = None
+    # Reserved resource, captured at stage 09c from the admin-only
+    # DealLease view (``get_capacity_reservation``), never from a
+    # buyer-facing response -- ``resource_id``/``vm_host`` are
+    # intentionally opaque across the ordinary reservation boundary (see
+    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
+    # private to the site authority" requirement). Admin introspection is
+    # a legitimate, separate channel from that opacity guarantee.
+    reserved_resource_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
     # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.

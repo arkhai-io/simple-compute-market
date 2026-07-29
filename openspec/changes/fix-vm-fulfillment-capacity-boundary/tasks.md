@@ -67,3 +67,44 @@
 | Internal packages are consumed from `.dist` wheels rather than relative editable sibling paths | Existing `docs/development/ARCHITECTURE.md` packaging/dependency section; amend only if the current text is insufficient |
 | Root build composition delegates domain artifact ownership to `domains/Makefile` | Existing repository build guidance in `AGENTS.md`/`ARCHITECTURE.md`; no new permanent rule unless implementation finds a gap |
 
+## 7. Post-provision opaque-boundary correction
+
+- [x] 7.1 Fix `fulfill_vm_obligation`'s post-provision `capacity.commit(...)` gate: key on `reserved_capacity_reservation_id` instead of `reserved_resource_id`, which is legitimately absent on the real opaque reservation response and was silently skipping the lease-window refresh.
+- [x] 7.2 Fix `fulfill_vm_obligation`'s post-provision `register_lease(...)` gate the same way: key on `reserved_capacity_reservation_id`/`vm_target`/`escrow_uid`, not `reserved_resource_id`/`reserved_vm_host` -- the latter was silently skipping lease registration, which the watchdog's auto-release depends on.
+- [x] 7.3 Make `_register_vm_lease_with_settings`'s `resource_id`/`vm_host` parameters optional (`| None = None`), matching that its `LeaseRegistration` call never reads them.
+- [x] 7.4 Add a regression test using the real opaque-reservation shape (no `resource_id`/`vm_host` in the `reserve()` result) asserting both post-provision calls still fire. Confirm it fails against the pre-fix gates and passes after.
+- [x] 7.5 Re-run the full touched-file test suite; confirm no regressions.
+- [x] 7.6 Record the correction and its promotion status in `design.md`'s "Post-implementation correction" section.
+
+### Section 7 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+## 8. Correct scheduled-vs-committed dimensions authority
+
+- [x] 8.1 Discuss phase: confirm via test whether `SettlementResource.dimensions` reflects the reservation's full committed dimensions or the (possibly narrower) scheduled request. Confirmed: the latter, and this is correct -- see `design.md`'s "Discuss phase" and "Resolution" sections for the negotiation-conversation context that settles this.
+- [x] 8.2 No scheduler code change required -- `_resource_from_record` already reports the scheduled (reservation-bounded) dimensions, which is the correct behavior once negotiation-driven narrowing is understood as intended.
+- [x] 8.3 Correct `openspec/specs/site-capacity/spec.md`'s "Committed dimensions remain authoritative through scheduling" requirement to state the scheduled shape, bounded by but not necessarily equal to the reservation, is authoritative.
+- [x] 8.4 Correct `openspec/specs/physical-provisioning/spec.md`'s "Provisioning shape comes from committed capacity" requirement to match.
+- [x] 8.5 Add the repository-wide negotiation/capacity premise to `docs/development/ARCHITECTURE.md`: pooled-capacity negotiation, not physical-resource pinning; `resize_reservation` as the mechanism for a persisted shape change; explicit note that `resize_reservation` has no negotiation-side caller yet.
+- [x] 8.6 Update `kit/fulfillment/tests/unit/test_scheduler.py::test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation`'s docstring to describe pinned intended behavior rather than an open gap.
+- [x] 8.7 Re-run `kit/fulfillment` test suite; confirm no regressions.
+
+### Section 8 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+## 9. Verification pass on prior fixes
+
+- [x] 9.1 Re-verify prior fixes in this change against current code, not against task checkmarks alone.
+- [x] 9.2 `vm_host` stripping from `/reservations`: confirmed still not done; decision needed (recorded in `design.md`, not yet made).
+- [x] 9.3 Adapter lockfile: root-caused the actual regeneration bug (`test-domain-dist-reinit` propagating an absolute `DIST_DIR`), fixed the root `Makefile`, regenerated `domains/vms/provisioning/adapter/uv.lock` cleanly (verified no absolute paths), confirmed the adapter's own test target still passes (25/25).
+- [x] 9.4 CI workflow: reviewed `.github/workflows/tests.yml`; confirmed gaps broader than initially reported (missing several packages from the matrix entirely, not just the staging-only trigger). Left unresolved pending a decision on priority.
+- [x] 9.5 Cross-service test strengthening: confirmed the specific test originally flagged is unchanged, but found its substance already satisfied by `test_ansible_fulfillment_provider.py::test_request_supplied_sizing_is_ignored_even_when_present` (this change's own task 3.10). Recommend treating as resolved.
+
+### Section 9 design-promotion record
+
+See `design.md`'s "Design-promotion record" table.
+
+
+

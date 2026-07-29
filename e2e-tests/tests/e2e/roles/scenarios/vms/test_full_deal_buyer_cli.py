@@ -52,8 +52,9 @@ Phase 8 — Settlement pipeline (buyer driven by `market settle` background)
   08c  Evaluate provisioning job: rule_matched=PROV_RULE_ID, would_pause=True
   08b  Post-submit observation:
          wait_for_event("settle_submitted")
-         GET /settle/{uid}/status → provisioning_job_id present
-         stage_events: provision/job_submitted with resource_id==E2E_RESOURCE_ID
+         GET /settle/{uid}/status → fulfillment_id present, state=dispatching
+         stage_events: provision/job_submitted confirms dispatch started
+         (resource identity confirmed later, via admin introspection, at 09c)
 
 Phase 9 — Provisioning completion
   09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
@@ -901,10 +902,12 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         Sync points (no buyer action — the subprocess is already running):
           1. Buyer run-log: settle_submitted event surfaces after the
              buyer's signed POST /settle/{uid} returns from the seller.
-          2. Seller stage events: provision/job_submitted carries the
-             reserved resource_id; assert it matches E2E_RESOURCE_ID.
-          3. Storefront settle/status (buyer-signed): provisioning_job_id
-             populated. Provisioning service confirms job exists.
+          2. Seller stage events: provision/job_submitted fires, confirming
+             dispatch started (resource identity is confirmed later, via
+             admin introspection, at 09c -- see that stage's docstring).
+          3. Storefront settle/status (buyer-signed): fulfillment_id
+             populated. Provisioning service confirms the fulfillment is
+             dispatched and gated by the paused mock rule.
 
         The subprocess remains blocked on /settle/{uid}/status polling
         because the mock pause gate (armed in 07) holds the job before
@@ -920,7 +923,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
                  {k: submitted.get(k) for k in ("ts", "body")})
 
         from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-        event = _wait(
+        _wait(
             storefront_admin_client,
             "provision", "job_submitted",
             listing_id=deal_state.seller_listing_id,
@@ -931,25 +934,22 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             deal_state.real_escrow_uid,
             buyer_address=buyer_config["wallet_address"],
         )
-        prov_job_id = status_resp.provisioning_job_id
-        assert prov_job_id, (
-            f"provisioning_job_id absent from settle status after job_submitted event: "
+        # provisioning_job_id is always None for a fulfillment on the
+        # durable path; fulfillment_id is that path's durable identity.
+        # See core_storefront.models.settle_models.SettleStatusResponse.
+        fulfillment_id = status_resp.fulfillment_id
+        assert fulfillment_id, (
+            f"fulfillment_id absent from settle status after job_submitted event: "
             f"{status_resp}"
         )
 
-        job = provisioning_client.get_job(prov_job_id)
-        assert job.status in ("queued", "running", "succeeded"), (
-            f"Unexpected job status: {job.status}"
+        status = provisioning_client.get_fulfillment_status(fulfillment_id)
+        assert status.get("state") == "dispatching", (
+            f"Expected fulfillment dispatched but gated on the paused mock "
+            f"rule, got: {status}"
         )
-        deal_state.provisioning_job_id = prov_job_id
-        deal_state.reserved_resource_id = event.data.get("resource_id")
-        assert deal_state.reserved_resource_id == E2E_RESOURCE_ID, (
-            f"Settlement reserved unexpected resource "
-            f"{deal_state.reserved_resource_id!r}; expected {E2E_RESOURCE_ID!r}. "
-            f"job_submitted event: {event}"
-        )
-        log.info("[08b] Provisioning job %s in state %s (reserved=%s)",
-                 prov_job_id, job.status, deal_state.reserved_resource_id)
+        deal_state.fulfillment_id = fulfillment_id
+        log.info("[08b] Fulfillment %s in state %s", fulfillment_id, status.get("state"))
 
 
 # ===========================================================================
@@ -958,22 +958,30 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 
 class TestStage09a_ProvisioningCompletes:
     def test_09a_release_gate_and_job_succeeds(
-        self, provisioning_test_client, deal_state: DealState
+        self, provisioning_test_client, provisioning_client, deal_state: DealState
     ):
-        """Release provisioning gate then long-poll until job succeeds."""
-        require_state(deal_state, "provisioning_job_id")
+        """Release the provisioning gate, then deterministically converge
+        the fulfillment to a terminal state.
+
+        See ``test_full_deal.py``'s stage 09a docstring for why this can't
+        ``wait_for_job(<id>)`` the way the legacy direct-dispatch path
+        could, and why job completion and fulfillment convergence are two
+        separate things that must each be driven explicitly.
+        """
+        require_state(deal_state, "fulfillment_id")
 
         provisioning_test_client.resume_rule(PROV_RULE_ID)
+        provisioning_test_client.drain(timeout=30)
+        provisioning_client.run_fulfillment_convergence_cycle()
 
-        result = provisioning_test_client.wait_for_job(
-            deal_state.provisioning_job_id, timeout=30
-        )
-        assert result["status"] == "succeeded", (
-            f"Expected succeeded, got {result['status']!r}. "
-            f"Error: {result.get('error')}"
+        status = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
+        assert status.get("state") == "active", (
+            f"Expected fulfillment to converge to active, got: {status}"
         )
         deal_state.provisioning_result_injected = True
-        log.info("[09a] Provisioning job %s succeeded", deal_state.provisioning_job_id)
+        log.info(
+            "[09a] Fulfillment %s converged to active", deal_state.fulfillment_id
+        )
 
 
 class TestStage09b_BuyerObservesReadyAndCleanExit:
@@ -1061,13 +1069,17 @@ class TestStage09c_LeaseRegistered:
     def test_09c_provisioning_lease_registered(
         self, provisioning_client, deal_state: DealState
     ):
-        """Provisioning owns the happy-path lease row after fulfillment."""
+        """Provisioning owns the happy-path lease row after fulfillment.
+
+        Resource identity is confirmed here, not at stage 08b -- see
+        ``test_full_deal.py``'s stage 09c docstring for why (opaque
+        buyer-facing boundary vs. legitimate admin introspection).
+        """
         require_state(
             deal_state,
             "real_escrow_uid",
             "settlement_status",
-            "reserved_resource_id",
-            "provisioning_job_id",
+            "fulfillment_id",
         )
 
         # DealLease resolves where this deal's lease lives: a site-ledger
@@ -1075,18 +1087,21 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == deal_state.reserved_resource_id
         assert lease.get("resource_id") == E2E_RESOURCE_ID
         vm_host = lease.get("vm_host")
         assert vm_host, (
             f"Lease missing vm_host; required for stage 10a provider teardown operation: {lease!r}"
         )
-        assert lease.get("create_job_id") in (None, deal_state.provisioning_job_id)
+        assert lease.get("create_job_id"), (
+            f"Expected a tracked Ansible create job on the admin lease view, "
+            f"got: {lease}"
+        )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
         )
 
         deal_state.deal_lease = lease_view
+        deal_state.reserved_resource_id = lease.get("resource_id")
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         deal_state.vm_host = vm_host

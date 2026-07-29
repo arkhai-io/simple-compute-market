@@ -89,7 +89,119 @@ The following corrections were accepted during code review and are part of this 
 
 | Material decision | Permanent documentation |
 |---|---|
-| Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md`, “Committed dimensions remain authoritative through scheduling” |
-| Providers derive shape from scheduled reservation dimensions rather than caller retransmission | `openspec/specs/physical-provisioning/spec.md`, “Provisioning shape comes from committed capacity” |
-| Ansible pools select an allowlisted requirement delegate alongside the playbook | `openspec/specs/resource-pool-management/spec.md`, “Registered requirement delegates”; `openspec/specs/physical-provisioning/spec.md`, “Provisioning shape comes from committed capacity” |
-| Delegate validation and accepted-operation snapshot semantics | `openspec/specs/resource-pool-management/spec.md`, “Registered requirement delegates” |
+| Committed reservation dimensions are authoritative for fulfillment shape | `openspec/specs/site-capacity/spec.md`, "Committed dimensions remain authoritative through scheduling" |
+| Providers derive shape from scheduled reservation dimensions rather than caller retransmission | `openspec/specs/physical-provisioning/spec.md`, "Provisioning shape comes from committed capacity" |
+| Ansible pools select an allowlisted requirement delegate alongside the playbook | `openspec/specs/resource-pool-management/spec.md`, "Registered requirement delegates"; `openspec/specs/physical-provisioning/spec.md`, "Provisioning shape comes from committed capacity" |
+| Delegate validation and accepted-operation snapshot semantics | `openspec/specs/resource-pool-management/spec.md`, "Registered requirement delegates" |
+
+## Post-implementation corrections
+
+Defects found after the initial implementation, each resolved to a current
+decision. Historical review provenance (who found what, when, in which
+pass) is not repeated here — see git history / PR review for that.
+
+### Post-provision fulfillment calls were still gated on opaque fields
+
+`fulfill_vm_obligation`'s post-provision `capacity.commit(...)` and
+`register_lease(...)` calls were gated on `resource_id`/`vm_host`, which
+are legitimately absent on an ordinary pool-scoped reservation. Both
+silently no-op'd — the lease-window refresh and the watchdog registration
+this change's design depends on for auto-release never ran on the exact
+path this change exists to make trustworthy.
+
+**Decision:** both gates key on `capacity_reservation_id` (always present)
+instead. `resource_id`/`vm_host` remain optional, unused arguments to both
+calls — neither ever read them (`commit()` ignores `resource_id` whenever
+`capacity_reservation_id` is supplied; `register_lease`'s `LeaseRegistration`
+never read either field, since `executor_ref` self-heals from the
+independently-written `reservation.vm_host`).
+
+Regression test: `test_post_provision_commit_and_lease_registration_do_not_require_resource_id`
+(`test_fulfillment_provisioning.py`), using the real opaque-reservation
+shape.
+
+### `vm_host` was not stripped from the reservation response
+
+`vm_host` is real physical-placement data, populated at `reserve()` time,
+that was never added to the response-stripping list alongside
+`resource_id`/`capacity_bucket_id`/`backing_resource_id`.
+
+**Decision:** stripped. `resource_id`/`vm_host` are an optional
+pinning/telemetry pathway (resource pools exist so buyers negotiate on
+pooled capacity, not a pinned physical node); no code should depend on
+either being present for ordinary fulfillment. All references to `vm_host`
+in stage-event/log telemetry removed accordingly (functional passthrough
+to `provision_vm`/`register_lease`/`schedule_shutdown` left as-is — already
+accepted-but-unused compatibility parameters).
+
+### Scheduled dimensions vs. reservation dimensions
+
+`SettlementResource.dimensions` reports the *scheduled* shape (bounded by,
+but not necessarily equal to, the reservation), confirmed by
+`test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation`.
+This is correct behavior, not a bug: negotiation resizes the reservation
+via `resize_reservation` (supersede, never mutate) when a shape genuinely
+changes; a scheduling request may separately narrow for a placement/pricing
+check without committing to that resize yet.
+
+**Rejected alternative:** always reporting the reservation's full committed
+dimensions regardless of what was scheduled. Would silently deliver the
+pre-negotiation shape after a buyer negotiated down — a correctness/billing
+defect in the opposite direction from this change's original purpose.
+
+**Decision:** no scheduler code change (it already behaved correctly).
+`site-capacity/spec.md` and `physical-provisioning/spec.md` corrected —
+both overclaimed that the reservation's own dimensions are unconditionally
+authoritative; the scheduled, reservation-bounded dimensions are.
+`docs/development/ARCHITECTURE.md` gained the repository-wide statement of
+the premise this depends on (pooled-capacity negotiation, not physical-node
+pinning; a negotiated shape change resizes the reservation).
+
+**Open, not resolved by this change:** `resize_reservation` has no
+negotiation-side caller yet. The corrected specs describe intended design;
+wiring negotiation to it is separate, larger work.
+
+### Adapter lockfile was not portable
+
+`domains/vms/provisioning/adapter/uv.lock` still recorded stale
+editable-source resolutions after `pyproject.toml`'s `[tool.uv.sources]`
+block was cleaned. Root cause: the root `Makefile`'s `test-domain-dist-reinit`
+target passed its own absolute `DIST_DIR` into `uv sync --find-links`,
+which bakes that literal machine-specific path into `uv.lock`'s
+`source = { registry = ... }` entries on every regeneration.
+
+**Decision:** stopped propagating the absolute override; the adapter's own
+already-correct relative default (`DIST_DIR ?= ../../../../.dist`) applies
+instead. Regenerated lock verified free of absolute paths; target's own
+test scope (25 tests) still passes.
+
+### Cross-service test coverage
+
+Two gaps identified against the merged head: the boundary test only
+asserted up to `dispatching` (not a terminal state), and it ran in no CI
+job (`.github/workflows/tests.yml` triggers on `staging` only and its
+matrix omits several touched packages entirely).
+
+**Decision:** the "inspect prepared values under conflicting caller
+fields" gap is satisfied by
+`test_ansible_fulfillment_provider.py::test_request_supplied_sizing_is_ignored_even_when_present`,
+a more appropriate layer for that proof than the heavier cross-service
+test. The cross-service test tier itself was later retired in favor of a
+mock-transport client test plus existing e2e coverage — see
+`openspec/changes/refactor-e2e-fulfillment-lifecycle`.
+
+**Unresolved:** the CI-matrix gaps (missing packages, staging-only trigger)
+remain open pending a repository-owner decision on priority, since GitHub
+Actions isn't part of the current local workflow.
+
+## Design-promotion record
+
+| Material decision | Permanent location |
+|---|---|
+| Post-provision lease refresh/registration key on `capacity_reservation_id`, never `resource_id`/`vm_host` | `openspec/specs/site-capacity/spec.md`'s opaque-reservation-boundary requirement |
+| `resource_id`/`vm_host` are an optional pinning/telemetry pathway, not the primary negotiation unit; covers any domain-specific physical field, not just generic accounting identifiers | `openspec/specs/site-capacity/spec.md`, "Capacity accounting is private to the site authority" |
+| Scheduled (reservation-bounded) dimensions, not the reservation's own dimensions unconditionally, are authoritative for what a provider builds | `openspec/specs/site-capacity/spec.md`, "Committed dimensions remain authoritative through scheduling" |
+| Providers derive shape from the scheduled settlement resource | `openspec/specs/physical-provisioning/spec.md`, "Provisioning shape comes from committed capacity" |
+| Capacity reservations negotiate pooled capacity, not a pinned physical resource; a negotiated shape change resizes the reservation; `resize_reservation` has no caller yet | `docs/development/ARCHITECTURE.md`, "Capacity reservation" |
+| `test-domain-dist-reinit` must not propagate an absolute `DIST_DIR` into the adapter's lock regeneration | In-code comment on the `Makefile` target; build tooling, not subsystem behavior, so no `openspec/specs` entry |
+

@@ -8,6 +8,7 @@ POOLS-7 has landed independent site resource-pool and capacity-bucket projection
 - Define explicit mapping between provisioning-owned projected resource identities and storefront-owned commercial inventory, pricing, settlement options, and listing identities.
 - Make listing publication and reservation claim construction consume mapped authoritative projection identity rather than independently authored physical host/pool fields.
 - Extend the resource-pool projection with the minimum pool metadata needed for domain-owned hints, including enabled state and opaque `policy_tags`.
+- Extend the resource-pool projection with each pool's configured VM size defaults (`default_vm_ram`, `default_vm_vcpus`, `default_vm_disk_size`), currently persisted provisioning-service-side with no cross-service consumer, so a storefront can resolve a full four-dimension shape at negotiation time rather than only GPU count (2026-07-29 addition; see task 3.5).
 - Define a domain-neutral `listing_mode` policy-tag key while VM, bare-metal, and API-credit domains own accepted values and structural defaults.
 - Define an optional `max_reservation_hold_seconds` preference that cooperating storefronts cap against their own hold policy; it remains advisory rather than site-enforced.
 - Retire only storefront-local physical-authority columns, CSV paths, validators, and readers proven superseded; retain commercial and operational state.
