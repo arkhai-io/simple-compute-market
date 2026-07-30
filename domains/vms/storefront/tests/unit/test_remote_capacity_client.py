@@ -169,6 +169,37 @@ def test_site_mode_defaults_authority_url_to_provisioning():
     assert built.site("default").base_url == "http://prov:8081"
 
 
+def test_most_available_placement_gets_the_kit_site_exact_claim_matcher():
+    """Selecting "most_available" must not rank against the aggregator's
+    own coarse default -- this domain's backing site is kit/site, which
+    owns the only full claim-parsing and feasibility semantics, so
+    composition must inject its exact matcher instead."""
+    import functools
+
+    from market_site.ledger import dict_resource_satisfies_claim
+
+    with patch(
+        "market_storefront.utils.config.settings",
+        _settings(placement="most_available"),
+    ):
+        built = cc.build_capacity_client(lambda: None)
+    assert isinstance(built._placement, functools.partial)
+    assert built._placement.func is cc.most_available
+    assert built._placement.keywords["claim_matcher"] is dict_resource_satisfies_claim
+
+
+def test_fill_first_placement_is_not_wrapped_with_a_claim_matcher():
+    """fill_first ignores claim entirely -- wrapping it would be
+    pointless ceremony, and it must stay the plain function so
+    fill_first-selecting domains aren't forced to depend on kit/site."""
+    with patch(
+        "market_storefront.utils.config.settings",
+        _settings(placement="fill_first"),
+    ):
+        built = cc.build_capacity_client(lambda: None)
+    assert built._placement is cc.fill_first
+
+
 @pytest.mark.asyncio
 async def test_subscriber_closes_and_reopens_with_site_availability(
     client: cc.RemoteCapacityClient,

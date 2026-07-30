@@ -237,25 +237,29 @@ async def test_site_deltas_reach_aggregate_subscribers_tagged():
 # given claim from (wrong pool, wrong resource, insufficient dimensions).
 # ---------------------------------------------------------------------------
 
-from core_storefront.aggregation import _resource_matches_claim, _site_available_units  # noqa: E402
+from core_storefront.aggregation import (  # noqa: E402
+    ClaimMatcher,
+    _coarse_resource_matches_claim,
+    _site_available_units,
+)
 
 
 def test_resource_matches_claim_no_claim_matches_everything():
     row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 0}
-    assert _resource_matches_claim(row, None) is True
-    assert _resource_matches_claim(row, {}) is True
+    assert _coarse_resource_matches_claim(row, None) is True
+    assert _coarse_resource_matches_claim(row, {}) is True
 
 
 def test_resource_matches_claim_filters_by_pool_id():
     row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 100}
-    assert _resource_matches_claim(row, {"pool_id": "pool-a"}) is True
-    assert _resource_matches_claim(row, {"pool_id": "pool-b"}) is False
+    assert _coarse_resource_matches_claim(row, {"pool_id": "pool-a"}) is True
+    assert _coarse_resource_matches_claim(row, {"pool_id": "pool-b"}) is False
 
 
 def test_resource_matches_claim_filters_by_resource_id():
     row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 100}
-    assert _resource_matches_claim(row, {"resource_id": "r1"}) is True
-    assert _resource_matches_claim(row, {"resource_id": "r2"}) is False
+    assert _coarse_resource_matches_claim(row, {"resource_id": "r1"}) is True
+    assert _coarse_resource_matches_claim(row, {"resource_id": "r2"}) is False
 
 
 def test_resource_matches_claim_dimensions_requires_every_requested_dimension():
@@ -263,20 +267,46 @@ def test_resource_matches_claim_dimensions_requires_every_requested_dimension():
         "pool_id": "pool-a", "resource_id": "r1", "available_units": 4,
         "available": {"gpu_count": 4, "ram_gb": 64},
     }
-    assert _resource_matches_claim(
+    assert _coarse_resource_matches_claim(
         row, {"dimensions": {"gpu_count": 2, "ram_gb": 32}},
     ) is True
     # Enough GPUs, not enough RAM -- must fail on the RAM dimension alone.
-    assert _resource_matches_claim(
+    assert _coarse_resource_matches_claim(
         row, {"dimensions": {"gpu_count": 2, "ram_gb": 128}},
     ) is False
 
 
 def test_resource_matches_claim_legacy_units_shape_apicredits_style():
     row = {"pool_id": None, "resource_id": "quota-1", "available_units": 10}
-    assert _resource_matches_claim(row, {"units": 5}) is True
-    assert _resource_matches_claim(row, {"units": 50}) is False
-    assert _resource_matches_claim(row, {"gpu_count": 5}) is True
+    assert _coarse_resource_matches_claim(row, {"units": 5}) is True
+    assert _coarse_resource_matches_claim(row, {"units": 50}) is False
+    assert _coarse_resource_matches_claim(row, {"gpu_count": 5}) is True
+
+
+def test_coarse_matcher_ignores_categorical_attributes_by_design():
+    """The coarse default is documented as not checking arbitrary
+    categorical claim attributes (e.g. region/gpu_model) -- pins that
+    this is a deliberate, named limitation, not an oversight, so a
+    caller who needs exact semantics knows to inject a stronger
+    ClaimMatcher rather than assume this one already checks everything
+    a claim might name."""
+    row = {
+        "pool_id": "pool-a", "resource_id": "r1", "available_units": 4,
+        "available": {"gpu_count": 4},
+        "attributes": {"region": "us-east", "gpu_model": "L40"},
+    }
+    # A completely mismatched region/gpu_model still "matches" the
+    # coarse default -- this is the documented gap an injected matcher
+    # closes, not a bug in the coarse matcher itself.
+    assert _coarse_resource_matches_claim(
+        row,
+        {
+            "pool_id": "pool-a",
+            "region": "eu-west",
+            "gpu_model": "A100",
+            "dimensions": {"gpu_count": 1},
+        },
+    ) is True
 
 
 def test_site_available_units_ignores_non_matching_pool_rows():
@@ -287,8 +317,21 @@ def test_site_available_units_ignores_non_matching_pool_rows():
         {"pool_id": "right-pool", "resource_id": "r2", "available_units": 2},
     ]
     claim = {"pool_id": "right-pool"}
-    assert _site_available_units(snapshot, claim) == 2
-    assert _site_available_units(snapshot, None) == 502
+    assert _site_available_units(snapshot, claim, _coarse_resource_matches_claim) == 2
+    assert _site_available_units(snapshot, None, _coarse_resource_matches_claim) == 502
+
+
+def test_site_available_units_accepts_an_injected_claim_matcher():
+    """The matcher is a parameter, not a hardcoded call -- a caller can
+    inject a stricter (or looser) one and _site_available_units must use
+    exactly that one, not silently fall back to the coarse default."""
+    snapshot = [{"pool_id": "p", "resource_id": "r1", "available_units": 5}]
+
+    def _reject_everything(row: Mapping[str, Any], claim: Mapping[str, Any] | None) -> bool:
+        return False
+
+    assert _site_available_units(snapshot, {"pool_id": "p"}, _reject_everything) == 0
+    assert _site_available_units(snapshot, {"pool_id": "p"}, _coarse_resource_matches_claim) == 5
 
 
 @pytest.mark.asyncio
@@ -319,3 +362,49 @@ async def test_most_available_ranks_by_claim_matching_capacity_not_raw_total():
         ["dc-a", "dc-b"], snapshots, claim={"pool_id": "target-pool"},
     )
     assert order == ["dc-a", "dc-b"]
+
+
+@pytest.mark.asyncio
+async def test_most_available_uses_an_injected_exact_claim_matcher_when_given_one():
+    """A composition root injecting an exact ClaimMatcher (e.g. VM's
+    kit/site-backed one) must see it actually change the ranking --
+    proves claim_matcher is threaded through, not just accepted and
+    ignored."""
+    client, a, b = _aggregate(placement=most_available)
+
+    async def snapshot_a():
+        return [{
+            "resource_id": "r-a", "pool_id": "gpu-pool",
+            "available_units": 1, "state": "available",
+            "attributes": {"region": "eu-west"},
+        }]
+
+    async def snapshot_b():
+        return [{
+            "resource_id": "r-b", "pool_id": "gpu-pool",
+            "available_units": 20, "state": "available",
+            "attributes": {"region": "us-east"},
+        }]
+
+    a.snapshot = snapshot_a  # type: ignore[method-assign]
+    b.snapshot = snapshot_b  # type: ignore[method-assign]
+
+    snapshots = {"dc-a": await a.snapshot(), "dc-b": await b.snapshot()}
+    claim = {"pool_id": "gpu-pool", "region": "eu-west"}
+
+    def _region_exact_matcher(row: Mapping[str, Any], claim: Mapping[str, Any] | None) -> bool:
+        if not claim:
+            return True
+        if row.get("pool_id") != claim.get("pool_id"):
+            return False
+        return row.get("attributes", {}).get("region") == claim.get("region")
+
+    # Coarse default ignores region -- site B's larger raw total wins.
+    coarse_order = most_available(["dc-a", "dc-b"], snapshots, claim=claim)
+    assert coarse_order == ["dc-b", "dc-a"]
+
+    # Injected exact matcher excludes B entirely (wrong region) -- A wins.
+    exact_order = most_available(
+        ["dc-a", "dc-b"], snapshots, claim=claim, claim_matcher=_region_exact_matcher,
+    )
+    assert exact_order == ["dc-a", "dc-b"]

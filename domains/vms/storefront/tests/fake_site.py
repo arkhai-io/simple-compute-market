@@ -195,6 +195,15 @@ class FakeSite:
         # ledger's _resource_matches skips it.
         dimensions = claim.get("dimensions") or {}
         requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
+        # resource_type is a special top-level claim key (mirroring real
+        # kit/site's _split_claim_requirement), not an arbitrary
+        # attribute -- every resource this fake serves is "compute.gpu"
+        # (see the hardcoded snapshot() response above), so it never
+        # lives in a resource's own attributes dict the way
+        # gpu_model/region do.
+        required_resource_type = claim.get("resource_type")
+        if required_resource_type is not None and required_resource_type != "compute.gpu":
+            return None
         for rid, row in self.resources.items():
             if not row["enabled"]:
                 continue
@@ -202,7 +211,8 @@ class FakeSite:
             top_level = {"resource_id": rid, "pool_id": rid}
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
-                for k, v in claim.items() if k not in ("gpu_count", "dimensions")
+                for k, v in claim.items()
+                if k not in ("gpu_count", "dimensions", "resource_type")
             )
             if mismatched:
                 continue

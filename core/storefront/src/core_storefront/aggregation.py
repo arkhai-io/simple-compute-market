@@ -72,22 +72,38 @@ def fill_first(
     return list(site_names)
 
 
-def _resource_matches_claim(row: Mapping[str, Any], claim: Mapping[str, Any] | None) -> bool:
-    """Best-effort client-side ranking hint only — NOT an enforcement
-    point. Deliberately does not import kit/site (the aggregator is a
-    storefront-process concept and must not depend on
-    provisioning-service-internal packages); operates on the plain-dict
-    snapshot() payload that crosses the HTTP boundary, using the claim
-    vocabulary reserve()/probe() actually accept today: an optional
-    pool_id/resource_id pin, plus either a multidimensional ``dimensions``
-    map or a legacy single-quantity claim.
+ClaimMatcher = Callable[[Mapping[str, Any], Mapping[str, Any] | None], bool]
+"""Whether a plain-dict ``snapshot()`` row could serve a claim.
 
-    A wrong ranking here costs one extra round-trip (probe()/reserve() on
-    the chosen site remain the real, authoritative check), not an
-    incorrect admission — see ARCHITECTURE.md's layered-ownership model
-    for why this deliberately duplicates a coarse version of the
-    authoritative check across the storefront/site process boundary
-    instead of sharing code with it.
+A ranking hint, not an enforcement point — ``probe()``/``reserve()`` on
+the chosen site remain the real, authoritative check (see
+ARCHITECTURE.md's layered-ownership model). This package deliberately
+does not import ``kit/site``: it must stay usable against any
+``CapacityClient`` implementation, not just the one that happens to
+exist today, so its own default (``_coarse_resource_matches_claim``)
+only understands a small, explicitly-documented claim subset. Domains
+whose backing site needs exact claim semantics (matching every
+attribute a claim names, not just identity and quantity) inject a
+stronger matcher at composition time — see
+``dict_resource_satisfies_claim`` in ``kit/site`` for the one built
+against that package's own requirement-parsing and feasibility
+semantics.
+"""
+
+
+def _coarse_resource_matches_claim(
+    row: Mapping[str, Any], claim: Mapping[str, Any] | None,
+) -> bool:
+    """Match a row's identity and quantitative capacity against a claim.
+
+    Intentionally incomplete: checks an optional pool_id/resource_id pin
+    and either a multidimensional ``dimensions`` map or a legacy
+    single-quantity claim, but not arbitrary categorical claim attributes
+    (e.g. a buyer-selectable region or hardware model) — those require
+    knowing which claim keys are quantitative versus exact-match, which
+    is backing-site-specific. This is the default ``ClaimMatcher`` for
+    callers that have not injected a stronger one; it costs an extra,
+    avoidable round-trip on a wrong rank, never an incorrect admission.
     """
     if not claim:
         return True
@@ -119,12 +135,14 @@ def _resource_matches_claim(row: Mapping[str, Any], claim: Mapping[str, Any] | N
 
 
 def _site_available_units(
-    snapshot: list[dict[str, Any]], claim: Mapping[str, Any] | None = None,
+    snapshot: list[dict[str, Any]],
+    claim: Mapping[str, Any] | None,
+    claim_matcher: ClaimMatcher,
 ) -> int:
     return sum(
         max(int(row.get("available_units") or 0), 0)
         for row in snapshot
-        if _resource_matches_claim(row, claim)
+        if claim_matcher(row, claim)
     )
 
 
@@ -133,15 +151,24 @@ def most_available(
     snapshots: Mapping[str, list[dict[str, Any]]],
     *,
     claim: Mapping[str, Any] | None = None,
+    claim_matcher: ClaimMatcher = _coarse_resource_matches_claim,
 ) -> list[str]:
     """Spread: prefer the site with the most free units matching ``claim``
-    (ties keep configuration order; sites without a snapshot go last)."""
+    per ``claim_matcher`` (ties keep configuration order; sites without a
+    snapshot go last).
+
+    The one defaulting point for ``claim_matcher`` — everything this
+    function calls receives it explicitly rather than re-defaulting on
+    its own, so an internal caller can't accidentally fall back to the
+    coarse matcher a composition root deliberately overrode.
+    """
     def _key(idx_name: tuple[int, str]) -> tuple[int, int]:
         idx, name = idx_name
         snapshot = snapshots.get(name)
         if snapshot is None:
             return (1, idx)  # unknown availability — try after known sites
-        return (0, -_site_available_units(snapshot, claim) * len(site_names) + idx)
+        available = _site_available_units(snapshot, claim, claim_matcher)
+        return (0, -available * len(site_names) + idx)
 
     # Sort by (known first, descending availability), stable on config order.
     ordered = sorted(enumerate(site_names), key=_key)

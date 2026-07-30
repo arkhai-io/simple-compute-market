@@ -384,6 +384,63 @@ def resource_satisfies_requirement(
     )
 
 
+def dict_resource_satisfies_claim(
+    row: Mapping[str, Any],
+    claim: Mapping[str, Any] | None,
+    *,
+    unit_claim_keys: Sequence[str] = _DEFAULT_UNIT_CLAIM_KEYS,
+) -> bool:
+    """Match a plain-dict ``snapshot()`` row against a claim, using the
+    same requirement-parsing and feasibility semantics admission uses.
+
+    An injectable ``ClaimMatcher`` for callers outside ``kit/site`` (see
+    ``core/storefront/aggregation.py``) that need exact claim semantics
+    against the wire-shaped snapshot payload rather than a live
+    ``CapacityBucket``. Does no independent interpretation of the claim or
+    the row: reuses ``_split_claim_requirement``/``_requested_dimensions``
+    to parse the claim and ``resource_feasibility_view``/
+    ``resource_satisfies_requirement`` to match it, so there remains
+    exactly one implementation of both. Raises the same way the ledger's
+    own admission path does on a malformed claim (e.g. an empty or
+    non-mapping ``dimensions``) rather than silently treating it as
+    unconstrained — the caller is expected to validate claims before they
+    reach ranking or admission.
+
+    A row missing an attribute the claim requires does not match: reading
+    a missing key returns ``None``, which is equal to the required value
+    only if the claim itself requires ``None`` — never treated as
+    "unconstrained".
+
+    ``unit_claim_keys`` must match whatever the backing
+    ``CapacityLedgerService`` was composed with (e.g. VM's
+    ``("units", "gpu_count")`` in ``container.py``) for the legacy
+    non-dimensional claim fallback to agree with admission; the default
+    here is the module-wide default, not any particular domain's.
+    """
+    if not claim:
+        return True
+    resource_kind, required_attributes = _split_claim_requirement(
+        claim, unit_claim_keys=unit_claim_keys,
+    )
+    required_dimensions = _requested_dimensions(claim, unit_claim_keys=unit_claim_keys)
+    resource = resource_feasibility_view(
+        resource_id=str(row.get("resource_id") or ""),
+        pool_id=row.get("pool_id") or row.get("resource_id"),
+        resource_kind=row.get("resource_type") or "",
+        available=row.get("available") or {},
+        attributes=row.get("attributes") or {},
+        resource_subtype=row.get("resource_subtype"),
+        value=row.get("value"),
+        units=row.get("available_units"),
+    )
+    return resource_satisfies_requirement(
+        resource=resource,
+        required_resource_kind=resource_kind,
+        required_dimensions=required_dimensions,
+        required_attributes=required_attributes,
+    )
+
+
 def _resource_feasibility_view(
     resource: CapacityBucket, available: Mapping[str, Any]
 ) -> ResourceFeasibilityView:

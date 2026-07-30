@@ -10,11 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Base, DEFAULT_POOL_ID, ResourcePool
@@ -135,6 +134,84 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
     return column_name in {
         column["name"] for column in inspect(engine).get_columns(table_name)
     }
+
+
+def _drop_columns_via_table_rebuild(
+    engine: Engine, table_name: str, columns_to_drop: Sequence[str],
+) -> None:
+    """Deterministically drop columns from a SQLite table via a full
+    create/copy/drop/rename cycle, instead of ``ALTER TABLE ... DROP
+    COLUMN`` (unavailable before SQLite 3.35, and this repository
+    supports SQLite only — so there is no reason to accept a silent
+    partial migration rather than doing the rebuild every version
+    actually supports).
+
+    A no-op if none of ``columns_to_drop`` are present. Introspects the
+    table's current columns via ``PRAGMA table_info`` rather than a
+    hardcoded column list, so this stays correct as the model gains
+    columns rather than needing to be kept in sync by hand; preserves
+    every other column's type, nullability, default, and primary-key
+    flag, and recreates every named index that doesn't reference a
+    dropped column.
+    """
+    present = {
+        column for column in columns_to_drop
+        if _column_exists(engine, table_name, column)
+    }
+    if not present:
+        return
+    with engine.begin() as connection:
+        columns = connection.execute(
+            text(f"PRAGMA table_info({table_name})")
+        ).fetchall()
+        keep = [c for c in columns if c[1] not in present]
+        if not keep:
+            raise ValueError(
+                f"Refusing to drop every column of {table_name!r}"
+            )
+        keep_names = [c[1] for c in keep]
+
+        # Captured before the table is dropped -- once the rebuilt table
+        # is renamed into place, a query for tbl_name = table_name would
+        # find the *new*, index-less table instead of the original's
+        # indexes.
+        indexes = connection.execute(text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = :table_name "
+            "AND sql IS NOT NULL"
+        ), {"table_name": table_name}).fetchall()
+
+        def _column_def(col) -> str:
+            _cid, name, col_type, notnull, default, pk = col
+            parts = [name, col_type or ""]
+            if pk:
+                parts.append("PRIMARY KEY")
+            if notnull and not pk:
+                parts.append("NOT NULL")
+            if default is not None:
+                parts.append(f"DEFAULT {default}")
+            return " ".join(part for part in parts if part)
+
+        rebuild_table = f"{table_name}__rebuild"
+        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
+        connection.execute(text(
+            f"CREATE TABLE {rebuild_table} "
+            f"({', '.join(_column_def(c) for c in keep)})"
+        ))
+        column_list = ", ".join(keep_names)
+        connection.execute(text(
+            f"INSERT INTO {rebuild_table} ({column_list}) "
+            f"SELECT {column_list} FROM {table_name}"
+        ))
+        connection.execute(text(f"DROP TABLE {table_name}"))
+        connection.execute(text(
+            f"ALTER TABLE {rebuild_table} RENAME TO {table_name}"
+        ))
+
+        for (index_sql,) in indexes:
+            if any(dropped in index_sql for dropped in present):
+                continue
+            connection.execute(text(index_sql))
 
 
 def _add_column_if_missing(
@@ -847,16 +924,7 @@ def _migrate_capacity_reservations_vm_host_to_executor_ref(engine: Engine) -> No
             "WHERE vm_host IS NOT NULL "
             "AND (executor_ref IS NULL OR json_extract(executor_ref, '$.vm_host') IS NULL)"
         ))
-        try:
-            connection.execute(text(
-                "ALTER TABLE capacity_reservations DROP COLUMN vm_host"
-            ))
-        except OperationalError:
-            # SQLite versions before 3.35 cannot DROP COLUMN. The backfill
-            # above already ran, so executor_ref is authoritative either
-            # way; a leftover, unread vm_host column on an old SQLite is
-            # harmless, not a correctness gap.
-            pass
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_host"])
 
 
 def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) -> None:
@@ -881,12 +949,7 @@ def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) 
             "SET executor_target = vm_target "
             "WHERE vm_target IS NOT NULL AND executor_target IS NULL"
         ))
-        try:
-            connection.execute(text(
-                "ALTER TABLE capacity_reservations DROP COLUMN vm_target"
-            ))
-        except OperationalError:
-            pass
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_target"])
 
 
 _MIGRATIONS: tuple[Migration, ...] = (

@@ -17,6 +17,15 @@ _REQUIRED_COMPUTE_KEYS = (
     "gpu_model",
 )
 
+# Every VM listing today is GPU compute -- ComputeGpuResourceAdapter is the
+# only resource adapter this domain registers (domains/vms/listings/resources.py),
+# so this is a domain constant, not something the order schema needs to
+# carry yet. Must match what capacity registration actually advertises
+# (kit/site's CapacityBucket.resource_type for VM resources), or the
+# claim's resource_type constraint would reject every resource that
+# exists.
+_VM_RESOURCE_TYPE = "compute.gpu"
+
 # _DIMENSION_COMPUTE_KEYS (gpu_count/vcpu_count/ram_gb/disk_gb) comes from
 # arkhai_vms.compute_requirements -- the same shared vocabulary the
 # provisioning adapter derives its Ansible fulfillment fields from, so
@@ -56,6 +65,7 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
         raise ValueError("Cannot build a capacity claim without a settlement order.")
     required_attributes: dict[str, Any] = {}
     dimensions: dict[str, Any] = {}
+    required_attributes["resource_type"] = _VM_RESOURCE_TYPE
     compute_resource = extract_compute_from_order(order_dict)
     if hasattr(compute_resource, "model_dump"):
         compute_resource = compute_resource.model_dump()

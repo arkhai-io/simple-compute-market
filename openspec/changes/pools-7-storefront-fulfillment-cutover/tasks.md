@@ -939,6 +939,142 @@ design.
     apicredits-style claim, the original-bug regression case, and an
     end-to-end `most_available` ranking test through the real routing
     path). Full file: 17/17 passing.
+  - **Update (2026-07-30, code review): the coarse fix above was correct
+    but incomplete, and has been extended, not replaced.** External
+    review during code review (pre-merge, not pre-plan) found the coarse
+    matcher ignores categorical claim attributes the VM claim builder
+    already emits today (`region`, `gpu_model`) and that the authoritative
+    site admission path already checks — verified against current code,
+    not taken on the reviewer's word: `vm_job_spec_service.py`'s
+    `_REQUIRED_COMPUTE_KEYS` really does put `region`/`gpu_model` at the
+    claim's top level, and `kit/site/ledger.py`'s `_split_claim_requirement`/
+    `resource_satisfies_requirement` really do check every such attribute
+    at admission. This does not cause incorrect admission (the site
+    remains authoritative) but does cause avoidable failed probe/reserve
+    attempts against a site that was never going to accept the claim.
+    Resolution, after discussion of where the fix should live:
+    - **Not fixed by duplicating more site-matching logic into
+      `core/storefront`.** Checked `docs/development/ARCHITECTURE.md`'s
+      package-and-dependency-layers rule directly: `core/storefront` is a
+      core-layer package, `kit/site` is a kit-layer package, and
+      dependencies only point downward (kit may depend on core; core must
+      never depend on kit). `core/storefront/aggregation.py`'s existing
+      docstring ("deliberately does not import kit/site") is that rule in
+      effect, not a style choice — so `ResourceFeasibilityView`-style
+      matching could not simply move into `core/storefront` without
+      violating it, and moving it the other way (into a new shared `kit/`
+      package) doesn't work either, since `core/storefront` cannot import
+      *any* kit-layer package, regardless of name.
+    - **Also not fixed by promoting the shared types into `core/` itself.**
+      Considered and rejected: `ResourceFeasibilityView` is `kit/site`'s
+      own way of modeling a resource (`resource_kind`, per-dimension
+      `available`, exact-match `attributes`), not a concept every domain
+      needs — `apicredits` runs through the same aggregator today with
+      none of it meaning anything (a single resource type, no dimensions
+      beyond `units`). Moving it into `core` would make `core/storefront`
+      stop being backend-agnostic (every `CapacityClient` implementation
+      would be assumed `kit/site`-shaped), which is a regression in the
+      abstraction `CapacityClient` exists to provide, not a
+      generalization of it.
+    - **Fixed with dependency injection instead**, matching a pattern
+      already in use one parameter over: `AggregateCapacityClient.__init__`
+      already takes a pluggable `placement: PlacementPolicy | None`, and
+      `capacity_client.py`'s `build_capacity_client` is already the
+      composition point that resolves a placement policy by config string.
+      Adding an injected `claim_matcher` is the same shape as something
+      already there, not a new seam.
+  - **11.2.1 `core/storefront/src/core_storefront/aggregation.py`:**
+    renamed `_resource_matches_claim` → `_coarse_resource_matches_claim`
+    with a docstring stating its limitation as a documented design
+    decision, not an oversight to fix later. Added
+    `ClaimMatcher = Callable[[Mapping, Mapping | None], bool]` as the
+    injectable-strategy type. `most_available`/`_site_available_units`
+    both take `claim_matcher` explicitly now (default
+    `_coarse_resource_matches_claim`) — one defaulting point in
+    `most_available`'s signature; `_site_available_units` requires it as
+    a plain parameter so no internal caller can silently fall back to the
+    coarse default a composition root deliberately overrode. Went with a
+    `Callable` type alias over a `Protocol` for a single-signature
+    callable, per review discussion — happy to switch to `Protocol` if
+    preferred, no behavior difference either way.
+  - **11.2.2 `kit/site/src/market_site/ledger.py`:** added
+    `dict_resource_satisfies_claim(row, claim, *, unit_claim_keys=...)`,
+    a thin adapter reconstructing a `ResourceFeasibilityView` from the
+    plain-dict `snapshot()` row shape and delegating entirely to the
+    already-existing pure functions (`_split_claim_requirement`,
+    `_requested_dimensions`, `resource_feasibility_view`,
+    `resource_satisfies_requirement`) — no independent interpretation of
+    the claim or the row, so there remains exactly one implementation of
+    both parsing and matching. Strict on malformed claims (raises the
+    same way admission does, rather than silently treating a malformed
+    `dimensions` map as unconstrained); fails closed on a row missing an
+    attribute the claim names (a missing key reads as `None`, which only
+    matches a claim that itself requires `None`). **Found while
+    implementing, not anticipated by either reviewer:** the adapter must
+    accept `unit_claim_keys` as a parameter, not use the module default —
+    VM's `CapacityLedgerService` is composed with
+    `unit_claim_keys=("units", "gpu_count")` in `container.py`, not the
+    module-wide `("units",)`; without threading this through, the
+    adapter's legacy-claim fallback would have silently diverged from
+    what VM's own admission path actually accepts for the same claim
+    shape. Confirmed by a dedicated test
+    (`test_unit_claim_keys_must_match_the_backing_ledger_service_configuration`)
+    that fails without the parameter.
+  - **11.2.3 `domains/vms/storefront/.../capacity_client.py`:**
+    `_aggregate_for` wraps `most_available` in
+    `functools.partial(claim_matcher=dict_resource_satisfies_claim)`
+    specifically when the resolved placement *is* `most_available` — the
+    shared `PLACEMENT_POLICIES` dict itself is untouched, so this
+    substitution is domain-composition-local and does not change what
+    `apicredits`/bare-metal get when they select `"most_available"`.
+    Added `arkhai-kit-site>=0.2.0` as an explicit `pyproject.toml`
+    dependency (previously only transitive; the `reinit` target already
+    listed it defensively, so no Makefile change was needed).
+  - **11.2.4 `vm_job_spec_service.py`: added `resource_type` to every
+    claim**, as `_VM_RESOURCE_TYPE = "compute.gpu"` — a domain constant
+    rather than pulled from the order (per review discussion: the order
+    schema doesn't reliably carry this distinction today, and hardcoding
+    is acceptable until it does), verified to equal what
+    `ComputeGpuResourceAdapter` — the only resource adapter this domain
+    registers — actually advertises, so the claim's new constraint cannot
+    reject every real VM resource that exists. **Found and fixed while
+    implementing:** `domains/vms/storefront/tests/fake_site.py`'s
+    `FakeSite` (a hand-rolled test double, not real `kit/site`) didn't
+    understand `resource_type` as a special top-level claim key — it
+    already special-cased `gpu_count`/`dimensions` out of its generic
+    attribute-equality mismatch check, but not `resource_type`, so every
+    resource it served started failing to match once the claim named it.
+    Fixed `_match()` to special-case it the same way; this is a
+    test-double gap the new claim constraint exposed, not a production
+    admission bug — real `kit/site` already handled `resource_type`
+    correctly via `_split_claim_requirement` before this change.
+  - **11.2 tests (review-driven additions), all passing:** `test_aggregation.py`
+    grew two more cases (the coarse matcher's documented categorical-attribute
+    gap; an injected exact matcher actually changing ranking versus the
+    coarse default) — 20/20. New `kit/site/tests/unit/test_dict_resource_satisfies_claim.py`
+    (22 cases): a parametrized equivalence sweep proving the adapter and
+    the authoritative admission path agree for the same data across
+    `pool_id`/`resource_id`/`resource_type`/`region`/`gpu_model`/
+    dimensions/legacy-units claims, plus the fail-closed, strict-malformed,
+    and `unit_claim_keys` cases above. New
+    `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`
+    cases proving the composition wiring itself (that `"most_available"`
+    actually gets wrapped with the kit/site matcher, and `"fill_first"`
+    stays unwrapped) — 12/12. New
+    `domains/vms/storefront/tests/unit/test_vm_job_spec_service.py`
+    (3 cases) — `compute_capacity_claim_from_order` had no dedicated test
+    file at all before this, a pre-existing gap closed alongside the new
+    behavior it needed covering. Full re-verified totals after every
+    change in this update: `core/storefront` 20/20, `kit/site` 135/135,
+    `domains/vms/storefront` unit 635/635 + integration 146/148 (the 2
+    failures are the already-documented Node/Rust/Foundry alkahest gap,
+    unrelated), `provisioning/compute/service` 540/540.
+  - **Permanent documentation (update):** still none — the injected-matcher
+    design is implementation technique (which package owns which
+    semantics, and why), not new externally-observable subsystem behavior;
+    recorded as in-code docstrings on `ClaimMatcher`/
+    `dict_resource_satisfies_claim`, matching how this document already
+    treats similar implementation-location decisions.
 - [x] 11.3 Confirm the composition/wheel/reinit/Docker/deployment wiring for
       `kit/fulfillment` found already satisfied in `design.md` item 8 —
       `kit/Makefile`'s `dist`/`test` targets, both consumers' `reinit`
@@ -1197,18 +1333,43 @@ design.
   - [x] 11.6.6 Add a `compute_provisioning_service/db/migrations.py` migration:
     backfill `executor_ref` via `json_set`/`json_patch` (merge, not
     overwrite) for every row where `vm_host IS NOT NULL` and
-    `executor_ref` doesn't already carry it, then
-    `ALTER TABLE capacity_reservations DROP COLUMN vm_host` — precedented
-    verbatim by `core_storefront/sqlite_migrations.py`'s existing
-    `DROP COLUMN` migration. Note in the migration's own comment that
-    `domains/apicredits`'s database shares this schema but has no
-    migration runner (`Base.metadata.create_all()` only) — an
-    already-deployed apicredits database keeps a harmless, permanently-null
-    `vm_host` column after this lands, and that's expected, not a bug to
-    chase. **Done** — migration `20260730_001_capacity_reservations_vm_host_to_executor_ref`,
-    registered in `_MIGRATIONS`, with an `OperationalError` fallback for
-    SQLite versions before 3.35 (leaves the column in place rather than
-    failing; the backfill already ran either way).
+    `executor_ref` doesn't already carry it, then drop the column.
+    Note in the migration's own comment that `domains/apicredits`'s
+    database shares this schema but has no migration runner
+    (`Base.metadata.create_all()` only) — an already-deployed apicredits
+    database keeps a harmless, permanently-null `vm_host` column after
+    this lands, and that's expected, not a bug to chase. **Done**,
+    registered as `20260730_001_capacity_reservations_vm_host_to_executor_ref`
+    (folded into the consolidated cutover migration per 11.6.9 below).
+  - **Update (2026-07-30, code review): column drop is now deterministic,
+    not best-effort.** The original implementation caught
+    `OperationalError` from `ALTER TABLE ... DROP COLUMN` and continued —
+    review correctly flagged this as conflicting with Section 11's own
+    purpose (an obsolete column could silently survive migration while
+    the migration is still marked applied) and too broad a catch (locking,
+    corruption, or malformed-SQL errors would be indistinguishable from
+    "this SQLite is too old"). Since this repository supports only
+    SQLite, "does this SQLite support `DROP COLUMN`" isn't actually
+    ambiguous enough to justify a runtime fallback — replaced with a new,
+    generic `_drop_columns_via_table_rebuild(engine, table_name,
+    columns_to_drop)` helper: a full create/copy/drop/rename cycle,
+    introspecting the table's current columns via `PRAGMA table_info`
+    rather than a hardcoded column list (so it stays correct as the model
+    gains columns, and works whether it's simulating a pre-migration
+    database in a test or running against the real, already-migrated
+    schema), preserving every kept column's type/nullability/default/
+    primary-key flag and recreating every named index that doesn't
+    reference a dropped column. Both `vm_host` and `vm_target` migrations
+    now call this instead of the `try/except OperationalError` pattern;
+    the now-unused `OperationalError` import was removed.
+    **Caught a real bug in the helper itself via a test written
+    specifically to check for it**, not by inspection: the first
+    implementation queried `sqlite_master` for the table's indexes
+    *after* the rename, by which point the query matched the newly
+    renamed (index-less) table instead of the original's indexes —
+    `test_named_indexes_survive_the_rebuild` failed with zero indexes
+    recreated, exposing that the index capture needs to happen before
+    the original table is dropped, not after. Fixed and reverified.
   - [x] 11.6.7 **Tests.** **Done.** `kit/site`: new coverage for
     `reserve()`'s `executor_ref` derivation, and for
     `find_active_lease_by_vm_target` — which, checked against the existing
@@ -1282,6 +1443,14 @@ design.
     (unit+integration) 540/540, migration-specific suite
     (`test_database.py` + `test_legacy_vm_lease_migration.py` +
     `test_vm_host_executor_ref_migration.py`) 23/23.
+  - **Update (2026-07-30, after the table-rebuild fix above): totals
+    changed, consolidation itself unaffected.** The rebuild-helper fix
+    added 4 more tests to `test_vm_host_executor_ref_migration.py`
+    (index preservation, primary-key/NOT-NULL preservation, unrelated-row/
+    column integrity, and the every-column-refused case) — migration
+    count and IDs are unchanged by that fix, only the drop mechanism is.
+    Final totals: `provisioning/compute/service` (unit+integration)
+    544/544, migration-specific suite 27/27.
   - **Permanent documentation:** checked `openspec/specs/site-capacity/spec.md`,
     `openspec/specs/physical-provisioning/spec.md`, and
     `docs/development/ARCHITECTURE.md` for `vm_host` mentions that might

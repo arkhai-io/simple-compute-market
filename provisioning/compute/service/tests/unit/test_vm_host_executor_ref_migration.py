@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
@@ -158,3 +160,111 @@ class TestVmHostBackfill:
         # invocation of this migration during bootstrap above -- calling
         # it again here proves the explicit no-op path too.
         _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+
+
+class TestTableRebuildPreservesIndexesAndConstraints:
+    """_drop_columns_via_table_rebuild does a full create/copy/drop/rename
+    cycle rather than ALTER TABLE ... DROP COLUMN (deterministic across
+    every supported SQLite version, not best-effort) -- these tests prove
+    the rebuild doesn't lose the things a naive rebuild could drop:
+    named indexes, the primary key, NOT NULL columns, and unrelated data.
+    """
+
+    def test_named_indexes_survive_the_rebuild(self):
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        before = {
+            name for (name,) in engine.connect().execute(text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'index' AND tbl_name = 'capacity_reservations' "
+                "AND sql IS NOT NULL"
+            )).fetchall()
+        }
+        assert before, "test setup didn't actually have named indexes to prove survive"
+
+        _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+
+        after = {
+            name for (name,) in engine.connect().execute(text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'index' AND tbl_name = 'capacity_reservations' "
+                "AND sql IS NOT NULL"
+            )).fetchall()
+        }
+        assert after == before
+
+        # And the index is not just present but still queryable/correct:
+        # a lookup by escrow_uid (one of the indexed columns) still finds
+        # the row after the rebuild.
+        engine.connect().execute(text(
+            "INSERT INTO capacity_reservations "
+            "(capacity_reservation_id, units, state, escrow_uid) "
+            "VALUES ('r-idx', 1, 'reserved', 'esc-idx')"
+        )).connection.commit()
+        found = engine.connect().execute(text(
+            "SELECT capacity_reservation_id FROM capacity_reservations "
+            "WHERE escrow_uid = 'esc-idx'"
+        )).fetchall()
+        assert [row[0] for row in found] == ["r-idx"]
+
+    def test_primary_key_and_not_null_columns_survive_the_rebuild(self):
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+
+        with engine.connect() as connection:
+            columns = connection.execute(
+                text("PRAGMA table_info(capacity_reservations)")
+            ).fetchall()
+        by_name = {c[1]: c for c in columns}
+        assert by_name["capacity_reservation_id"][5] == 1  # pk flag
+        assert by_name["units"][3] == 1  # notnull flag
+        assert by_name["state"][3] == 1
+
+        # A duplicate primary key must still be rejected post-rebuild.
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO capacity_reservations "
+                "(capacity_reservation_id, units, state) "
+                "VALUES ('dup', 1, 'reserved')"
+            ))
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "INSERT INTO capacity_reservations "
+                    "(capacity_reservation_id, units, state) "
+                    "VALUES ('dup', 1, 'reserved')"
+                ))
+
+    def test_unrelated_rows_and_columns_are_untouched_by_the_rebuild(self):
+        """A row with no vm_host at all, and a row's other columns, must
+        come through the rebuild exactly as they were."""
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO capacity_reservations "
+                "(capacity_reservation_id, units, state, escrow_uid, "
+                "vm_host, failure_reason) "
+                "VALUES ('r-untouched', 3, 'committed', 'esc-x', NULL, 'oops')"
+            ))
+
+        _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+
+        row = _row(engine, "r-untouched")
+        assert row["units"] == 3
+        assert row["state"] == "committed"
+        assert row["escrow_uid"] == "esc-x"
+        assert row["failure_reason"] == "oops"
+        assert "vm_host" not in row
+
+    def test_refuses_to_drop_every_column(self):
+        from compute_provisioning_service.db.migrations import (
+            _drop_columns_via_table_rebuild,
+        )
+
+        engine = _sqlite_memory_engine()
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE only_one_column (junk VARCHAR)"
+            ))
+        with pytest.raises(ValueError):
+            _drop_columns_via_table_rebuild(engine, "only_one_column", ["junk"])
+

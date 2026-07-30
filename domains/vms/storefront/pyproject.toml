@@ -16,6 +16,7 @@ dependencies = [
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-policy",
+    "arkhai-kit-site>=0.2.0",
     "arkhai-bare-metal>=0.2.0",
     "arkhai-vms>=0.2.0",
     "arkhai-compute-provisioning>=0.3.0",
