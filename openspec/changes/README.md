@@ -84,6 +84,32 @@ wheel-only internal dependencies
 | 3 | [`type-core-packages`](type-core-packages/) | active after affected public surfaces stabilize | Restore advertised checks, ratchet package by package, and verify `py.typed` in installed wheels |
 | 4 | [`configure-pypi-trusted-publishing`](configure-pypi-trusted-publishing/) | externally blocked | Reconcile the complete consumable distribution graph and verify current-name trusted publishers plus PyPI-only downstream installation |
 
+## Agent-driven VM capacity campaign
+
+```text
+reconciled feat/issue-discovery-harness + pinned dev
+                         │
+                         ▼
+agent-driven VM capacity contracts
+                         │
+                         ▼
+guarded issue/fix publication
+                         │
+                         ▼
+private executor adoption, qualification, and measurement
+```
+
+| Order | Change | Status | Acceptance boundary |
+|---|---|---|---|
+| 1 | [`define-agent-driven-vm-capacity-contracts`](define-agent-driven-vm-capacity-contracts/) | active | Mode-neutral pinned G1 VM scenarios, exact qualification/measured profile stages, substantive Codex-owned buyer/seller actions, independent durable fulfillment/frontier/cleanup oracles, and sanitized finding v2 |
+| 2 | [`guard-issue-fix-publication`](guard-issue-fix-publication/) | blocked on the final pushed finding-v2 contract from step 1 | Complete GitHub observation, occurrence-idempotent branch-scoped issues, crash-recoverable mutation journals, truthful proposals/lifecycle, and separately authorized draft fix PRs |
+
+The public campaign defines portable contracts and validators only. The private
+`compute-market-internal-infra` runner owns Codex identities, GitHub/gcloud
+credentials, the real GKE/KVM/Ansible/GPU topology, generation fencing,
+unredacted evidence, teardown, and eventual local-to-cloud executor selection
+at one exact final public SCM commit.
+
 ## Independent active changes
 
 | Change | Status | Audited scope |
