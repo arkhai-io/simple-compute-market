@@ -1,0 +1,42 @@
+schema: spec-driven
+
+context: |
+  Arkhai is a multi-package Python marketplace reference stack. Core role packages
+  own schema-opaque orchestration; domain packages own deterministic market
+  semantics; kit packages provide reusable capabilities from below. Core MUST NOT
+  import domain implementations, and kit/domain concept modules MUST NOT depend up
+  into composition roots. Buyers use a core-owned CLI with domain entry-point
+  plugins; registries are core services configured by a listing filter-spec;
+  storefronts and provisioning compose domain adapters over shared capacity and
+  settlement boundaries.
+
+  Use official vocabulary: Market Agreement, Capacity Offering, Capacity
+  Projection, Capacity Reservation, Physical Resource, Resource Pool, Physical
+  Settlement, Settlement Resource, PhysicalSettlementScheduler,
+  FulfillmentProvider, Settlement Record, agreement/deal reference, allocation_id,
+  pool_id, resource_id, and settlement_resource_id.
+
+  Python dependencies and commands use uv. JavaScript/TypeScript dependencies use
+  bun. Keep changes minimal, preserve wire and persistence compatibility explicitly,
+  and verify behavior with the narrowest focused test or scenario that exercises the
+  observable contract. Runtime behavior, normative requirements, and proposed
+  deltas belong in OpenSpec; ordinary docs remain explanatory or operational.
+
+rules:
+  proposal:
+    - Name every affected capability and state explicit non-goals.
+    - Identify deferred, conditional, and externally blocked work rather than presenting it as implementation-ready.
+    - Call out wire, database, deployment, packaging, or contributor-workflow breaks.
+  specs:
+    - Express durable observable behavior and ownership boundaries, not source paths alone.
+    - Give every requirement at least one WHEN/THEN scenario with a verifiable outcome.
+    - Keep broader conceptual models and design motivation in the capability's permanent architecture.md companion.
+    - Use the repository's official settlement and capacity vocabulary.
+  design:
+    - Record compatibility, migration, rollback, and cross-service ownership decisions when relevant.
+    - Prefer capability boundaries that survive package moves; cite paths only as implementation evidence.
+  tasks:
+    - Order implementation by real dependencies and keep independently archivable outcomes in separate changes.
+    - Include focused behavioral verification before documentation cleanup.
+    - Name exact permanent spec.md, architecture.md, or repository ARCHITECTURE.md promotion destinations for accepted decisions.
+    - Do not add changelog or broad documentation work until the requested behavior is proven.

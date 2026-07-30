@@ -358,7 +358,7 @@ vm_vcpus: 4
 vm_disk_size: 10G
 vm_tenant_pubkey: "<tenant-ssh-key-from-local-machine>"
 vm_gpu_provisioned: true
-vm_gpu_devices: ["0000:03:00.0", "0000:04:00.0"]
+vm_gpu_count: 2
 image_setup_type: scratch
 frp_domain: "vm.arkhai.io"
 frp_server_addr: "<frp-server-vm-ip-address>"
@@ -381,10 +381,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 - `vm_disk_size`: Disk size for the VM (10G = 10GB)
 - `vm_tenant_pubkey`: SSH public key for tenant access (from your local machine)
 - `vm_gpu_provisioned`: Whether to enable GPU passthrough (false for non-GPU VMs)
-- `vm_gpu_devices`: Exact canonical PCI BDFs to passthrough. Marketplace
-  fulfillment obtains these from the site allocation and never substitutes a
-  different GPU. `vm_gpu_count` remains a manual legacy auto-selection input;
-  do not combine it with an exact device field.
+- `vm_gpu_count`: Number of GPUs to passthrough (only used when vm_gpu_provisioned is true)
 - `image_setup_type`: Image type to use (scratch = base Ubuntu image, golden = custom image)
 - `frp_domain`: Domain/subdomain for FRP remote access
 - `frp_server_addr`: IP address of your FRP server
@@ -1055,7 +1052,7 @@ vm_vcpus: 4
 vm_disk_size: 20G
 vm_tenant_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjmOBBEpr7KvLbsmjLOaqmPahELCroCiTYEjQ+p6yRM buyer@example.com"
 vm_gpu_provisioned: true
-vm_gpu_devices: ["0000:03:00.0", "0000:04:00.0"]
+vm_gpu_count: 2
 image_setup_type: scratch
 frp_domain: vm.arkhai.io
 frp_server_addr: 192.168.100.61
@@ -1221,12 +1218,7 @@ ansible-playbook -i inventory/hosts playbooks/single-tenant/vm-operations.yaml \
 - `vm_disk_size`: Disk size with unit (e.g., `10G`, `20G`, `50G`)
 - `vm_tenant_pubkey`: SSH public key for tenant access (full key string)
 - `vm_gpu_provisioned`: Enable GPU passthrough (`true` or `false`)
-- `vm_gpu_devices`: Exact canonical PCI BDFs to attach (only when
-  `vm_gpu_provisioned: true`). The exact path validates the frozen devices
-  against the host lockfile, vfio binding, and live libvirt attachments, then
-  fails without retry substitution if any device is unavailable.
-- `vm_gpu_count`: Manual legacy auto-selection by count. Never combine this
-  with `vm_gpu_device` or `vm_gpu_devices`.
+- `vm_gpu_count`: Number of GPUs to allocate (only when `vm_gpu_provisioned: true`)
 - `image_setup_type`: Base image type (`scratch` for Ubuntu cloud image, `golden` for custom image)
 - `frp_domain`: FRP domain for remote access (e.g., `vm.arkhai.io`)
 - `frp_server_addr`: IP address of FRP server (e.g., `192.168.100.61`)

@@ -46,7 +46,7 @@ class FakeCapacity:
             "claim": claim, "deal_ref": deal_ref, "ttl_seconds": ttl_seconds,
         })
         return {
-            "allocation_id": f"alloc-{len(self.reserved)}",
+            "capacity_reservation_id": f"alloc-{len(self.reserved)}",
             "resource_id": "svc-quota",
             "allocated_units": (claim or {}).get("units"),
             "hold_expires_at": "2099-01-01 00:00",
@@ -131,6 +131,7 @@ def _terms(quantity=3, key_mode="new", key_id=None) -> ProvisionTerms:
         key["key_id"] = key_id
     return ProvisionTerms(
         kind="api_credits.v1",
+        version=1,
         payload={"quantity": quantity, "key": key},
     )
 
@@ -139,6 +140,7 @@ def test_normalize_api_credits_message_terms_uses_domain_runtime() -> None:
     normalized = _normalize_api_credits_message_terms(
         ProvisionTerms(
             kind="api_credits.v1",
+            version=1,
             payload={
                 "quantity": "5",
                 "key": {"mode": "existing", "key_id": "ak_existing"},
@@ -152,10 +154,26 @@ def test_normalize_api_credits_message_terms_uses_domain_runtime() -> None:
     assert normalized.key_id == "ak_existing"
 
 
-def test_normalize_api_credits_message_terms_tolerates_foreign_terms() -> None:
-    terms = ProvisionTerms(kind="compute.v1", payload={"duration_seconds": 60})
+def test_normalize_api_credits_message_terms_rejects_foreign_terms() -> None:
+    terms = ProvisionTerms(
+        kind="compute.v1",
+        version=1,
+        payload={"duration_seconds": 60},
+    )
 
-    assert _normalize_api_credits_message_terms(terms) is None
+    with pytest.raises(ValueError, match="api_credits.v1"):
+        _normalize_api_credits_message_terms(terms)
+
+
+def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
+    terms = ProvisionTerms(
+        kind="api_credits.v1",
+        version=2,
+        payload={"quantity": 1, "key": {"mode": "new"}},
+    )
+
+    with pytest.raises(ValueError, match="version"):
+        _normalize_api_credits_message_terms(terms)
 
 
 async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
@@ -197,7 +215,7 @@ async def test_listed_price_accept_persists_terms_and_hold(db, fake_capacity, ke
     assert hold_req["claim"] == {"units": 3, "resource_id": "svc-quota"}
     assert hold_req["ttl_seconds"] > 0
     hold = await db.load_capacity_hold(negotiation_id=neg_id)
-    assert hold["allocation_id"] == "alloc-1"
+    assert hold["capacity_reservation_id"] == "alloc-1"
 
 
 async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):

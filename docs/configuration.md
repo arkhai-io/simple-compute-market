@@ -101,9 +101,11 @@ broken `rl` setup at startup.
 
 ## Storefront: fulfillment failure policy
 
-Provisioning failure and external fulfillment failure callbacks run the
-same storefront-side failure policy. The default repairs inventory and
-emits a stage event:
+The storefront failure policy is an explicit commercial/admin repair surface;
+it is not the physical release authority for durable fulfillments. Provisioning
+provider failures retain capacity until fulfillment teardown succeeds or an
+operator performs explicit recovery. Legacy callback invocation may emit events
+or run configured commercial actions:
 
 ```toml
 [fulfillment.failure_policy]
@@ -116,7 +118,7 @@ Supported actions:
 
 | Action | Behavior |
 |---|---|
-| `release_capacity` | Mark the held compute allocation released, refresh aggregate resource availability, and reopen any derived listings that are now publishable. |
+| `release_capacity` | Explicit admin repair for a reservation proven safe outside the fulfillment lifecycle. Do not configure this as an automatic response to provider create/teardown failure; provisioning-owned teardown is authoritative. |
 | `emit_event` | Write a `stage_events` row with `stage="fulfillment"` and `event="failed"`; this is visible through `/api/v1/system/events` and its SSE stream. |
 | `webhook` | POST the failure payload to `webhook_url`. Failures are logged and do not block the rest of the policy chain. |
 | `refund` | Attempt the explicit seller refund path: send already-claimed assets back to the buyer. Token escrows dispatch through the selected escrow codec, covering native token, ERC-20, ERC-721, ERC-1155, and token-bundle escrows. Rows without a stored escrow proposal are skipped rather than deriving refund details from listing defaults. |

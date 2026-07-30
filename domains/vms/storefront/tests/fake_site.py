@@ -13,9 +13,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
-import re
-from collections.abc import Iterator
-from typing import Any
+from typing import Any, Iterator
 from unittest.mock import patch
 
 import httpx
@@ -26,7 +24,7 @@ class FakeSite:
 
     def __init__(self) -> None:
         self.resources: dict[str, dict] = {}
-        self.allocations: dict[str, dict] = {}
+        self.reservations: dict[str, dict] = {}
         self.events: list[dict] = []
         self._versions = itertools.count(1)
         self._ids = itertools.count(1)
@@ -39,82 +37,12 @@ class FakeSite:
         *,
         attributes: dict | None = None,
     ) -> None:
-        attrs = dict(attributes or {})
-        if attrs.get("vm_host") and "gpu_devices" not in attrs:
-            # Test seeding convenience. HTTP registration remains strict, just
-            # like the real site authority.
-            attrs["gpu_devices"] = self._default_gpu_devices(total_units)
         self.resources[resource_id] = {
             "resource_id": resource_id,
             "total_units": int(total_units),
-            "attributes": attrs,
+            "attributes": dict(attributes or {}),
             "enabled": True,
         }
-
-    @staticmethod
-    def _default_gpu_devices(count: int) -> list[dict[str, str]]:
-        return [
-            {
-                "pci_bdf": f"0000:{3 + index:02x}:00.0",
-                "gpu_uuid": f"GPU-fake-{index:04d}",
-            }
-            for index in range(int(count))
-        ]
-
-    @staticmethod
-    def _normalize_gpu_devices(value: Any, total_units: int) -> list[dict]:
-        if not isinstance(value, list) or len(value) != int(total_units):
-            raise ValueError("gpu_devices must contain exactly total_units entries")
-        normalized: list[dict] = []
-        seen: set[str] = set()
-        seen_uuids: set[str] = set()
-        for device in value:
-            if not isinstance(device, dict):
-                raise ValueError("gpu_devices entries must be objects")
-            bdf = str(device.get("pci_bdf") or "").strip().lower()
-            if not re.fullmatch(
-                r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", bdf,
-            ):
-                raise ValueError("gpu_devices entries require canonical pci_bdf")
-            if bdf in seen:
-                raise ValueError("gpu_devices contains duplicate pci_bdf")
-            seen.add(bdf)
-            if "gpu_uuid" in device:
-                gpu_uuid = str(device.get("gpu_uuid") or "").strip()
-                if not gpu_uuid or gpu_uuid.lower() in seen_uuids:
-                    raise ValueError("gpu_devices contains invalid or duplicate gpu_uuid")
-                seen_uuids.add(gpu_uuid.lower())
-            normalized.append({**device, "pci_bdf": bdf})
-        return normalized
-
-    def _scope(self, rid: str) -> str:
-        attrs = self.resources[rid]["attributes"]
-        return str(attrs.get("physical_host_id") or attrs.get("vm_host") or rid)
-
-    def _available_devices(self, rid: str) -> list[dict] | None:
-        row = self.resources[rid]
-        attrs = row["attributes"]
-        if not attrs.get("vm_host"):
-            return None
-        inventory = self._normalize_gpu_devices(
-            attrs.get("gpu_devices"), row["total_units"],
-        )
-        held: set[str] = set()
-        scope = self._scope(rid)
-        for allocation in self.allocations.values():
-            if allocation["state"] not in (
-                "reserved", "provisioning", "leased", "releasing",
-                "release_failed", "unmanaged",
-            ):
-                continue
-            if self._scope(allocation["resource_id"]) != scope:
-                continue
-            executor_ref = allocation.get("executor_ref") or {}
-            devices = executor_ref.get("gpu_devices")
-            if not isinstance(devices, list):
-                return []
-            held.update(str(device.get("pci_bdf")) for device in devices)
-        return [device for device in inventory if device["pci_bdf"] not in held]
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -128,11 +56,8 @@ class FakeSite:
         })
 
     def _available(self, rid: str) -> int:
-        exact = self._available_devices(rid)
-        if exact is not None:
-            return len(exact)
         held = sum(
-            a["units"] for a in self.allocations.values()
+            a["units"] for a in self.reservations.values()
             if a["resource_id"] == rid
             and a["state"] in ("reserved", "provisioning", "leased", "releasing")
         )
@@ -145,18 +70,11 @@ class FakeSite:
 
         if request.method == "PUT" and path.startswith("/api/v1/capacity/resources/"):
             rid = path.rsplit("/", 1)[1]
-            attrs = body.get("attributes") or {}
-            if attrs.get("vm_host"):
-                try:
-                    attrs["gpu_devices"] = self._normalize_gpu_devices(
-                        attrs.get("gpu_devices"), body["total_units"],
-                    )
-                except ValueError as exc:
-                    return httpx.Response(422, json={"detail": str(exc)})
             self.resources[rid] = {
                 "resource_id": rid,
                 "total_units": body["total_units"],
-                "attributes": attrs,
+                "attributes": body.get("attributes") or {},
+                "capacity": body.get("capacity"),
                 "enabled": body.get("enabled", True),
             }
             self._emit("released", rid)
@@ -182,100 +100,78 @@ class FakeSite:
         if path == "/api/v1/capacity/probe":
             return httpx.Response(200, json={"match": self._match(body["claim"])})
 
-        if path == "/api/v1/capacity/reservations":
+        if request.method == "POST" and path == "/api/v1/capacity/reservations":
             match = self._match(body["claim"])
             if match is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation_id = f"alloc-{next(self._ids)}"
-            row = self.resources[match["resource_id"]]
-            available_devices = self._available_devices(match["resource_id"])
-            allocated_devices = (
-                [dict(device) for device in available_devices[
-                    :match["allocated_gpu_count"]
-                ]]
-                if available_devices is not None
-                else []
-            )
-            executor_ref = (
-                {
-                    "vm_host": row["attributes"].get("vm_host"),
-                    "gpu_devices": allocated_devices,
-                }
-                if row["attributes"].get("vm_host")
-                else {}
-            )
-            self.allocations[allocation_id] = {
-                "allocation_id": allocation_id,
+                return httpx.Response(200, json={"reservation": None})
+            capacity_reservation_id = f"alloc-{next(self._ids)}"
+            self.reservations[capacity_reservation_id] = {
+                "capacity_reservation_id": capacity_reservation_id,
                 "resource_id": match["resource_id"],
                 "units": match["allocated_gpu_count"],
                 "state": "reserved",
                 "deal_ref": body.get("deal_ref") or {},
-                "vm_host": row["attributes"].get("vm_host"),
-                "executor_ref": executor_ref,
-                "gpu_devices": allocated_devices,
             }
             self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"allocation": {
+            return httpx.Response(200, json={"reservation": {
                 **match,
-                "allocation_id": allocation_id,
+                "capacity_reservation_id": capacity_reservation_id,
                 "hold_expires_at": None,
-                "executor_ref": executor_ref,
-                "gpu_devices": allocated_devices,
             }})
 
         if path.endswith("/commit"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
                 return httpx.Response(404, json={"detail": "not found"})
-            allocation["state"] = "leased"
-            allocation["lease_start_utc"] = body.get("lease_start_utc")
-            allocation["lease_end_utc"] = body.get("lease_end_utc")
-            self._emit("committed", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
+            reservation["state"] = "leased"
+            reservation["lease_start_utc"] = body.get("lease_start_utc")
+            reservation["lease_end_utc"] = body.get("lease_end_utc")
+            self._emit("committed", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": reservation})
 
         if path == "/api/v1/capacity/releases":
-            allocation = None
-            if body.get("allocation_id"):
-                allocation = self.allocations.get(body["allocation_id"])
+            reservation = None
+            if body.get("capacity_reservation_id"):
+                reservation = self.reservations.get(body["capacity_reservation_id"])
             else:
                 escrow = (body.get("deal_ref") or {}).get("escrow_uid")
-                allocation = next(
-                    (a for a in self.allocations.values()
+                reservation = next(
+                    (a for a in self.reservations.values()
                      if a["deal_ref"].get("escrow_uid") == escrow
                      and a["state"] != "released"),
                     None,
                 )
-            if allocation is None or allocation["state"] == "released":
-                return httpx.Response(200, json={"allocation": None})
-            allocation["state"] = "released"
-            allocation["failure_reason"] = body.get("failure_reason")
-            allocation["failure_message"] = body.get("failure_message")
-            self._emit("released", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": {
-                **allocation,
-                "allocated_gpu_count": allocation["units"],
+            if reservation is None or reservation["state"] == "released":
+                return httpx.Response(200, json={"reservation": None})
+            reservation["state"] = "released"
+            reservation["failure_reason"] = body.get("failure_reason")
+            reservation["failure_message"] = body.get("failure_message")
+            self._emit("released", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": {
+                **reservation,
+                "allocated_gpu_count": reservation["units"],
             }})
 
         if path.endswith("/truncate-lease"):
-            allocation_id = path.split("/")[-2]
-            allocation = self.allocations.get(allocation_id)
-            if allocation is None:
-                return httpx.Response(200, json={"allocation": None})
-            allocation["lease_end_utc"] = body["lease_end_utc"]
-            self._emit("lease_truncated", allocation["resource_id"])
-            return httpx.Response(200, json={"allocation": allocation})
+            capacity_reservation_id = path.split("/")[-2]
+            reservation = self.reservations.get(capacity_reservation_id)
+            if reservation is None:
+                return httpx.Response(200, json={"reservation": None})
+            reservation["lease_end_utc"] = body["lease_end_utc"]
+            self._emit("lease_truncated", reservation["resource_id"])
+            return httpx.Response(200, json={"reservation": reservation})
 
-        if path == "/api/v1/capacity/allocations":
+        if request.method == "GET" and path == "/api/v1/capacity/reservations":
             escrow = request.url.params.get("escrow_uid")
             state = request.url.params.get("state")
             rows = [
-                a for a in self.allocations.values()
+                a for a in self.reservations.values()
                 if (escrow is None or a["deal_ref"].get("escrow_uid") == escrow)
                 and (state is None or a["state"] == state)
             ]
             return httpx.Response(200, json={
-                "allocations": rows, "total": len(rows),
+                "reservations": rows, "total": len(rows),
             })
 
         if path == "/api/v1/capacity/events":
@@ -291,7 +187,14 @@ class FakeSite:
 
     def _match(self, claim: dict) -> dict | None:
         claim = claim or {}
-        requested = int(claim.get("gpu_count") or 1)
+        # compute_capacity_claim_from_order now always routes gpu_count.
+        # This fake only proves the GPU-count contract this test double
+        # documents itself as covering but it must at least read the
+        # quantity from the new location and skip "dimensions" in the
+        # attribute-equality mismatch check the same way the real
+        # ledger's _resource_matches skips it.
+        dimensions = claim.get("dimensions") or {}
+        requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
         for rid, row in self.resources.items():
             if not row["enabled"]:
                 continue
@@ -299,7 +202,7 @@ class FakeSite:
             top_level = {"resource_id": rid, "pool_id": rid}
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
-                for k, v in claim.items() if k != "gpu_count"
+                for k, v in claim.items() if k not in ("gpu_count", "dimensions")
             )
             if mismatched:
                 continue

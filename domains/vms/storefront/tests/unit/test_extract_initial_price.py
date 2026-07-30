@@ -35,6 +35,7 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
         gpu_count=1,
         sla=99.0,
         region=Region.CALIFORNIA_US,
+        resource_id="resource-price-test",
     )
     rates = (
         []

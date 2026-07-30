@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -31,10 +32,24 @@ class ApiCreditsListing(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _accept_offer_resource_payload(cls, value: Any) -> Any:
+        # Domain models can cross a source/wheel import boundary in the
+        # storefront image. Structurally identical Pydantic classes loaded
+        # from those two locations do not pass isinstance validation, so
+        # normalize models back to their wire representation first.
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json")
         if not isinstance(value, dict):
             return value
         if "offer_resource" in value:
-            return value
+            offer_resource = value["offer_resource"]
+            if isinstance(offer_resource, BaseModel):
+                offer_resource = offer_resource.model_dump(mode="json")
+            elif isinstance(offer_resource, str):
+                try:
+                    offer_resource = json.loads(offer_resource)
+                except (TypeError, ValueError):
+                    return value
+            return {**value, "offer_resource": offer_resource}
         return {"offer_resource": value}
 
     @model_validator(mode="after")
@@ -97,7 +112,7 @@ class ApiCreditsReceipt(BaseModel):
     kind: Literal["api_credits.v1"] = API_CREDITS_SCHEMA_KIND
     status: str
     escrow_uid: str | None = None
-    allocation_id: str | None = None
+    capacity_reservation_id: str | None = None
     key_id: str | None = None
     fulfillment_uid: str | None = None
     credentials_ref: dict[str, Any] | None = None

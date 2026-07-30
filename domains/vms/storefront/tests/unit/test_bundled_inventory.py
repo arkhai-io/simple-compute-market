@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import csv
-import json
-import re
 from decimal import Decimal
 from importlib import resources
+
 
 MOCK_TOKEN = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 MOCK_TOKEN_DECIMALS = 18
@@ -47,20 +46,3 @@ def test_bundled_mock_inventory_prices_fit_one_hour_escrow_value_limit():
             f"{filename}:{resource_id} publishes {scaled}, which overflows "
             "alkahest_py Erc20Data.value during the documented one-hour buy"
         )
-
-
-def test_bundled_vm_inventory_freezes_exact_gpu_devices():
-    for filename in ("kvm1-machine.csv", "resources.sample.csv"):
-        for row in _inventory_rows(filename):
-            if row.get("resource_type") != "compute.gpu":
-                continue
-            if not row.get("attribute.vm_host"):
-                continue
-            devices = json.loads(row["attribute.gpu_devices"])
-            assert len(devices) == int(row["value"]), (filename, row["resource_id"])
-            bdfs = [device["pci_bdf"] for device in devices]
-            assert len(bdfs) == len(set(bdfs))
-            assert all(
-                re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]", bdf)
-                for bdf in bdfs
-            )

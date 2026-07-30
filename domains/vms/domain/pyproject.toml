@@ -1,20 +1,21 @@
 [project]
 name = "arkhai-vms"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Shared VM-domain models and helpers used by Arkhai VM buyer and storefront packages."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2",
+    "arkhai-core>=0.2.0",
 ]
 
 [project.optional-dependencies]
 storefront = [
-    "arkhai-core-storefront",
+    "arkhai-core-storefront>=0.2.0",
 ]
 
-[project.entry-points."market.storefront_publication_sources"]
-vms = "arkhai_vms.storefront_adapter:vm_publication_adapter"
+[project.entry-points."market.storefront_domains"]
+vms = "arkhai_vms.domain_runtime:VM_MARKET_DOMAIN"
 
 [build-system]
 requires = ["hatchling"]
@@ -28,6 +29,6 @@ pythonpath = ["src"]
 
 [dependency-groups]
 dev = [
-    "arkhai-core-storefront",
+    "arkhai-core-storefront>=0.2.0",
     "pytest>=8.0",
 ]

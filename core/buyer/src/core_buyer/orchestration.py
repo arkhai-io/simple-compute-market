@@ -50,7 +50,6 @@ from .negotiation_client import (
 
 DEFAULT_SETTLEMENT_POLL_INTERVAL = 5.0
 DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
-CAPACITY_EXHAUSTED_STATUS = "capacity_exhausted"
 
 
 # Factory: build the EscrowProposal for a specific candidate listing.
@@ -747,18 +746,13 @@ def _settle_one(
             rounds=outcome.rounds,
             attempts=attempts,
         )
-    failure_reason = final.get("reason") or "provisioning_failed"
     return BuyResult(
-        status=(
-            CAPACITY_EXHAUSTED_STATUS
-            if failure_reason == CAPACITY_EXHAUSTED_STATUS
-            else "failed"
-        ),
+        status="failed",
         negotiation_id=outcome.negotiation_id,
         seller_url=seller_url,
         agreed_amount=outcome.agreed_amount,
         escrow_uid=escrow_uid,
-        reason=failure_reason,
+        reason=final.get("reason") or "provisioning_failed",
         rounds=outcome.rounds,
         attempts=attempts,
     )

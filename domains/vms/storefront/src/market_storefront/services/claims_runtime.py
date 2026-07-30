@@ -72,7 +72,7 @@ async def truncate_lease_for_abandoned_claim(
 
     A claim abandoned before lease end (escrow reclaimed, conditions
     terminally failed) means continuing to serve is donating compute.
-    Truncating the allocation's lease to *now* hands the rest to the
+    Truncating the reservation's lease to *now* hands the rest to the
     ledger's existing expiry machinery — teardown job, local release,
     capacity event, deal notification — on its next watchdog cycle.
     """
@@ -85,9 +85,9 @@ async def truncate_lease_for_abandoned_claim(
 
     try:
         capacity = build_capacity_client(lambda: sqlite_client)
-        allocation_id: str | None = None
+        capacity_reservation_id: str | None = None
         for client in remote_site_clients(capacity).values():
-            rows = await client.list_allocations(escrow_uid=escrow_uid)
+            rows = await client.list_reservations(escrow_uid=escrow_uid)
             held = [
                 a for a in rows
                 if a.get("state") in (
@@ -95,23 +95,23 @@ async def truncate_lease_for_abandoned_claim(
                 )
             ]
             if held:
-                allocation_id = str(held[0]["allocation_id"])
+                capacity_reservation_id = str(held[0]["capacity_reservation_id"])
                 break
-        if not allocation_id:
+        if not capacity_reservation_id:
             logger.info(
-                "[CLAIMS] No live allocation to truncate for abandoned "
+                "[CLAIMS] No live reservation to truncate for abandoned "
                 "claim %s", escrow_uid,
             )
             return None
 
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
-            allocation_id=allocation_id, lease_end_utc=lease_end,
+            capacity_reservation_id=capacity_reservation_id, lease_end_utc=lease_end,
         )
         stage_event(
             "claims", "lease_truncated_after_abandonment",
             escrow_uid=escrow_uid,
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             lease_end_utc=lease_end,
             reason=reason,
             site=(truncated or {}).get("site"),

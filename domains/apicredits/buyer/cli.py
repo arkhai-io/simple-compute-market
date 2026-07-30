@@ -1,28 +1,24 @@
-"""API-credits schema plugin for the core `market` buyer CLI.
-
-The `market` console script is core-owned (``core_buyer.cli:main``);
-this package contributes the API-credits schema's commands through the
-``market.buyer_plugins`` entry-point group. Unlike the first (VM)
-plugin, which claims the bare ``buy``/``negotiate``/``settle`` verbs,
-this plugin namespaces its verbs under one ``credits`` group —
-``market credits buy``, ``market credits listing list``, … — so the two
-plugins compose in one binary without shadowing each other ("one
-binary, many registry schemas"). Dispatching the bare verbs by listing
-schema is item-7 territory; until then the first-installed plugin's
-claim on them stands.
-"""
+"""API-credit market-domain contribution for the core ``market`` buyer CLI."""
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 import typer
 
 from core_buyer.cli import build_app
-from core_buyer.plugins import BuyerSchemaPlugin
+from core_buyer.policy_surface import configured_buyer_policy
+from domains.apicredits.domain_runtime import market_domain
+from domains.apicredits.negotiation import make_api_credits_provision_terms
+from market_core import (
+    DomainCapability,
+    ImmutableBuyerCapability,
+    MarketDomainContract,
+)
 
 from . import buy_cli as buy_module
 from . import negotiate_cli as negotiate_module
 from . import settle_cli as settle_module
-from .common import APICREDITS_SCHEMA_ID
 from .listing_cli import listing_app
 
 
@@ -44,17 +40,27 @@ def register(app: typer.Typer) -> None:
     )
 
 
-#: Loaded by the core CLI via
-#: [project.entry-points."market.buyer_plugins"] apicredits = "domains.apicredits.buyer.cli:plugin"
-plugin = BuyerSchemaPlugin(
-    schema_id=APICREDITS_SCHEMA_ID,
-    register=register,
-    distribution="arkhai-apicredits-buyer",
-)
+def _buyer_market_domain() -> MarketDomainContract:
+    base = market_domain()
+    return replace(
+        base,
+        declared_capabilities=(
+            base.declared_capabilities | {DomainCapability.BUYER}
+        ),
+        buyer=ImmutableBuyerCapability(
+            register_commands=register,
+            build_provision_terms=make_api_credits_provision_terms,
+            select_policy=configured_buyer_policy,
+            decode_result=base.codecs.result,
+        ),
+    )
 
-#: Pre-assembled app for direct module execution; the installed `market`
-#: console script reaches the same assembly through plugin discovery.
-app = build_app(plugins=[plugin])
+
+#: Loaded by ``market.buyer_domains`` discovery.
+domain = _buyer_market_domain()
+
+#: Pre-assembled app for direct module execution.
+app = build_app(domains=[domain])
 
 
 if __name__ == "__main__":

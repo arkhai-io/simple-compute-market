@@ -1,18 +1,40 @@
 """VM provision-term construction."""
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 VM_PROVISION_KIND = "compute.v1"
+VM_PROVISION_VERSION = 1
+
+
+class VmProvisionPayload(BaseModel):
+    """Domain-owned payload schema for VM provision envelope version 1."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_seconds: int = Field(gt=0)
+    ssh_public_key: str = ""
+    start_utc: str | None = None
+    compute_resource: dict[str, Any] | None = None
 
 
 class VmProvisionTerms(BaseModel):
-    """VM-domain provision terms matching the compute.v1 wire shape."""
+    """VM provision envelope with independently versioned payload."""
 
-    kind: str = Field(default=VM_PROVISION_KIND)
-    payload: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["compute.v1"] = VM_PROVISION_KIND
+    version: Literal[1] = VM_PROVISION_VERSION
+    payload: dict[str, Any]
+
+    @field_validator("payload")
+    @classmethod
+    def _validate_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return VmProvisionPayload.model_validate(value).model_dump(
+            exclude_none=True,
+        )
 
     @property
     def duration_seconds(self) -> int | None:

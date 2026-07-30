@@ -1,5 +1,12 @@
 """Shared VM-domain helpers used across buyer and storefront packages."""
 
+from arkhai_vms.compute_requirements import (
+    DIMENSION_KEYS,
+    DISK_GB_DIMENSION,
+    GPU_COUNT_DIMENSION,
+    RAM_GB_DIMENSION,
+    VCPU_COUNT_DIMENSION,
+)
 from arkhai_vms.provision_terms import (
     VM_PROVISION_KIND,
     VmProvisionTerms,
@@ -20,6 +27,11 @@ from arkhai_vms.schema import (
 )
 
 __all__ = [
+    "DIMENSION_KEYS",
+    "DISK_GB_DIMENSION",
+    "GPU_COUNT_DIMENSION",
+    "RAM_GB_DIMENSION",
+    "VCPU_COUNT_DIMENSION",
     "VM_PROVISION_KIND",
     "VmListing",
     "VmMaterialization",

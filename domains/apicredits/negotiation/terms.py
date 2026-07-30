@@ -1,25 +1,61 @@
 """API-credits provision-term construction.
 
-``ProvisionTerms{kind: "api_credits.v1", payload: {quantity, key}}`` —
-fixed at round 0 exactly like VM duration. ``key`` is the buyer's key
-disposition: ``{"mode": "new"}`` or
-``{"mode": "existing", "key_id": "ak_…"}``.
+``ProvisionTerms{kind: "api_credits.v1", version: 1, payload: ...}``
+is fixed at round 0. ``key`` is the buyer's key disposition:
+``{"mode": "new"}`` or ``{"mode": "existing", "key_id": "ak_…"}``.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 API_CREDITS_PROVISION_KIND = "api_credits.v1"
+API_CREDITS_PROVISION_VERSION = 1
+
+
+class ApiCreditsKeyIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["new", "existing"] = "new"
+    key_id: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_existing_key(self) -> "ApiCreditsKeyIntent":
+        if self.mode == "existing" and not self.key_id:
+            raise ValueError("key.key_id is required when key.mode is existing")
+        return self
+
+
+class ApiCreditsProvisionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: int = Field(ge=1)
+    key: ApiCreditsKeyIntent = Field(default_factory=ApiCreditsKeyIntent)
 
 
 class ApiCreditsProvisionTerms(BaseModel):
-    """API-credits provision terms matching the api_credits.v1 wire shape."""
+    """API-credit provision envelope with domain-owned payload validation."""
 
-    kind: str = Field(default=API_CREDITS_PROVISION_KIND)
-    payload: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["api_credits.v1"] = API_CREDITS_PROVISION_KIND
+    version: Literal[1] = API_CREDITS_PROVISION_VERSION
+    payload: dict[str, Any]
+
+    @field_validator("payload")
+    @classmethod
+    def _validate_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return ApiCreditsProvisionPayload.model_validate(value).model_dump(
+            exclude_none=True,
+        )
 
     @property
     def quantity(self) -> int | None:

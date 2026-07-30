@@ -1,4 +1,5 @@
 from enum import Enum
+import re
 from datetime import datetime
 from typing import Any, Literal, Union
 from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
@@ -469,6 +470,9 @@ class ComputeResourcePortfolio(BaseModel):
         return False
 
 
+_STOREFRONT_CAPACITY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
 class Listing(BaseModel):
     """Marketplace listing for trading compute resources and tokens."""
 
@@ -511,6 +515,52 @@ class Listing(BaseModel):
         default=None,
         description="The oracle wallet address used for arbitration and escrow workflows",
     )
+
+    @model_validator(mode="after")
+    def validate_compute_offer_identity(self) -> "Listing":
+        """Require a valid storefront capacity identity for compute listings.
+
+        ``ComputeResource`` is also used outside listing publication, so this
+        marketplace-specific invariant belongs on ``Listing`` rather than the
+        shared resource model. Surrounding whitespace is normalized; empty or
+        malformed identifiers are rejected. Listings may carry both IDs, with
+        ``resource_id`` taking precedence later when a capacity claim is built.
+        """
+        if not isinstance(self.offer_resource, ComputeResource):
+            return self
+
+        self.offer_resource.pool_id = self.normalize_capacity_identifier(
+            self.offer_resource.pool_id, field_name="pool_id"
+        )
+        self.offer_resource.resource_id = self.normalize_capacity_identifier(
+            self.offer_resource.resource_id, field_name="resource_id"
+        )
+        if (
+            self.offer_resource.pool_id is None
+            and self.offer_resource.resource_id is None
+        ):
+            raise ValueError(
+                "Compute listing offer_resource must provide either pool_id "
+                "or resource_id."
+            )
+        return self
+
+    @staticmethod
+    def normalize_capacity_identifier(
+        value: str | None, *, field_name: str
+    ) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{field_name} must not be blank")
+        if not _STOREFRONT_CAPACITY_ID_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                f"{field_name} must start with an alphanumeric character and "
+                "contain only letters, digits, '.', '_', ':', or '-' "
+                "(maximum 128 characters)"
+            )
+        return normalized
 
     @model_validator(mode="before")
     @classmethod

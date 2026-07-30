@@ -31,6 +31,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
@@ -138,9 +139,28 @@ class ListingsController:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+
+        from domains.vms.listings.models import Listing
+        try:
+            listing = Listing.model_validate(row)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "invalid_listing_capacity_identity",
+                    "reason": str(exc),
+                    "hint": (
+                        "This stored listing cannot be resumed or republished. "
+                        "Explicitly close it with POST "
+                        f"/api/v1/listings/{listing_id}/close to remove it from "
+                        "active registry discovery."
+                    ),
+                },
+            ) from exc
+
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from market_storefront.services.publication_service import publish_order_to_registry
-        publish_result = await publish_order_to_registry(row)
+        publish_result = await publish_order_to_registry(listing)
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id, paused=False,

@@ -36,9 +36,7 @@ vm_disk_size: 20G
 # The playbook sets vm_gpu_provisioned from gpu_provisioned (use this name in vm-vars).
 gpu_provisioned: false      # true to attach a GPU (passthrough or partitioned)
 
-# Marketplace fulfillment always pins the site allocation's exact devices.
-# vm_gpu_count remains a manual/legacy auto-selection input; do not combine it
-# with vm_gpu_device or vm_gpu_devices.
+# Multi-GPU: request N GPUs (role picks from lockfile), or pin devices:
 # vm_gpu_count: 2
 # vm_gpu_device: "0000:01:00.0"
 # vm_gpu_devices: ["0000:01:00.0", "0000:02:00.0"]

@@ -11,6 +11,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.middleware import buyer_auth
@@ -84,6 +85,11 @@ class NegotiateController:
                     "cover the requested quantity, or the key claim was "
                     "rejected. See `reason`."
                 ),
+            })
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail={
+                "error": "incompatible_provision_terms",
+                "reason": str(exc),
             })
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

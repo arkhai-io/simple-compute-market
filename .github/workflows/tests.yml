@@ -58,7 +58,7 @@ jobs:
           # test_alkahest parity tests spawn node via alkahest_py (needs the
           # JS impl); cross-language parity is covered by the ts/rust jobs.
           - { name: vms-storefront,         dir: domains/vms/storefront, pytest_args: "--deselect tests/unit/test_alkahest.py::test_rust --deselect tests/unit/test_alkahest.py::test_python" }
-          - { name: vms-provisioning,       dir: domains/vms/provisioning/service, pythonpath: src, predist: true }
+          - { name: compute-provisioning-service, dir: provisioning/compute/service, predist: true }
           - { name: apicredits-buyer,        dir: domains/apicredits/buyer, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback" }
           - { name: apicredits-storefront,   dir: domains/apicredits/storefront }
           - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }

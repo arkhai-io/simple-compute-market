@@ -82,8 +82,6 @@ class DealState:
     _provision_job_evaluated: bool = False
     # Phase 8 — settlement
     settlement_submitted: bool = False
-    provisioning_job_id: Optional[str] = None
-    reserved_resource_id: Optional[str] = None
     # Phase 9 — provisioning completion
     provisioning_result_injected: bool = False
     lease_id: Optional[str] = None
@@ -95,11 +93,25 @@ class DealState:
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
-    # Phase 10-11 — lease expiry lifecycle
-    _lease_expiry_armed: bool = False
-    remove_job_id: Optional[str] = None
+    # Phase 10-11 — explicit interruption and fulfillment teardown lifecycle
+    _termination_requested: bool = False
+    # Durable fulfillment identity, captured at settlement (stage 08b) from
+    # the settle-status response's ``fulfillment_id`` -- the buyer-facing
+    # path no longer surfaces a raw Ansible ``provisioning_job_id`` (always
+    # None for a fulfillment on the durable path; see
+    # ``core_storefront.models.settle_models.SettleStatusResponse``).
+    # Reused through phases 9-11 for status polling and teardown.
+    fulfillment_id: Optional[str] = None
+    # Reserved resource, captured at stage 09c from the admin-only
+    # DealLease view (``get_capacity_reservation``), never from a
+    # buyer-facing response -- ``resource_id``/``vm_host`` are
+    # intentionally opaque across the ordinary reservation boundary (see
+    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
+    # private to the site authority" requirement). Admin introspection is
+    # a legitimate, separate channel from that opacity guarantee.
+    reserved_resource_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
-    # row in embedded-capacity mode, a site-ledger allocation in remote
+    # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
     deal_lease: Optional[Any] = None
 
@@ -203,7 +215,7 @@ def provisioning_client():
     every non-health route on a single shared admin key (X-Admin-Key);
     there is no per-agent identity.
     """
-    from provisioning_client import SyncProvisioningClient
+    from vm_provisioning_operator import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
     admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     client = SyncProvisioningClient(
@@ -243,8 +255,8 @@ def _ensure_provisioning_host_registered(provisioning_client):
     Real-host integration tests use a real key path; this fixture is
     only relevant when ``ACTIVE_PROFILES=mock``.
     """
-    from provisioning_client import ProvisioningError
-    from provisioning_client import HostCreate
+    from vm_provisioning_operator import ProvisioningError
+    from vm_provisioning_operator import HostCreate
 
     host_name = "kvm1"
 
@@ -421,60 +433,59 @@ def wait_for_stage_event(
 
 
 # ---------------------------------------------------------------------------
-# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger allocation)
+# Mode-agnostic deal-lease view (embedded vm_leases vs site-ledger reservation)
 # ---------------------------------------------------------------------------
 
 class DealLease:
-    """One deal's lease: the temporal tail of its ledger allocation.
+    """One deal's lease: the temporal tail of its ledger reservation.
 
     The full-deal scenarios drive the expiry lifecycle through this
-    view — resolve the allocation by escrow, read it back in lease
+    view — resolve the reservation by escrow, read it back in lease
     vocabulary, back-date its end, and observe the watchdog release it
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` uses the lease vocabulary:
-    active / releasing / released / forced.
+    ``status`` and ``release_job_id`` come from the authoritative compute
+    provisioning lease contract.  For VM release, ``release_job_id`` is the
+    durable fulfillment id rather than an Ansible queue job id.
     """
-
-    _LEASE_STATUS = {"leased": "active"}
 
     def __init__(self, provisioning_client, escrow_uid: str) -> None:
         self._client = provisioning_client
         self.escrow_uid = escrow_uid
         self.is_ledger = True
-        allocations = (
-            provisioning_client.list_capacity_allocations(escrow_uid=escrow_uid)
-            .get("allocations") or []
+        reservations = (
+            provisioning_client.list_capacity_reservations(escrow_uid=escrow_uid)
+            .get("reservations") or []
         )
-        live = [a for a in allocations if a.get("lease_end_utc")]
+        live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
-            f"No ledger allocation with a lease tail for escrow "
+            f"No ledger reservation with a lease tail for escrow "
             f"{escrow_uid!r} — was the lease registered after fulfillment?"
         )
-        self.lease_id = str(live[0]["allocation_id"])
+        self.lease_id = str(live[0]["capacity_reservation_id"])
 
     def refresh(self) -> dict:
-        """Current lease fields in lease vocabulary."""
-        row = self._client.get_capacity_allocation(self.lease_id)
+        """Current lease fields from the public compute lease contract."""
+        lease = self._client.get_lease(self.lease_id)
+        row = self._client.get_capacity_reservation(self.lease_id)
+        data = lease.model_dump(mode="json") if hasattr(lease, "model_dump") else dict(lease)
         return {
-            "id": row.get("allocation_id"),
+            "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
             "resource_id": row.get("resource_id"),
             "vm_host": row.get("vm_host"),
             "vm_target": row.get("vm_target"),
-            "status": self._LEASE_STATUS.get(
-                str(row.get("state")), str(row.get("state")),
-            ),
-            "vm_remove_job_id": row.get("vm_remove_job_id"),
-            "create_job_id": row.get("create_job_id"),
+            "status": data.get("status"),
+            "fulfillment_id": data.get("release_job_id"),
+            "create_job_id": data.get("create_job_id"),
         }
 
     def backdate(self, lease_end_utc: str) -> dict:
         """Move the lease end into the past so the next watchdog cycle fires.
 
         Uses PATCH /api/v1/leases/{id} (update_lease) to update the ledger
-        allocation's lease_end_utc directly.  Returns the refreshed normalized
+        reservation's lease_end_utc directly.  Returns the refreshed normalized
         lease view.
         """
         self._client.update_lease(self.lease_id, lease_end_utc=lease_end_utc)

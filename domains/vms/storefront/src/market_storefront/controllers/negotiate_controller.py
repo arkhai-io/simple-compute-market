@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
@@ -83,6 +84,11 @@ class NegotiateController:
                     "new negotiations, or no matching compute is currently "
                     "available. Try a different listing."
                 ),
+            })
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail={
+                "error": "incompatible_provision_terms",
+                "reason": str(exc),
             })
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

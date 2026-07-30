@@ -463,7 +463,6 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(return_value={
         "status": "error",
-        "reason": "capacity_exhausted",
         "message": "Provisioning failed: No available compute VM",
     })
 
@@ -482,7 +481,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
 
     row = await client.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == "failed"
-    assert row["reason"] == "capacity_exhausted"
+    assert "No available compute VM" in row["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -526,3 +525,65 @@ def test_serialize_parses_tenant_credentials_json():
     assert out["tenant_credentials"] == {"password": "secret"}
     assert out["fulfillment_uid"] == "0xa"
     assert "attestation_uid" not in out
+
+
+def test_serialize_includes_fulfillment_id_distinct_from_fulfillment_uid():
+    """fulfillment_id (durable physical-fulfillment identity) and
+    fulfillment_uid (on-chain settlement-claim identity) are different
+    concepts and may both be set on the same row."""
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_uid": "0xa",
+        "fulfillment_id": "fulfillment-123",
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert out["fulfillment_id"] == "fulfillment-123"
+    assert out["fulfillment_uid"] == "0xa"
+    assert out["fulfillment_id"] != out["fulfillment_uid"]
+
+
+def test_serialize_omits_fulfillment_id_when_none():
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_id": None,
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert "fulfillment_id" not in out
+
+@pytest.mark.asyncio
+async def test_fulfillment_context_and_processing_claim_round_trip(client):
+    await client.insert_escrow(
+        escrow_uid="0xresume", negotiation_id="neg-resume",
+        chain_name="anvil", escrow_address="0x" + "cc" * 20,
+    )
+    context = json.dumps({
+        "kind": "vm.storefront.fulfillment-context",
+        "schema_version": 1,
+        "payload": {"escrow_uid": "0xresume", "fulfillment_request": {}},
+    })
+    await client.update_escrow(
+        escrow_uid="0xresume",
+        fulfillment_context=context,
+        fulfillment_phase="context_persisted",
+    )
+    rows = await client.list_incomplete_primary_escrows(limit=10)
+    assert [row["escrow_uid"] for row in rows] == ["0xresume"]
+    assert rows[0]["fulfillment_context"] == context
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-a", lease_until="2999-01-01T00:00:00+00:00"
+    ) is True
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-b", lease_until="2999-01-01T00:00:00+00:00"
+    ) is False
+    await client.release_escrow_convergence(escrow_uid="0xresume", owner="worker-a")
+    assert await client.claim_escrow_convergence(
+        escrow_uid="0xresume", owner="worker-b", lease_until="2999-01-01T00:00:00+00:00"
+    ) is True

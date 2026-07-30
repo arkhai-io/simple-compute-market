@@ -23,25 +23,6 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
 )
 from domains.vms.buyer.cli_helpers import parse_filter_options
-from domains.vms.buyer.buy_cli import _pin_discovered_matches
-
-
-def test_exact_listing_and_seller_pins_are_applied_after_discovery() -> None:
-    matches = [
-        {"listing_id": "L1", "seller": "https://seller-one.example/"},
-        {"listing_id": "L2", "seller": "https://seller-two.example"},
-    ]
-
-    assert _pin_discovered_matches(
-        matches,
-        listing_id="L2",
-        seller_url="https://seller-two.example/",
-    ) == [matches[1]]
-    assert _pin_discovered_matches(
-        matches,
-        listing_id="missing",
-        seller_url=None,
-    ) == []
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -449,34 +430,6 @@ class TestConfirmSettlementGate:
         )
         assert escrow_count["n"] == 1
         assert result.status == "ready"
-
-    def test_settlement_capacity_reason_becomes_typed_terminal(self, monkeypatch):
-        self._setup_orchestrator(monkeypatch)
-        monkeypatch.setattr(
-            "core_buyer.orchestration.submit_settlement",
-            lambda **kw: {"status": "queued"},
-        )
-        monkeypatch.setattr(
-            "core_buyer.orchestration.wait_for_settlement",
-            lambda **kw: {
-                "status": "failed",
-                "reason": "capacity_exhausted",
-            },
-        )
-
-        result = _run_buy_with_legacy_hooks(
-            config=self._config(),
-            constraints=self._constraints(),
-            provision=self._provision(),
-            build_escrow_proposal=_build_escrow_proposal(),
-            build_escrow_terms=_stub_build_escrow_terms,
-            create_escrow=lambda _escrows: ["uid-capacity"],
-            matches=[{"listing_id": "L1", "seller": "http://s1"}],
-            max_matches_to_try=1,
-        )
-
-        assert result.status == "capacity_exhausted"
-        assert result.reason == "capacity_exhausted"
 
     def test_confirm_callback_raising_aborts_safely(self, monkeypatch):
         """Exceptions in the confirm callback don't reach the chain."""

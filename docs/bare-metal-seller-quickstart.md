@@ -16,7 +16,7 @@ your own listing registry instead of pointing at an existing one, see
 
 > Transitional packaging note: the bare-metal domain schema lives in
 > `domains/bare_metal`, while the current runnable provisioning/site authority
-> still lives under `domains/vms/provisioning/service`. Until the storefront
+> still lives under `provisioning/compute/service`. Until the storefront
 > package split is complete, some compose service names and commands still use
 > the VM seller image.
 
@@ -106,11 +106,6 @@ Important fields:
   It must match `[bare_metal_nodes]` in the provisioning inventory. If omitted,
   `resource_id` is used.
 - `attribute.vm_host` is for VM slices; leave it empty in bare-metal rows.
-- VM slice rows for this physical host additionally require
-  `attribute.gpu_devices`: the exact per-GPU PCI BDF inventory (plus GPU UUID
-  when available). Keep those private runtime values in the VM seller's
-  inventory; bare-metal rows remain whole-host/exclusive and do not duplicate
-  the device list.
 - `value` is the total units on the physical host. For GPU hosts, this is
   normally the total GPU count.
 

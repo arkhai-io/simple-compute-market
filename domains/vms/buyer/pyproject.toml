@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12,<3.14"
@@ -14,13 +14,13 @@ dependencies = [
   # on-chain escrow creation. Imported lazily from
   # core_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
-  "alkahest-py==1.1.0",
-  "arkhai-core-buyer",
-  "arkhai-core",
+  "alkahest-py==1.1.2",
+  "arkhai-core-buyer>=0.2.0",
+  "arkhai-core>=0.2.0",
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
-  "arkhai-vms",
+  "arkhai-vms>=0.2.0",
 ]
 
 [dependency-groups]
@@ -49,10 +49,10 @@ environments = [
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
-# The `market` console script ships from arkhai-core-buyer; this package only
-# contributes the VM compute schema plugin the core CLI discovers.
-[project.entry-points."market.buyer_plugins"]
-vms = "domains.vms.buyer.cli:plugin"
+# The `market` console script ships from arkhai-core-buyer; this package
+# contributes the validated VM market-domain contract.
+[project.entry-points."market.buyer_domains"]
+vms = "domains.vms.buyer.cli:domain"
 
 [tool.uv.sources]
 torch = [

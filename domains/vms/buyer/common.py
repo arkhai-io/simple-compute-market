@@ -38,9 +38,8 @@ from core_buyer.registry_config import (  # noqa: F401
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STOREFRONT_ROOT = REPO_ROOT / "domains" / "vms" / "storefront"
 
-#: The registry schema this plugin implements (mirrors the
-#: BuyerSchemaPlugin declaration in `.cli`). Discovery verbs resolve
-#: registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
+#: The registry schema understood by the VM buyer domain. Discovery verbs
+#: resolve registries through `resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, …)`
 #: so registries declaring a different schema are skipped.
 VMS_SCHEMA_ID = "vms.compute"
 

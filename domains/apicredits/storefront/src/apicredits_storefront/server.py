@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.utils.config import AGENT_ID, settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 from apicredits_storefront.utils.sync_negotiation import continue_sync_negotiation
@@ -93,6 +94,7 @@ app = FastAPI(
     root_path=settings.gateway.root_path,
     swagger_ui_parameters={"persistAuthorization": True},
 )
+app.state.market_domain = get_market_domain_contract()
 
 
 install_admin_key_openapi(app, root_path=settings.gateway.root_path)

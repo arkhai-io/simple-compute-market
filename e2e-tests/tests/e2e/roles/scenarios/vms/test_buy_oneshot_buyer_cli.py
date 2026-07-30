@@ -373,7 +373,7 @@ class TestStageB5_SellerAndLease:
         )
 
         # DealLease resolves where the lease lives: a site-ledger
-        # allocation (remote-capacity mode) or a vm_leases row (embedded).
+        # reservation (remote-capacity mode) or a vm_leases row (embedded).
         from tests.e2e.roles.scenarios.vms.conftest import DealLease
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid

@@ -48,12 +48,59 @@ def patched_sqlite(db, monkeypatch):
 
 class TestPublishOrderRecordsPublications:
     @pytest.mark.asyncio
+    async def test_invalid_legacy_row_is_rejected_before_registry_contact(self):
+        order = {
+            "listing_id": "legacy-invalid",
+            "seller": "http://seller.test",
+            "offer_resource": {
+                "gpu_model": "H200", "gpu_count": 1,
+                "sla": 99.9, "region": "test",
+            },
+            "accepted_escrows": [],
+        }
+        with patch(
+            "market_storefront.services.publication_service.publish_listing_to_registries",
+            new_callable=AsyncMock,
+        ) as publish:
+            with pytest.raises(ValueError, match="pool_id or resource_id"):
+                await publication_service.publish_order_to_registry(order)
+        publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mutated_listing_model_is_revalidated_before_publish(self):
+        from domains.vms.listings.models import Listing
+
+        listing = Listing.model_validate({
+            "listing_id": "mutated-listing",
+            "seller": "http://seller.test",
+            "offer_resource": {
+                "resource_id": "res-before-mutation", "gpu_model": "H200",
+                "gpu_count": 1, "sla": 99.9, "region": "test",
+            },
+            "accepted_escrows": [],
+        })
+        listing.offer_resource.resource_id = None
+        listing.offer_resource.pool_id = None
+
+        with patch(
+            "market_storefront.services.publication_service.publish_listing_to_registries",
+            new_callable=AsyncMock,
+        ) as publish:
+            with pytest.raises(ValueError, match="pool_id or resource_id"):
+                await publication_service.publish_order_to_registry(listing)
+        publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_successful_fanout_writes_one_row_per_registry(
         self, patched_sqlite,
     ):
         order = {
             "listing_id": "L1",
-            "offer_resource": {"gpu_model": "H200"},
+            "seller": "http://seller.test",
+            "offer_resource": {
+                "resource_id": "res-L1", "gpu_model": "H200",
+                "gpu_count": 1, "sla": 99.9, "region": "test",
+            },
             "accepted_escrows": [{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
@@ -97,7 +144,11 @@ class TestPublishOrderRecordsPublications:
         one. This is the audit trail consumers will read to retry."""
         order = {
             "listing_id": "Lpartial",
-            "offer_resource": {"gpu_model": "H200"},
+            "seller": "http://seller.test",
+            "offer_resource": {
+                "resource_id": "res-Lpartial", "gpu_model": "H200",
+                "gpu_count": 1, "sla": 99.9, "region": "test",
+            },
             "accepted_escrows": [{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,

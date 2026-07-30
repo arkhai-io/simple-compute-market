@@ -144,7 +144,11 @@ async def test_buyer_auth_accepts_matching_x_identity():
     body = NegotiateNewRequest(
         listing_id="listing-1",
         buyer_address=OWNER_ADDRESS,
-        provision_terms={"duration_seconds": 1, "ssh_public_key": ""},
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {"duration_seconds": 1, "ssh_public_key": ""},
+        },
         proposal={
             "chain_name": "anvil",
             "escrow_address": "0x" + "0" * 40,
@@ -175,7 +179,11 @@ async def test_buyer_auth_rejects_x_identity_mismatching_buyer_address():
     body = NegotiateNewRequest(
         listing_id="listing-1",
         buyer_address=OWNER_ADDRESS,  # body says owner
-        provision_terms={"duration_seconds": 1, "ssh_public_key": ""},
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {"duration_seconds": 1, "ssh_public_key": ""},
+        },
         proposal={
             "chain_name": "anvil",
             "escrow_address": "0x" + "0" * 40,
@@ -206,7 +214,11 @@ async def test_buyer_auth_back_compat_no_identity_headers():
     body = NegotiateNewRequest(
         listing_id="listing-1",
         buyer_address=OWNER_ADDRESS,
-        provision_terms={"duration_seconds": 1, "ssh_public_key": ""},
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {"duration_seconds": 1, "ssh_public_key": ""},
+        },
         proposal={
             "chain_name": "anvil",
             "escrow_address": "0x" + "0" * 40,

@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .provision_terms import BareMetalProvisionTerms
+
 BARE_METAL_SCHEMA_KIND = "bare_metal.v1"
 BARE_METAL_EXECUTOR_KIND = "bare_metal"
 SSH_ACCESS_METHOD = "ssh"
@@ -30,7 +32,7 @@ def bare_metal_executor_ref(
     *,
     access_ref: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build executor_ref for a bare-metal lease allocation."""
+    """Build executor_ref for a bare-metal lease reservation."""
     ref = dict(access_ref or {})
     ref[PHYSICAL_HOST_ID_REF_KEY] = physical_host_id
     return ref
@@ -109,6 +111,20 @@ class BareMetalMessage(BaseModel):
         default=None,
         description="Optional access metadata/reference agreed by policy.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_provision_terms(cls, value: Any) -> Any:
+        if isinstance(value, BareMetalProvisionTerms):
+            envelope = value
+        else:
+            raw = value.model_dump() if hasattr(value, "model_dump") else value
+            if not isinstance(raw, dict) or "payload" not in raw:
+                return value
+            envelope = BareMetalProvisionTerms.model_validate(raw)
+        payload = dict(envelope.payload)
+        payload["kind"] = envelope.kind
+        return payload
 
     @model_validator(mode="after")
     def _validate_message(self) -> "BareMetalMessage":
@@ -269,13 +285,13 @@ class BareMetalReceipt(BaseModel):
 
 
 class BareMetalLeaseCreate(BaseModel):
-    """Request to attach a bare-metal lease tail to a live allocation."""
+    """Request to attach a bare-metal lease tail to a live reservation."""
 
-    allocation_id: str | None = Field(
+    capacity_reservation_id: str | None = Field(
         default=None,
         description=(
-            "Site allocation identifier. If omitted, the provisioner may look "
-            "up the live allocation by escrow_uid."
+            "Site reservation identifier. If omitted, the provisioner may look "
+            "up the live reservation by escrow_uid."
         ),
     )
     escrow_uid: str = Field(description="On-chain escrow UID from the deal.")
@@ -320,9 +336,9 @@ class BareMetalLeaseCreate(BaseModel):
 
 
 class BareMetalLeaseView(BaseModel):
-    """Minimal allocation-backed bare-metal lease view."""
+    """Minimal reservation-backed bare-metal lease view."""
 
-    allocation_id: str
+    capacity_reservation_id: str
     escrow_uid: str | None = None
     machine_id: str
     physical_host_id: str
@@ -336,6 +352,7 @@ class BareMetalLeaseView(BaseModel):
 class BareMetalAccessResult(BaseModel):
     """Result shape for bare-metal grant/reclaim executor slots."""
 
+    kind: Literal["bare_metal.v1"] = BARE_METAL_SCHEMA_KIND
     action: str = Field(
         description="Bare-metal executor lifecycle action that completed.",
     )
@@ -382,7 +399,7 @@ class BareMetalAccessResult(BaseModel):
 def materialization_to_lease_create(
     materialization: BareMetalMaterialization,
     *,
-    allocation_id: str | None = None,
+    capacity_reservation_id: str | None = None,
     create_job_id: str | None = None,
 ) -> BareMetalLeaseCreate:
     """Adapt domain materialization into the current provisioning API request."""
@@ -392,7 +409,7 @@ def materialization_to_lease_create(
     if materialization.access_method:
         access_ref.setdefault("access_method", materialization.access_method)
     return BareMetalLeaseCreate(
-        allocation_id=allocation_id,
+        capacity_reservation_id=capacity_reservation_id,
         escrow_uid=materialization.escrow_uid,
         machine_id=materialization.machine_id,
         physical_host_id=materialization.physical_host_id,
@@ -408,7 +425,7 @@ def receipt_from_lease_view(
     *,
     result_ref: dict[str, Any] | None = None,
 ) -> BareMetalReceipt:
-    """Adapt the current allocation-backed lease view into a domain receipt."""
+    """Adapt the current reservation-backed lease view into a domain receipt."""
     return BareMetalReceipt(
         escrow_uid=lease.escrow_uid,
         machine_id=lease.machine_id,

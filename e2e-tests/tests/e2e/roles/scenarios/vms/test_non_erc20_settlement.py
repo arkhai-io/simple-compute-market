@@ -343,7 +343,14 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         listing_id=listing_id,
         buyer_address=buyer_config["wallet_address"],
         initial_amount=_BUYER_INITIAL_AMOUNT,
-        duration_seconds=_DURATION_SECONDS,
+        provision_terms={
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": _DURATION_SECONDS,
+                "ssh_public_key": "",
+            },
+        },
         chain_name=_CHAIN_NAME,
         escrow_address=case.escrow_address,
         literal_fields=dict(case.literal_fields),
@@ -435,11 +442,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         escrow_uid,
         buyer_address=buyer_config["wallet_address"],
     )
-    assert status.provisioning_job_id
+    # provisioning_job_id is always None for a fulfillment on the durable
+    # path; fulfillment_id is that path's durable identity. See
+    # core_storefront.models.settle_models.SettleStatusResponse.
+    fulfillment_id = status.fulfillment_id
+    assert fulfillment_id, status
 
     provisioning_test_client.resume_rule(case.rule_id)
-    job = provisioning_test_client.wait_for_job(status.provisioning_job_id, timeout=30)
-    assert job["status"] == "succeeded", job
+    provisioning_test_client.drain(timeout=30)
+    provisioning_client.run_fulfillment_convergence_cycle()
+    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
+    assert fulfillment_status.get("state") == "active", fulfillment_status
 
     wait = storefront_admin_client.wait_for_settlement(escrow_uid, timeout=60.0)
     assert wait.ready is True, wait

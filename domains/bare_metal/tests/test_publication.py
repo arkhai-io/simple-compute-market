@@ -1,114 +1,152 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from arkhai_bare_metal import (
-    BARE_METAL_SCHEMA_KIND,
     available_bare_metal_listings,
     bare_metal_listing_key,
+    trusted_bare_metal_projection,
 )
 
 
-def _resource(
-    resource_id: str,
-    *,
-    available_units: int = 1,
-    enabled: bool = True,
-    attributes: dict | None = None,
-) -> dict:
-    return {
-        "resource_id": resource_id,
-        "available_units": available_units,
-        "enabled": enabled,
-        "attributes": attributes or {},
+def _view(**overrides):
+    value = {
+        "physical_resource_id": "resource-1",
+        "physical_host_id": "physical-host-1",
+        "machine_id": "machine-1",
+        "available": True,
+        "allocation_mode": "exclusive",
+        "access_methods": ["ssh", "serial-console"],
+        "capacity": {"gpu_count": 8, "ram_gb": 512},
+        "capabilities": {"gpu_model": "H200", "ram_gb": 512},
     }
+    value.update(overrides)
+    return value
 
 
-def test_available_bare_metal_listings_derive_exclusive_host_payloads():
-    listings = available_bare_metal_listings(
-        [
-            _resource(
-                "bare-metal-node-1",
-                attributes={
-                    "allocation_mode": "exclusive",
-                    "physical_host_id": "host-physical-1",
-                    "machine_id": "bm-node-1",
-                    "gpu_model": "H200",
-                    "ram_gb": 512,
-                },
-            ),
-        ],
-        min_duration_seconds=3600,
-        max_duration_seconds=7200,
-        site={"region": "us-west"},
+def _resource(view=None, **overrides):
+    value = {
+        "physical_resource_id": "resource-1",
+        "publication_views": {"bare_metal.v1": view or _view()},
+    }
+    value.update(overrides)
+    return value
+
+
+def test_interpreter_preserves_distinct_identities_and_listing_semantics():
+    generation = trusted_bare_metal_projection(
+        site_id="site-a",
+        revision=3,
+        digest="generation-3",
+        resource_pools=[{"resource_pool_id": "pool-1", "resources": [_resource()]}],
+        complete=True,
     )
 
-    assert len(listings) == 1
-    listing = listings[0]
-    assert listing.kind == BARE_METAL_SCHEMA_KIND
-    assert listing.machine_id == "bm-node-1"
-    assert listing.physical_host_id == "host-physical-1"
-    assert listing.min_duration_seconds == 3600
-    assert listing.max_duration_seconds == 7200
-    assert listing.site == {"region": "us-west"}
-    assert listing.capabilities == {"gpu_model": "H200", "ram_gb": 512}
+    listings = available_bare_metal_listings(generation.resources)
+
+    assert generation.site_id == "site-a"
+    assert generation.resources[0].physical_resource_id == "resource-1"
+    assert listings[0].machine_id == "machine-1"
+    assert listings[0].physical_host_id == "physical-host-1"
+    assert listings[0].access_methods == ["ssh", "serial-console"]
+    assert listings[0].capabilities == {
+        "gpu_count": 8,
+        "ram_gb": 512,
+        "gpu_model": "H200",
+    }
+    assert listings[0].site is None
 
 
-def test_available_bare_metal_listings_skip_shareable_vm_slices():
-    listings = available_bare_metal_listings(
-        [
-            _resource(
-                "host-1-vm-gpus",
-                attributes={
-                    "allocation_mode": "shareable",
-                    "physical_host_id": "host-physical-1",
-                    "vm_host": "kvm1",
-                },
-            ),
-        ]
+def test_unavailable_resource_is_not_listed():
+    generation = trusted_bare_metal_projection(
+        site_id="site-a",
+        revision=4,
+        digest="generation-4",
+        resource_pools=[{
+            "resource_pool_id": "pool-1",
+            "resources": [_resource(_view(available=False))],
+        }],
+        complete=True,
     )
 
-    assert listings == []
+    assert available_bare_metal_listings(generation.resources) == []
 
 
-def test_available_bare_metal_listings_skip_conflict_blocked_or_disabled_hosts():
-    listings = available_bare_metal_listings(
-        [
-            _resource(
-                "blocked",
-                available_units=0,
-                attributes={
-                    "allocation_mode": "exclusive",
-                    "physical_host_id": "host-physical-1",
-                },
-            ),
-            _resource(
-                "disabled",
-                enabled=False,
-                attributes={
-                    "allocation_mode": "exclusive",
-                    "physical_host_id": "host-physical-2",
-                },
-            ),
-        ]
+def test_incomplete_generation_ignores_partial_remote_rows():
+    generation = trusted_bare_metal_projection(
+        site_id="site-a",
+        revision=4,
+        digest="unavailable",
+        resource_pools=[{"resources": [_resource()]}],
+        complete=False,
     )
 
-    assert listings == []
+    assert generation.complete is False
+    assert generation.resources == []
 
 
-def test_available_bare_metal_listings_defaults_machine_id_to_resource_id():
-    listings = available_bare_metal_listings(
-        [
-            _resource(
-                "bare-metal-node-1",
-                attributes={
-                    "allocation_mode": "exclusive",
-                    "physical_host_id": "host-physical-1",
-                },
-            ),
-        ]
+def test_authoritative_empty_generation_remains_complete():
+    generation = trusted_bare_metal_projection(
+        site_id="site-a",
+        revision=5,
+        digest="empty",
+        resource_pools=[],
+        complete=True,
     )
 
-    assert listings[0].machine_id == "bare-metal-node-1"
+    assert generation.complete is True
+    assert generation.resources == []
 
 
-def test_bare_metal_listing_key_is_stable_per_machine():
-    assert bare_metal_listing_key("bm-node-1") == "bare-metal:bm-node-1"
+def test_stale_complete_generation_remains_usable():
+    generation = trusted_bare_metal_projection(
+        site_id="site-a",
+        revision=3,
+        digest="generation-3",
+        resource_pools=[{"resources": [_resource()]}],
+        complete=True,
+        stale=True,
+    )
+
+    assert generation.stale is True
+    assert len(available_bare_metal_listings(generation.resources)) == 1
+
+
+def test_interpreter_rejects_conflicting_containing_resource_identity():
+    with pytest.raises(ValueError, match="conflicts"):
+        trusted_bare_metal_projection(
+            site_id="site-a",
+            revision=1,
+            digest="bad",
+            resource_pools=[{
+                "resources": [
+                    _resource(physical_resource_id="different-resource"),
+                ],
+            }],
+            complete=True,
+        )
+
+
+def test_interpreter_requires_explicit_machine_identity():
+    view = _view()
+    view.pop("machine_id")
+
+    with pytest.raises(ValidationError):
+        trusted_bare_metal_projection(
+            site_id="site-a",
+            revision=1,
+            digest="bad",
+            resource_pools=[{"resources": [_resource(view)]}],
+            complete=True,
+        )
+
+
+def test_derivation_key_is_site_and_resource_scoped():
+    assert bare_metal_listing_key(
+        site_id="site-a",
+        physical_resource_id="resource-1",
+    ) != bare_metal_listing_key(
+        site_id="site-b",
+        physical_resource_id="resource-1",
+    )

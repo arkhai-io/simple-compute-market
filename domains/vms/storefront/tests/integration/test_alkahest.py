@@ -13,7 +13,6 @@ from alkahest_py import (
 
 MOCK_TOKEN_ADDR = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 
-
 _ENV_TEST_MANAGER_SETUP = """\
 EnvTestManager could not start the local Alkahest test chain runtime.
 
@@ -65,10 +64,9 @@ async def full_arbitration_flow(
     inner_demand_data = f"test arbitration data {secret_code}".encode("utf-8")
 
     demand_data = TrustedOracleArbiterDemandData(oracle_address, inner_demand_data)
-    encoded_demand_data = demand_data.encode_self()
     arbiter = {
         "arbiter": arbiter_address,
-        "demand": encoded_demand_data,
+        "demand": demand_data.encode_self(),
     }
 
     escrow_receipt = await create_escrow(
@@ -84,7 +82,7 @@ async def full_arbitration_flow(
     )
 
     await seller_client.oracle.request_arbitration(
-        fulfillment_uid, oracle_address, encoded_demand_data
+        fulfillment_uid, oracle_address, inner_demand_data
     )
 
     def decision_function(attestation, demand):

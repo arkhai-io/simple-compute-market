@@ -54,14 +54,14 @@ class VmMessage(BaseModel):
     @classmethod
     def _accept_provision_terms(cls, value: Any) -> Any:
         if isinstance(value, VmProvisionTerms):
-            payload = dict(value.payload)
-            payload.setdefault("kind", value.kind)
-            return payload
-        if isinstance(value, dict) and isinstance(value.get("payload"), dict):
-            payload = dict(value["payload"])
-            payload.setdefault("kind", value.get("kind", VM_PROVISION_KIND))
-            return payload
-        return value
+            envelope = value
+        elif isinstance(value, dict) and "payload" in value:
+            envelope = VmProvisionTerms.model_validate(value)
+        else:
+            return value
+        payload = dict(envelope.payload)
+        payload["kind"] = envelope.kind
+        return payload
 
 
 class VmTerms(BaseModel):
@@ -78,14 +78,14 @@ class VmTerms(BaseModel):
     @classmethod
     def _accept_provision_terms(cls, value: Any) -> Any:
         if isinstance(value, VmProvisionTerms):
-            payload = dict(value.payload)
-            payload.setdefault("kind", value.kind)
-            return payload
-        if isinstance(value, dict) and isinstance(value.get("payload"), dict):
-            payload = dict(value["payload"])
-            payload.setdefault("kind", value.get("kind", VM_PROVISION_KIND))
-            return payload
-        return value
+            envelope = value
+        elif isinstance(value, dict) and "payload" in value:
+            envelope = VmProvisionTerms.model_validate(value)
+        else:
+            return value
+        payload = dict(envelope.payload)
+        payload["kind"] = envelope.kind
+        return payload
 
     @model_validator(mode="after")
     def _validate_terms(self) -> "VmTerms":

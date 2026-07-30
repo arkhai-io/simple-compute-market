@@ -1,0 +1,22 @@
+[project]
+name = "arkhai-vms-provisioning-iac"
+version = "0.1.0"
+description = "VM provisioning Ansible IaC -- inventory, playbooks, roles. Not a distributable Python package; only its tests/ directory is Python."
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+# Ansible roles/playbooks/inventory, not an importable Python package --
+# nothing here to build into a wheel. Only tests/ is Python, and it only
+# needs pytest to run; ``package = false`` gives this directory a normal
+# uv-managed venv + lockfile without hatchling trying to package
+# something that doesn't exist, consistent with every other package in
+# this repository running its tests through ``uv run pytest`` rather
+# than the bare system interpreter.
+package = false
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]

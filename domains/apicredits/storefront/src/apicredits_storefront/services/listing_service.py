@@ -44,9 +44,7 @@ class ListingService:
             availability_view,
             build_capacity_client,
         )
-        from apicredits_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
+        from apicredits_storefront.domain_runtime import get_market_domain_contract
         from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
 
         if not accepted_escrows:
@@ -78,10 +76,10 @@ class ListingService:
             )
 
         from apicredits_storefront.domain_runtime import (
-            get_storefront_domain_runtime,
+            get_market_domain_contract,
         )
 
-        listing = get_storefront_domain_runtime().listing({
+        listing = get_market_domain_contract().codecs.listing({
             "offer_resource": {
                 "service_name": service_name,
                 "description": description,
@@ -119,7 +117,9 @@ class ListingService:
             return {"status": "created", "listing_id": listing_id}
 
         row = await self._db.load_listing(listing_id=listing_id)
-        publish_result = await publish_order_to_registry(row or {})
+        publication = get_market_domain_contract().publication
+        assert publication is not None and publication.publish is not None
+        publish_result = await publication.publish(row or {})
         return {
             "status": "created",
             "listing_id": listing_id,

@@ -256,13 +256,14 @@ async def _run_settlement_job_bg(
     claim_escrow_address: str | None = None,
 ) -> None:
     """Background coroutine: run fulfillment, patch the job row."""
-    # Imported here so unit tests can mock fulfill_compute_obligation by
-    # patching the symbol on this module.
-    from market_storefront.services.fulfillment_service import fulfill_compute_obligation
+    from market_storefront.domain_runtime import get_market_domain_contract
     from market_storefront.utils.config import settings
 
+    fulfillment = get_market_domain_contract().fulfillment
+    assert fulfillment is not None
+
     try:
-        result = await fulfill_compute_obligation(
+        result = await fulfillment.fulfill(
             client=alkahest_client,
             escrow_uid=escrow_uid,
             ssh_public_key=provision.ssh_public_key,
@@ -315,15 +316,7 @@ async def _run_settlement_job_bg(
                     escrow_uid,
                 )
     else:
-        # ``reason`` is a stable machine-readable terminal when the
-        # fulfillment layer can classify the failure (notably
-        # ``capacity_exhausted``). Keep free-form detail in service/stage
-        # logs instead of forcing buyers to parse an error sentence.
-        reason = (
-            (result or {}).get("reason")
-            or (result or {}).get("message")
-            or f"status={status!r}"
-        )
+        reason = (result or {}).get("message") or f"status={status!r}"
         await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="failed",
@@ -350,6 +343,7 @@ def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
     }
     for field in (
         "fulfillment_uid",
+        "fulfillment_id",
         "chain_name",
         "escrow_address",
         "provisioning_job_id",

@@ -152,6 +152,7 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
     assert proposal["literal_fields"] == {"token": token}
     assert seen_body["provision_terms"] == {
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": 3600,
             "ssh_public_key": "ssh-rsa AAAA",

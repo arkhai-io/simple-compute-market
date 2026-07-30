@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def _apply_fulfillment_failure_policy_adapter(
     *,
-    allocation_id: str | None,
+    capacity_reservation_id: str | None,
     escrow_uid: str,
     listing_id: str | None,
     resource_id: str | None,
@@ -36,7 +36,7 @@ async def _apply_fulfillment_failure_policy_adapter(
     await apply_fulfillment_failure_policy(
         get_sqlite_client(),
         FulfillmentFailureContext(
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
             listing_id=listing_id,
             resource_id=resource_id,
@@ -63,27 +63,27 @@ async def fulfill_credit_obligation(
     """Issue credits for a settled escrow and fulfill the obligation.
 
     When the negotiation's acceptance placed a TTL quota hold (two-phase
-    reserve), its allocation_id rides the issuance call — the tokens
+    reserve), its capacity_reservation_id rides the issuance call — the tokens
     service commits that hold open-ended instead of racing a fresh
     reserve. Consume-once: the hold row's job is done either way.
     """
     from core_storefront.stage_log import stage_event
 
     from apicredits_storefront.domain_runtime import (
-        get_storefront_domain_runtime,
+        get_market_domain_contract,
     )
     from apicredits_storefront.utils import config
 
-    held_allocation: dict | None = None
+    held_reservation: dict | None = None
     if negotiation_id:
         db = get_sqlite_client()
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
-            held_allocation = dict(hold.get("payload") or {})
-            held_allocation.setdefault("allocation_id", hold.get("allocation_id"))
+            held_reservation = dict(hold.get("payload") or {})
+            held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
             await db.delete_capacity_hold(negotiation_id=negotiation_id)
 
-    listing = get_storefront_domain_runtime().listing(order)
+    listing = get_market_domain_contract().codecs.listing(order)
     return await fulfill_api_credits_obligation(
         client=client,
         escrow_uid=escrow_uid,
@@ -97,5 +97,5 @@ async def fulfill_credit_obligation(
         admin_key=config.credits_admin_key(),
         stage_event=stage_event,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
-        held_allocation=held_allocation,
+        held_reservation=held_reservation,
     )

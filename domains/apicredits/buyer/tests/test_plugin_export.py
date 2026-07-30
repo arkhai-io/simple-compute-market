@@ -1,35 +1,27 @@
-"""The API-credits buyer CLI is a schema plugin on the core `market` skeleton.
-
-Covers both halves: the entry-point metadata actually resolves to our
-plugin (what the installed core console script relies on), and the
-assembled app exposes the namespaced `credits` verb surface — this
-plugin claims no bare verbs, so it composes with the VM plugin in one
-binary without shadowing.
-"""
+"""The API-credit buyer CLI contributes a validated market-domain contract."""
 
 from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from core_buyer.plugins import BuyerSchemaPlugin, discover_plugins
-from domains.apicredits.buyer.cli import app, plugin
+from core_buyer.plugins import discover_domains
+from domains.apicredits.buyer.cli import app, domain
+from market_core import DomainCapability, MarketDomainContract
 
 runner = CliRunner()
 
 
-def test_entry_point_discovery_finds_apicredits_plugin():
-    discovered = {p.schema_id: p for p in discover_plugins()}
-    assert "api_credits" in discovered, (
-        "market.buyer_plugins entry point for the API-credits schema is "
-        "not installed — `market` (core_buyer.cli:main) would fall back "
-        "to the generic no-plugin CLI"
-    )
-    assert discovered["api_credits"].distribution == "arkhai-apicredits-buyer"
+def test_entry_point_discovery_finds_api_credit_domain():
+    discovered = {item.identity: item for item in discover_domains()}
+    assert "api_credits.v1" in discovered
 
 
-def test_plugin_is_well_formed():
-    assert isinstance(plugin, BuyerSchemaPlugin)
-    assert plugin.schema_id == "api_credits"
+def test_domain_is_well_formed_without_compute_capability():
+    assert isinstance(domain, MarketDomainContract)
+    assert domain.identity == "api_credits.v1"
+    assert domain.has_capability(DomainCapability.BUYER)
+    assert not domain.has_capability(DomainCapability.COMPUTE_PROVISIONING)
+    assert domain.compute_provisioning is None
 
 
 def test_assembled_app_exposes_credits_group_only():
@@ -60,8 +52,8 @@ def test_listing_surface_is_token_rendering_not_generic_fallback():
     assert "--filter" in result.output
 
 
-def test_version_reports_plugin():
+def test_version_reports_domain_contract():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "api_credits" in result.output
-    assert "arkhai-apicredits-buyer" in result.output
+    assert "api_credits.v1" in result.output
+    assert "contract 1.0" in result.output

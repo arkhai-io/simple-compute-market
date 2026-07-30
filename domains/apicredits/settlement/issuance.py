@@ -47,14 +47,14 @@ async def submit_credit_issuance(
     key_mode: str = "new",
     key_id: str | None = None,
     buyer_wallet: str | None = None,
-    allocation_id: str | None = None,
+    capacity_reservation_id: str | None = None,
     resource_id: str | None = None,
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     """Issue ``quantity`` credits for a settled escrow.
 
     Returns the issuance dict ``{key_id, secret?, quantity, balance,
-    allocation_id, already_issued}``. ``secret`` is present only for a
+    capacity_reservation_id, already_issued}``. ``secret`` is present only for a
     newly created (or rotated-on-retry) key — delivered once, to the
     buyer, through the settle-status channel.
 
@@ -71,8 +71,8 @@ async def submit_credit_issuance(
     }
     if buyer_wallet:
         body["buyer"] = {"scheme": "wallet", "id": buyer_wallet}
-    if allocation_id:
-        body["allocation_id"] = allocation_id
+    if capacity_reservation_id:
+        body["capacity_reservation_id"] = capacity_reservation_id
     if resource_id:
         body["resource_id"] = resource_id
 

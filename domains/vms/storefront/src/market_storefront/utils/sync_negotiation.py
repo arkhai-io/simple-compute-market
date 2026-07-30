@@ -60,7 +60,9 @@ from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
     record_seller_decision_message as _record_seller_decision_message,
 )
+from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
 from arkhai_vms import provision_duration_seconds, provision_start_utc
+from domains.vms.listings import extract_compute_from_order
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
@@ -127,8 +129,11 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
     from market_storefront.services.capacity_client import build_capacity_client
+    from market_storefront.domain_runtime import get_market_domain_contract
 
-    return vm_storefront_round.default_seller_round_hook(
+    policy = get_market_domain_contract().storefront
+    assert policy is not None
+    return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
@@ -147,7 +152,7 @@ def _chain_config_paths() -> dict[str, str | None]:
 
 
 def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
-    """Normalize provision terms through the injected VM domain runtime."""
+    """Validate the VM envelope before any negotiation policy runs."""
     if provision_terms is None:
         return None
     raw = (
@@ -155,21 +160,52 @@ def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
         if hasattr(provision_terms, "model_dump")
         else provision_terms
     )
-    try:
-        from market_storefront.domain_runtime import (
-            get_storefront_domain_runtime,
-        )
+    from market_storefront.domain_runtime import get_market_domain_contract
 
-        return get_storefront_domain_runtime().message(raw)
-    except Exception:
-        # Legacy behavior tolerated foreign/empty provision envelopes by
-        # treating them as absent VM delivery terms.
-        if (
-            provision_duration_seconds(provision_terms) is None
-            and provision_start_utc(provision_terms) is None
-        ):
-            return None
-        raise
+    return get_market_domain_contract().codecs.message(raw)
+
+
+def _reject_unsupported_resource_shape_request(
+    vm_message_terms: Any,
+    *,
+    our_order_dict: dict[str, Any],
+    listing_id: str,
+) -> None:
+    """Loudly reject a buyer-requested resource shape that differs from the listing.
+
+    Seller negotiation policy currently prices only the listing's
+    advertised shape. It has no way to price, size-check, or refuse an
+    oversized ask against anything else. Silently admitting a
+    non-matching request (or silently falling back to the listing's shape
+    while telling the buyer nothing) risks giving away capacity the seller
+    never agreed to price, or letting a buyer believe it negotiated a
+    smaller/different deal than what actually gets built. A request that
+    names a shape different from the listing's own is therefore refused
+    outright, the same way ``listing_not_open``/``no_floor_price`` already
+    refuse other requests this negotiation path cannot yet honor.
+
+    A buyer that sends no ``compute_resource`` at all (the ordinary case
+    today) is unaffected -- this only rejects a request that actively
+    names a shape, and that shape disagrees with the listing on a
+    dimension the listing itself declares.
+    """
+    if vm_message_terms is None:
+        return
+    requested = getattr(vm_message_terms, "compute_resource", None)
+    if not requested:
+        return
+    listing_compute = extract_compute_from_order(our_order_dict)
+    mismatched = {
+        key: {"requested": requested[key], "listing": listing_compute.get(key)}
+        for key in _DIMENSION_COMPUTE_KEYS
+        if requested.get(key) is not None
+        and requested[key] != listing_compute.get(key)
+    }
+    if mismatched:
+        raise OfferUnfulfillableError(
+            f"resource_shape_not_negotiable: {mismatched}",
+            listing_id=listing_id,
+        )
 
 
 def _accepted_escrow_artifacts(
@@ -208,6 +244,18 @@ async def _place_capacity_hold(
     requested_duration_seconds: int | None = None,
 ) -> None:
     """Two-phase reserve: a TTL'd soft hold at terms acceptance.
+
+    Always claims capacity from ``order_dict`` (the seller's own listing),
+    never from anything a buyer requested during negotiation. This is
+    intentional, not an oversight: seller negotiation policy currently
+    prices only the listing's advertised shape, and a buyer requesting a
+    different one is already rejected loudly at negotiation creation
+    (``_reject_unsupported_resource_shape_request``), so by the time a hold
+    is placed here, the only shape that could have survived negotiation is
+    the listing's own. Do not "fix" this by threading a negotiated shape
+    through without first building seller policy that can price it --
+    doing so would let a buyer claim capacity the seller never agreed to
+    give away.
 
     Closes the window where the escrow settles but the capacity is gone
     (the capacity design's reservation-protocol step 2) — settlement
@@ -259,7 +307,7 @@ async def _place_capacity_hold(
     await sqlite_client.save_capacity_hold(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=str(held["allocation_id"]),
+        capacity_reservation_id=str(held["capacity_reservation_id"]),
         payload=held,
         expires_at=held.get("hold_expires_at"),
     )
@@ -267,7 +315,7 @@ async def _place_capacity_hold(
         "negotiation", "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        allocation_id=held.get("allocation_id"),
+        capacity_reservation_id=held.get("capacity_reservation_id"),
         resource_id=held.get("resource_id"),
         site=held.get("site"),
         hold_expires_at=held.get("hold_expires_at"),
@@ -345,7 +393,13 @@ async def start_sync_negotiation(
     canonical id is server-assigned, not client-derived.
 
     ``provision_terms`` carries the buyer's lease duration, ssh key, and
-    eventually compute spec. ``proposal`` is the buyer's full
+    optionally a requested compute shape. A requested shape that names a
+    dimension differing from the listing's own shape is rejected outright
+    (``OfferUnfulfillableError``, ``resource_shape_not_negotiable``) --
+    seller negotiation policy cannot yet reason about a non-listing shape,
+    so this path only ever admits the listing's own, fixed shape. Omitting
+    ``compute_resource`` entirely negotiates normally against the listing's
+    shape, exactly as before. ``proposal`` is the buyer's full
     EscrowProposal — picks a ``(chain_name, escrow_address)`` entry from
     the listing's ``accepted_escrows``, supplies the buyer-committable
     fields, and for scalar payment escrows carries the absolute opening
@@ -393,6 +447,10 @@ async def start_sync_negotiation(
             f"listing_not_open (status={listing_status!r})",
             listing_id=our_listing_id,
         )
+
+    _reject_unsupported_resource_shape_request(
+        vm_message_terms, our_order_dict=our_order_dict, listing_id=our_listing_id,
+    )
 
     proposal_dict = (
         proposal.model_dump()

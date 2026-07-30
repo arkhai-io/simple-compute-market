@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core_storefront.models.listing_models import CreateListingRequest
-from market_storefront.domain_runtime import get_storefront_domain_runtime
+from market_storefront.domain_runtime import get_market_domain_contract
 from market_storefront.services.listing_service import ListingService
 
 
@@ -16,10 +16,10 @@ _ACCEPTED_ESCROWS = [{
 
 
 def test_storefront_resolves_vm_domain_runtime() -> None:
-    runtime = get_storefront_domain_runtime()
+    runtime = get_market_domain_contract()
 
-    assert runtime.schema_id == "compute.v1"
-    assert runtime.listing({"gpu_model": "H200", "gpu_count": 1}).offer_resource == {
+    assert runtime.identity == "compute.v1"
+    assert runtime.codecs.listing({"gpu_model": "H200", "gpu_count": 1}).offer_resource == {
         "gpu_model": "H200",
         "gpu_count": 1,
     }

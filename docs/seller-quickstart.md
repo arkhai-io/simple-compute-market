@@ -36,7 +36,7 @@ make build-seller
 ```
 
 `build-seller` builds the two images you need (`arkhai:storefront`,
-`arkhai:provisioning`) and the wheels they consume — ~3 minutes on a
+`arkhai:compute-provisioning`) and the wheels they consume — ~3 minutes on a
 warm machine. Build on Linux; macOS hits a known cross-platform
 `uv sync` issue.
 
@@ -54,7 +54,7 @@ base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
 
 db_path          = "./src/market_storefront/data/storefront/agent.db"
 log_file_path    = "./logs/seller.log"
-admin_api_key    = "<choose-a-secret>"   # used by the provisioning service for lease-expiry callbacks
+admin_api_key    = "<choose-a-secret>"   # storefront credential for configured provisioning sites
 
 [wallet]
 private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
@@ -102,45 +102,24 @@ default_max_duration_seconds = 86400
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
 
-## 3. resources.csv
+## 3. Commercial listing input and capacity identity
 
-What you offer for sale. One row per slice. The compose mounts
-`./resources.csv` (override with `SELLER_RESOURCES_CSV`) at
-`/app/resources.csv`; the storefront auto-seeds from it on first start.
+Provisioning Host, Resource Pool, and capacity tables are authoritative for
+physical inventory. The storefront loads trusted `site_resource_pools` and
+`site_capacity_buckets` projections from each configured site. Commercial
+listing input may still be supplied through `resources.csv`, but each VM row
+must reference a projected `pool_id` or `resource_id` and declare its sellable
+shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
+`vm_host`, authority URLs, API keys, or internal capacity-bucket IDs.
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.gpu_devices
-slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",<vm_host_alias>,<physical_host_id>,shareable,"[{""pci_bdf"":""0000:03:00.0"",""gpu_uuid"":""GPU-<uuid-from-nvidia-smi>""}]"
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
+listing-slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,default,H200,"California, US",1,8,32,100
 ```
 
-- `min_price` — human / whole-token units, scaled by token decimals on
-  publish (`2` = $2/hr with USDC).
-- `token` — 0x ERC-20 contract address. The storefront eth-calls
-  `symbol()` and `decimals()` and caches the result. Omit to use
-  `[pricing].default_token_address`.
-- `attribute.vm_host` — must match a host alias in the provisioning
-  service's ansible inventory (§6). For mock mode any string works.
-- `attribute.physical_host_id` — stable identity for the underlying physical
-  machine. Used by the site authority to avoid double-selling the same host
-  if you also run a bare-metal storefront for the same hardware. If omitted,
-  `attribute.vm_host` is used as the default.
-- `attribute.allocation_mode` — `shareable` for VM-slice listings. If omitted
-  for a VM resource with `attribute.vm_host`, it defaults to `shareable`.
-- `attribute.gpu_devices` — required for VM resources. Supply a JSON array with
-  exactly `value` whole-GPU identity objects. Each object requires the full
-  canonical PCI BDF (`dddd:bb:ss.f`) and should include the stable GPU UUID
-  when the host exposes one. BDFs and supplied UUIDs must be unique. Discover
-  them from the actual KVM host immediately before freezing inventory; never
-  copy the sanitized addresses above into a live seller configuration.
-
-The site authority selects and persists an exact subset from this inventory for
-each allocation. VM fulfillment passes those BDFs to Ansible verbatim and will
-fail closed if the allocation lacks them; it never falls back to count-based
-host selection. Do not edit or remove an allocated device until its VM has been
-torn down and the allocation released.
-
-A larger sample is at
-[`domains/vms/storefront/src/market_storefront/data/resources.sample.csv`](../domains/vms/storefront/src/market_storefront/data/resources.sample.csv).
+`min_price` remains a human whole-token hourly rate and `token` is the ERC-20
+contract. Capacity admission, physical selection, prepared execution, and
+teardown are owned by the selected provisioning site rather than this CSV.
 
 ## 4. Bring it up
 
@@ -212,9 +191,11 @@ touching libvirt. To create real VMs:
    # edit hosts with your real KVM host(s)
    ```
 
-   `attribute.vm_host` in `resources.csv` must match an alias under
-   `[kvm_hosts]` in this file. Each host line's `ansible_host` is how the
-   provisioning service reaches the host over SSH. If buyers reach that host
+   The provisioning service imports these aliases into its authoritative Host
+   and Resource Pool tables. Storefront listings reference trusted projected
+   `pool_id`/`resource_id`; they do not carry `vm_host`. Each host line's
+   `ansible_host` is how the provisioning service reaches the host over SSH.
+   If buyers reach that host
    on a **different** address than the provisioner does (e.g. the provisioner
    is on a private/overlay network but the VM port-forwards are exposed on a
    public IP), add a `public_host=` var — that's the address put in the
@@ -266,14 +247,27 @@ touching libvirt. To create real VMs:
   start that finds an empty pin re-registers (gas cost).
 - **`[registry.auth]` keys must match `[registry] urls` exactly** —
   scheme, host, port, no trailing slash.
-- **`admin_api_key` empty or missing** — provisioning service can't
-  call back on lease expiry, leases never release.
+- **`admin_api_key` empty or missing** — authenticated reservation,
+  scheduling, result, and teardown calls to the configured site fail closed.
+  Lease expiry is provisioning-owned and does not depend on a storefront callback.
+- **A globally paused storefront rejects every new negotiation with
+  `503 {"reason":"global"}`.** Global pause is durably persisted and separate
+  from per-listing pause. Resume it through the authenticated
+  `POST /admin/resume` endpoint before accepting buyers.
+- **The resource importer and storefront must use the same SQLite path.**
+  A mismatch leaves the running storefront with no resources and causes
+  `409 no_matching_inventory`. Check `resource_count` in
+  `GET /api/v1/system/status`; zero usually means the importer wrote a
+  different database. Prefer an explicit importer `--db-path` or
+  `STOREFRONT_DB_PATH`.
 - **`resources.csv` prices are human / whole-token units.** Use
   fractional strings (`"0.50"`) for sub-token rates. `0` is a literal
   free offering.
-- **`attribute.vm_host` must match an inventory alias.** Wrong alias =
-  settle fails with "host not found".
-- **When co-selling VM slices and bare metal from the same host, use one
-  stable `attribute.physical_host_id` in both domain storefront inventories.**
-  Otherwise the site ledger cannot prevent cross-mode double selling.
+- **Do not publish `vm_host`.** Listings use trusted projected `pool_id` or
+  `resource_id`; physical host selection is provisioning-owned. The admin
+  settle evaluate endpoint validates canonical schedule/begin requests without
+  reserving or probing a host.
+- **When co-selling VM slices and bare metal, configure one stable physical
+  host identity in authoritative provisioning inventory.** Domain projections
+  preserve that identity so the site ledger prevents cross-mode double selling.
 - **`agent_id` must be a Python identifier** — no dashes.

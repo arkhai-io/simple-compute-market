@@ -59,9 +59,9 @@ def test_issue_new_key_grants_and_commits_quota(service, ledger):
 
     # Quota consumed and committed open-ended (credits don't expire).
     assert ledger.snapshot()[0]["available_units"] == 900
-    allocation = ledger.get_allocation(result["allocation_id"])
-    assert allocation["state"] == "leased"
-    assert allocation["lease_end_utc"] is None
+    reservation = ledger.get_reservation(result["capacity_reservation_id"])
+    assert reservation["state"] == "leased"
+    assert reservation["lease_end_utc"] is None
 
 
 def test_issue_is_idempotent_on_escrow_uid(service, ledger):
@@ -136,12 +136,12 @@ def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     )
     result = service.issue(
         escrow_uid="0xheld", quantity=200, key_mode="new",
-        allocation_id=hold["allocation_id"], **BUYER,
+        capacity_reservation_id=hold["capacity_reservation_id"], **BUYER,
     )
-    assert result["allocation_id"] == hold["allocation_id"]
+    assert result["capacity_reservation_id"] == hold["capacity_reservation_id"]
     # The hold was committed, not duplicated by a fresh reserve.
     assert ledger.snapshot()[0]["available_units"] == 800
-    assert ledger.get_allocation(hold["allocation_id"])["state"] == "leased"
+    assert ledger.get_reservation(hold["capacity_reservation_id"])["state"] == "leased"
 
 
 def test_issue_quota_exhausted_persists_nothing(service, ledger):

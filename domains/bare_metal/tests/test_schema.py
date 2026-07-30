@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from arkhai_bare_metal import (
     BARE_METAL_ACCESS_ACTIONS,
+    BARE_METAL_PROVISION_VERSION,
     BARE_METAL_SCHEMA_KIND,
     NODE_GRANT_ACCESS_ACTION,
     NODE_RECLAIM_ACCESS_ACTION,
@@ -18,9 +19,11 @@ from arkhai_bare_metal import (
     BareMetalListing,
     BareMetalMaterialization,
     BareMetalMessage,
+    BareMetalProvisionTerms,
     BareMetalReceipt,
     BareMetalTerms,
     bare_metal_executor_ref,
+    make_bare_metal_provision_terms,
     materialization_to_lease_create,
     receipt_from_lease_view,
 )
@@ -77,6 +80,35 @@ def test_bare_metal_message_accepts_ssh_public_key():
     assert message.kind == BARE_METAL_SCHEMA_KIND
     assert message.access_method == SSH_ACCESS_METHOD
     assert message.ssh_public_key == "ssh-ed25519 AAAA buyer"
+
+
+def test_bare_metal_message_unwraps_versioned_provision_terms():
+    envelope = make_bare_metal_provision_terms(
+        duration_seconds=3600,
+        ssh_public_key="ssh-ed25519 AAAA buyer",
+    )
+    original = envelope.model_dump(mode="json")
+
+    message = BareMetalMessage.model_validate(envelope)
+
+    assert envelope.version == BARE_METAL_PROVISION_VERSION
+    assert message.duration_seconds == 3600
+    assert message.ssh_public_key == "ssh-ed25519 AAAA buyer"
+    assert envelope.model_dump(mode="json") == original
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"kind": "compute.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v1", "version": 2, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key"}},
+        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "key", "unknown": True}},
+        {"kind": "bare_metal.v1", "version": 1, "payload": {"duration_seconds": 1, "access_method": "ssh", "ssh_public_key": "   "}},
+    ],
+)
+def test_bare_metal_provision_terms_reject_invalid_envelopes(value):
+    with pytest.raises(ValidationError):
+        BareMetalProvisionTerms.model_validate(value)
 
 
 def test_bare_metal_terms_are_canonical_negotiation_handoff():
@@ -137,11 +169,11 @@ def test_materialization_to_lease_create_adapts_current_api_request():
 
     request = materialization_to_lease_create(
         materialization,
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         create_job_id="job-1",
     )
 
-    assert request.allocation_id == "alloc-1"
+    assert request.capacity_reservation_id == "alloc-1"
     assert request.escrow_uid == "0xbm"
     assert request.machine_id == "bm-node-1"
     assert request.physical_host_id == "host-physical-1"
@@ -173,7 +205,7 @@ def test_bare_metal_receipt_is_domain_view_not_executor_result():
 
 def test_receipt_from_lease_view_adapts_current_api_view():
     lease = BareMetalLeaseView(
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",
@@ -186,7 +218,7 @@ def test_receipt_from_lease_view_adapts_current_api_view():
 
     receipt = receipt_from_lease_view(
         lease,
-        result_ref={"allocation_id": "alloc-1"},
+        result_ref={"capacity_reservation_id": "alloc-1"},
     )
 
     assert receipt.escrow_uid == "0xbm"
@@ -195,12 +227,12 @@ def test_receipt_from_lease_view_adapts_current_api_view():
     assert receipt.lease_start_utc == datetime(
         2099, 1, 1, tzinfo=timezone.utc,
     )
-    assert receipt.result_ref == {"allocation_id": "alloc-1"}
+    assert receipt.result_ref == {"capacity_reservation_id": "alloc-1"}
 
 
 def test_bare_metal_lease_create_keeps_machine_and_physical_ids_separate():
     body = BareMetalLeaseCreate(
-        allocation_id="alloc-1",
+        capacity_reservation_id="alloc-1",
         escrow_uid="0xbm",
         machine_id="bm-node-1",
         physical_host_id="host-physical-1",

@@ -11,7 +11,7 @@ It is intentionally outside `core/`, `domains/`, and `kit/`:
   multiple compute domains, such as VM and bare-metal.
 
 The current transitional implementation remains in
-`domains/vms/provisioning/service` until the compute provisioner can be moved
+`provisioning/compute/service` until the compute provisioner can be moved
 without breaking existing VM clients, Docker images, or Helm/developer flows.
 
 Current package:

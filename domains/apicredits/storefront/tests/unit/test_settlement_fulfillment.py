@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ import pytest
 from domains.apicredits.settlement import fulfillment as fulfillment_module
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from domains.apicredits.settlement.issuance import CreditsServiceError
+from market_core import ImmutableFulfillmentCapability
 
 _BUYER = "0xBuyerAAAA0000000000000000000000000000ab"
 _OFFER = {
@@ -43,7 +45,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         return {
             "key_id": "ak_new", "secret": "ak_new.s3cret",
             "quantity": kwargs["quantity"], "balance": 3,
-            "allocation_id": kwargs.get("allocation_id"),
+            "capacity_reservation_id": kwargs.get("capacity_reservation_id"),
             "already_issued": False,
         }
 
@@ -60,7 +62,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         service_url="http://tokens:8082",
         admin_key="k",
         stage_event=stage_event,
-        held_allocation={"allocation_id": "alloc-7", "resource_id": "svc-quota"},
+        held_reservation={"capacity_reservation_id": "alloc-7", "resource_id": "svc-quota"},
     )
 
     assert result["status"] == "fulfilled"
@@ -73,7 +75,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     assert "secret" not in payload
 
     # The negotiation-time hold rode the issuance call.
-    assert issued["allocation_id"] == "alloc-7"
+    assert issued["capacity_reservation_id"] == "alloc-7"
     assert issued["escrow_uid"] == "0xescrow1"
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
 
@@ -98,12 +100,12 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
         admin_key="k",
         stage_event=stage_event,
         apply_failure_policy=fake_policy,
-        held_allocation={"allocation_id": "alloc-8"},
+        held_reservation={"capacity_reservation_id": "alloc-8"},
     )
     assert result["status"] == "error"
     assert "quota_exhausted" in result["message"]
     assert policy_calls and policy_calls[0]["reason"] == "quota_exhausted"
-    assert policy_calls[0]["allocation_id"] == "alloc-8"
+    assert policy_calls[0]["capacity_reservation_id"] == "alloc-8"
     assert [e[1] for e in events] == ["failed"]
 
 
@@ -261,10 +263,7 @@ async def settled_db(tmp_path, monkeypatch):
             rates=[{"field": "amount", "per": "token", "value": "100"}],
             expiration_unix=1_800_000_000,
         ),
-        provision_terms=ProvisionTerms(
-            kind="api_credits.v1",
-            payload={"quantity": 3, "key": {"mode": "new"}},
-        ),
+        provision_terms=ProvisionTerms(kind="api_credits.v1", version=1, payload={"quantity": 3, "key": {"mode": "new"}}),
         our_base_url="http://seller:8002",
         their_agent_url=_BUYER,
     )
@@ -276,7 +275,7 @@ async def test_settlement_job_verifies_issues_and_stores_credentials(
     settled_db, monkeypatch,
 ):
     db, neg_id = settled_db
-    from apicredits_storefront.services import fulfillment_service
+    from apicredits_storefront import domain_runtime
     from apicredits_storefront.utils import config as config_module
     from apicredits_storefront.utils import settlement_jobs
 
@@ -294,7 +293,14 @@ async def test_settlement_job_verifies_issues_and_stores_credentials(
         }
 
     monkeypatch.setattr(settlement_jobs, "verify_escrow_for_settlement", fake_verify)
-    monkeypatch.setattr(fulfillment_service, "fulfill_credit_obligation", fake_fulfill)
+    monkeypatch.setattr(
+        domain_runtime,
+        "APICREDITS_STOREFRONT_DOMAIN",
+        replace(
+            domain_runtime.APICREDITS_STOREFRONT_DOMAIN,
+            fulfillment=ImmutableFulfillmentCapability(fulfill=fake_fulfill),
+        ),
+    )
     monkeypatch.setitem(
         config_module.CHAINS, "anvil",
         SimpleNamespace(alkahest_address_config_path=None, rpc_url="http://x"),

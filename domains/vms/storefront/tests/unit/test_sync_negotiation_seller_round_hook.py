@@ -42,6 +42,7 @@ async def db(tmp_path):
             "gpu_count": 1,
             "sla": 99.9,
             "region": "California, US",
+            "resource_id": "resource-hook",
         },
         accepted_escrows=[{
             "chain_name": "anvil",
@@ -70,6 +71,7 @@ def _proposal(amount: int) -> EscrowProposal:
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
     terms = ProvisionTerms.model_validate({
         "kind": "compute.v1",
+        "version": 1,
         "payload": {
             "duration_seconds": "3600",
             "start_utc": "2030-01-01T00:00:00Z",
@@ -84,10 +86,29 @@ def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
     assert normalized.start_utc == "2030-01-01T00:00:00Z"
 
 
-def test_normalize_vm_message_terms_tolerates_foreign_terms() -> None:
-    terms = ProvisionTerms(kind="fiat.v1", payload={"invoice_id": "inv-1"})
+def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
+    terms = ProvisionTerms(
+        kind="fiat.v1",
+        version=1,
+        payload={"invoice_id": "inv-1"},
+    )
 
-    assert _normalize_vm_message_terms(terms) is None
+    with pytest.raises(ValueError, match="compute.v1"):
+        _normalize_vm_message_terms(terms)
+
+
+def test_normalize_vm_message_terms_rejects_unsupported_version() -> None:
+    terms = ProvisionTerms(
+        kind="compute.v1",
+        version=2,
+        payload={
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    )
+
+    with pytest.raises(ValueError, match="version"):
+        _normalize_vm_message_terms(terms)
 
 
 @pytest.mark.asyncio
@@ -114,7 +135,14 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
         our_listing_id="L-hook",
         buyer_address=_BUYER,
         proposal=_proposal(50),
-        provision_terms=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA"),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
         seller_round_hook=hook,
@@ -125,6 +153,82 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
     assert seen["history"][0].proposal["fields"]["amount"] == 50
     assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
+
+
+@pytest.mark.asyncio
+async def test_start_sync_negotiation_rejects_mismatched_resource_shape(db):
+    """A buyer requesting a shape other than the listing's is refused outright.
+
+    Seller negotiation policy currently prices only the listing's
+    advertised shape; this pins the loud-rejection behavior rather than
+    silent admission or silent fallback to the listing's shape.
+    """
+    from market_storefront.utils.sync_negotiation import OfferUnfulfillableError
+
+    async def hook(**_kwargs):
+        raise AssertionError("seller policy must not run for a rejected request")
+
+    with pytest.raises(OfferUnfulfillableError) as exc_info:
+        await start_sync_negotiation(
+            sqlite_client=db,
+            our_listing_id="L-hook",
+            buyer_address=_BUYER,
+            proposal=_proposal(50),
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 3600,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                    # Listing offers gpu_count=1; this asks for 2.
+                    "compute_resource": {"gpu_count": 2},
+                },
+            ),
+            our_base_url="http://test-seller:8001",
+            their_agent_url="http://buyer:9000",
+            seller_round_hook=hook,
+        )
+    assert "resource_shape_not_negotiable" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_sync_negotiation_permits_resource_shape_matching_listing(db):
+    """A buyer that names a shape equal to the listing's own is unaffected."""
+    seen = {}
+
+    async def hook(**kwargs):
+        seen["ran"] = True
+        return SellerRoundResult(
+            our_amount=100,
+            strategy_label="maximize",
+            direction="maximize",
+            chain_label="custom",
+            decision=NegotiationDecision(
+                action="counter",
+                proposal=_proposal(100).model_dump(),
+            ),
+        )
+
+    response = await start_sync_negotiation(
+        sqlite_client=db,
+        our_listing_id="L-hook",
+        buyer_address=_BUYER,
+        proposal=_proposal(50),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+                "compute_resource": {"gpu_count": 1},
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=hook,
+    )
+    assert seen["ran"] is True
+    assert response["action"] == "counter"
 
 
 @pytest.mark.asyncio
@@ -146,7 +250,14 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         our_listing_id="L-hook",
         buyer_address=_BUYER,
         proposal=_proposal(50),
-        provision_terms=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA"),
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
         our_base_url="http://test-seller:8001",
         their_agent_url="http://buyer:9000",
         seller_round_hook=opening_hook,

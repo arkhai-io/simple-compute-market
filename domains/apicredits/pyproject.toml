@@ -1,0 +1,52 @@
+[project]
+name = "arkhai-apicredits-domain"
+version = "0.1.0"
+license = "MIT"
+description = "Shared API-credit domain models, policies, and market-domain contract."
+requires-python = ">=3.12"
+dependencies = [
+    "arkhai-core>=0.2.0",
+    "arkhai-kit-policy",
+    "httpx>=0.27",
+    "pydantic>=2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+only-include = ["__init__.py"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"__init__.py" = "domains/apicredits/__init__.py"
+"domain_runtime.py" = "domains/apicredits/domain_runtime.py"
+"schema.py" = "domains/apicredits/schema.py"
+"listings/__init__.py" = "domains/apicredits/listings/__init__.py"
+"listings/models.py" = "domains/apicredits/listings/models.py"
+"listings/pricing.py" = "domains/apicredits/listings/pricing.py"
+"listings/reconciler.py" = "domains/apicredits/listings/reconciler.py"
+"negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
+"negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
+"negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
+"negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
+"negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
+"settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"
+"settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
+"settlement/issuance.py" = "domains/apicredits/settlement/issuance.py"
+
+[tool.uv.sources]
+arkhai-core = { path = "../../core", editable = true }
+arkhai-kit-policy = { path = "../../kit/policy", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["../.."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

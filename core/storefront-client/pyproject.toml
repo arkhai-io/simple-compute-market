@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-storefront-client"
-version = "0.15.0"
+version = "0.16.0"
 license = "MIT"
 description = "Async and sync HTTP clients for the Arkhai storefront REST API."
 requires-python = ">=3.12"

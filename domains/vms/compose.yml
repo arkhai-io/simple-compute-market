@@ -99,6 +99,8 @@ services:
         condition: service_healthy
       registry-b:
         condition: service_healthy
+      provisioning:
+        condition: service_healthy
     ports:
       - "8001:8001"
     cap_add:
@@ -151,6 +153,8 @@ services:
     depends_on:
       registry:
         condition: service_healthy
+      provisioning:
+        condition: service_healthy
     ports:
       - "8002:8002"
     cap_add:
@@ -193,12 +197,13 @@ services:
       retries: 3
 
   # 4. Provisioning service.
-  # Configuration is bundled in the image (domains/vms/provisioning/service/src/settings.toml,
+  # Configuration is bundled in the compute provisioning service wheel,
   # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
   # overrides go in `environment:` below.
   provisioning:
-    image: arkhai:provisioning
+    image: arkhai:compute-provisioning
     platform: linux/amd64
+    command: ["sh", "-c", "compute-provisioning-migrate && exec compute-provisioning-api"]
     depends_on:
       redis:
         condition: service_healthy
@@ -222,6 +227,12 @@ services:
       - ./provisioning/iac:/opt/domains/vms/provisioning/iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8081/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:

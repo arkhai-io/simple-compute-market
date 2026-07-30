@@ -24,11 +24,11 @@ from core_buyer.registry_config import (  # noqa: F401 — re-exports
     resolve_indexer_urls_for_schema,
 )
 
-#: The registry schema this plugin implements (mirrors the
-#: BuyerSchemaPlugin declaration in `.cli`). Discovery verbs resolve
-#: registries through `resolve_indexer_urls_for_schema(APICREDITS_SCHEMA_ID, …)`
-#: so registries declaring a different schema are skipped. The
-#: api-credits registry's filter-spec.yaml declares the same id.
+#: The registry schema understood by the API-credit buyer domain. Discovery
+#: verbs resolve registries through
+#: `resolve_indexer_urls_for_schema(APICREDITS_SCHEMA_ID, …)` so registries
+#: declaring a different schema are skipped. The API-credit registry's
+#: filter-spec.yaml declares the same id.
 APICREDITS_SCHEMA_ID = "api_credits"
 
 

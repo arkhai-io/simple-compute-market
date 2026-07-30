@@ -400,7 +400,7 @@
         GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
         if [ -n "$GPU_DEVICES" ]; then
           while read -r pci_addr; do
-            [ -z "$pci_addr" ] && continueThen remove all task that contains installation of GPU driver that is not
+            [ -z "$pci_addr" ] && continue
             normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
             ATTACHED_GPUS_LIST="$ATTACHED_GPUS_LIST $normalized_pci"
             GPU_MODEL=$(lspci -s ${normalized_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
@@ -463,126 +463,6 @@
     - gpu_provision_mode is defined
     - gpu_provision_mode == 'passthrough'
     - all_vm_gpu_attachments is defined
-
-- name: Reject ambiguous exact GPU selection
-  assert:
-    that:
-      - vm_gpu_count is not defined
-      - vm_gpu_device is not defined or (vm_gpu_device | length) == 0
-    fail_msg: >-
-      Exact vm_gpu_devices cannot be combined with vm_gpu_count or
-      vm_gpu_device. The capacity authority's device subset is final.
-  when:
-    - vm_action == "create"
-    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
-    - vm_gpu_devices is defined
-    - (vm_gpu_devices | length) > 0
-
-- name: Validate and freeze exact GPU devices on the KVM host
-  shell:
-    cmd: |
-      set -euo pipefail
-      LOCKFILE=/etc/libvirt/gpu-capabilities/gpu-lockfile.json
-      if [ ! -f "$LOCKFILE" ]; then
-        echo "GPU capabilities lockfile is missing" >&2
-        exit 1
-      fi
-      for required_command in jq virsh lspci; do
-        if ! command -v "$required_command" >/dev/null 2>&1; then
-          echo "Required exact-GPU validation command is missing: $required_command" >&2
-          exit 1
-        fi
-      done
-
-      ATTACHED_GPUS=$(
-        for vm in $(virsh list --all --name); do
-          [ -z "$vm" ] && continue
-          virsh dumpxml "$vm" 2>/dev/null \
-            | grep -A 5 "hostdev.*pci" \
-            | grep "address.*domain" \
-            | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" \
-            | sed 's/0x//g' \
-            | awk -F: '{printf "%04s:%02s:%02s.%s\n", $1, $2, $3, $4}' \
-            | sed 's/ /0/g' || true
-        done | sort -u
-      )
-
-      FIRST=1
-      SEEN=""
-      printf '['
-      {% for requested_bdf in vm_gpu_devices %}
-      GPU_BDF={{ requested_bdf | quote }}
-      if ! [[ "$GPU_BDF" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]]; then
-        echo "Invalid exact GPU PCI BDF: $GPU_BDF" >&2
-        exit 1
-      fi
-      GPU_BDF=$(echo "$GPU_BDF" | tr '[:upper:]' '[:lower:]')
-      if echo " $SEEN " | grep -q " $GPU_BDF "; then
-        echo "Duplicate exact GPU PCI BDF: $GPU_BDF" >&2
-        exit 1
-      fi
-      SEEN="$SEEN $GPU_BDF"
-      if ! jq -e --arg bdf "$GPU_BDF" \
-        '.gpu_modes.passthrough.available_devices | index($bdf) != null' \
-        "$LOCKFILE" >/dev/null; then
-        echo "Exact GPU $GPU_BDF is not in the host passthrough inventory" >&2
-        exit 1
-      fi
-      if [ ! -e "/sys/bus/pci/devices/$GPU_BDF" ]; then
-        echo "Exact GPU $GPU_BDF is absent from host PCI inventory" >&2
-        exit 1
-      fi
-      DRIVER=$(basename "$(readlink "/sys/bus/pci/devices/$GPU_BDF/driver" 2>/dev/null || true)")
-      if [ "$DRIVER" != "vfio-pci" ]; then
-        echo "Exact GPU $GPU_BDF is bound to ${DRIVER:-no driver}, not vfio-pci" >&2
-        exit 1
-      fi
-      if [ "$(cat "/sys/bus/pci/devices/$GPU_BDF/boot_vga" 2>/dev/null || echo 0)" = "1" ]; then
-        echo "Exact GPU $GPU_BDF is the host boot GPU" >&2
-        exit 1
-      fi
-      if echo "$ATTACHED_GPUS" | grep -qx "$GPU_BDF"; then
-        echo "Exact GPU $GPU_BDF is already attached to a VM" >&2
-        exit 1
-      fi
-
-      AUDIO_BDF="${GPU_BDF%.*}.1"
-      if lspci -D -s "$AUDIO_BDF" 2>/dev/null | grep -qi audio; then
-        AUDIO_DRIVER=$(basename "$(readlink "/sys/bus/pci/devices/$AUDIO_BDF/driver" 2>/dev/null || true)")
-        if [ "$AUDIO_DRIVER" != "vfio-pci" ]; then
-          echo "GPU peer $AUDIO_BDF is not bound to vfio-pci" >&2
-          exit 1
-        fi
-        if echo "$ATTACHED_GPUS" | grep -qx "$AUDIO_BDF"; then
-          echo "GPU peer $AUDIO_BDF is already attached to a VM" >&2
-          exit 1
-        fi
-      else
-        AUDIO_BDF="NO_AUDIO_DEVICE"
-      fi
-
-      [ $FIRST -eq 0 ] && printf ','
-      jq -nc --arg pci "$GPU_BDF" --arg audio "$AUDIO_BDF" \
-        '{pci: $pci, audio: $audio}'
-      FIRST=0
-      {% endfor %}
-      printf ']\n'
-    executable: /bin/bash
-  register: exact_gpu_devices_json
-  changed_when: false
-  when:
-    - vm_action == "create"
-    - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
-    - vm_gpu_devices is defined
-    - (vm_gpu_devices | length) > 0
-  delegate_to: "{{ target_host }}"
-
-- name: Freeze exact GPU passthrough arguments
-  set_fact:
-    vm_gpu_passthrough_devices: "{{ exact_gpu_devices_json.stdout | from_json }}"
-  when:
-    - exact_gpu_devices_json is defined
-    - exact_gpu_devices_json.stdout is defined
 
 - name: Find least-used available GPU (avoid exhausting first GPU)
   shell:
@@ -719,7 +599,6 @@
     - gpu_lockfile is defined
     - gpu_lockfile.gpu_modes.passthrough.available_devices is defined
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
   delegate_to: "{{ target_host }}"
 
 - name: Fail if GPU lockfile not found
@@ -743,7 +622,6 @@
     - available_gpu_pci.stdout is defined
     - available_gpu_pci.stdout == "NO_LOCKFILE"
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Fail if no available GPU found
   fail:
@@ -769,7 +647,6 @@
     - available_gpu_pci.stdout is defined
     - available_gpu_pci.stdout == "NO_AVAILABLE_GPU"
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Get total available GPUs for retry calculation (not attached to VMs)
   shell: |
@@ -825,7 +702,6 @@
     - vm_action == "create"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
   delegate_to: "{{ target_host }}"
 
 - name: Initialize GPU retry variables
@@ -838,7 +714,6 @@
     - vm_action == "create"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Check GPU mode support using parsed lockfile
   set_fact:
@@ -894,7 +769,6 @@
     - available_gpu_pci.stdout is defined
     - available_gpu_pci.stdout != "NO_AVAILABLE_GPU"
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Find audio device associated with the GPU
   shell: |
@@ -919,7 +793,6 @@
     - gpu_pci_for_passthrough.stdout is defined
     - gpu_pci_for_passthrough.stdout != "NO_AVAILABLE_GPU"
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
   delegate_to: "{{ target_host }}"
 
 - name: Display GPU and audio device info
@@ -933,7 +806,6 @@
     - gpu_provision_mode == 'passthrough'
     - gpu_pci_for_passthrough is defined
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Get MIG instance PCI address for partitioned GPU
   shell: |
@@ -972,7 +844,6 @@
     - vm_action == "create"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Debug GPU retry configuration
   debug:
@@ -986,7 +857,6 @@
     - vm_action == "create"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Validate GPU device was found
   fail:
@@ -1006,7 +876,6 @@
     - vm_gpu_device is defined
     - vm_gpu_device == '' or vm_gpu_device is search('NOT_CREATED|NOT_FOUND')
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Get GPU model information
   shell: |
@@ -1022,7 +891,6 @@
     - vm_gpu_device is defined
     - vm_gpu_device != ''
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
   delegate_to: "{{ target_host }}"
 
 - name: Set GPU information facts
@@ -1036,7 +904,6 @@
     - vm_gpu_device != ''
     - gpu_info_result is defined
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 - name: Display GPU provisioning configuration
   debug:
@@ -1055,7 +922,6 @@
     - vm_gpu_device is defined
     - vm_gpu_device != ''
     - vm_gpu_count is not defined or vm_gpu_count | int <= 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
 
 # ===== AUTO-SELECT GPUS BY COUNT =====
 # When vm_gpu_count is defined (number), automatically select that many available GPUs
@@ -1203,7 +1069,7 @@
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_count is defined
     - vm_gpu_count | int > 1
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
   delegate_to: "{{ target_host }}"
 
 - name: Parse auto-selected GPUs from JSON
@@ -1247,16 +1113,16 @@
     - vm_gpu_devices is defined
     - (vm_gpu_devices | length) > 0
 
-# ===== EXACT GPU SUPPORT (WITHOUT RETRY OR SUBSTITUTION) =====
-# A frozen one- or multi-GPU allocation always uses this exact-device path.
-- name: Create VM with exact GPU devices (no retry or substitution)
+# ===== MULTI-GPU SUPPORT (WITHOUT RETRY) =====
+# When vm_gpu_devices has > 1 GPU, use multi-GPU approach without retry
+- name: Create VM with multiple GPUs (no retry)
   include_tasks: gpu-virt-install-multi.yml
   when:
     - vm_action == "create" 
     - vm_image_type in ["scratch", "base"]
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_devices is defined
-    - vm_gpu_devices | length > 0
+    - vm_gpu_devices | length > 1
 
 # ===== SINGLE GPU SUPPORT (WITH RETRY) =====
 # When only vm_gpu_device is defined (single GPU), use retry logic
@@ -1478,7 +1344,7 @@
     - vm_action == "create" and vm_image_type == "scratch"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_device is defined and vm_gpu_device != ''
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
 
 - name: Create VM with virt-install (without GPU)
   shell: |
@@ -1580,14 +1446,15 @@
     - vm_action == "create" and vm_image_type == "golden"
   delegate_to: "{{ target_host }}"
 
-# ===== EXACT GPU SUPPORT FOR GOLDEN IMAGE (WITHOUT RETRY OR SUBSTITUTION) =====
-- name: Create VM from golden image with exact GPU devices (no retry or substitution)
+# ===== MULTI-GPU SUPPORT FOR GOLDEN IMAGE (WITHOUT RETRY) =====
+# When vm_gpu_devices is defined (list of GPUs), use multi-GPU approach without retry
+- name: Create VM from golden image with multiple GPUs (no retry)
   include_tasks: gpu-virt-install-multi.yml
   when:
     - vm_action == "create" and vm_image_type == "golden"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_devices is defined
-    - vm_gpu_devices | length > 0
+    - vm_gpu_devices | length > 1
 
 # ===== SINGLE GPU SUPPORT FOR GOLDEN IMAGE (WITH RETRY) =====
 # When only vm_gpu_device is defined (single GPU), use retry logic
@@ -1808,7 +1675,7 @@
     - vm_action == "create" and vm_image_type == "golden"
     - vm_gpu_provisioned is defined and vm_gpu_provisioned | bool
     - vm_gpu_device is defined and vm_gpu_device != ''
-    - vm_gpu_devices is not defined or (vm_gpu_devices | length) == 0
+    - vm_gpu_devices is not defined or (vm_gpu_devices | length) <= 1
 
 - name: Create VM from golden image (without GPU)
   shell: |

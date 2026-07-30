@@ -1,11 +1,11 @@
 [project]
 name = "arkhai-core-storefront"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [
-    "arkhai-core",
+    "arkhai-core>=0.2.0",
     "arkhai-core-registry-client",
     "arkhai-kit-config",
     "arkhai-kit-identity",
@@ -23,7 +23,7 @@ packages = ["src/core_storefront"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]

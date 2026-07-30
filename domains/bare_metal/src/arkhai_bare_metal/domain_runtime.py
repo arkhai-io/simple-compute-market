@@ -1,10 +1,17 @@
-"""Bare-metal implementation of the core storefront domain runtime."""
+"""Bare-metal implementation of the core market-domain contract."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from core_storefront.domain_runtime import StorefrontDomainRuntime
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainCapability,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    ImmutablePublicationCapability,
+    MarketDomainContract,
+)
 
 from .schema import (
     BARE_METAL_SCHEMA_KIND,
@@ -41,18 +48,30 @@ def _normalize_result(value: Any) -> BareMetalAccessResult:
     return BareMetalAccessResult.model_validate(value)
 
 
-BARE_METAL_STOREFRONT_RUNTIME = StorefrontDomainRuntime(
-    schema_id=BARE_METAL_SCHEMA_KIND,
-    normalize_listing=_normalize_listing,
-    normalize_message=_normalize_message,
-    normalize_terms=_normalize_terms,
-    normalize_materialization=_normalize_materialization,
-    normalize_receipt=_normalize_receipt,
-    normalize_result=_normalize_result,
+def _publication_source(**kwargs: Any) -> Any:
+    from .storefront_adapter import bare_metal_publication_adapter
+
+    return bare_metal_publication_adapter(**kwargs)
+
+
+BARE_METAL_MARKET_DOMAIN = MarketDomainContract(
+    identity=DomainIdentity(BARE_METAL_SCHEMA_KIND),
+    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+    codecs=ImmutableCodecCapability(
+        normalize_listing=_normalize_listing,
+        normalize_message=_normalize_message,
+        normalize_terms=_normalize_terms,
+        normalize_materialization=_normalize_materialization,
+        normalize_receipt=_normalize_receipt,
+        normalize_result=_normalize_result,
+    ),
+    declared_capabilities=frozenset({DomainCapability.PUBLICATION}),
+    publication=ImmutablePublicationCapability(
+        source_factory=_publication_source,
+    ),
 )
 
 
-def storefront_runtime() -> StorefrontDomainRuntime:
-    """Return the bare-metal domain runtime for core storefront composition."""
-    return BARE_METAL_STOREFRONT_RUNTIME
-
+def market_domain() -> MarketDomainContract:
+    """Return the bare-metal market-domain contract."""
+    return BARE_METAL_MARKET_DOMAIN

@@ -93,7 +93,7 @@ class AdminController:
 
         This is the provider-control-plane half of spot interruption.
         It validates that the deal came from an interruptible listing,
-        finds the live capacity allocation, and truncates that lease to
+        finds the live capacity reservation, and truncates that lease to
         the interruption timestamp. The splitter declaration remains a
         separate settlement action until the on-chain helper is wired.
         """
@@ -128,26 +128,26 @@ class AdminController:
             )
 
         interrupted_at = self._interrupt_time(body.interrupted_at_utc)
-        allocation = await self._find_live_allocation_for_escrow(escrow_uid)
-        if allocation is None:
+        reservation = await self._find_live_reservation_for_escrow(escrow_uid)
+        if reservation is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"No live allocation found for escrow {escrow_uid!r}",
+                detail=f"No live reservation found for escrow {escrow_uid!r}",
             )
-        allocation_id = str(allocation["allocation_id"])
+        capacity_reservation_id = str(reservation["capacity_reservation_id"])
 
         truncated: dict[str, Any] | None = None
         if not body.dry_run:
             capacity = self._capacity()
             truncated = await capacity.truncate_lease(
-                allocation_id=allocation_id,
+                capacity_reservation_id=capacity_reservation_id,
                 lease_end_utc=interrupted_at,
             )
             if truncated is None:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        f"Allocation {allocation_id!r} is no longer held "
+                        f"Reservation {capacity_reservation_id!r} is no longer held "
                         "and could not be interrupted"
                     ),
                 )
@@ -159,7 +159,7 @@ class AdminController:
                 "admin", "deal_interrupted",
                 escrow_uid=escrow_uid,
                 listing_id=listing_id,
-                allocation_id=allocation_id,
+                capacity_reservation_id=capacity_reservation_id,
                 interrupted_at_utc=interrupted_at,
                 reason=body.reason,
                 seller_amount=body.seller_amount,
@@ -170,14 +170,14 @@ class AdminController:
         return InterruptDealResponse(
             escrow_uid=escrow_uid,
             status="dry_run" if body.dry_run else "interrupted",
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             listing_id=listing_id,
             interrupted_at_utc=interrupted_at,
             lease_truncated=not body.dry_run,
             settlement_action="splitter_declaration_pending",
             seller_amount=body.seller_amount,
             refund_amount=body.refund_amount,
-            allocation=truncated or allocation,
+            reservation=truncated or reservation,
         )
 
     @router.post(
@@ -492,7 +492,7 @@ class AdminController:
             )
             return False
 
-    async def _find_live_allocation_for_escrow(
+    async def _find_live_reservation_for_escrow(
         self, escrow_uid: str,
     ) -> dict[str, Any] | None:
         from market_storefront.services.capacity_client import remote_site_clients
@@ -500,10 +500,10 @@ class AdminController:
         capacity = self._capacity()
         for client in remote_site_clients(capacity).values():
             try:
-                rows = await client.list_allocations(escrow_uid=escrow_uid)
+                rows = await client.list_reservations(escrow_uid=escrow_uid)
             except Exception as exc:
                 logger.warning(
-                    "[ADMIN] Could not list allocations for escrow %s: %s",
+                    "[ADMIN] Could not list reservations for escrow %s: %s",
                     escrow_uid, exc,
                 )
                 continue
@@ -516,32 +516,26 @@ class AdminController:
         return None
 
     async def _mirror_resources_to_site_authority(self, source: str) -> None:
-        """Re-sync inventory to the site ledger after an admin mutation.
+        """Compatibility no-op for callers completing local admin mutations.
 
-        Remote-capacity mode only (no-op otherwise): resources imported or
-        patched mid-run must be reservable at the site authority, not just
-        present in the local market view. Best-effort — the admin call
-        already succeeded locally.
+        Provisioning inventory is authoritative and storefront projections are
+        pull-synchronized. Storefront admin mutations must not push inventory
+        into the provisioning ledger.
         """
-        from market_storefront.services.capacity_client import sync_site_resources
-
-        try:
-            await sync_site_resources(lambda: self._db)
-        except Exception as exc:
-            logger.warning(
-                "[ADMIN] Site-authority resource sync after %s failed: %s",
-                source, exc,
-            )
+        logger.debug(
+            "[ADMIN] Skipping deprecated storefront inventory push after %s",
+            source,
+        )
 
     async def _apply_fulfillment_event(
         self,
         *,
-        allocation_id: str,
+        capacity_reservation_id: str,
         event_name: str,
         state: str,
         close_oversized: bool = False,
         reopen_available: bool = False,
-        release_allocation: bool = False,
+        release_reservation: bool = False,
         provider_resource_id: str | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
@@ -549,27 +543,27 @@ class AdminController:
     ) -> FulfillmentEventResponse:
         """Record a deal-scoped event and reconcile derived listings.
 
-        The allocation itself lives in the site authority's ledger.
+        The reservation itself lives in the site authority's ledger.
         Progress events (started / usage-started / release-started) carry
-        no capacity effect — a held allocation is held in every one of
+        no capacity effect — a held reservation is held in every one of
         those states — so they only stage and reconcile;
-        ``release_allocation`` (capacity-released, failed) returns the
+        ``release_reservation`` (capacity-released, failed) returns the
         units through the capacity client. A release that finds nothing
         is tolerated: the watchdog or failure policy usually got there
         first, and these events must stay idempotent.
         """
         result: dict[str, Any] = {"resource_id": provider_resource_id}
-        if release_allocation:
+        if release_reservation:
             try:
                 released = await self._capacity().release(
-                    allocation_id=allocation_id,
+                    capacity_reservation_id=capacity_reservation_id,
                     failure_reason=failure_reason,
                     failure_message=failure_message,
                 )
             except Exception as exc:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Could not release allocation {allocation_id!r} "
+                    detail=f"Could not release reservation {capacity_reservation_id!r} "
                            f"at the site authority: {exc}",
                 )
             if released is not None:
@@ -584,14 +578,14 @@ class AdminController:
         stage_event(
             "fulfillment",
             event_name,
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             resource_id=result.get("resource_id"),
             gpu_count=result.get("gpu_count"),
             closed_listing_ids=closed_listing_ids,
             reopened_listing_ids=reopened_listing_ids,
         )
         return FulfillmentEventResponse(
-            allocation_id=allocation_id,
+            capacity_reservation_id=capacity_reservation_id,
             state=state,
             resource_id=result.get("resource_id"),
             gpu_count=result.get("gpu_count"),
@@ -707,7 +701,7 @@ class AdminController:
         self, body: FulfillmentStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
-            allocation_id=body.allocation_id,
+            capacity_reservation_id=body.capacity_reservation_id,
             event_name="started",
             state="provisioning",
             close_oversized=True,
@@ -725,7 +719,7 @@ class AdminController:
         self, body: UsageStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
-            allocation_id=body.allocation_id,
+            capacity_reservation_id=body.capacity_reservation_id,
             event_name="usage_started",
             state="leased",
             close_oversized=True,
@@ -746,7 +740,7 @@ class AdminController:
         self, body: ReleaseStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
-            allocation_id=body.allocation_id,
+            capacity_reservation_id=body.capacity_reservation_id,
             event_name="release_started",
             state="releasing",
             close_oversized=True,
@@ -763,12 +757,12 @@ class AdminController:
         self, body: CapacityReleasedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
-            allocation_id=body.allocation_id,
+            capacity_reservation_id=body.capacity_reservation_id,
             event_name="capacity_released",
             state="released",
             close_oversized=False,
             reopen_available=True,
-            release_allocation=True,
+            release_reservation=True,
             provider_lease_id=body.provider_lease_id,
             provider_resource_id=body.resource_id,
             released_at=body.released_at,
@@ -785,7 +779,7 @@ class AdminController:
         result = await apply_fulfillment_failure_policy(
             self._db,
             FulfillmentFailureContext(
-                allocation_id=body.allocation_id,
+                capacity_reservation_id=body.capacity_reservation_id,
                 escrow_uid=body.escrow_uid,
                 provider_id=body.provider_id,
                 provider_job_id=body.provider_job_id,
@@ -800,10 +794,10 @@ class AdminController:
         if "release_capacity" in configured_failure_actions() and result.state is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"Allocation {body.allocation_id!r} not found",
+                detail=f"Reservation {body.capacity_reservation_id!r} not found",
             )
         return FulfillmentEventResponse(
-            allocation_id=result.allocation_id or body.allocation_id,
+            capacity_reservation_id=result.capacity_reservation_id or body.capacity_reservation_id,
             state=result.state or "unchanged",
             resource_id=result.resource_id,
             gpu_count=result.gpu_count,
@@ -811,6 +805,36 @@ class AdminController:
             closed_listing_ids=[],
             reopened_listing_ids=result.reopened_listing_ids,
         )
+
+    def _open_derived_compute_listing_ids(self) -> set[str]:
+        """Snapshot open derived listings before an reservation changes capacity."""
+        conn = sqlite3.connect(
+            f"file:{self._db.db_path}?mode=ro&nolock=1",
+            uri=True,
+            timeout=5,
+        )
+        try:
+            rows = conn.execute(
+                """
+                SELECT d.listing_id
+                FROM derived_compute_listings d
+                JOIN listings l ON l.listing_id = d.listing_id
+                WHERE d.status = 'open' AND l.status = 'open'
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return set()
+        finally:
+            conn.close()
+        return {str(row[0]) for row in rows}
+
+    async def _closed_since_snapshot(self, listing_ids: set[str]) -> set[str]:
+        closed: set[str] = set()
+        for listing_id in listing_ids:
+            row = await self._db.load_listing(listing_id=listing_id)
+            if row and row.get("status") == "closed":
+                closed.add(listing_id)
+        return closed
 
     @router.post(
         "/portfolio/reservations",
@@ -820,13 +844,14 @@ class AdminController:
     async def reserve_capacity(
         self, body: ReserveCapacityRequest,
     ) -> ReserveCapacityResponse:
-        """Force-reserve compute capacity using the allocation model.
+        """Force-reserve compute capacity using the reservation model.
 
         This is an operator/test hook for manual holds and recovery
         workflows. The hold lands in the site authority's ledger like
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
+        open_listing_ids = self._open_derived_compute_listing_ids()
         reserved = await self._capacity().reserve(
             claim=body.required_attributes or None,
             deal_ref={
@@ -841,10 +866,18 @@ class AdminController:
                 detail="No available compute VM matched required attributes",
             )
         closed_listing_ids = await self._close_oversized_compute_listings()
+        # The capacity-delta subscriber can race this inline reconciliation.
+        # Include listings that were open when reservation began but that the
+        # subscriber closed first, so the response reports the full effect of
+        # this reservation rather than only the inline worker's share.
+        closed_listing_ids = sorted(
+            set(closed_listing_ids)
+            | await self._closed_since_snapshot(open_listing_ids)
+        )
         stage_event(
             "portfolio",
             "capacity_reserved_by_admin",
-            allocation_id=reserved.get("allocation_id"),
+            capacity_reservation_id=reserved.get("capacity_reservation_id"),
             pool_id=reserved.get("pool_id"),
             member_id=reserved.get("member_id"),
             resource_id=reserved.get("resource_id"),
@@ -861,7 +894,7 @@ class AdminController:
             or (reserved.get("attributes") or {}).get("pool_id")
         )
         return ReserveCapacityResponse(
-            allocation_id=str(reserved["allocation_id"]),
+            capacity_reservation_id=str(reserved["capacity_reservation_id"]),
             pool_id=str(pool_id) if pool_id else None,
             member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
             resource_id=str(reserved["resource_id"]),
@@ -936,14 +969,14 @@ class AdminController:
             sites = remote_site_clients(self._capacity())
             for site_name, client in sites.items():
                 for state in ("reserved", "provisioning", "leased", "releasing"):
-                    for allocation in await client.list_allocations(state=state):
+                    for reservation in await client.list_reservations(state=state):
                         done = await client.release(
-                            allocation_id=allocation.get("allocation_id"),
+                            capacity_reservation_id=reservation.get("capacity_reservation_id"),
                         )
                         if done:
                             released.append(
                                 f"ledger:{site_name}:"
-                                f"{allocation.get('allocation_id')}",
+                                f"{reservation.get('capacity_reservation_id')}",
                             )
         except Exception as exc:
             logger.warning(
