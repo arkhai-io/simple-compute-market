@@ -216,7 +216,7 @@ async def test_unsupported_contract_major_reports_supported_version(client_and_q
 
 
 async def test_contract_lease_view_serializes_every_reachable_reservation_state():
-    """POOLS-7 §10 fix: `_lease_view`'s `status=str(reservation.get("state"))`
+    """`_lease_view`'s `status=str(reservation.get("state"))`
     passed market_site's raw `ReservationState` values straight through
     into `LeaseView.status: LeaseState`, whose members didn't cover them
     -- most immediately, a freshly-registered lease is always raw state
@@ -275,7 +275,7 @@ def _create_fulfillment_aggregate(
 ) -> None:
     """Persist a real `SettlementRecord` for the client-contract tests below.
 
-    POOLS-7 §10.11 review finding: the original test only monkeypatched
+    The original test only monkeypatched
     `FulfillmentOrchestrator.begin_fulfillment_teardown` and never
     exercised the real aggregate at all, so it could not have caught a
     routing, serialization, or state-machine regression in the endpoint
@@ -375,7 +375,7 @@ async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_40
 async def test_contract_register_lease_never_sends_executor_ref_and_it_self_heals(
     client_and_queue,
 ):
-    """POOLS-7 §10.7: the generic `/contract/leases` path -- the one
+    """The generic `/contract/leases` path -- the one
     `ComputeProvisioningClient.register_lease` and the VM storefront
     actually use, distinct from the VM-domain-branded `/leases` surface --
     has no `executor_ref` field on its request contract at all. Confirms

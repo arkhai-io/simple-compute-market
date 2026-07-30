@@ -193,7 +193,7 @@ class TestLeaseClientEndpointCoverage:
         assert terminated["id"] == lease["id"]
         assert terminated["status"] == "releasing"
 
-        # POOLS-7 §10.8: confirm terminate_lease actually drove the
+        # Confirm terminate_lease actually drove the
         # fulfillment aggregate into durable teardown, not just that the
         # reservation-ledger view reports "releasing" -- the two are
         # separate state machines now, joined only by VmReleaseExecutor.

@@ -229,3 +229,93 @@ async def test_site_deltas_reach_aggregate_subscribers_tagged():
     assert (seen[0].kind, seen[0].version, seen[0].resource_id) == (
         "reserved", 7, "res-b",
     )
+
+
+# ---------------------------------------------------------------------------
+# most_available claim-awareness: most_available/fill_first must never
+# rank a site above another based on capacity it cannot actually serve a
+# given claim from (wrong pool, wrong resource, insufficient dimensions).
+# ---------------------------------------------------------------------------
+
+from core_storefront.aggregation import _resource_matches_claim, _site_available_units  # noqa: E402
+
+
+def test_resource_matches_claim_no_claim_matches_everything():
+    row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 0}
+    assert _resource_matches_claim(row, None) is True
+    assert _resource_matches_claim(row, {}) is True
+
+
+def test_resource_matches_claim_filters_by_pool_id():
+    row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 100}
+    assert _resource_matches_claim(row, {"pool_id": "pool-a"}) is True
+    assert _resource_matches_claim(row, {"pool_id": "pool-b"}) is False
+
+
+def test_resource_matches_claim_filters_by_resource_id():
+    row = {"pool_id": "pool-a", "resource_id": "r1", "available_units": 100}
+    assert _resource_matches_claim(row, {"resource_id": "r1"}) is True
+    assert _resource_matches_claim(row, {"resource_id": "r2"}) is False
+
+
+def test_resource_matches_claim_dimensions_requires_every_requested_dimension():
+    row = {
+        "pool_id": "pool-a", "resource_id": "r1", "available_units": 4,
+        "available": {"gpu_count": 4, "ram_gb": 64},
+    }
+    assert _resource_matches_claim(
+        row, {"dimensions": {"gpu_count": 2, "ram_gb": 32}},
+    ) is True
+    # Enough GPUs, not enough RAM -- must fail on the RAM dimension alone.
+    assert _resource_matches_claim(
+        row, {"dimensions": {"gpu_count": 2, "ram_gb": 128}},
+    ) is False
+
+
+def test_resource_matches_claim_legacy_units_shape_apicredits_style():
+    row = {"pool_id": None, "resource_id": "quota-1", "available_units": 10}
+    assert _resource_matches_claim(row, {"units": 5}) is True
+    assert _resource_matches_claim(row, {"units": 50}) is False
+    assert _resource_matches_claim(row, {"gpu_count": 5}) is True
+
+
+def test_site_available_units_ignores_non_matching_pool_rows():
+    """A site with abundant capacity in an unrelated pool must not be
+    ranked as available for a request it cannot serve."""
+    snapshot = [
+        {"pool_id": "wrong-pool", "resource_id": "r1", "available_units": 500},
+        {"pool_id": "right-pool", "resource_id": "r2", "available_units": 2},
+    ]
+    claim = {"pool_id": "right-pool"}
+    assert _site_available_units(snapshot, claim) == 2
+    assert _site_available_units(snapshot, None) == 502
+
+
+@pytest.mark.asyncio
+async def test_most_available_ranks_by_claim_matching_capacity_not_raw_total():
+    """A site with a huge unrelated-pool total must not outrank a site
+    with less total but the actually-requested pool's capacity."""
+    client, a, b = _aggregate(placement=most_available)
+    a.units, a.reservations = 4, {}
+    b.units, b.reservations = 8, {}
+
+    async def snapshot_a():
+        return [{
+            "resource_id": "r-a", "pool_id": "target-pool",
+            "available_units": 1, "state": "available", "attributes": {},
+        }]
+
+    async def snapshot_b():
+        return [{
+            "resource_id": "r-b", "pool_id": "other-pool",
+            "available_units": 8, "state": "available", "attributes": {},
+        }]
+
+    a.snapshot = snapshot_a  # type: ignore[method-assign]
+    b.snapshot = snapshot_b  # type: ignore[method-assign]
+
+    snapshots = {"dc-a": await a.snapshot(), "dc-b": await b.snapshot()}
+    order = most_available(
+        ["dc-a", "dc-b"], snapshots, claim={"pool_id": "target-pool"},
+    )
+    assert order == ["dc-a", "dc-b"]

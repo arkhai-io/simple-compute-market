@@ -72,14 +72,60 @@ def fill_first(
     return list(site_names)
 
 
-def _site_available_units(snapshot: list[dict[str, Any]]) -> int:
-    total = 0
-    for row in snapshot:
-        available = row.get("available_units")
-        if available is None:
-            continue
-        total += max(int(available), 0)
-    return total
+def _resource_matches_claim(row: Mapping[str, Any], claim: Mapping[str, Any] | None) -> bool:
+    """Best-effort client-side ranking hint only — NOT an enforcement
+    point. Deliberately does not import kit/site (the aggregator is a
+    storefront-process concept and must not depend on
+    provisioning-service-internal packages); operates on the plain-dict
+    snapshot() payload that crosses the HTTP boundary, using the claim
+    vocabulary reserve()/probe() actually accept today: an optional
+    pool_id/resource_id pin, plus either a multidimensional ``dimensions``
+    map or a legacy single-quantity claim.
+
+    A wrong ranking here costs one extra round-trip (probe()/reserve() on
+    the chosen site remain the real, authoritative check), not an
+    incorrect admission — see ARCHITECTURE.md's layered-ownership model
+    for why this deliberately duplicates a coarse version of the
+    authoritative check across the storefront/site process boundary
+    instead of sharing code with it.
+    """
+    if not claim:
+        return True
+    pool_id = claim.get("pool_id")
+    if pool_id is not None and row.get("pool_id") != pool_id:
+        return False
+    resource_id = claim.get("resource_id")
+    if resource_id is not None and row.get("resource_id") != resource_id:
+        return False
+    requested = claim.get("dimensions")
+    if isinstance(requested, Mapping) and requested:
+        available = row.get("available") or {}
+        for dimension, quantity in requested.items():
+            try:
+                if float(available.get(dimension, 0) or 0) < float(quantity):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+    # Legacy, non-dimensional claim (the shape apicredits still sends):
+    # compare against the row's single reported available_units value.
+    requested_units = claim.get("units", claim.get("gpu_count"))
+    if requested_units is None:
+        return True
+    try:
+        return float(row.get("available_units") or 0) >= float(requested_units)
+    except (TypeError, ValueError):
+        return False
+
+
+def _site_available_units(
+    snapshot: list[dict[str, Any]], claim: Mapping[str, Any] | None = None,
+) -> int:
+    return sum(
+        max(int(row.get("available_units") or 0), 0)
+        for row in snapshot
+        if _resource_matches_claim(row, claim)
+    )
 
 
 def most_available(
@@ -88,14 +134,14 @@ def most_available(
     *,
     claim: Mapping[str, Any] | None = None,
 ) -> list[str]:
-    """Spread: prefer the site with the most free units (ties keep
-    configuration order; sites without a snapshot go last)."""
+    """Spread: prefer the site with the most free units matching ``claim``
+    (ties keep configuration order; sites without a snapshot go last)."""
     def _key(idx_name: tuple[int, str]) -> tuple[int, int]:
         idx, name = idx_name
         snapshot = snapshots.get(name)
         if snapshot is None:
             return (1, idx)  # unknown availability — try after known sites
-        return (0, -_site_available_units(snapshot) * len(site_names) + idx)
+        return (0, -_site_available_units(snapshot, claim) * len(site_names) + idx)
 
     # Sort by (known first, descending availability), stable on config order.
     ordered = sorted(enumerate(site_names), key=_key)

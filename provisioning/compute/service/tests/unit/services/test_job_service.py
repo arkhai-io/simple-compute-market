@@ -294,6 +294,44 @@ class TestRedactLogs:
         result = svc._redact_logs(logs)
         assert result == logs
 
+    def test_redacts_backslash_escaped_json_password(self):
+        """`json-output.yml`'s `debug: msg: "{{ vm_creation_json }}"` task
+        is the literal transport `_extract_ansible_json` parses, so it
+        cannot get `no_log`. Depending on Ansible's
+        stdout_callback/result_format, that debug message can render as a
+        backslash-escaped JSON string nested inside the outer task result
+        -- the redaction pattern must match both the unescaped and
+        escaped forms.
+        """
+        svc = _make_service()
+        logs = (
+            'ok: [kvm1] => {\n'
+            '    "msg": "{\\n    \\"authentication\\": {\\n        '
+            '\\"root\\": {\\n            \\"password\\": \\"aB3xY9zQ1mK7pL2n\\"'
+            '\\n        }\\n    }\\n}"\n'
+            '}'
+        )
+        result = svc._redact_logs(logs)
+        assert "aB3xY9zQ1mK7pL2n" not in result
+
+    def test_redacts_nested_yaml_authentication_block(self):
+        """`json-output.yml`'s `debug: var: vm_creation_data` task renders
+        as a nested YAML dump, not a top-level `password:` key -- the
+        scrubber must catch this shape too."""
+        svc = _make_service()
+        logs = (
+            "ok: [kvm1] => \n"
+            "  vm_creation_data:\n"
+            "    authentication:\n"
+            "      root:\n"
+            "        password: aB3xY9zQ1mK7pL2n\n"
+            "      tenant:\n"
+            "        password: zQ1mK7pL2naB3xY9\n"
+        )
+        result = svc._redact_logs(logs)
+        assert "aB3xY9zQ1mK7pL2n" not in result
+        assert "zQ1mK7pL2naB3xY9" not in result
+
     def test_empty_string_returned_unchanged(self):
         svc = _make_service()
         assert svc._redact_logs("") == ""

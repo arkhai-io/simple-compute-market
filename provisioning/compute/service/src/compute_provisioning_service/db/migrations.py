@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Base, DEFAULT_POOL_ID, ResourcePool
@@ -759,13 +760,24 @@ def _migrate_retire_site_resources(engine: Engine) -> None:
 
 
 def _migrate_capacity_model_cutover(engine: Engine) -> None:
-    """Apply the reservation and private capacity-accounting cutover."""
+    """Apply the full reservation and capacity-accounting cutover.
+
+    A single migration ID rather than several sequential ones: nothing
+    built on this cutover has been deployed anywhere, so there is no
+    intermediate, partially-migrated database to preserve compatibility
+    with. Folding every related schema change in here (rather than
+    registering each as its own dated migration) keeps the migration list
+    reflecting only states a real database has actually been in.
+    """
     _migrate_rename_site_allocations_to_capacity_reservations(engine)
     _migrate_capacity_reservations_settlement_resource_id(engine)
     _migrate_site_resources_pool_id(engine)
     _migrate_capacity_buckets_and_current_debits(engine)
     _migrate_retire_site_resources(engine)
-
+    _migrate_remove_provisioned_resource_domain_ref(engine)
+    _migrate_ansible_pool_requirement_delegate(engine)
+    _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+    _migrate_capacity_reservations_vm_target_to_executor_target(engine)
 
 
 def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
@@ -809,6 +821,74 @@ def _migrate_ansible_pool_requirement_delegate(engine: Engine) -> None:
         "VARCHAR NOT NULL DEFAULT 'vm_management_v1'",
     )
 
+
+def _migrate_capacity_reservations_vm_host_to_executor_ref(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_host`` in favor of the generic
+    ``executor_ref`` JSON field.
+
+    ``kit/site`` carries no VM-domain-specific column names on the shared,
+    domain-neutral reservation table -- physical placement identity lives
+    uniformly in ``executor_ref`` across every domain, matching
+    bare-metal's ``physical_host_id`` pattern (which was never given its
+    own column). Backfills any existing ``vm_host`` value into
+    ``executor_ref`` (merged via ``json_set``, not overwritten -- a row
+    may already carry other ``executor_ref`` keys) before dropping the
+    column. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_host"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_ref = json_set(COALESCE(executor_ref, '{}'), '$.vm_host', vm_host) "
+            "WHERE vm_host IS NOT NULL "
+            "AND (executor_ref IS NULL OR json_extract(executor_ref, '$.vm_host') IS NULL)"
+        ))
+        try:
+            connection.execute(text(
+                "ALTER TABLE capacity_reservations DROP COLUMN vm_host"
+            ))
+        except OperationalError:
+            # SQLite versions before 3.35 cannot DROP COLUMN. The backfill
+            # above already ran, so executor_ref is authoritative either
+            # way; a leftover, unread vm_host column on an old SQLite is
+            # harmless, not a correctness gap.
+            pass
+
+
+def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_target`` in favor of the generic
+    ``executor_target`` field.
+
+    Unlike ``vm_host``, ``vm_target`` was never actually distinct from
+    ``executor_target`` -- every reservation-binding write site sets both
+    columns to the same value at the same time. This backfill exists only
+    for defensiveness against a row where the two happened to diverge; on
+    every row this repository's own code could have produced, it is a
+    no-op. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_target"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_target = vm_target "
+            "WHERE vm_target IS NOT NULL AND executor_target IS NULL"
+        ))
+        try:
+            connection.execute(text(
+                "ALTER TABLE capacity_reservations DROP COLUMN vm_target"
+            ))
+        except OperationalError:
+            pass
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -841,13 +921,5 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260724_002_drop_vm_leases_table",
         _migrate_drop_vm_leases_table,
-    ),
-    Migration(
-        "20260725_001_remove_provisioned_resource_domain_ref",
-        _migrate_remove_provisioned_resource_domain_ref,
-    ),
-    Migration(
-        "20260728_001_ansible_pool_requirement_delegate",
-        _migrate_ansible_pool_requirement_delegate,
     ),
 )

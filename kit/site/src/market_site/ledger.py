@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from .db import (
@@ -63,6 +64,23 @@ ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 VM_EXECUTOR_KIND = "vm"
+
+
+def _executor_ref_for_resource(resource: CapacityBucket) -> dict[str, Any] | None:
+    """Build the generic ``executor_ref`` a reservation should carry when
+    it binds to ``resource``, from that resource's domain-specific
+    ``vm_host`` attribute.
+
+    ``kit/site`` carries no VM-specific columns on the shared reservation
+    table — physical placement identity lives uniformly in the generic
+    ``executor_ref`` JSON field across every domain, the same way
+    bare-metal's ``physical_host_id`` already does. This is the one place
+    that derivation happens, used by every reservation-binding write site
+    (fresh reservation, resize-supersede, settlement-resource rebind) so
+    they cannot drift from each other.
+    """
+    vm_host = (resource.attributes or {}).get("vm_host")
+    return {"vm_host": vm_host} if vm_host else None
 
 
 class CapacityConflictError(Exception):
@@ -645,7 +663,7 @@ class CapacityLedgerService:
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
-                vm_host=(resource.attributes or {}).get("vm_host"),
+                executor_ref=_executor_ref_for_resource(resource),
                 executor_kind=(
                     VM_EXECUTOR_KIND
                     if (resource.attributes or {}).get("vm_host")
@@ -746,7 +764,7 @@ class CapacityLedgerService:
             raise CapacityConflictError(f"reservation {capacity_reservation_id} has no capacity debit")
         debit.capacity_bucket_id = destination.capacity_bucket_id
         reservation.settlement_resource_id = settlement_resource_id
-        reservation.vm_host = (destination.attributes or {}).get("vm_host")
+        reservation.executor_ref = _executor_ref_for_resource(destination)
         serialized_dims = _serialize_dimensions(reservation_dims)
         db.add(CapacityEvent(
             kind="capacity_released_for_reassignment",
@@ -1046,7 +1064,7 @@ class CapacityLedgerService:
                 deal_ref=deal,
                 escrow_uid=deal.get("escrow_uid"),
                 hold_expires_at=hold_expires_at,
-                vm_host=(resource.attributes or {}).get("vm_host"),
+                executor_ref=_executor_ref_for_resource(resource),
                 executor_kind=(
                     VM_EXECUTOR_KIND
                     if (resource.attributes or {}).get("vm_host")
@@ -1114,8 +1132,6 @@ class CapacityLedgerService:
         *,
         capacity_reservation_id: str | None = None,
         escrow_uid: str | None = None,
-        vm_host: str | None = None,
-        vm_target: str | None = None,
         executor_kind: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
@@ -1139,10 +1155,6 @@ class CapacityLedgerService:
             )
             if reservation is None or reservation.state not in HELD_RESERVATION_STATES:
                 return None
-            if vm_host:
-                reservation.vm_host = vm_host
-            if vm_target:
-                reservation.vm_target = vm_target
             self._sync_executor_fields(
                 reservation,
                 executor_kind=executor_kind,
@@ -1209,8 +1221,6 @@ class CapacityLedgerService:
         self,
         capacity_reservation_id: str,
         *,
-        vm_host: str | None = None,
-        vm_target: str | None = None,
         executor_kind: str | None = None,
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
@@ -1237,10 +1247,6 @@ class CapacityLedgerService:
             }
             if reservation is None or reservation.state in terminal:
                 return None
-            if vm_host is not None:
-                reservation.vm_host = vm_host
-            if vm_target is not None:
-                reservation.vm_target = vm_target
             self._sync_executor_fields(
                 reservation,
                 executor_kind=executor_kind,
@@ -1268,13 +1274,23 @@ class CapacityLedgerService:
         Used by the ``POST /vms/{vm_name}/remove`` endpoint to cancel any
         watchdog-managed lease before submitting the explicit removal job,
         avoiding a double-fire when the lease would otherwise expire later.
+
+        ``vm_host`` is matched via ``executor_ref``'s JSON payload and
+        ``vm_target`` via ``executor_target`` — neither
+        ``CapacityReservation`` column exists anymore (see
+        ``docs/development/ARCHITECTURE.md``, "Shared vocabulary and
+        identities"); the `executor_ref` lookup is the first ORM-level
+        use of SQLite's JSON1 extension in this module, though the
+        extension itself is already relied on at the migration layer
+        (``compute_provisioning_service/db/migrations.py``'s ``pool_id``
+        backfill).
         """
         with self._lock, self._session_factory() as db:
             reservation = (
                 db.query(CapacityReservation)
                 .filter(
-                    CapacityReservation.vm_host == vm_host,
-                    CapacityReservation.vm_target == vm_target,
+                    func.json_extract(CapacityReservation.executor_ref, "$.vm_host") == vm_host,
+                    CapacityReservation.executor_target == vm_target,
                     CapacityReservation.state.in_(HELD_RESERVATION_STATES),
                     CapacityReservation.lease_end_utc.isnot(None),
                 )
@@ -1790,8 +1806,11 @@ class CapacityLedgerService:
             "executor_target": reservation.executor_target,
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
-            "vm_host": reservation.vm_host,
-            "vm_target": reservation.vm_target,
+            "vm_host": (reservation.executor_ref or {}).get("vm_host"),
+            "vm_target": (
+                reservation.executor_target
+                if reservation.executor_kind == VM_EXECUTOR_KIND else None
+            ),
             "lease_start_utc": reservation.lease_start_utc,
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,
@@ -1828,20 +1847,22 @@ class CapacityLedgerService:
         executor_target: str | None = None,
         executor_ref: Mapping[str, Any] | None = None,
     ) -> None:
+        # Captured before any mutation below: the retired vm_host column's
+        # self-heal source is now executor_ref itself (see
+        # _executor_ref_for_resource, set at reserve() time), not a
+        # separate field to derive executor_ref from.
+        existing_vm_host = (reservation.executor_ref or {}).get("vm_host")
+
         if executor_kind is not None:
             reservation.executor_kind = executor_kind
-        elif reservation.vm_host and not reservation.executor_kind:
+        elif existing_vm_host and not reservation.executor_kind:
             reservation.executor_kind = VM_EXECUTOR_KIND
 
         if executor_target is not None:
             reservation.executor_target = executor_target
-        elif reservation.vm_target and not reservation.executor_target:
-            reservation.executor_target = reservation.vm_target
 
         if executor_ref is not None:
             reservation.executor_ref = dict(executor_ref)
-        elif reservation.vm_host and not reservation.executor_ref:
-            reservation.executor_ref = {"vm_host": reservation.vm_host}
 
     @staticmethod
     def _sync_release_job_fields(

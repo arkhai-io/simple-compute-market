@@ -3,9 +3,8 @@
 These cover the CapacityReservation-backed lease lifecycle: release happens in
 the ledger's local transaction, the owning storefront gets a
 point-to-point capacity-released event, and the resource PATCH callback
-never fires. (The legacy vm_leases table/model this superseded — and its
-own now-removed test file — were confirmed dead and cleaned up
-separately; see db/models.py and db/migrations.py.)
+never fires. There is no separate `vm_leases` table or model in this
+codebase; a lease is a state on the reservation row itself.
 """
 
 from __future__ import annotations
@@ -230,7 +229,7 @@ def _expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe") -> 
     )
     ledger.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
-        vm_host="kvm1", vm_target="tenant-x",
+        executor_target="tenant-x",
         lease_end_utc="2020-01-01 00:00",
     )
     return reserved
@@ -251,8 +250,7 @@ def _just_expired_reservation(ledger: CapacityLedgerService, escrow: str = "0xe"
     )
     ledger.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
-        vm_host="kvm1",
-        vm_target="tenant-x",
+        executor_target="tenant-x",
         lease_end_utc=just_expired,
     )
     return reserved

@@ -113,6 +113,61 @@ class VmManagementContractTests(unittest.TestCase):
         ):
             self.assertIn(token, text)
 
+    def test_vm_create_protects_every_password_bearing_task_with_no_log(self) -> None:
+        """Every task that generates or displays tenant_password/root_password
+        in vm-create.yml must be `no_log: true`, matching
+        vm-reset-password.yml's existing pattern -- with one deliberate
+        exception this test also pins: the password-generating/display
+        tasks here are protected, but json-output.yml's own `debug:
+        var:`/`debug: msg:` tasks (which also render the credential-bearing
+        vm_creation_data/vm_creation_json) MUST NOT gain no_log, since they
+        are the literal transport AnsibleService._extract_ansible_json
+        parses out of raw stdout -- see ansible_service.py's
+        redact_ansible_output docstring.
+        """
+        text = _read(VM_CREATE)
+
+        task_names = (
+            "Generate random password for tenant user",
+            "Generate random password for root user",
+            "Set root password available for Golden VMs",
+            "Create tenant user via SSH connection",
+            "Create JSON data structure for VM creation (generated tenant key)",
+            "Create JSON data structure for VM creation (provided tenant key)",
+        )
+        for name in task_names:
+            idx = text.index(f"- name: {name}")
+            # The task's own block ends at the next "- name:" line (or EOF);
+            # no_log must appear somewhere inside that span.
+            next_idx = text.find("\n- name:", idx + 1)
+            block = text[idx:next_idx] if next_idx != -1 else text[idx:]
+            self.assertIn(
+                "no_log: true", block,
+                f"task {name!r} is missing no_log: true",
+            )
+
+        # The two "Display VM creation result" debug messages must not
+        # interpolate the raw password inline.
+        for name in (
+            "Display VM creation result (SSH-ready, generated tenant key)",
+            "Display VM creation result (SSH-ready, with provided tenant key)",
+        ):
+            idx = text.index(f"- name: {name}")
+            next_idx = text.find("\n- name:", idx + 1)
+            block = text[idx:next_idx] if next_idx != -1 else text[idx:]
+            self.assertNotIn("{{ root_password }}", block)
+            self.assertNotIn("{{ tenant_password }}", block)
+
+    def test_json_output_transport_tasks_are_not_no_log_protected(self) -> None:
+        """The inverse of the previous test: json-output.yml's tasks are a
+        deliberate exception and must stay readable by
+        AnsibleService._extract_ansible_json's marker search."""
+        text = _read(JSON_OUTPUT)
+        idx = text.index("- name: Output VM creation data as parsable JSON")
+        next_idx = text.find("\n- name:", idx + 1)
+        block = text[idx:next_idx] if next_idx != -1 else text[idx:]
+        self.assertNotIn("no_log", block)
+
 
 if __name__ == "__main__":
     unittest.main()

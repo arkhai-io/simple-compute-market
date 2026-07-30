@@ -147,14 +147,9 @@ class LedgerSiteAuthority:
         lease_end_utc: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        vm_host, vm_target = self._legacy_vm_fields(
-            executor_kind, executor_target, executor_ref
-        )
         return self._ledger.attach_lease(
             capacity_reservation_id=capacity_reservation_id,
             escrow_uid=escrow_uid,
-            vm_host=vm_host,
-            vm_target=vm_target,
             executor_kind=executor_kind,
             executor_target=executor_target,
             executor_ref=executor_ref,
@@ -175,13 +170,8 @@ class LedgerSiteAuthority:
         release_job_id: str | None = None,
         create_job_id: str | None = None,
     ) -> dict[str, Any] | None:
-        vm_host, vm_target = self._legacy_vm_fields(
-            executor_kind, executor_target, executor_ref
-        )
         return self._ledger.update_lease_fields(
             capacity_reservation_id,
-            vm_host=vm_host,
-            vm_target=vm_target,
             executor_kind=executor_kind,
             executor_target=executor_target,
             executor_ref=executor_ref,
@@ -190,18 +180,6 @@ class LedgerSiteAuthority:
             release_job_id=release_job_id,
             create_job_id=create_job_id,
         )
-
-    @staticmethod
-    def _legacy_vm_fields(
-        executor_kind: str | None,
-        executor_target: str | None,
-        executor_ref: dict[str, Any] | None,
-    ) -> tuple[str | None, str | None]:
-        if executor_kind != "vm":
-            return None, None
-        executor_ref = executor_ref or {}
-        vm_host = executor_ref.get("vm_host")
-        return (str(vm_host) if vm_host else None, executor_target)
 
     def begin_release(
         self, capacity_reservation_id: str, *, release_job_id: str

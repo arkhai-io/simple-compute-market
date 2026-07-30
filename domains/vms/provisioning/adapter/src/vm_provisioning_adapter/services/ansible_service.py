@@ -48,6 +48,48 @@ from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleR
 logger = logging.getLogger(__name__)
 
 
+def redact_ansible_output(text: str) -> str:
+    """Scrub credential-shaped content out of raw Ansible stdout/stderr.
+
+    Shared by every consumer of Ansible subprocess output — this module's
+    own real-time debug logging, and ``job_service.py``'s persisted
+    ``job.logs`` — so there is exactly one place that defines what
+    "credential-shaped" means. Ansible's default behavior echoes a
+    ``set_fact``/``debug`` task's rendered value in its own "ok" output;
+    without ``no_log: true`` on the task itself (the primary defense, kept
+    current in ``vm-create.yml``/``vm-reset-password.yml``), that value
+    reaches this function's input. This is defense in depth, not a
+    substitute for ``no_log`` on the playbook side.
+
+    ``vm-management/tasks/json-output.yml``'s ``debug: var:``/``debug:
+    msg:`` tasks are a deliberate exception that MUST NOT gain `no_log`:
+    they are the literal transport `_extract_ansible_json` parses by
+    searching raw stdout for a `"<fact_name>":` marker, so credentials
+    reach this function's input by design on every VM create. Ansible can
+    render that debug-msg'd JSON string either as literal text or as a
+    backslash-escaped string nested inside its own outer result dict
+    (depends on ``stdout_callback``/``callback_result_format`` and the
+    installed Ansible version) as well as the bare YAML `password: value`
+    shape `debug: var:` produces — the JSON-shaped pattern below matches
+    both the escaped and unescaped forms.
+    """
+    if not text:
+        return text
+    redacted = re.sub(
+        r'(\\?"(?:password|ssh_key_path_host)\\?":\s*)\\?"[^"\\]*\\?"',
+        r'\1"[REDACTED]"',
+        text,
+    )
+    redacted = re.sub(
+        r"(password:\s*)(?!\[REDACTED\]).+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(r"-i\s+\S+\.ssh/\S+", "-i [REDACTED]", redacted)
+    redacted = re.sub(r"sshpass\s+-p\s+\S+", "sshpass -p [REDACTED]", redacted)
+    return redacted
+
+
 # ---------------------------------------------------------------------------
 # Process handle types — owned by AnsibleService, consumed by callers
 # ---------------------------------------------------------------------------
@@ -177,7 +219,10 @@ class AnsibleService:
                                 line = run.process.stdout.readline()
                                 if line:
                                     stdout_lines.append(line)
-                                    logger.debug("ansible stdout: %s", line.rstrip())
+                                    logger.debug(
+                                        "ansible stdout: %s",
+                                        redact_ansible_output(line.rstrip()),
+                                    )
                         else:
                             line = run.process.stdout.readline()
                             if line:
@@ -195,7 +240,10 @@ class AnsibleService:
                                 line = run.process.stderr.readline()
                                 if line:
                                     stderr_lines.append(line)
-                                    logger.debug("ansible stderr: %s", line.rstrip())
+                                    logger.debug(
+                                        "ansible stderr: %s",
+                                        redact_ansible_output(line.rstrip()),
+                                    )
                         else:
                             line = run.process.stderr.readline()
                             if line:
