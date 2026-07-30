@@ -1,0 +1,143 @@
+{
+  "schema_version": 2,
+  "capture_id": "b1-s1-g1-mock-capture",
+  "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+  "scenario_id": "b1-s1-g1",
+  "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+  "profile_stage_id": "b1-s1-g1-mock",
+  "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+  "execution_boundary": "mock",
+  "actor_trigger": "agent-triggered",
+  "release_id": "mock-release",
+  "oracle_authority_id": "b1-s1-g1-mock-oracle",
+  "oracle_authority_sha256": "93b3b846a5d060c7fd794fbba90ff2450ee0db4f7879d876ce743a5a333507a3",
+  "buyer_receipt_sha256s": [
+    "33dba15d7423c37e83fe5701d08fc4864e703b46699a434a346a371d6ab6fb88"
+  ],
+  "seller_receipt_sha256s": [
+    "04823b5c3ba4ed607086d2c986a5bd4de28a83ae2bad12cc4f1372184303d680"
+  ],
+  "action_sha256s": [
+    "2a1a560ef82ca677615ff02cb8c7966053e788c25dbbe74336cbfa45f646c1a7",
+    "b25ca788d1b10ce897a2973d59d44789c81ff675e8fa277f16fc332d91bb1819",
+    "009ac3c975ff411b9254428780d708046b07bedf11f5d021ca1b792785a2c244"
+  ],
+  "prepared_action_sha256s": [
+    "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
+    "fe32e004b9a7d83ab96adc38e190a6f601cc979ac4cc9bbdfcd151bf589b9dfc",
+    "898b5233b23fac0dcb5e9e1bf88ffaa803587e8a888abbdbcca7af7e41c0787d"
+  ],
+  "action_result_sha256s": [
+    "3f374f779cba51f84dbf9ae6fcb1f4efc80ffe23bfa48ad9e84b1f02e9a4e013",
+    "cccd2adcba5e9710fe20d9eff85205889000d94cc0304359508b01b709114a48",
+    "3a784bc5ea429361b03ebaf53464ab8ad657ff684acac956e2c829bb77fd0784"
+  ],
+  "captured_payloads": [
+    {
+      "action_id": "seller-service-start-1",
+      "action_kind": "seller-service-start",
+      "actor_slot": "seller-1",
+      "release_id": "mock-release",
+      "action_sha256": "2a1a560ef82ca677615ff02cb8c7966053e788c25dbbe74336cbfa45f646c1a7",
+      "prepared_action_sha256": "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
+      "payload_sha256": "7cf4dc84194c445a3e71876ef0f05faa5e91088773eb3c8b1fc8d9c1c38423fd",
+      "runtime_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "109056bde8fedf4671be2845b75ee7ed7e8a1dde57cc6489bfdf3f8e571c95ee"
+      },
+      "concrete_payload_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.concrete-payload.v1",
+        "value": "e93d6b142560748573a930432f48533e85407ded002dfc47d87f135f5555a920"
+      }
+    },
+    {
+      "action_id": "seller-1-publication-1",
+      "action_kind": "seller-listing-publication",
+      "actor_slot": "seller-1",
+      "release_id": "mock-release",
+      "action_sha256": "b25ca788d1b10ce897a2973d59d44789c81ff675e8fa277f16fc332d91bb1819",
+      "prepared_action_sha256": "fe32e004b9a7d83ab96adc38e190a6f601cc979ac4cc9bbdfcd151bf589b9dfc",
+      "payload_sha256": "adef59b942a8e256320f43eb1a635fdd40009ae12daa76c609834b4971f9b6d6",
+      "runtime_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
+      },
+      "concrete_payload_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.concrete-payload.v1",
+        "value": "40560baf7a2f5d51f3775ceae4fd423f15791ea3e4e35c3135c4e12bd8fdea2e"
+      }
+    },
+    {
+      "action_id": "buyer-request-1",
+      "action_kind": "buyer-request",
+      "actor_slot": "buyer-1",
+      "release_id": "mock-release",
+      "action_sha256": "009ac3c975ff411b9254428780d708046b07bedf11f5d021ca1b792785a2c244",
+      "prepared_action_sha256": "898b5233b23fac0dcb5e9e1bf88ffaa803587e8a888abbdbcca7af7e41c0787d",
+      "payload_sha256": "f90447cfa1137c7b8a5446854a49c3a4805d6300ef7e51dce6598ca821d5eac0",
+      "runtime_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
+      },
+      "concrete_payload_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.concrete-payload.v1",
+        "value": "4fa24530997875da8d8606b7546c9653fe78b5de01f6f03a69de15f024eed3b1"
+      }
+    }
+  ],
+  "runtime_service_bindings": [
+    {
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1",
+      "runtime_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "109056bde8fedf4671be2845b75ee7ed7e8a1dde57cc6489bfdf3f8e571c95ee"
+      }
+    }
+  ],
+  "runtime_listing_bindings": [
+    {
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1",
+      "runtime_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
+      }
+    }
+  ],
+  "actor_invocation_capabilities": [
+    {
+      "actor_slot": "buyer-1",
+      "binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "3b2ef23fecb64bae291718be92cddfdc2cbcbb4bf32a7ef261a43e93559cebce"
+      }
+    },
+    {
+      "actor_slot": "seller-1",
+      "binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
+      }
+    }
+  ],
+  "agent_ownership_proof_scope": "portable-binding-only",
+  "private_actor_ownership_verified": false,
+  "live_resource_ledger": [],
+  "complete_stage_actor_set_claimed": false,
+  "registry_admission_claimed": false,
+  "real_oracle_claimed": false,
+  "capacity_claimed": false,
+  "result_kind": "mock-preparation-only",
+  "completed_at": "2026-07-30T10:00:09.000000Z"
+}

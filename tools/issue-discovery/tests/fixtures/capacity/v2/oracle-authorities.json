@@ -1,0 +1,34 @@
+[
+  {
+    "schema_version": 2,
+    "oracle_authority_id": "b1-s1-g1-mock-oracle",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "execution_boundary": "mock",
+    "actor_trigger": "agent-triggered",
+    "oracle_kind": "capture-only",
+    "result_schema": {
+      "path": "tools/issue-discovery/schemas/capacity-mock-capture.schema.json",
+      "sha256": "d8e8a7f4ec8eefb28b4eb136cd31bc7386cc655dbd6b722e48065f9bd0f22b68"
+    },
+    "observer_plan_sha256": null,
+    "real_oracle_allowed": false
+  },
+  {
+    "schema_version": 2,
+    "oracle_authority_id": "b1-s1-g1-oracle-1",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "execution_boundary": "real-qualification",
+    "actor_trigger": "agent-triggered",
+    "oracle_kind": "independent-vm-capacity",
+    "result_schema": {
+      "path": "tools/issue-discovery/schemas/capacity-result.schema.json",
+      "sha256": "4848484848484848484848484848484848484848484848484848484848484848"
+    },
+    "observer_plan_sha256": "2424242424242424242424242424242424242424242424242424242424242424",
+    "real_oracle_allowed": true
+  }
+]

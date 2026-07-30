@@ -30,6 +30,13 @@ CAPACITY_PROFILE_PATH = CAPACITY_PROFILE_ROOT / "g1-v2.json"
 CAPACITY_PROFILE_SCHEMA = PurePosixPath(
     "tools/issue-discovery/schemas/capacity-profile-registry.schema.json"
 )
+CAPACITY_PROFILE_STAGE_ROOT = PurePosixPath(
+    "tools/issue-discovery/config/capacity/profile-stages"
+)
+CAPACITY_MOCK_STAGE_PATH = CAPACITY_PROFILE_STAGE_ROOT / "b1-s1-g1-mock.json"
+CAPACITY_PROFILE_STAGE_SCHEMA = PurePosixPath(
+    "tools/issue-discovery/schemas/capacity-profile-stage.schema.json"
+)
 
 FROZEN_G1_SCENARIO_IDS = (
     "b1-s1-g1",
@@ -91,6 +98,7 @@ _UNRESOLVED_MARKERS = (
     "todo",
 )
 _PROFILE_VALIDATION_TOKEN = object()
+_PROFILE_STAGE_VALIDATION_TOKEN = object()
 
 
 class CapacityValidationError(RuntimeError):
@@ -133,6 +141,30 @@ class ValidatedProfileRegistry:
         value = json.loads(self._canonical_bytes.decode("utf-8"))
         if not isinstance(value, dict):
             raise CapacityValidationError("validated profile snapshot is not an object")
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedProfileStage:
+    """One Git-pinned profile-stage authority and its pinned scenario."""
+
+    stage_id: str
+    scm_ref: str
+    relative_path: str
+    canonical_sha256: str
+    registry_sha256: str | None
+    repo_root: Path
+    scenario: PinnedScenario | None
+    _canonical_bytes: bytes = field(repr=False)
+    _validation_token: object = field(repr=False, compare=False)
+
+    @property
+    def stage(self) -> dict[str, Any]:
+        value = json.loads(self._canonical_bytes.decode("utf-8"))
+        if not isinstance(value, dict):
+            raise CapacityValidationError(
+                "validated profile-stage snapshot is not an object"
+            )
         return value
 
 
@@ -1266,6 +1298,183 @@ def resolve_pinned_profile_registry(
                 "declared profile SHA-256 does not match the canonical registry"
             )
     return authority
+
+
+def profile_stage_sha256(stage: dict[str, Any]) -> str:
+    """Return the canonical SHA-256 of one closed profile-stage record."""
+    return canonical_sha256(stage)
+
+
+def resolve_pinned_profile_stage(
+    repo_root: Path,
+    scm_ref: str,
+    stage_id: str,
+    *,
+    expected_sha256: str | None = None,
+) -> ValidatedProfileStage:
+    """Resolve one real-registry or standalone mock stage from exact Git bytes."""
+    root = _validate_repo_root(repo_root)
+    if not _COMMIT_RE.fullmatch(scm_ref):
+        raise CapacityValidationError(
+            "SCM ref must be an exact lowercase 40-character commit"
+        )
+    object_type = _run_git(root, "cat-file", "-t", scm_ref).decode("ascii").strip()
+    if object_type != "commit":
+        raise CapacityValidationError("SCM ref must identify a Git commit")
+    if not isinstance(stage_id, str) or not re.fullmatch(
+        r"[a-z0-9][a-z0-9-]*",
+        stage_id,
+    ):
+        raise CapacityValidationError("profile-stage ID is invalid")
+
+    registry_sha256: str | None
+    scenario: PinnedScenario | None
+    if stage_id == "b1-s1-g1-mock":
+        stage_blob = _checked_pinned_worktree_blob(
+            root,
+            scm_ref,
+            CAPACITY_MOCK_STAGE_PATH,
+        )
+        schema_blob = _checked_pinned_worktree_blob(
+            root,
+            scm_ref,
+            CAPACITY_PROFILE_STAGE_SCHEMA,
+        )
+        stage = _strict_json_object(
+            stage_blob,
+            source=f"{scm_ref}:{CAPACITY_MOCK_STAGE_PATH.as_posix()}",
+        )
+        schema = _strict_json_object(
+            schema_blob,
+            source=f"{scm_ref}:{CAPACITY_PROFILE_STAGE_SCHEMA.as_posix()}",
+        )
+        errors = _validation_errors(stage, schema)
+        if stage.get("stage_id") != stage_id:
+            errors.append("standalone profile-stage identity does not match its path")
+        binding = stage.get("scenario_binding")
+        if not isinstance(binding, dict):
+            errors.append("standalone mock stage must bind one scenario")
+            scenario = None
+        else:
+            try:
+                scenario = resolve_pinned_scenario(
+                    root,
+                    scm_ref,
+                    binding.get("scenario_path"),
+                    expected_sha256=binding.get("scenario_sha256"),
+                )
+            except CapacityValidationError as error:
+                errors.append(str(error))
+                scenario = None
+            else:
+                scenario_value = scenario.scenario
+                if binding.get("scenario_id") != scenario.scenario_id:
+                    errors.append(
+                        "standalone mock stage scenario identity does not match"
+                    )
+                for key in ("actor_counts", "load_counts"):
+                    if stage.get(key) != scenario_value.get(key):
+                        errors.append(
+                            f"standalone mock stage {key} does not match its scenario"
+                        )
+                physical = scenario_value.get("physical_capacity")
+                if (
+                    not isinstance(physical, dict)
+                    or stage.get("independently_assignable_gpus")
+                    != physical.get("independently_assignable_gpus")
+                ):
+                    errors.append(
+                        "standalone mock stage GPU authority does not match its scenario"
+                    )
+                if stage.get("retry_budget") != scenario_value.get("retry_budget"):
+                    errors.append(
+                        "standalone mock stage retry authority does not match its scenario"
+                    )
+        if errors:
+            raise CapacityValidationError(
+                "profile-stage validation failed:\n- " + "\n- ".join(errors)
+            )
+        relative_path = CAPACITY_MOCK_STAGE_PATH.as_posix()
+        registry_sha256 = None
+    else:
+        registry = resolve_pinned_profile_registry(root, scm_ref)
+        matches = [
+            item
+            for item in registry.registry["stages"]
+            if item.get("stage_id") == stage_id
+        ]
+        if len(matches) != 1:
+            raise CapacityValidationError(
+                "profile-stage must resolve exactly once in the pinned G1 registry"
+            )
+        stage = matches[0]
+        binding = stage.get("scenario_binding")
+        if binding is None:
+            scenario = None
+        elif isinstance(binding, dict):
+            scenario = resolve_pinned_scenario(
+                root,
+                scm_ref,
+                binding["scenario_path"],
+                expected_sha256=binding["scenario_sha256"],
+            )
+        else:
+            raise CapacityValidationError(
+                "pinned profile-stage has invalid scenario authority"
+            )
+        relative_path = CAPACITY_PROFILE_PATH.as_posix()
+        registry_sha256 = registry.canonical_sha256
+
+    digest = profile_stage_sha256(stage)
+    if expected_sha256 is not None:
+        if not _SHA256_RE.fullmatch(expected_sha256):
+            raise CapacityValidationError(
+                "declared profile-stage SHA-256 must be 64 lowercase "
+                "hexadecimal characters"
+            )
+        if digest != expected_sha256:
+            raise CapacityValidationError(
+                "declared profile-stage SHA-256 does not match pinned authority"
+            )
+    return ValidatedProfileStage(
+        stage_id=stage_id,
+        scm_ref=scm_ref,
+        relative_path=relative_path,
+        canonical_sha256=digest,
+        registry_sha256=registry_sha256,
+        repo_root=root,
+        scenario=scenario,
+        _canonical_bytes=canonical_json_bytes(stage),
+        _validation_token=_PROFILE_STAGE_VALIDATION_TOKEN,
+    )
+
+
+def require_pinned_profile_stage(
+    authority: ValidatedProfileStage,
+) -> dict[str, Any]:
+    """Revalidate an immutable profile-stage authority at its exact SCM ref."""
+    if (
+        not isinstance(authority, ValidatedProfileStage)
+        or authority._validation_token is not _PROFILE_STAGE_VALIDATION_TOKEN
+    ):
+        raise CapacityValidationError(
+            "profile-stage operations require validated Git-pinned authority"
+        )
+    reproduced = resolve_pinned_profile_stage(
+        authority.repo_root,
+        authority.scm_ref,
+        authority.stage_id,
+        expected_sha256=authority.canonical_sha256,
+    )
+    if (
+        reproduced.relative_path != authority.relative_path
+        or reproduced.registry_sha256 != authority.registry_sha256
+        or reproduced.scenario != authority.scenario
+    ):
+        raise CapacityValidationError(
+            "profile-stage authority changed after validation"
+        )
+    return authority.stage
 
 
 def _require_validated_profile(

@@ -157,6 +157,18 @@
           },
           "actor_trigger": {
             "const": "agent-triggered"
+          },
+          "expected_outcomes": {
+            "type": "null"
+          },
+          "admission": {
+            "const": {
+              "all_of": [
+                "capture-only-boundary",
+                "empty-live-resource-ledger"
+              ],
+              "any_of": []
+            }
           }
         }
       }
@@ -371,7 +383,9 @@
         "b2-s2-stage-complete",
         "b4-s2-stage-passed",
         "b4-s4-stage-failed",
-        "four-seller-admission-unavailable"
+        "four-seller-admission-unavailable",
+        "capture-only-boundary",
+        "empty-live-resource-ledger"
       ]
     },
     "admission": {

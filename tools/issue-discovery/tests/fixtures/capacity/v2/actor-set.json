@@ -1,0 +1,130 @@
+{
+  "schema_version": 2,
+  "actor_set_id": "b1-s1-g1-actor-set-1",
+  "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scenario_id": "b1-s1-g1",
+  "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "profile_stage_id": "b1-s1-g1-qualification",
+  "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "execution_boundary": "real-qualification",
+  "actor_trigger": "agent-triggered",
+  "release_id": "release-1",
+  "concurrency_policy_id": "b1-s1-g1-concurrency-1",
+  "concurrency_policy_sha256": "3434343434343434343434343434343434343434343434343434343434343434",
+  "clock_evidence_binding": {
+    "method": "hmac-sha256-v1",
+    "domain": "scm.capacity.native-evidence.v1",
+    "value": "4949494949494949494949494949494949494949494949494949494949494949"
+  },
+  "release_observed_at": "2026-07-30T10:00:00Z",
+  "actors": [
+    {
+      "role": "observer",
+      "actor_slot": "observer-1",
+      "plan_sha256": "2424242424242424242424242424242424242424242424242424242424242424",
+      "receipt_sha256": "5050505050505050505050505050505050505050505050505050505050505050",
+      "started_offset_ns": -1500000000,
+      "completed_offset_ns": 900000000
+    },
+    {
+      "role": "buyer",
+      "actor_slot": "buyer-1",
+      "plan_sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+      "receipt_sha256": "5151515151515151515151515151515151515151515151515151515151515151",
+      "started_offset_ns": -1400000000,
+      "completed_offset_ns": 800000000
+    },
+    {
+      "role": "seller",
+      "actor_slot": "seller-1",
+      "plan_sha256": "1414141414141414141414141414141414141414141414141414141414141414",
+      "receipt_sha256": "5252525252525252525252525252525252525252525252525252525252525252",
+      "started_offset_ns": -1300000000,
+      "completed_offset_ns": 700000000
+    },
+    {
+      "role": "host-operator",
+      "actor_slot": "host-operator-1",
+      "plan_sha256": "2020202020202020202020202020202020202020202020202020202020202020",
+      "receipt_sha256": "5353535353535353535353535353535353535353535353535353535353535353",
+      "started_offset_ns": -1200000000,
+      "completed_offset_ns": 1000000000
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "seller-service-start-1",
+      "action_kind": "seller-service-start",
+      "actor_slot": "seller-1",
+      "action_sha256": "5454545454545454545454545454545454545454545454545454545454545454",
+      "action_result_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "invoked_offset_ns": -800000000,
+      "terminal_offset_ns": -550000000
+    },
+    {
+      "action_id": "seller-publication-1",
+      "action_kind": "seller-listing-publication",
+      "actor_slot": "seller-1",
+      "action_sha256": "5656565656565656565656565656565656565656565656565656565656565656",
+      "action_result_sha256": "5757575757575757575757575757575757575757575757575757575757575757",
+      "invoked_offset_ns": -400000000,
+      "terminal_offset_ns": -100000000
+    },
+    {
+      "action_id": "buyer-request-1",
+      "action_kind": "buyer-request",
+      "actor_slot": "buyer-1",
+      "action_sha256": "4343434343434343434343434343434343434343434343434343434343434343",
+      "action_result_sha256": "5858585858585858585858585858585858585858585858585858585858585858",
+      "invoked_offset_ns": 0,
+      "terminal_offset_ns": 300000000
+    }
+  ],
+  "runtime_service_bindings": [
+    {
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1",
+      "runtime_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "3737373737373737373737373737373737373737373737373737373737373737"
+      }
+    }
+  ],
+  "runtime_listing_bindings": [
+    {
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1",
+      "runtime_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.runtime-binding.v1",
+        "value": "4040404040404040404040404040404040404040404040404040404040404040"
+      }
+    }
+  ],
+  "invocation_windows": [
+    {
+      "action_kind": "seller-service-start",
+      "opened_offset_ns": -900000000,
+      "closed_offset_ns": -600000000,
+      "max_emission_skew_ns": 100000000
+    },
+    {
+      "action_kind": "seller-listing-publication",
+      "opened_offset_ns": -500000000,
+      "closed_offset_ns": -200000000,
+      "max_emission_skew_ns": 100000000
+    },
+    {
+      "action_kind": "buyer-request",
+      "opened_offset_ns": 0,
+      "closed_offset_ns": 300000000,
+      "max_emission_skew_ns": 100000000
+    }
+  ],
+  "controller_observation": {
+    "role_receipts_authored": false,
+    "local_queue_detected": false,
+    "throttle_detected": false
+  }
+}

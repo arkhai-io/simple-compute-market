@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-oracle-authority-v2.json",
+  "title": "SCM independent capacity-oracle authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "oracle_authority_id",
+    "scm_ref",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "execution_boundary",
+    "actor_trigger",
+    "oracle_kind",
+    "result_schema",
+    "observer_plan_sha256",
+    "real_oracle_allowed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "oracle_authority_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "scm_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "profile_stage_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "execution_boundary": {
+      "enum": [
+        "mock",
+        "real-qualification",
+        "real-measured"
+      ]
+    },
+    "actor_trigger": {
+      "const": "agent-triggered"
+    },
+    "oracle_kind": {
+      "enum": [
+        "capture-only",
+        "independent-vm-capacity"
+      ]
+    },
+    "result_schema": {
+      "$ref": "#/$defs/tracked_content"
+    },
+    "observer_plan_sha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "real_oracle_allowed": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "execution_boundary": {
+            "const": "mock"
+          }
+        },
+        "required": [
+          "execution_boundary"
+        ]
+      },
+      "then": {
+        "properties": {
+          "oracle_kind": {
+            "const": "capture-only"
+          },
+          "real_oracle_allowed": {
+            "const": false
+          },
+          "observer_plan_sha256": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "oracle_kind": {
+            "const": "independent-vm-capacity"
+          },
+          "real_oracle_allowed": {
+            "const": true
+          },
+          "observer_plan_sha256": {
+            "$ref": "#/$defs/digest"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "tracked_content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

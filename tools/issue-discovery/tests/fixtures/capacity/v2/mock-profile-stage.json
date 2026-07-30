@@ -1,0 +1,32 @@
+{
+  "stage_id": "b1-s1-g1-mock",
+  "stage_class": "mock",
+  "scenario_binding": {
+    "scenario_id": "b1-s1-g1",
+    "scenario_path": "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71"
+  },
+  "execution_boundary": "mock",
+  "actor_trigger": "agent-triggered",
+  "optional": false,
+  "actor_counts": {
+    "observers": 1,
+    "buyers": 1,
+    "sellers": 1,
+    "host_operators": 1
+  },
+  "load_counts": {
+    "selected_listings": 1,
+    "requests": 1
+  },
+  "independently_assignable_gpus": 1,
+  "expected_outcomes": null,
+  "retry_budget": 0,
+  "admission": {
+    "all_of": [
+      "capture-only-boundary",
+      "empty-live-resource-ledger"
+    ],
+    "any_of": []
+  }
+}

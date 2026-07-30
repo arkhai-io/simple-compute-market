@@ -1,0 +1,187 @@
+[
+  {
+    "schema_version": 2,
+    "receipt_id": "buyer-1-receipt",
+    "plan_id": "buyer-1-plan",
+    "plan_sha256": "3351bea03d4baa598c81081236f24868594deae9d910beca83e7b1e68f6b4692",
+    "role": "buyer",
+    "actor_slot": "buyer-1",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "instruction": {
+      "path": "docs/buyer-quickstart.md",
+      "sha256": "19ea3ce90ee63d70a14a89c6af5f8f240754757355e6c7c099c776eca47ff141"
+    },
+    "isolated_identity_fingerprint": "4d4e21620aba6d004d588b49346cc56401b994b589637ac26ac7a6fdcf044670",
+    "prepared_authority_sha256": "ba36f8da18a9bac7b18ec8ea159f788f237ba07bc563c487d6c5bfc99c1dedd0",
+    "run_authority": {
+      "release_id": "mock-release",
+      "concurrency_policy_id": null,
+      "concurrency_policy_sha256": null
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "3b2ef23fecb64bae291718be92cddfdc2cbcbb4bf32a7ef261a43e93559cebce"
+      },
+      "actor_liveness_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "e975215ef988e3acab3e57ed8e5621440cf8016133128fecfbbabede63822be9"
+      }
+    },
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00.100000Z",
+      "prepared_at": "2026-07-30T10:00:01.000000Z",
+      "barrier_observed_at": "2026-07-30T10:00:05.000000Z",
+      "completed_at": "2026-07-30T10:00:09.000000Z"
+    },
+    "barrier": {
+      "barrier_kind": "release",
+      "barrier_id": "mock-release",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "install-build",
+        "status": "passed",
+        "evidence_sha256": "b7ae14939f2eb2bfd67ea887970ac18eb2212e70dedcc96018db0a783975ddb8"
+      },
+      {
+        "step_id": "wallet-preparation",
+        "status": "passed",
+        "evidence_sha256": "242207026e04250ff6a6df1eb8a7c1df52ef3201d5c4841cd37c101364b3ddd5"
+      },
+      {
+        "step_id": "ssh-preparation",
+        "status": "passed",
+        "evidence_sha256": "e50bdd7f18f5e27ad678bd9a54d307411317031835d73df788577ec5c90dad44"
+      },
+      {
+        "step_id": "endpoint-check",
+        "status": "passed",
+        "evidence_sha256": "562daacaf5d92bb6f7c1468b2092da6585fa43a5efcf980a64c01cfa0bc37853"
+      },
+      {
+        "step_id": "balance-check",
+        "status": "passed",
+        "evidence_sha256": "5cad6172e3bac75ecab23869286798a885792dc73e9aea2346515c6251afd613"
+      },
+      {
+        "step_id": "listing-discovery",
+        "status": "passed",
+        "evidence_sha256": "620713c9df76d28e5ec1d6500f4ecdb5c52135762c8372e5c543322090bc6326"
+      },
+      {
+        "step_id": "request-preparation",
+        "status": "passed",
+        "evidence_sha256": "abd1b218bd52888e3491afae7ceddceae4a84d60776a41d16e30b7494f863394"
+      }
+    ],
+    "role_evidence": {
+      "kind": "buyer",
+      "action_result_sha256": "3a784bc5ea429361b03ebaf53464ab8ad657ff684acac956e2c829bb77fd0784",
+      "guest_verification": null
+    }
+  },
+  {
+    "schema_version": 2,
+    "receipt_id": "seller-1-receipt",
+    "plan_id": "seller-1-plan",
+    "plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "role": "seller",
+    "actor_slot": "seller-1",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "instruction": {
+      "path": "docs/seller-quickstart.md",
+      "sha256": "12b62545d6e054aa6182ba0128fdd345476f3991934f6da73d9590bfbc34950d"
+    },
+    "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
+    "prepared_authority_sha256": "c32140b86091f828f6e89b37091e227c41859f83c7d31de847b540c518111fc3",
+    "run_authority": {
+      "release_id": "mock-release",
+      "concurrency_policy_id": null,
+      "concurrency_policy_sha256": null
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
+      },
+      "actor_liveness_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "e168e428700a6f9a22144f46d9f9c18c13965cdb400e03310f4a23940ef94e9d"
+      }
+    },
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00.100000Z",
+      "prepared_at": "2026-07-30T10:00:01.000000Z",
+      "barrier_observed_at": "2026-07-30T10:00:08.000000Z",
+      "completed_at": "2026-07-30T10:00:09.000000Z"
+    },
+    "barrier": {
+      "barrier_kind": "observation",
+      "barrier_id": "b1-s1-g1-mock-observation",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "install-build",
+        "status": "passed",
+        "evidence_sha256": "b7ae14939f2eb2bfd67ea887970ac18eb2212e70dedcc96018db0a783975ddb8"
+      },
+      {
+        "step_id": "configuration",
+        "status": "passed",
+        "evidence_sha256": "6b0180f0c5507f3bf95f8c735ddbfca87db70f9fd3ea602d8157569b89fa357f"
+      },
+      {
+        "step_id": "wallet-preparation",
+        "status": "passed",
+        "evidence_sha256": "242207026e04250ff6a6df1eb8a7c1df52ef3201d5c4841cd37c101364b3ddd5"
+      },
+      {
+        "step_id": "publication-preparation",
+        "status": "passed",
+        "evidence_sha256": "135771681b013e5d912e879809ff88bea463aaa5704e77c1ab413e70654b8d97"
+      },
+      {
+        "step_id": "service-start",
+        "status": "passed",
+        "evidence_sha256": "2a3ebe5ea4b35895808a25d289a21cd356a85ecdd73951c8743c879411fde687"
+      },
+      {
+        "step_id": "listing-publication",
+        "status": "passed",
+        "evidence_sha256": "227985af123bd42c8e02df03d2756f04c33501a01b279bf1de4eef54a9ec5ed8"
+      },
+      {
+        "step_id": "observation-liveness",
+        "status": "passed",
+        "evidence_sha256": "0e32acd64d7ee4a210f60ac06f9e7968d319a3a5fd70c49bfe175c8ad24fe790"
+      }
+    ],
+    "role_evidence": {
+      "kind": "seller",
+      "service_start_result_sha256": "3f374f779cba51f84dbf9ae6fcb1f4efc80ffe23bfa48ad9e84b1f02e9a4e013",
+      "publication_result_sha256s": [
+        "cccd2adcba5e9710fe20d9eff85205889000d94cc0304359508b01b709114a48"
+      ],
+      "alive_through_observation": true
+    }
+  }
+]

@@ -1,0 +1,81 @@
+{
+  "schema_version": 2,
+  "policy_id": "b1-s1-g1-concurrency-1",
+  "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scenario_id": "b1-s1-g1",
+  "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "profile_stage_id": "b1-s1-g1-qualification",
+  "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "release_id": "release-1",
+  "frozen_at": "2026-07-30T09:59:59Z",
+  "actor_slots": [
+    "observer-1",
+    "buyer-1",
+    "seller-1",
+    "host-operator-1"
+  ],
+  "action_ids": [
+    "seller-service-start-1",
+    "seller-publication-1",
+    "buyer-request-1"
+  ],
+  "role_plan_authorities": [
+    {
+      "plan_id": "observer-plan-1",
+      "plan_sha256": "2424242424242424242424242424242424242424242424242424242424242424"
+    },
+    {
+      "plan_id": "buyer-plan-1",
+      "plan_sha256": "0101010101010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "plan_id": "seller-plan-1",
+      "plan_sha256": "1414141414141414141414141414141414141414141414141414141414141414"
+    },
+    {
+      "plan_id": "host-plan-1",
+      "plan_sha256": "2020202020202020202020202020202020202020202020202020202020202020"
+    }
+  ],
+  "prepared_action_authorities": [
+    {
+      "action_id": "seller-service-start-1",
+      "prepared_action_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "action_id": "seller-publication-1",
+      "prepared_action_sha256": "6767676767676767676767676767676767676767676767676767676767676767"
+    },
+    {
+      "action_id": "buyer-request-1",
+      "prepared_action_sha256": "6565656565656565656565656565656565656565656565656565656565656565"
+    }
+  ],
+  "clock_evidence_binding": {
+    "method": "hmac-sha256-v1",
+    "domain": "scm.capacity.native-evidence.v1",
+    "value": "4949494949494949494949494949494949494949494949494949494949494949"
+  },
+  "invocation_windows": [
+    {
+      "action_kind": "seller-service-start",
+      "opened_offset_ns": -900000000,
+      "closed_offset_ns": -600000000,
+      "max_emission_skew_ns": 100000000
+    },
+    {
+      "action_kind": "seller-listing-publication",
+      "opened_offset_ns": -500000000,
+      "closed_offset_ns": -200000000,
+      "max_emission_skew_ns": 100000000
+    },
+    {
+      "action_kind": "buyer-request",
+      "opened_offset_ns": 0,
+      "closed_offset_ns": 300000000,
+      "max_emission_skew_ns": 100000000
+    }
+  ],
+  "deny_local_queue": true,
+  "deny_controller_throttle": true
+}

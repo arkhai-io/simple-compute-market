@@ -7,8 +7,11 @@
   "required": [
     "schema_version", "action_id", "action_kind", "scm_ref", "scenario_id",
     "scenario_sha256", "profile_stage_id", "profile_stage_sha256",
-    "actor_slot", "logical_selection", "runtime_binding", "payload_sha256",
-    "wrapper", "release_id", "attempt", "expected_result"
+    "actor_slot", "role_plan_id", "role_plan_sha256",
+    "isolated_identity_fingerprint", "actor_invocation_capability_binding",
+    "prepared_action_sha256", "logical_selection", "runtime_binding",
+    "concrete_payload_binding", "payload_sha256", "wrapper", "release_id", "concurrency_policy_id",
+    "concurrency_policy_sha256", "attempt", "expected_result"
   ],
   "properties": {
     "schema_version": {"const": 2},
@@ -20,6 +23,11 @@
     "profile_stage_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
     "profile_stage_sha256": {"$ref": "#/$defs/digest"},
     "actor_slot": {"type": "string", "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"},
+    "role_plan_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+    "role_plan_sha256": {"$ref": "#/$defs/digest"},
+    "isolated_identity_fingerprint": {"$ref": "#/$defs/digest"},
+    "actor_invocation_capability_binding": {"$ref": "#/$defs/actor_invocation_binding"},
+    "prepared_action_sha256": {"$ref": "#/$defs/digest"},
     "logical_selection": {
       "oneOf": [
         {"$ref": "#/$defs/buyer_selection"},
@@ -28,16 +36,39 @@
       ]
     },
     "runtime_binding": {"$ref": "#/$defs/runtime_binding"},
+    "concrete_payload_binding": {"$ref": "#/$defs/concrete_payload_binding"},
     "payload_sha256": {"$ref": "#/$defs/digest"},
     "wrapper": {"$ref": "#/$defs/tracked_content"},
     "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+    "concurrency_policy_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"}
+      ]
+    },
+    "concurrency_policy_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/digest"}
+      ]
+    },
     "attempt": {"const": 1},
     "expected_result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "independent_oracle_authority_sha256"],
+      "required": [
+        "schema_version",
+        "action_result_schema",
+        "oracle_authority_id",
+        "independent_oracle_authority_sha256"
+      ],
       "properties": {
         "schema_version": {"const": 2},
+        "action_result_schema": {"$ref": "#/$defs/tracked_content"},
+        "oracle_authority_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+        },
         "independent_oracle_authority_sha256": {"$ref": "#/$defs/digest"}
       }
     }
@@ -89,6 +120,26 @@
       "properties": {
         "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
         "domain": {"const": "scm.capacity.runtime-binding.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "actor_invocation_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.actor-invocation.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "concrete_payload_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.concrete-payload.v1"},
         "value": {"$ref": "#/$defs/digest"}
       }
     },

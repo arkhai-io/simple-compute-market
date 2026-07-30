@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-concurrency-policy-v2.json",
+  "title": "SCM pre-release capacity concurrency policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "scm_ref",
+    "scenario_id",
+    "scenario_sha256",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "release_id",
+    "frozen_at",
+    "actor_slots",
+    "action_ids",
+    "role_plan_authorities",
+    "prepared_action_authorities",
+    "clock_evidence_binding",
+    "invocation_windows",
+    "deny_local_queue",
+    "deny_controller_throttle"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "policy_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "scm_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/scenario_id"
+    },
+    "scenario_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "profile_stage_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "frozen_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "actor_slots": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?:buyer|seller|host-operator|observer)-[1-9][0-9]*$"
+      }
+    },
+    "action_ids": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+      }
+    },
+    "role_plan_authorities": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/role_plan_authority"}
+    },
+    "prepared_action_authorities": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/prepared_action_authority"}
+    },
+    "clock_evidence_binding": {
+      "$ref": "#/$defs/native_evidence_binding"
+    },
+    "invocation_windows": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/invocation_window"
+      }
+    },
+    "deny_local_queue": {
+      "const": true
+    },
+    "deny_controller_throttle": {
+      "const": true
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1"
+      ]
+    },
+    "native_evidence_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "domain",
+        "value"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "hmac-sha256-v1",
+            "opaque-random-v1"
+          ]
+        },
+        "domain": {
+          "const": "scm.capacity.native-evidence.v1"
+        },
+        "value": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "role_plan_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_id", "plan_sha256"],
+      "properties": {
+        "plan_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "plan_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "prepared_action_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "prepared_action_sha256"],
+      "properties": {
+        "action_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "prepared_action_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "invocation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_kind",
+        "opened_offset_ns",
+        "closed_offset_ns",
+        "max_emission_skew_ns"
+      ],
+      "properties": {
+        "action_kind": {
+          "enum": [
+            "buyer-request",
+            "seller-service-start",
+            "seller-listing-publication"
+          ]
+        },
+        "opened_offset_ns": {
+          "type": "integer"
+        },
+        "closed_offset_ns": {
+          "type": "integer"
+        },
+        "max_emission_skew_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000000000
+        }
+      }
+    }
+  }
+}

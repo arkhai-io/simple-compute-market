@@ -3,16 +3,39 @@
     "schema_version": 2,
     "receipt_id": "buyer-receipt-1",
     "plan_id": "buyer-plan-1",
-    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "plan_sha256": "0101010101010101010101010101010101010101010101010101010101010101",
     "role": "buyer",
     "actor_slot": "buyer-1",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "docs/quickstart/buyer.md",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "path": "docs/buyer-quickstart.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "isolated_identity_fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+    "prepared_authority_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "run_authority": {
+      "release_id": "release-1",
+      "concurrency_policy_id": "b1-s1-g1-concurrency-1",
+      "concurrency_policy_sha256": "3434343434343434343434343434343434343434343434343434343434343434"
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "6060606060606060606060606060606060606060606060606060606060606060"
+      },
+      "actor_liveness_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "0606060606060606060606060606060606060606060606060606060606060606"
+      }
+    },
     "lifecycle": {
       "started_at": "2026-07-30T10:00:00Z",
       "prepared_at": "2026-07-30T10:00:01Z",
@@ -28,19 +51,29 @@
       {
         "step_id": "request-preparation",
         "status": "passed",
-        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "evidence_sha256": "0707070707070707070707070707070707070707070707070707070707070707"
+      },
+      {
+        "step_id": "guest-ssh-resume",
+        "status": "passed",
+        "evidence_sha256": "0808080808080808080808080808080808080808080808080808080808080808"
+      },
+      {
+        "step_id": "cuda-vector-add",
+        "status": "passed",
+        "evidence_sha256": "0909090909090909090909090909090909090909090909090909090909090909"
       }
     ],
     "role_evidence": {
       "kind": "buyer",
-      "action_result_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "action_result_sha256": "1010101010101010101010101010101010101010101010101010101010101010",
       "guest_verification": {
         "fulfillment_id": "fulfillment-1",
         "ssh_resumed": true,
         "visible_gpus": 1,
-        "workload_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "workload_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
         "success_marker": "SCM_CUDA_VECTOR_ADD_OK",
-        "result_checksum": "2222222222222222222222222222222222222222222222222222222222222222"
+        "result_checksum": "1313131313131313131313131313131313131313131313131313131313131313"
       }
     }
   },
@@ -48,21 +81,44 @@
     "schema_version": 2,
     "receipt_id": "seller-receipt-1",
     "plan_id": "seller-plan-1",
-    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "plan_sha256": "1414141414141414141414141414141414141414141414141414141414141414",
     "role": "seller",
     "actor_slot": "seller-1",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "docs/quickstart/seller.md",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "path": "docs/seller-quickstart.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "isolated_identity_fingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
+    "prepared_authority_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+    "run_authority": {
+      "release_id": "release-1",
+      "concurrency_policy_id": "b1-s1-g1-concurrency-1",
+      "concurrency_policy_sha256": "3434343434343434343434343434343434343434343434343434343434343434"
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "6161616161616161616161616161616161616161616161616161616161616161"
+      },
+      "actor_liveness_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "1515151515151515151515151515151515151515151515151515151515151515"
+      }
+    },
     "lifecycle": {
       "started_at": "2026-07-30T10:00:00Z",
       "prepared_at": "2026-07-30T10:00:01Z",
-      "barrier_observed_at": "2026-07-30T10:00:02Z",
-      "completed_at": "2026-07-30T10:00:03Z"
+      "barrier_observed_at": "2026-07-30T10:00:04Z",
+      "completed_at": "2026-07-30T10:00:05Z"
     },
     "barrier": {
       "barrier_kind": "observation",
@@ -71,16 +127,21 @@
     },
     "step_outcomes": [
       {
+        "step_id": "service-start",
+        "status": "passed",
+        "evidence_sha256": "1616161616161616161616161616161616161616161616161616161616161616"
+      },
+      {
         "step_id": "listing-publication",
         "status": "passed",
-        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "evidence_sha256": "1717171717171717171717171717171717171717171717171717171717171717"
       }
     ],
     "role_evidence": {
       "kind": "seller",
-      "service_start_result_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "service_start_result_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
       "publication_result_sha256s": [
-        "1111111111111111111111111111111111111111111111111111111111111111"
+        "1919191919191919191919191919191919191919191919191919191919191919"
       ],
       "alive_through_observation": true
     }
@@ -89,21 +150,44 @@
     "schema_version": 2,
     "receipt_id": "host-receipt-1",
     "plan_id": "host-plan-1",
-    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "plan_sha256": "2020202020202020202020202020202020202020202020202020202020202020",
     "role": "host-operator",
     "actor_slot": "host-operator-1",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "tools/issue-discovery/instructions/host-operator.md",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "path": "tools/issue-discovery/instructions/capacity/host-operator.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "isolated_identity_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "prepared_authority_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "run_authority": {
+      "release_id": "release-1",
+      "concurrency_policy_id": "b1-s1-g1-concurrency-1",
+      "concurrency_policy_sha256": "3434343434343434343434343434343434343434343434343434343434343434"
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "6262626262626262626262626262626262626262626262626262626262626262"
+      },
+      "actor_liveness_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "2121212121212121212121212121212121212121212121212121212121212121"
+      }
+    },
     "lifecycle": {
       "started_at": "2026-07-30T10:00:00Z",
       "prepared_at": "2026-07-30T10:00:01Z",
-      "barrier_observed_at": "2026-07-30T10:00:02Z",
-      "completed_at": "2026-07-30T10:00:03Z"
+      "barrier_observed_at": "2026-07-30T10:00:06Z",
+      "completed_at": "2026-07-30T10:00:07Z"
     },
     "barrier": {
       "barrier_kind": "cleanup",
@@ -114,7 +198,7 @@
       {
         "step_id": "baseline-equivalence",
         "status": "passed",
-        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "evidence_sha256": "2323232323232323232323232323232323232323232323232323232323232323"
       }
     ],
     "role_evidence": {
@@ -122,17 +206,17 @@
       "topology_authority_binding": {
         "method": "hmac-sha256-v1",
         "domain": "scm.capacity.topology-authority.v1",
-        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       },
       "reversible_baseline_binding": {
         "method": "opaque-random-v1",
         "domain": "scm.capacity.reversible-baseline.v1",
-        "value": "1111111111111111111111111111111111111111111111111111111111111111"
+        "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       },
       "baseline_equivalence_binding": {
         "method": "opaque-random-v1",
         "domain": "scm.capacity.baseline-equivalence.v1",
-        "value": "2222222222222222222222222222222222222222222222222222222222222222"
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "kvm_ansible_ready": true,
       "cleanup_complete": true
@@ -142,21 +226,44 @@
     "schema_version": 2,
     "receipt_id": "observer-receipt-1",
     "plan_id": "observer-plan-1",
-    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "plan_sha256": "2424242424242424242424242424242424242424242424242424242424242424",
     "role": "observer",
     "actor_slot": "observer-1",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "tools/issue-discovery/instructions/observer.md",
-      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      "path": "tools/issue-discovery/instructions/capacity/observer.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "isolated_identity_fingerprint": "dededededededededededededededededededededededededededededededede",
+    "prepared_authority_sha256": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+    "run_authority": {
+      "release_id": "release-1",
+      "concurrency_policy_id": "b1-s1-g1-concurrency-1",
+      "concurrency_policy_sha256": "3434343434343434343434343434343434343434343434343434343434343434"
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "6363636363636363636363636363636363636363636363636363636363636363"
+      },
+      "actor_liveness_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "2525252525252525252525252525252525252525252525252525252525252525"
+      }
+    },
     "lifecycle": {
       "started_at": "2026-07-30T10:00:00Z",
       "prepared_at": "2026-07-30T10:00:01Z",
-      "barrier_observed_at": "2026-07-30T10:00:02Z",
-      "completed_at": "2026-07-30T10:00:03Z"
+      "barrier_observed_at": "2026-07-30T10:00:06Z",
+      "completed_at": "2026-07-30T10:00:07Z"
     },
     "barrier": {
       "barrier_kind": "observation",
@@ -167,17 +274,90 @@
       {
         "step_id": "independent-observation",
         "status": "passed",
-        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "evidence_sha256": "2626262626262626262626262626262626262626262626262626262626262626"
       }
     ],
     "role_evidence": {
       "kind": "observer",
       "independent_source": true,
+      "controller_source": false,
+      "release_observed": true,
+      "terminal_observed": true,
       "native_evidence_bindings": [
         {
           "method": "hmac-sha256-v1",
           "domain": "scm.capacity.native-evidence.v1",
-          "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          "value": "3434343434343434343434343434343434343434343434343434343434343434"
+        }
+      ]
+    }
+  },
+  {
+    "schema_version": 2,
+    "receipt_id": "observer-probe-receipt-1",
+    "plan_id": "observer-probe-plan-1",
+    "plan_sha256": "2727272727272727272727272727272727272727272727272727272727272727",
+    "role": "observer",
+    "actor_slot": "observer-1",
+    "profile_stage_id": "observer-probe",
+    "profile_stage_sha256": "5656565656565656565656565656565656565656565656565656565656565656",
+    "scenario_id": null,
+    "scenario_sha256": null,
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "tools/issue-discovery/instructions/capacity/observer.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "isolated_identity_fingerprint": "7878787878787878787878787878787878787878787878787878787878787878",
+    "prepared_authority_sha256": "9090909090909090909090909090909090909090909090909090909090909090",
+    "run_authority": {
+      "release_id": "observer-probe",
+      "concurrency_policy_id": null,
+      "concurrency_policy_sha256": null
+    },
+    "provenance": {
+      "producer": "actor-process",
+      "controller_authored": false,
+      "actor_invocation_capability_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.actor-invocation.v1",
+        "value": "6464646464646464646464646464646464646464646464646464646464646464"
+      },
+      "actor_liveness_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "2828282828282828282828282828282828282828282828282828282828282828"
+      }
+    },
+    "lifecycle": {
+      "started_at": "2026-07-30T09:59:55Z",
+      "prepared_at": "2026-07-30T09:59:56Z",
+      "barrier_observed_at": "2026-07-30T09:59:57Z",
+      "completed_at": "2026-07-30T09:59:58Z"
+    },
+    "barrier": {
+      "barrier_kind": "observation",
+      "barrier_id": "observer-probe",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "independent-observation",
+        "status": "passed",
+        "evidence_sha256": "2929292929292929292929292929292929292929292929292929292929292929"
+      }
+    ],
+    "role_evidence": {
+      "kind": "observer",
+      "independent_source": true,
+      "controller_source": false,
+      "release_observed": true,
+      "terminal_observed": true,
+      "native_evidence_bindings": [
+        {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "3030303030303030303030303030303030303030303030303030303030303030"
         }
       ]
     }

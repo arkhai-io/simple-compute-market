@@ -1,0 +1,99 @@
+[
+  {
+    "schema_version": 2,
+    "plan_id": "buyer-1-plan",
+    "role": "buyer",
+    "actor_slot": "buyer-1",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "instruction": {
+      "path": "docs/buyer-quickstart.md",
+      "sha256": "19ea3ce90ee63d70a14a89c6af5f8f240754757355e6c7c099c776eca47ff141"
+    },
+    "isolated_identity_fingerprint": "4d4e21620aba6d004d588b49346cc56401b994b589637ac26ac7a6fdcf044670",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "3b2ef23fecb64bae291718be92cddfdc2cbcbb4bf32a7ef261a43e93559cebce"
+    },
+    "prepared_authority_sha256": "ba36f8da18a9bac7b18ec8ea159f788f237ba07bc563c487d6c5bfc99c1dedd0",
+    "role_plan": {
+      "kind": "buyer",
+      "request_id": "request-1",
+      "action_id": "buyer-request-1",
+      "prepared_action_sha256": "898b5233b23fac0dcb5e9e1bf88ffaa803587e8a888abbdbcca7af7e41c0787d",
+      "preparation_steps": [
+        "install-build",
+        "wallet-preparation",
+        "ssh-preparation",
+        "endpoint-check",
+        "balance-check",
+        "listing-discovery",
+        "request-preparation"
+      ],
+      "success_steps": [
+        "guest-ssh-resume",
+        "cuda-vector-add"
+      ],
+      "guest_exercise": {
+        "wrapper": {
+          "path": "tools/issue-discovery/workloads/cuda/run-vector-add.sh",
+          "sha256": "604e2fe2c06da60563e42c7937c77e3fe6143f368726a1870a1a5fa731f94c38"
+        },
+        "source": {
+          "path": "tools/issue-discovery/workloads/cuda/vector_add.cu",
+          "sha256": "5e522cde6e8b8d6a6a362b06b218dc80c9d6e5740725294619fcc3fdedd7b7d4"
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 2,
+    "plan_id": "seller-1-plan",
+    "role": "seller",
+    "actor_slot": "seller-1",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "instruction": {
+      "path": "docs/seller-quickstart.md",
+      "sha256": "12b62545d6e054aa6182ba0128fdd345476f3991934f6da73d9590bfbc34950d"
+    },
+    "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
+    },
+    "prepared_authority_sha256": "c32140b86091f828f6e89b37091e227c41859f83c7d31de847b540c518111fc3",
+    "role_plan": {
+      "kind": "seller",
+      "service_slot": "seller-service-1",
+      "listing_slots": [
+        "listing-1"
+      ],
+      "service_start_action_id": "seller-service-start-1",
+      "service_start_prepared_action_sha256": "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
+      "publication_action_ids": [
+        "seller-1-publication-1"
+      ],
+      "publication_prepared_action_sha256s": [
+        "fe32e004b9a7d83ab96adc38e190a6f601cc979ac4cc9bbdfcd151bf589b9dfc"
+      ],
+      "required_steps": [
+        "install-build",
+        "configuration",
+        "wallet-preparation",
+        "publication-preparation",
+        "service-start",
+        "listing-publication",
+        "observation-liveness"
+      ]
+    }
+  }
+]

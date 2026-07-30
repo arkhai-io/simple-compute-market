@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-actor-set-v2.json",
+  "title": "SCM substantive capacity actor-set receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "actor_set_id",
+    "scm_ref",
+    "scenario_id",
+    "scenario_sha256",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "execution_boundary",
+    "actor_trigger",
+    "release_id",
+    "concurrency_policy_id",
+    "concurrency_policy_sha256",
+    "clock_evidence_binding",
+    "release_observed_at",
+    "actors",
+    "actions",
+    "runtime_service_bindings",
+    "runtime_listing_bindings",
+    "invocation_windows",
+    "controller_observation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "actor_set_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "scm_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/scenario_id"
+    },
+    "scenario_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "profile_stage_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "execution_boundary": {
+      "enum": [
+        "real-qualification",
+        "real-measured"
+      ]
+    },
+    "actor_trigger": {
+      "const": "agent-triggered"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "concurrency_policy_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "concurrency_policy_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "clock_evidence_binding": {
+      "$ref": "#/$defs/native_evidence_binding"
+    },
+    "release_observed_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "actors": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/actor"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "runtime_service_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/runtime_service_binding"
+      }
+    },
+    "runtime_listing_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/runtime_listing_binding"
+      }
+    },
+    "invocation_windows": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/invocation_window"
+      }
+    },
+    "controller_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role_receipts_authored",
+        "local_queue_detected",
+        "throttle_detected"
+      ],
+      "properties": {
+        "role_receipts_authored": {
+          "const": false
+        },
+        "local_queue_detected": {
+          "const": false
+        },
+        "throttle_detected": {
+          "const": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1"
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "domain",
+        "value"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "hmac-sha256-v1",
+            "opaque-random-v1"
+          ]
+        },
+        "domain": {
+          "const": "scm.capacity.runtime-binding.v1"
+        },
+        "value": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "native_evidence_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "domain",
+        "value"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "hmac-sha256-v1",
+            "opaque-random-v1"
+          ]
+        },
+        "domain": {
+          "const": "scm.capacity.native-evidence.v1"
+        },
+        "value": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "actor_slot",
+        "plan_sha256",
+        "receipt_sha256",
+        "started_offset_ns",
+        "completed_offset_ns"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "buyer",
+            "seller",
+            "host-operator",
+            "observer"
+          ]
+        },
+        "actor_slot": {
+          "type": "string",
+          "pattern": "^(?:buyer|seller|host-operator|observer)-[1-9][0-9]*$"
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "receipt_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "started_offset_ns": {
+          "type": "integer",
+          "maximum": 0
+        },
+        "completed_offset_ns": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "action_kind",
+        "actor_slot",
+        "action_sha256",
+        "action_result_sha256",
+        "invoked_offset_ns",
+        "terminal_offset_ns"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+        },
+        "action_kind": {
+          "enum": [
+            "buyer-request",
+            "seller-service-start",
+            "seller-listing-publication"
+          ]
+        },
+        "actor_slot": {
+          "type": "string",
+          "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"
+        },
+        "action_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "action_result_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "invoked_offset_ns": {
+          "type": "integer"
+        },
+        "terminal_offset_ns": {
+          "type": "integer"
+        }
+      }
+    },
+    "runtime_service_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seller_slot",
+        "service_slot",
+        "runtime_binding"
+      ],
+      "properties": {
+        "seller_slot": {
+          "type": "string",
+          "pattern": "^seller-[1-9][0-9]*$"
+        },
+        "service_slot": {
+          "type": "string",
+          "pattern": "^seller-service-[1-9][0-9]*$"
+        },
+        "runtime_binding": {
+          "$ref": "#/$defs/binding"
+        }
+      }
+    },
+    "runtime_listing_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seller_slot",
+        "listing_slot",
+        "runtime_binding"
+      ],
+      "properties": {
+        "seller_slot": {
+          "type": "string",
+          "pattern": "^seller-[1-9][0-9]*$"
+        },
+        "listing_slot": {
+          "type": "string",
+          "pattern": "^listing-[1-9][0-9]*$"
+        },
+        "runtime_binding": {
+          "$ref": "#/$defs/binding"
+        }
+      }
+    },
+    "invocation_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_kind",
+        "opened_offset_ns",
+        "closed_offset_ns",
+        "max_emission_skew_ns"
+      ],
+      "properties": {
+        "action_kind": {
+          "enum": [
+            "buyer-request",
+            "seller-service-start",
+            "seller-listing-publication"
+          ]
+        },
+        "opened_offset_ns": {
+          "type": "integer"
+        },
+        "closed_offset_ns": {
+          "type": "integer"
+        },
+        "max_emission_skew_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000000000
+        }
+      }
+    }
+  }
+}

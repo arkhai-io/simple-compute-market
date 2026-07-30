@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-action-payload-v2.json",
+  "title": "SCM sanitized logical capacity-action payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "action_id",
+    "action_kind",
+    "actor_slot",
+    "logical_selection",
+    "portable_intent",
+    "operation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "action_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "action_kind": {
+      "enum": [
+        "buyer-request",
+        "seller-service-start",
+        "seller-listing-publication"
+      ]
+    },
+    "actor_slot": {
+      "type": "string",
+      "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"
+    },
+    "logical_selection": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/buyer_selection"
+        },
+        {
+          "$ref": "#/$defs/service_selection"
+        },
+        {
+          "$ref": "#/$defs/publication_selection"
+        }
+      ]
+    },
+    "portable_intent": {
+      "oneOf": [
+        {"$ref": "#/$defs/buyer_intent"},
+        {"$ref": "#/$defs/service_intent"},
+        {"$ref": "#/$defs/publication_intent"}
+      ]
+    },
+    "operation": {
+      "enum": [
+        "market-negotiate-settle",
+        "seller-service-start",
+        "seller-inventory-publish"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action_kind": {
+            "const": "buyer-request"
+          }
+        },
+        "required": [
+          "action_kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "actor_slot": {
+            "pattern": "^buyer-[1-9][0-9]*$"
+          },
+          "logical_selection": {
+            "$ref": "#/$defs/buyer_selection"
+          },
+          "portable_intent": {
+            "$ref": "#/$defs/buyer_intent"
+          },
+          "operation": {
+            "const": "market-negotiate-settle"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action_kind": {
+            "const": "seller-service-start"
+          }
+        },
+        "required": [
+          "action_kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "actor_slot": {
+            "pattern": "^seller-[1-9][0-9]*$"
+          },
+          "logical_selection": {
+            "$ref": "#/$defs/service_selection"
+          },
+          "portable_intent": {
+            "$ref": "#/$defs/service_intent"
+          },
+          "operation": {
+            "const": "seller-service-start"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action_kind": {
+            "const": "seller-listing-publication"
+          }
+        },
+        "required": [
+          "action_kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "actor_slot": {
+            "pattern": "^seller-[1-9][0-9]*$"
+          },
+          "logical_selection": {
+            "$ref": "#/$defs/publication_selection"
+          },
+          "portable_intent": {
+            "$ref": "#/$defs/publication_intent"
+          },
+          "operation": {
+            "const": "seller-inventory-publish"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "buyer_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deal_type", "gpu_count", "provisioner", "settlement_flow",
+        "guest_check"
+      ],
+      "properties": {
+        "deal_type": {"const": "vm"},
+        "gpu_count": {"const": 1},
+        "provisioner": {"const": "kvm-ansible"},
+        "settlement_flow": {"const": "negotiate-then-settle"},
+        "guest_check": {"const": "cuda-vector-add"}
+      }
+    },
+    "service_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deal_type", "service_isolation", "provisioner"],
+      "properties": {
+        "deal_type": {"const": "vm"},
+        "service_isolation": {"const": "per-seller"},
+        "provisioner": {"const": "kvm-ansible"}
+      }
+    },
+    "publication_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deal_type", "gpu_count", "inventory_cardinality", "provisioner"
+      ],
+      "properties": {
+        "deal_type": {"const": "vm"},
+        "gpu_count": {"const": 1},
+        "inventory_cardinality": {"const": 1},
+        "provisioner": {"const": "kvm-ansible"}
+      }
+    },
+    "buyer_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "request_id",
+        "seller_slot",
+        "listing_slot"
+      ],
+      "properties": {
+        "kind": {
+          "const": "buyer-request"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^request-[1-9][0-9]*$"
+        },
+        "seller_slot": {
+          "type": "string",
+          "pattern": "^seller-[1-9][0-9]*$"
+        },
+        "listing_slot": {
+          "type": "string",
+          "pattern": "^listing-[1-9][0-9]*$"
+        }
+      }
+    },
+    "service_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "seller_slot",
+        "service_slot"
+      ],
+      "properties": {
+        "kind": {
+          "const": "seller-service-start"
+        },
+        "seller_slot": {
+          "type": "string",
+          "pattern": "^seller-[1-9][0-9]*$"
+        },
+        "service_slot": {
+          "type": "string",
+          "pattern": "^seller-service-[1-9][0-9]*$"
+        }
+      }
+    },
+    "publication_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "seller_slot",
+        "service_slot",
+        "listing_slot"
+      ],
+      "properties": {
+        "kind": {
+          "const": "seller-listing-publication"
+        },
+        "seller_slot": {
+          "type": "string",
+          "pattern": "^seller-[1-9][0-9]*$"
+        },
+        "service_slot": {
+          "type": "string",
+          "pattern": "^seller-service-[1-9][0-9]*$"
+        },
+        "listing_slot": {
+          "type": "string",
+          "pattern": "^listing-[1-9][0-9]*$"
+        }
+      }
+    }
+  }
+}

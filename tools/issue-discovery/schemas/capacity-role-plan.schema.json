@@ -10,10 +10,13 @@
     "role",
     "actor_slot",
     "profile_stage_id",
+    "profile_stage_sha256",
     "scenario_id",
+    "scenario_sha256",
     "scm_ref",
     "instruction",
     "isolated_identity_fingerprint",
+    "actor_invocation_capability_binding",
     "prepared_authority_sha256",
     "role_plan"
   ],
@@ -23,15 +26,23 @@
     "role": {"enum": ["buyer", "seller", "host-operator", "observer"]},
     "actor_slot": {"type": "string", "pattern": "^(?:buyer|seller|host-operator|observer)-[1-9][0-9]*$"},
     "profile_stage_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "profile_stage_sha256": {"$ref": "#/$defs/digest"},
     "scenario_id": {
       "oneOf": [
         {"type": "null"},
         {"$ref": "#/$defs/scenario_id"}
       ]
     },
+    "scenario_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/digest"}
+      ]
+    },
     "scm_ref": {"$ref": "#/$defs/ref"},
     "instruction": {"$ref": "#/$defs/tracked_content"},
     "isolated_identity_fingerprint": {"$ref": "#/$defs/digest"},
+    "actor_invocation_capability_binding": {"$ref": "#/$defs/actor_invocation_binding"},
     "prepared_authority_sha256": {"$ref": "#/$defs/digest"},
     "role_plan": {
       "oneOf": [
@@ -48,6 +59,8 @@
       "then": {
         "properties": {
           "actor_slot": {"pattern": "^buyer-[1-9][0-9]*$"},
+          "scenario_id": {"$ref": "#/$defs/scenario_id"},
+          "scenario_sha256": {"$ref": "#/$defs/digest"},
           "role_plan": {"$ref": "#/$defs/buyer_plan"}
         }
       }
@@ -57,6 +70,8 @@
       "then": {
         "properties": {
           "actor_slot": {"pattern": "^seller-[1-9][0-9]*$"},
+          "scenario_id": {"$ref": "#/$defs/scenario_id"},
+          "scenario_sha256": {"$ref": "#/$defs/digest"},
           "role_plan": {"$ref": "#/$defs/seller_plan"}
         }
       }
@@ -76,6 +91,26 @@
         "properties": {
           "actor_slot": {"pattern": "^observer-[1-9][0-9]*$"},
           "role_plan": {"$ref": "#/$defs/observer_plan"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "profile_stage_id": {"const": "observer-probe"}
+        },
+        "required": ["profile_stage_id"]
+      },
+      "then": {
+        "properties": {
+          "scenario_id": {"type": "null"},
+          "scenario_sha256": {"type": "null"}
+        }
+      },
+      "else": {
+        "properties": {
+          "scenario_id": {"$ref": "#/$defs/scenario_id"},
+          "scenario_sha256": {"$ref": "#/$defs/digest"}
         }
       }
     }
@@ -116,7 +151,8 @@
             "scm.capacity.topology-authority.v1",
             "scm.capacity.reversible-baseline.v1",
             "scm.capacity.baseline-equivalence.v1",
-            "scm.capacity.native-evidence.v1"
+            "scm.capacity.native-evidence.v1",
+            "scm.capacity.actor-invocation.v1"
           ]
         },
         "value": {"$ref": "#/$defs/digest"}
@@ -125,16 +161,30 @@
     "buyer_plan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "request_id", "action_id", "required_steps", "guest_exercise"],
+      "required": [
+        "kind",
+        "request_id",
+        "action_id",
+        "prepared_action_sha256",
+        "preparation_steps",
+        "success_steps",
+        "guest_exercise"
+      ],
       "properties": {
         "kind": {"const": "buyer"},
         "request_id": {"type": "string", "pattern": "^request-[1-9][0-9]*$"},
         "action_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-        "required_steps": {
+        "prepared_action_sha256": {"$ref": "#/$defs/digest"},
+        "preparation_steps": {
           "const": [
             "install-build", "wallet-preparation", "ssh-preparation",
             "endpoint-check", "balance-check", "listing-discovery",
-            "request-preparation", "guest-ssh-resume", "cuda-vector-add"
+            "request-preparation"
+          ]
+        },
+        "success_steps": {
+          "const": [
+            "guest-ssh-resume", "cuda-vector-add"
           ]
         },
         "guest_exercise": {
@@ -151,7 +201,16 @@
     "seller_plan": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "service_slot", "listing_slots", "service_start_action_id", "publication_action_ids", "required_steps"],
+      "required": [
+        "kind",
+        "service_slot",
+        "listing_slots",
+        "service_start_action_id",
+        "service_start_prepared_action_sha256",
+        "publication_action_ids",
+        "publication_prepared_action_sha256s",
+        "required_steps"
+      ],
       "properties": {
         "kind": {"const": "seller"},
         "service_slot": {"type": "string", "pattern": "^seller-service-[1-9][0-9]*$"},
@@ -162,11 +221,18 @@
           "items": {"type": "string", "pattern": "^listing-[1-9][0-9]*$"}
         },
         "service_start_action_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "service_start_prepared_action_sha256": {"$ref": "#/$defs/digest"},
         "publication_action_ids": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}
+        },
+        "publication_prepared_action_sha256s": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/digest"}
         },
         "required_steps": {
           "const": [
@@ -233,6 +299,12 @@
       "allOf": [
         {"$ref": "#/$defs/binding"},
         {"properties": {"domain": {"const": "scm.capacity.native-evidence.v1"}}}
+      ]
+    },
+    "actor_invocation_binding": {
+      "allOf": [
+        {"$ref": "#/$defs/binding"},
+        {"properties": {"domain": {"const": "scm.capacity.actor-invocation.v1"}}}
       ]
     }
   }

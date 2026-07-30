@@ -148,7 +148,25 @@ Add closed public schemas for:
 
 Common role fields bind contract version, role/actor logical identity,
 non-secret isolated-identity fingerprint, exact SCM ref, instruction path/hash,
-prepared action or configuration hash, and monotonic lifecycle timestamps.
+exact scenario/profile-stage identity and digest, prepared action or
+configuration hash, and ordered lifecycle timestamps. The prepared-authority
+hash is the canonical SHA-256 of the closed nested role-specific plan, so it
+has one reproducible, acyclic referent rather than being an opaque producer
+assertion. The complete role-plan artifact names every action ID the role will
+own and the digest of that action's exact prepared intent. The prepared intent
+includes the logical selection, portable VM/KVM/Ansible terms, service or
+listing binding, private concrete-payload binding, pinned wrapper, expected
+oracle, and actor-invocation capability, but excludes release/policy fields so
+the graph remains acyclic. A real pre-release concurrency policy freezes every
+complete role-plan digest and every prepared-action digest. Frozen actions then
+bind the complete role plan, the same prepared intent, and the release/policy;
+action results bind the frozen-action digest, and the terminal role receipt
+binds the ordered result digests.
+Every real role receipt also binds the common release and concurrency-policy
+ID/digest, including the actionless host and observer roles; a standalone
+observer probe or mock receipt binds its exact non-campaign release and null
+policy. This prevents valid cleanup or observation evidence from being replayed
+across waves.
 Role-specific sections prove the documented preparation appropriate to that
 role. A host-operator binds the public instruction, private G1/topology and
 baseline authority through the typed privacy-preserving bindings,
@@ -156,10 +174,13 @@ KVM/Ansible readiness, teardown plan, and liveness through cleanup. Portable
 receipts contain no raw wallets, project/host/GPU identities, private endpoints,
 credentials, or executor-local paths.
 
-Buyer steps cover quickstart install/build, wallet/SSH preparation, endpoint
-and balance checks, listing discovery, exact request preparation, and successful
-guest SSH/resume plus the Git-pinned compiled CUDA vector-add workload. Seller
-steps cover install/build,
+Buyer steps separate preparation required for every request from
+success-contingent guest verification. Every buyer proves quickstart
+install/build, wallet/SSH preparation, endpoint and balance checks, listing
+discovery, and exact request preparation. Only a buyer whose independent
+outcome is `vm-succeeded` additionally proves guest SSH/resume and the
+Git-pinned compiled CUDA vector-add workload; an expected capacity-refused
+buyer records no fabricated guest step. Seller steps cover install/build,
 configuration, wallet/publication preparation, distinct service start, exact
 listing publication, and observation liveness. The receipt stores typed step
 outcomes and public digests, not their private values.
@@ -169,9 +190,14 @@ maps those one-to-one to live seller/listing identities and exposes only the
 logical projection and a closed typed binding containing method, field-specific
 domain, and one 256-bit value. Its method is either domain-separated
 HMAC-SHA-256 under a per-campaign private key or an opaque cryptographically
-random surrogate stored with the native proof. Raw hashes of enumerable private
-identifiers are invalid. Frozen wrappers recheck the typed binding against the
-native private proof immediately before publication or purchase.
+random surrogate stored with the native proof. The private executor allocates
+distinct service bindings and one distinct listing binding per logical
+seller/listing pair. A listing's opaque binding may be allocated before
+publication; the seller publication atomically seals its owner-only proof to
+the one minted live listing, and every buyer later resolves that unchanged
+binding. Raw hashes of enumerable private identifiers are invalid. Frozen
+wrappers recheck the applicable typed binding against the native private proof
+immediately before service start, publication, or purchase.
 
 A role receipt is accepted only alongside an action/result receipt whose actor
 and lifecycle timestamps show liveness through the barrier. The public
@@ -179,9 +205,14 @@ validator checks structure and correlation; private infrastructure proves
 process identity and supplies the secret-bearing execution context.
 
 An aggregate actor-set receipt binds the exact declared cardinalities,
-overlapping lifetimes, invocation timestamps/skew, and controller queue/
-throttle observation. This prevents a B8 contract from passing with eight
-serial Codex processes.
+overlapping lifetimes, a pre-release concurrency-policy digest, independently
+observed monotonic offsets relative to the common release, a typed native clock
+evidence binding, and controller queue/throttle observation. Skew is calculated
+without integer truncation from those common-clock offsets and cannot be chosen
+after the wave. Every action interval must also remain inside its owning
+actor's independently observed lifetime. This prevents wall-clock
+disagreement, post-exit actions, or eight serial Codex processes from
+satisfying a B8 contract.
 
 **Rejected alternative:** one generic readiness receipt with arbitrary
 key/value evidence. It cannot make missing role work or an early actor exit
@@ -193,17 +224,54 @@ The controller may freeze exact request or publication bytes and the
 deterministic driver may perform the low-level operation, but the initiating
 agent must invoke a pinned wrapper while its Codex process is still active.
 Buyers own purchase; sellers own service start and exact listing publication.
-The portable action binds the wrapper path/hash, payload hash, scenario,
-logical seller/listing selection, privacy-preserving runtime binding, release,
-attempt, expected result schema, and independent-oracle authority. It cannot
-bind a result that does not yet exist. The terminal result binds the canonical
-action digest and only then computes its own canonical digest.
+The portable action binds the wrapper path/hash, sanitized portable-payload
+hash, scenario, logical seller/listing selection, privacy-preserving
+service/listing and private concrete-payload bindings, actor-invocation
+capability, prepared-action digest, release, attempt, expected result schema,
+and an independent-oracle-authority artifact.
+That closed authority artifact binds the exact stage, result schema, observer
+plan when real evidence is allowed, and whether the boundary is capture-only;
+its canonical digest is the action field's exact referent. For a real action,
+that observer-plan digest must occur exactly once in the same frozen policy's
+role-plan authority set. It cannot bind a result that does not yet exist. The
+terminal result binds the canonical action digest and release, and only then
+computes its own canonical digest.
 
 The wrapper contract is one-shot: it verifies frozen authority immediately
 before emission, emits exactly once, and returns a typed result. Changed bytes,
 duplicate release, attempt greater than one, wrapper substitution, or early
-actor exit fail closed. The private implementation may use a pipe, socket, or
-file-backed release channel as long as it preserves those semantics.
+actor exit fail closed. The wrapper-fixed action kind is a single-use argument
+that a caller cannot override. A rejected unauthorized-retry receipt records the
+attempted value greater than one while a successful emission is always attempt
+one; a duplicate-release receipt likewise records more than one claim and zero
+emissions. The private implementation may use a pipe, socket, or file-backed
+release channel as long as it preserves those semantics. The public
+capture-only sink atomically installs one owner-only record containing the
+claim, canonical logical payload, and first terminal result—emitted or
+rejected—before it materializes the requested result file. A pre-emission
+rejection consumes that one-shot release, so corrected inputs cannot be
+resubmitted as a new attempt one. If result materialization is interrupted,
+the next invocation recovers that same first result; it cannot reinterpret the
+durable record as a new emission. Recovery accepts only the
+exact closed canonical record for an emitted, live, attempt-one, single-claim
+result or a schema-valid typed first rejection and requires any existing output
+to match those bytes; corruption or a conflicting output fails hard.
+
+The typed public actor-invocation capability is only a portable correlation
+referent. SCM cannot authenticate that a Codex process actually owns it.
+Private infrastructure must issue and verify the capability against the live
+Codex process/session and authenticated release channel. A public mock capture
+therefore records `portable-binding-only` and
+`private_actor_ownership_verified: false`; it proves contract composition and
+zero live effects, not private process authenticity.
+
+Capture-only composition uses the separately tracked
+`tools/issue-discovery/config/capacity/profile-stages/b1-s1-g1-mock.json`
+stage. It is not a member of the exact qualification/measured registry and
+therefore cannot authorize a campaign row. It reuses the pinned B1/S1/G1
+scenario only to prove seller-owned service/publication and buyer-owned request
+actions through the mock adapter, with an empty live-resource ledger,
+`execution_boundary=mock`, and no real oracle or capacity claim.
 
 **Rejected alternative:** let Codex approve a hash and exit before a controller
 thread emits it. That remains useful deterministic-driver evidence but is not

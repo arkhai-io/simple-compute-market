@@ -1,0 +1,58 @@
+[
+  {
+    "schema_version": 2,
+    "action_id": "seller-service-start-1",
+    "action_kind": "seller-service-start",
+    "actor_slot": "seller-1",
+    "logical_selection": {
+      "kind": "seller-service-start",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1"
+    },
+    "portable_intent": {
+      "deal_type": "vm",
+      "service_isolation": "per-seller",
+      "provisioner": "kvm-ansible"
+    },
+    "operation": "seller-service-start"
+  },
+  {
+    "schema_version": 2,
+    "action_id": "seller-1-publication-1",
+    "action_kind": "seller-listing-publication",
+    "actor_slot": "seller-1",
+    "logical_selection": {
+      "kind": "seller-listing-publication",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1",
+      "listing_slot": "listing-1"
+    },
+    "portable_intent": {
+      "deal_type": "vm",
+      "gpu_count": 1,
+      "inventory_cardinality": 1,
+      "provisioner": "kvm-ansible"
+    },
+    "operation": "seller-inventory-publish"
+  },
+  {
+    "schema_version": 2,
+    "action_id": "buyer-request-1",
+    "action_kind": "buyer-request",
+    "actor_slot": "buyer-1",
+    "logical_selection": {
+      "kind": "buyer-request",
+      "request_id": "request-1",
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1"
+    },
+    "portable_intent": {
+      "deal_type": "vm",
+      "gpu_count": 1,
+      "provisioner": "kvm-ansible",
+      "settlement_flow": "negotiate-then-settle",
+      "guest_check": "cuda-vector-add"
+    },
+    "operation": "market-negotiate-settle"
+  }
+]

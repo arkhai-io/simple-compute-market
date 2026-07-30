@@ -5,37 +5,47 @@
     "role": "buyer",
     "actor_slot": "buyer-1",
     "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
     "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "docs/quickstart/buyer.md",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "path": "docs/buyer-quickstart.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "prepared_authority_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "isolated_identity_fingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "6060606060606060606060606060606060606060606060606060606060606060"
+    },
+    "prepared_authority_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
     "role_plan": {
       "kind": "buyer",
       "request_id": "request-1",
       "action_id": "buyer-request-1",
-      "required_steps": [
+      "prepared_action_sha256": "6565656565656565656565656565656565656565656565656565656565656565",
+      "preparation_steps": [
         "install-build",
         "wallet-preparation",
         "ssh-preparation",
         "endpoint-check",
         "balance-check",
         "listing-discovery",
-        "request-preparation",
+        "request-preparation"
+      ],
+      "success_steps": [
         "guest-ssh-resume",
         "cuda-vector-add"
       ],
       "guest_exercise": {
         "wrapper": {
           "path": "tools/issue-discovery/workloads/cuda/run-vector-add.sh",
-          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
         },
         "source": {
           "path": "tools/issue-discovery/workloads/cuda/vector_add.cu",
-          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
         }
       }
     }
@@ -46,20 +56,35 @@
     "role": "seller",
     "actor_slot": "seller-1",
     "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
     "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "docs/quickstart/seller.md",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "path": "docs/seller-quickstart.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "prepared_authority_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "isolated_identity_fingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
+    "actor_invocation_capability_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "6161616161616161616161616161616161616161616161616161616161616161"
+    },
+    "prepared_authority_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
     "role_plan": {
       "kind": "seller",
       "service_slot": "seller-service-1",
-      "listing_slots": ["listing-1"],
+      "listing_slots": [
+        "listing-1"
+      ],
       "service_start_action_id": "seller-service-start-1",
-      "publication_action_ids": ["seller-publication-1"],
+      "service_start_prepared_action_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "publication_action_ids": [
+        "seller-publication-1"
+      ],
+      "publication_prepared_action_sha256s": [
+        "6767676767676767676767676767676767676767676767676767676767676767"
+      ],
       "required_steps": [
         "install-build",
         "configuration",
@@ -77,13 +102,20 @@
     "role": "host-operator",
     "actor_slot": "host-operator-1",
     "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
     "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "tools/issue-discovery/instructions/host-operator.md",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "path": "tools/issue-discovery/instructions/capacity/host-operator.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
     "isolated_identity_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "6262626262626262626262626262626262626262626262626262626262626262"
+    },
     "prepared_authority_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "role_plan": {
       "kind": "host-operator",
@@ -104,8 +136,8 @@
       },
       "admitted_gpus": 1,
       "kvm_ansible_readiness": true,
-      "observation_plan_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
-      "teardown_plan_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      "observation_plan_sha256": "abababababababababababababababababababababababababababababababab",
+      "teardown_plan_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
     }
   },
   {
@@ -113,23 +145,63 @@
     "plan_id": "observer-plan-1",
     "role": "observer",
     "actor_slot": "observer-1",
-    "profile_stage_id": "observer-probe",
-    "scenario_id": null,
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
     "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "instruction": {
-      "path": "tools/issue-discovery/instructions/observer.md",
-      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      "path": "tools/issue-discovery/instructions/capacity/observer.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
     },
-    "isolated_identity_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "prepared_authority_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "isolated_identity_fingerprint": "dededededededededededededededededededededededededededededededede",
+    "actor_invocation_capability_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "6363636363636363636363636363636363636363636363636363636363636363"
+    },
+    "prepared_authority_sha256": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
     "role_plan": {
       "kind": "observer",
-      "independent_source_plan_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "independent_source_plan_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
       "native_evidence_bindings": [
         {
           "method": "hmac-sha256-v1",
           "domain": "scm.capacity.native-evidence.v1",
-          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          "value": "3434343434343434343434343434343434343434343434343434343434343434"
+        }
+      ]
+    }
+  },
+  {
+    "schema_version": 2,
+    "plan_id": "observer-probe-plan-1",
+    "role": "observer",
+    "actor_slot": "observer-1",
+    "profile_stage_id": "observer-probe",
+    "profile_stage_sha256": "5656565656565656565656565656565656565656565656565656565656565656",
+    "scenario_id": null,
+    "scenario_sha256": null,
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "tools/issue-discovery/instructions/capacity/observer.md",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "isolated_identity_fingerprint": "7878787878787878787878787878787878787878787878787878787878787878",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "6464646464646464646464646464646464646464646464646464646464646464"
+    },
+    "prepared_authority_sha256": "9090909090909090909090909090909090909090909090909090909090909090",
+    "role_plan": {
+      "kind": "observer",
+      "independent_source_plan_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "native_evidence_bindings": [
+        {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "3434343434343434343434343434343434343434343434343434343434343434"
         }
       ]
     }

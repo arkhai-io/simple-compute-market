@@ -7,7 +7,9 @@
   "required": [
     "schema_version", "action_result_id", "action_id", "action_sha256",
     "actor_slot", "release_id", "attempt", "invoked_at", "terminal_at",
-    "result_kind", "emission_count", "terminal_payload_sha256", "failure_code"
+    "actor_alive_at_invocation", "release_claim_count",
+    "pre_emission_checks", "result_kind", "emission_count",
+    "terminal_payload_sha256", "failure_code"
   ],
   "properties": {
     "schema_version": {"const": 2},
@@ -16,9 +18,29 @@
     "action_sha256": {"$ref": "#/$defs/digest"},
     "actor_slot": {"type": "string", "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"},
     "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
-    "attempt": {"const": 1},
+    "attempt": {"type": "integer", "minimum": 1},
     "invoked_at": {"$ref": "#/$defs/timestamp"},
     "terminal_at": {"$ref": "#/$defs/timestamp"},
+    "actor_alive_at_invocation": {"type": "boolean"},
+    "release_claim_count": {"type": "integer", "minimum": 1},
+    "pre_emission_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_unchanged",
+        "payload_unchanged",
+        "selection_unchanged",
+        "runtime_binding_unchanged",
+        "wrapper_unchanged"
+      ],
+      "properties": {
+        "authority_unchanged": {"type": "boolean"},
+        "payload_unchanged": {"type": "boolean"},
+        "selection_unchanged": {"type": "boolean"},
+        "runtime_binding_unchanged": {"type": "boolean"},
+        "wrapper_unchanged": {"type": "boolean"}
+      }
+    },
     "result_kind": {"enum": ["emitted", "rejected-before-emission"]},
     "emission_count": {"type": "integer", "minimum": 0, "maximum": 1},
     "terminal_payload_sha256": {
@@ -46,6 +68,18 @@
       "then": {
         "properties": {
           "emission_count": {"const": 1},
+          "attempt": {"const": 1},
+          "actor_alive_at_invocation": {"const": true},
+          "release_claim_count": {"const": 1},
+          "pre_emission_checks": {
+            "const": {
+              "authority_unchanged": true,
+              "payload_unchanged": true,
+              "selection_unchanged": true,
+              "runtime_binding_unchanged": true,
+              "wrapper_unchanged": true
+            }
+          },
           "terminal_payload_sha256": {"$ref": "#/$defs/digest"},
           "failure_code": {"type": "null"}
         }
@@ -58,6 +92,42 @@
           "emission_count": {"const": 0},
           "terminal_payload_sha256": {"type": "null"},
           "failure_code": {"type": "string"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"failure_code": {"const": "unauthorized-retry"}},
+        "required": ["failure_code"]
+      },
+      "then": {
+        "properties": {
+          "attempt": {"type": "integer", "minimum": 2},
+          "emission_count": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"failure_code": {"const": "duplicate-release"}},
+        "required": ["failure_code"]
+      },
+      "then": {
+        "properties": {
+          "release_claim_count": {"type": "integer", "minimum": 2},
+          "emission_count": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"failure_code": {"const": "actor-exited"}},
+        "required": ["failure_code"]
+      },
+      "then": {
+        "properties": {
+          "actor_alive_at_invocation": {"const": false},
+          "emission_count": {"const": 0}
         }
       }
     }

@@ -1,0 +1,163 @@
+[
+  {
+    "schema_version": 2,
+    "action_id": "seller-service-start-1",
+    "action_kind": "seller-service-start",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "actor_slot": "seller-1",
+    "role_plan_id": "seller-1-plan",
+    "role_plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
+    },
+    "prepared_action_sha256": "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
+    "logical_selection": {
+      "kind": "seller-service-start",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1"
+    },
+    "runtime_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "109056bde8fedf4671be2845b75ee7ed7e8a1dde57cc6489bfdf3f8e571c95ee"
+    },
+    "concrete_payload_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.concrete-payload.v1",
+      "value": "e93d6b142560748573a930432f48533e85407ded002dfc47d87f135f5555a920"
+    },
+    "payload_sha256": "7cf4dc84194c445a3e71876ef0f05faa5e91088773eb3c8b1fc8d9c1c38423fd",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/start-seller-service.sh",
+      "sha256": "129d502ceacee20c4c01f229b55dc185f3c019fa042801877816babc5768120e"
+    },
+    "release_id": "mock-release",
+    "concurrency_policy_id": null,
+    "concurrency_policy_sha256": null,
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "action_result_schema": {
+        "path": "tools/issue-discovery/schemas/capacity-action-result.schema.json",
+        "sha256": "a0baa05f68528f7d2f401f57b49e0abded5411d9d01d4dd0988cd7a261fba5af"
+      },
+      "oracle_authority_id": "b1-s1-g1-mock-oracle",
+      "independent_oracle_authority_sha256": "93b3b846a5d060c7fd794fbba90ff2450ee0db4f7879d876ce743a5a333507a3"
+    }
+  },
+  {
+    "schema_version": 2,
+    "action_id": "seller-1-publication-1",
+    "action_kind": "seller-listing-publication",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "actor_slot": "seller-1",
+    "role_plan_id": "seller-1-plan",
+    "role_plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
+    },
+    "prepared_action_sha256": "fe32e004b9a7d83ab96adc38e190a6f601cc979ac4cc9bbdfcd151bf589b9dfc",
+    "logical_selection": {
+      "kind": "seller-listing-publication",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1",
+      "listing_slot": "listing-1"
+    },
+    "runtime_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
+    },
+    "concrete_payload_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.concrete-payload.v1",
+      "value": "40560baf7a2f5d51f3775ceae4fd423f15791ea3e4e35c3135c4e12bd8fdea2e"
+    },
+    "payload_sha256": "adef59b942a8e256320f43eb1a635fdd40009ae12daa76c609834b4971f9b6d6",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/publish-listing.sh",
+      "sha256": "601c0720e7bcfd7fc594a31e81ad268f353338c472f356fb177fef4bde136b86"
+    },
+    "release_id": "mock-release",
+    "concurrency_policy_id": null,
+    "concurrency_policy_sha256": null,
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "action_result_schema": {
+        "path": "tools/issue-discovery/schemas/capacity-action-result.schema.json",
+        "sha256": "a0baa05f68528f7d2f401f57b49e0abded5411d9d01d4dd0988cd7a261fba5af"
+      },
+      "oracle_authority_id": "b1-s1-g1-mock-oracle",
+      "independent_oracle_authority_sha256": "93b3b846a5d060c7fd794fbba90ff2450ee0db4f7879d876ce743a5a333507a3"
+    }
+  },
+  {
+    "schema_version": 2,
+    "action_id": "buyer-request-1",
+    "action_kind": "buyer-request",
+    "scm_ref": "8351a051c2221147ff30957530065d78fbfc8076",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+    "profile_stage_id": "b1-s1-g1-mock",
+    "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
+    "actor_slot": "buyer-1",
+    "role_plan_id": "buyer-1-plan",
+    "role_plan_sha256": "3351bea03d4baa598c81081236f24868594deae9d910beca83e7b1e68f6b4692",
+    "isolated_identity_fingerprint": "4d4e21620aba6d004d588b49346cc56401b994b589637ac26ac7a6fdcf044670",
+    "actor_invocation_capability_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.actor-invocation.v1",
+      "value": "3b2ef23fecb64bae291718be92cddfdc2cbcbb4bf32a7ef261a43e93559cebce"
+    },
+    "prepared_action_sha256": "898b5233b23fac0dcb5e9e1bf88ffaa803587e8a888abbdbcca7af7e41c0787d",
+    "logical_selection": {
+      "kind": "buyer-request",
+      "request_id": "request-1",
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1"
+    },
+    "runtime_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
+    },
+    "concrete_payload_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.concrete-payload.v1",
+      "value": "4fa24530997875da8d8606b7546c9653fe78b5de01f6f03a69de15f024eed3b1"
+    },
+    "payload_sha256": "f90447cfa1137c7b8a5446854a49c3a4805d6300ef7e51dce6598ca821d5eac0",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/emit-buyer-request.sh",
+      "sha256": "1b1326fc5f2208a68ca6ecec42867bacdb4f8aa15decf06ebaa97b0eed760ba2"
+    },
+    "release_id": "mock-release",
+    "concurrency_policy_id": null,
+    "concurrency_policy_sha256": null,
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "action_result_schema": {
+        "path": "tools/issue-discovery/schemas/capacity-action-result.schema.json",
+        "sha256": "a0baa05f68528f7d2f401f57b49e0abded5411d9d01d4dd0988cd7a261fba5af"
+      },
+      "oracle_authority_id": "b1-s1-g1-mock-oracle",
+      "independent_oracle_authority_sha256": "93b3b846a5d060c7fd794fbba90ff2450ee0db4f7879d876ce743a5a333507a3"
+    }
+  }
+]

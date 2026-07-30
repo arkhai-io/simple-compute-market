@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-mock-capture-v2.json",
+  "title": "SCM capture-only agent composition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "capture_id",
+    "scm_ref",
+    "scenario_id",
+    "scenario_sha256",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "execution_boundary",
+    "actor_trigger",
+    "release_id",
+    "oracle_authority_id",
+    "oracle_authority_sha256",
+    "buyer_receipt_sha256s",
+    "seller_receipt_sha256s",
+    "action_sha256s",
+    "prepared_action_sha256s",
+    "action_result_sha256s",
+    "captured_payloads",
+    "runtime_service_bindings",
+    "runtime_listing_bindings",
+    "actor_invocation_capabilities",
+    "agent_ownership_proof_scope",
+    "private_actor_ownership_verified",
+    "live_resource_ledger",
+    "complete_stage_actor_set_claimed",
+    "registry_admission_claimed",
+    "real_oracle_claimed",
+    "capacity_claimed",
+    "result_kind",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "capture_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "scm_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/scenario_id"
+    },
+    "scenario_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "profile_stage_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "execution_boundary": {
+      "const": "mock"
+    },
+    "actor_trigger": {
+      "const": "agent-triggered"
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "oracle_authority_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "oracle_authority_sha256": {"$ref": "#/$defs/digest"},
+    "buyer_receipt_sha256s": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "seller_receipt_sha256s": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "action_result_sha256s": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "action_sha256s": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
+    "prepared_action_sha256s": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
+    "captured_payloads": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/captured_payload"
+      }
+    },
+    "runtime_service_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/runtime_service_binding"}
+    },
+    "runtime_listing_bindings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/runtime_listing_binding"}
+    },
+    "actor_invocation_capabilities": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/actor_invocation_capability"}
+    },
+    "agent_ownership_proof_scope": {
+      "const": "portable-binding-only"
+    },
+    "private_actor_ownership_verified": {
+      "const": false
+    },
+    "live_resource_ledger": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "complete_stage_actor_set_claimed": {
+      "const": false
+    },
+    "registry_admission_claimed": {
+      "const": false
+    },
+    "real_oracle_claimed": {
+      "const": false
+    },
+    "capacity_claimed": {
+      "const": false
+    },
+    "result_kind": {
+      "const": "mock-preparation-only"
+    },
+    "completed_at": {
+      "$ref": "#/$defs/timestamp"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1"
+      ]
+    },
+    "captured_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "action_kind",
+        "actor_slot",
+        "release_id",
+        "action_sha256",
+        "prepared_action_sha256",
+        "payload_sha256",
+        "runtime_binding",
+        "concrete_payload_binding"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+        },
+        "action_kind": {
+          "enum": [
+            "buyer-request",
+            "seller-service-start",
+            "seller-listing-publication"
+          ]
+        },
+        "actor_slot": {
+          "type": "string",
+          "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"
+        },
+        "release_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+        },
+        "action_sha256": {"$ref": "#/$defs/digest"},
+        "prepared_action_sha256": {"$ref": "#/$defs/digest"},
+        "payload_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "runtime_binding": {"$ref": "#/$defs/runtime_binding"},
+        "concrete_payload_binding": {"$ref": "#/$defs/concrete_payload_binding"}
+      }
+    },
+    "runtime_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.runtime-binding.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "concrete_payload_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.concrete-payload.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "actor_invocation_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.actor-invocation.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "runtime_service_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seller_slot", "service_slot", "runtime_binding"],
+      "properties": {
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "service_slot": {"type": "string", "pattern": "^seller-service-[1-9][0-9]*$"},
+        "runtime_binding": {"$ref": "#/$defs/runtime_binding"}
+      }
+    },
+    "runtime_listing_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seller_slot", "listing_slot", "runtime_binding"],
+      "properties": {
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "listing_slot": {"type": "string", "pattern": "^listing-[1-9][0-9]*$"},
+        "runtime_binding": {"$ref": "#/$defs/runtime_binding"}
+      }
+    },
+    "actor_invocation_capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_slot", "binding"],
+      "properties": {
+        "actor_slot": {
+          "type": "string",
+          "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"
+        },
+        "binding": {"$ref": "#/$defs/actor_invocation_binding"}
+      }
+    }
+  }
+}

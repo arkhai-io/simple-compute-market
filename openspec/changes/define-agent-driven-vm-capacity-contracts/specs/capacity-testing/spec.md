@@ -270,11 +270,30 @@ independent-observer receipt variants. O1 MUST always mean the
 independent-observer actor, never the deterministic controller. The controller
 MAY coordinate barriers and deterministic reference emission, but MUST NOT
 author observer evidence, control the observer's source credentials, or accept
-its own observations as oracle authority. Every substantive receipt MUST bind the
-exact SCM commit, the role's pinned quickstart or instruction path and content
-digest, a non-secret isolated identity fingerprint, the prepared action or
-configuration digest, ordered lifecycle timestamps, and proof that the actor
-remained alive through its declared release or observation barrier. Portable receipts MUST
+its own observations as oracle authority. Every substantive receipt MUST bind
+the exact SCM commit, the role's pinned quickstart or instruction path and
+content digest, exact scenario/profile-stage identity and digest, a non-secret
+isolated identity fingerprint, the canonical digest of its closed
+role-specific plan, ordered lifecycle timestamps, and proof that the actor
+remained alive through its declared release or observation barrier. The
+complete role plan MUST name the action IDs it will own and the canonical
+digest of each action's exact prepared intent. That intent MUST cover the
+logical selection, portable VM/KVM/Ansible terms, service or listing binding,
+private concrete-payload binding, pinned wrapper, expected oracle, and
+actor-invocation capability while excluding release/policy fields. A
+pre-release concurrency policy MUST freeze every complete role-plan digest and
+prepared-action digest. Each frozen action MUST then reproduce the prepared
+intent and bind the complete role-plan digest plus the release/policy; each
+action result MUST bind the frozen-action digest, and the terminal receipt MUST
+bind the ordered result digests. This directed artifact graph MUST NOT contain
+a digest cycle.
+Every real-stage role receipt, including host-operator and observer receipts
+that own no market action, MUST bind the exact common `release_id` and
+concurrency-policy ID/digest. A standalone observer probe or capture-only mock
+MUST instead bind its exact non-campaign release with null policy authority.
+This run authority prevents an otherwise valid cleanup or observation receipt
+from being replayed into another wave.
+Portable receipts MUST
 exclude credentials, wallet addresses and secrets, executor-local paths,
 project and host identities, private endpoints, listing identifiers, and GPU
 identifiers. Logical public listing slots remain allowed; live listing IDs do
@@ -284,8 +303,10 @@ requirements.
 
 A buyer receipt MUST prove the pinned quickstart's install/build path, isolated
 wallet and SSH preparation, endpoint and balance checks, listing discovery,
-exact request preparation, and—after a successful real lifecycle—buyer-owned
-guest SSH/resume plus the declared GPU and CUDA exercise. A seller receipt MUST
+and exact request preparation for every request. Only after an independently
+successful real lifecycle MUST it also prove buyer-owned guest SSH/resume plus
+the declared GPU and CUDA exercise; an expected capacity-refused buyer MUST
+omit those success-only steps rather than claim them. A seller receipt MUST
 prove the pinned quickstart's install/build/configuration path, isolated wallet
 and publication preparation, distinct service start, exact truthful listing
 publication, and liveness through observation. Private values remain outside
@@ -316,8 +337,13 @@ For a concurrent stage, the aggregate role evidence MUST contain exactly the
 declared number of distinct role identities, MUST prove every declared actor
 process overlapped the release window, MUST prove request/publication
 invocations fell within the declared emission-skew bound, and MUST report no
-local actor queue or controller throttling. A serially executed actor set MUST
-NOT satisfy a concurrent stage.
+local actor queue or controller throttling. The skew bound MUST be frozen by a
+pre-release concurrency-policy digest. Cross-process overlap and skew MUST use
+independently captured monotonic offsets relative to one common release plus a
+typed native clock-evidence binding; a post-hoc wall-clock bound or
+integer-truncated duration is invalid. A serially executed actor set MUST NOT
+satisfy a concurrent stage. Every action's invocation and terminal offsets
+MUST fall inside its owning actor's independently observed lifetime.
 
 #### Scenario: Substantive buyer receipt is accepted
 - **WHEN** a buyer receipt proves pinned-instruction inspection, isolated preparation, listing discovery, exact frozen-request preparation, and liveness through release at the exact SCM commit
@@ -349,14 +375,38 @@ deterministic driver MAY execute those bytes behind a pinned wrapper, but a run
 MUST be labeled agent-triggered only when the initiating buyer process remains
 alive through release and invokes that wrapper itself. The action contract MUST
 bind the exact SCM commit, scenario identity and digest, selected logical
-seller/listing, typed `runtime_binding`, frozen request digest, wrapper
-identity and digest, actor identity, release identity, attempt number, and the
-expected result schema version and independent-oracle authority. The frozen
+seller/listing, typed service/listing `runtime_binding`, a private
+`concrete_payload_binding`, closed sanitized portable VM/KVM/Ansible intent and
+its exact canonical payload digest, pinned wrapper identity and digest, actor
+identity and actor-invocation capability, prepared-action digest, release
+identity, attempt number, and the expected result schema version and a closed
+independent-oracle-authority artifact's canonical digest. That authority MUST
+bind the exact profile stage, result schema, execution boundary/trigger,
+observer plan for a real path, and whether real oracle evidence is allowed. A
+real oracle's exact observer-plan digest MUST be frozen exactly once among the
+same concurrency policy's role-plan authorities. The frozen
 action MUST NOT bind a future result digest. A terminal result receipt MUST bind
 the canonical frozen-action digest and MUST compute its own canonical digest
 only after terminal observation. Changed authority,
 request, configuration, selection, wrapper, or bytes; an unauthorized retry;
 duplicate release; or actor exit before invocation MUST fail closed.
+The physical one-shot wrapper's fixed action kind MUST NOT be caller
+overridable, and the terminal result paired with a role MUST bind that exact
+supplied frozen-action digest and release rather than merely reuse its action
+ID.
+
+Service start and seller/listing publication MUST use distinct logical
+selections. Private infrastructure MUST allocate one typed service binding per
+seller service and one typed listing binding per logical seller/listing pair.
+An opaque listing binding MAY be allocated before publication, but publication
+MUST atomically seal its owner-only proof to exactly one minted live listing;
+the buyer wrapper MUST later resolve that unchanged binding. A service binding
+MUST NOT be substituted for a listing binding.
+
+A successful result MUST record attempt one and one release claim. A rejected
+unauthorized-retry result MUST preserve the attempted value greater than one
+and zero emissions; a rejected duplicate release MUST preserve more than one
+claims and zero emissions.
 
 A substantive seller MUST likewise remain alive and invoke its frozen service
 start and exact listing-publication actions through pinned one-shot wrappers.
@@ -364,6 +414,14 @@ During mock preparation those actions target only the mock boundary; during
 real qualification they target the admitted live boundary. Controller-owned
 seller service start or publication after the seller exits MUST NOT count as a
 substantive seller action.
+
+The public actor-invocation capability is a portable correlation referent, not
+proof that a Codex process owns it. Private infrastructure MUST issue and
+authenticate that capability against the still-live Codex process/session and
+the release channel immediately before every real invocation. A public mock
+capture MUST explicitly record `portable-binding-only` and
+`private_actor_ownership_verified: false`; it proves artifact composition and
+zero live effects, not private process authenticity.
 
 #### Scenario: Buyer triggers one frozen request
 - **WHEN** a live buyer receives one release for its unchanged frozen request and invokes the pinned wrapper exactly once
@@ -380,6 +438,18 @@ substantive seller action.
 #### Scenario: Seller owns service start and publication
 - **WHEN** a substantive seller reaches release with unchanged frozen configuration and listing bytes
 - **THEN** the live seller process invokes the pinned service-start and publication wrappers itself and remains alive through observation
+
+#### Scenario: Capture-only composition stays outside the campaign registry
+- **WHEN** buyer and seller agents rehearse the pinned B1/S1/G1 actions through `tools/issue-discovery/config/capacity/profile-stages/b1-s1-g1-mock.json`
+- **THEN** the artifact proves only `mock`/`agent-triggered` portable action/capability composition with an empty live-resource ledger, explicitly denies private actor-ownership verification, and cannot enter the exact qualification/measured registry or claim a real oracle
+
+#### Scenario: Interrupted mock result materialization is recovered
+- **WHEN** the capture-only sink durably installs the owner-only claim/payload/first-result record for either an emission or typed pre-emission rejection but result-file materialization is interrupted
+- **THEN** a repeated invocation for that exact output validates and recovers those exact first-terminal bytes without creating a second emission or reinterpreting the payload; a corrupt record or mismatched existing output fails hard
+
+#### Scenario: Rejected first invocation consumes the release
+- **WHEN** the first invocation fails a frozen authority, payload, selection, runtime-binding, wrapper, retry, or liveness check
+- **THEN** its typed zero-emission result is the atomically recorded first terminal result, and a later corrected invocation under the same action/release cannot emit as a new attempt one
 
 ### Requirement: Independent VM-capacity oracle
 Capacity outcomes MUST be evaluated from independent observations rather than
@@ -498,8 +568,9 @@ values rather than expose private resource identifiers.
 - **THEN** the stage fails clean-state verification and the next stage remains fenced
 
 ### Requirement: Private authority bindings resist identifier enumeration
-Every public value that binds a private runtime identity map, topology, host
-baseline, or native-evidence set MUST use one closed
+Every public value that binds a private runtime identity map, concrete action
+payload, actor-invocation capability, topology, host baseline, or
+native-evidence set MUST use one closed
 `privacy_preserving_binding` object containing exactly:
 
 - `method`: exactly `hmac-sha256-v1` or `opaque-random-v1`;
@@ -508,7 +579,9 @@ baseline, or native-evidence set MUST use one closed
   `scm.capacity.topology-authority.v1`,
   `scm.capacity.reversible-baseline.v1`,
   `scm.capacity.baseline-equivalence.v1`, or
-  `scm.capacity.native-evidence.v1`, as applicable; and
+  `scm.capacity.native-evidence.v1`,
+  `scm.capacity.actor-invocation.v1`, or
+  `scm.capacity.concrete-payload.v1`, as applicable; and
 - `value`: exactly 64 lowercase hexadecimal characters.
 
 For `hmac-sha256-v1`, `value` MUST be HMAC-SHA-256 under a per-campaign private
@@ -516,10 +589,15 @@ random key over the domain string, one zero byte, and the canonical native proof
 bytes. For `opaque-random-v1`, `value` MUST be 256 bits sampled from a
 cryptographically secure private random source and stored beside the owner-only
 native proof. The private executor MUST verify the typed value, method, and
-domain against that proof at every authority boundary. The key, random source
-value, and native identifiers MUST remain private.
+domain against that proof at every authority boundary. For a concrete-payload
+binding, that proof is the exact secret-bearing native action payload. For an
+actor-invocation binding, private infrastructure MUST additionally prove that
+the still-live Codex process/session owns the capability and authenticated
+release channel; the public carrier alone does not authenticate ownership. The
+key, random source value, and native identifiers MUST remain private.
 
 The portable schema fields MUST be named `runtime_binding`,
+`concrete_payload_binding`, `actor_invocation_capability_binding`,
 `topology_authority_binding`, `reversible_baseline_binding`,
 `baseline_equivalence_binding`, and `native_evidence_bindings` rather than
 calling either representation a digest. Raw unkeyed SHA-256 or another

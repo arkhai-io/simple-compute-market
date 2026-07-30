@@ -7,6 +7,157 @@ from typing import Sequence
 from issue_discovery.runner import DiscoveryRunner
 
 
+class _SingleUseAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        if getattr(namespace, self.dest, None) is not None:
+            raise argparse.ArgumentError(
+                self,
+                f"{option_string or self.dest} may only be supplied once",
+            )
+        setattr(namespace, self.dest, values)
+
+
+def _add_role_plan_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("role_plan", type=Path)
+    parser.add_argument(
+        "--expected-scm-ref",
+        default=None,
+        help="Optional exact campaign commit the role plan must bind.",
+    )
+
+
+def _add_role_receipt_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("role_receipt", type=Path)
+    parser.add_argument("--role-plan", type=Path, required=True)
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_oracle_authority_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("oracle_authority", type=Path)
+    parser.add_argument(
+        "--observer-plan",
+        type=Path,
+        default=None,
+        help="Required for real oracle authority; forbidden by mock authority.",
+    )
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_concurrency_policy_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("concurrency_policy", type=Path)
+    parser.add_argument(
+        "--role-plan",
+        dest="role_plans",
+        type=Path,
+        action="append",
+        required=True,
+        help="Exact role plan bound by the policy. Repeat for every actor.",
+    )
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_frozen_action_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("frozen_action", type=Path)
+    parser.add_argument("--role-plan", type=Path, required=True)
+    parser.add_argument("--payload", type=Path, required=True)
+    parser.add_argument("--oracle-authority", type=Path, required=True)
+    parser.add_argument("--observer-plan", type=Path, default=None)
+    parser.add_argument("--concurrency-policy", type=Path, default=None)
+    parser.add_argument(
+        "--policy-role-plan",
+        dest="policy_role_plans",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Role plan needed to validate a real concurrency policy. Repeat for "
+            "every actor; the action owner's --role-plan is included automatically."
+        ),
+    )
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_action_result_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("action_result", type=Path)
+    parser.add_argument("--frozen-action", type=Path, required=True)
+    parser.add_argument("--role-plan", type=Path, required=True)
+    parser.add_argument("--payload", type=Path, required=True)
+    parser.add_argument("--oracle-authority", type=Path, required=True)
+    parser.add_argument("--observer-plan", type=Path, default=None)
+    parser.add_argument("--concurrency-policy", type=Path, default=None)
+    parser.add_argument(
+        "--policy-role-plan",
+        dest="policy_role_plans",
+        type=Path,
+        action="append",
+        default=[],
+    )
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_role_evidence_bundle_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--role-plan",
+        dest="role_plans",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument(
+        "--role-receipt",
+        dest="role_receipts",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument(
+        "--frozen-action",
+        dest="frozen_actions",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument(
+        "--payload",
+        dest="payloads",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument(
+        "--oracle-authority",
+        dest="oracle_authorities",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument(
+        "--action-result",
+        dest="action_results",
+        type=Path,
+        action="append",
+        required=True,
+    )
+    parser.add_argument("--expected-scm-ref", default=None)
+
+
+def _add_actor_set_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("actor_set", type=Path)
+    parser.add_argument("--concurrency-policy", type=Path, required=True)
+    _add_role_evidence_bundle_args(parser)
+
+
+def _add_mock_capture_artifact_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("mock_capture", type=Path)
+    _add_role_evidence_bundle_args(parser)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="issue-discovery",
@@ -156,6 +307,193 @@ def build_parser() -> argparse.ArgumentParser:
     finding_ingest.add_argument("finding", type=Path)
     finding_ingest.set_defaults(handler=_capacity_finding_ingest)
 
+    role_plan_validate = capacity_subparsers.add_parser(
+        "role-plan-validate",
+        help="Validate a Git-pinned substantive capacity role plan.",
+    )
+    _add_role_plan_artifact_args(role_plan_validate)
+    role_plan_validate.set_defaults(handler=_capacity_role_plan_validate)
+
+    role_plan_hash = capacity_subparsers.add_parser(
+        "role-plan-sha256",
+        help="Validate and canonical-hash a substantive capacity role plan.",
+    )
+    _add_role_plan_artifact_args(role_plan_hash)
+    role_plan_hash.set_defaults(handler=_capacity_role_plan_sha256)
+
+    role_receipt_validate = capacity_subparsers.add_parser(
+        "role-receipt-validate",
+        help="Validate a substantive role receipt against its exact role plan.",
+    )
+    _add_role_receipt_artifact_args(role_receipt_validate)
+    role_receipt_validate.set_defaults(handler=_capacity_role_receipt_validate)
+
+    role_receipt_hash = capacity_subparsers.add_parser(
+        "role-receipt-sha256",
+        help="Validate and canonical-hash a substantive role receipt.",
+    )
+    _add_role_receipt_artifact_args(role_receipt_hash)
+    role_receipt_hash.set_defaults(handler=_capacity_role_receipt_sha256)
+
+    oracle_validate = capacity_subparsers.add_parser(
+        "oracle-authority-validate",
+        help="Validate a closed independent-oracle-authority artifact.",
+    )
+    _add_oracle_authority_artifact_args(oracle_validate)
+    oracle_validate.set_defaults(handler=_capacity_oracle_authority_validate)
+
+    oracle_hash = capacity_subparsers.add_parser(
+        "oracle-authority-sha256",
+        help="Validate and canonical-hash an independent-oracle authority.",
+    )
+    _add_oracle_authority_artifact_args(oracle_hash)
+    oracle_hash.set_defaults(handler=_capacity_oracle_authority_sha256)
+
+    policy_validate = capacity_subparsers.add_parser(
+        "concurrency-policy-validate",
+        help="Validate a pre-release concurrency policy against every role plan.",
+    )
+    _add_concurrency_policy_artifact_args(policy_validate)
+    policy_validate.set_defaults(handler=_capacity_concurrency_policy_validate)
+
+    policy_hash = capacity_subparsers.add_parser(
+        "concurrency-policy-sha256",
+        help="Validate and canonical-hash a pre-release concurrency policy.",
+    )
+    _add_concurrency_policy_artifact_args(policy_hash)
+    policy_hash.set_defaults(handler=_capacity_concurrency_policy_sha256)
+
+    action_validate = capacity_subparsers.add_parser(
+        "frozen-action-validate",
+        help="Validate one actor-bound frozen action and all of its authority.",
+    )
+    _add_frozen_action_artifact_args(action_validate)
+    action_validate.set_defaults(handler=_capacity_frozen_action_validate)
+
+    action_hash = capacity_subparsers.add_parser(
+        "frozen-action-sha256",
+        help="Validate and canonical-hash one actor-bound frozen action.",
+    )
+    _add_frozen_action_artifact_args(action_hash)
+    action_hash.set_defaults(handler=_capacity_frozen_action_sha256)
+
+    result_validate = capacity_subparsers.add_parser(
+        "action-result-validate",
+        help="Validate an action result against its exact frozen action.",
+    )
+    _add_action_result_artifact_args(result_validate)
+    result_validate.set_defaults(handler=_capacity_action_result_validate)
+
+    result_hash = capacity_subparsers.add_parser(
+        "action-result-sha256",
+        help="Validate and canonical-hash an action result.",
+    )
+    _add_action_result_artifact_args(result_hash)
+    result_hash.set_defaults(handler=_capacity_action_result_sha256)
+
+    actor_set_validate = capacity_subparsers.add_parser(
+        "actor-set-validate",
+        help="Validate a complete substantive actor-set aggregate.",
+    )
+    _add_actor_set_artifact_args(actor_set_validate)
+    actor_set_validate.set_defaults(handler=_capacity_actor_set_validate)
+
+    actor_set_hash = capacity_subparsers.add_parser(
+        "actor-set-sha256",
+        help="Validate and canonical-hash a substantive actor-set aggregate.",
+    )
+    _add_actor_set_artifact_args(actor_set_hash)
+    actor_set_hash.set_defaults(handler=_capacity_actor_set_sha256)
+
+    mock_capture_validate = capacity_subparsers.add_parser(
+        "mock-capture-validate",
+        help="Validate the standalone capture-only B1 composition.",
+    )
+    _add_mock_capture_artifact_args(mock_capture_validate)
+    mock_capture_validate.set_defaults(handler=_capacity_mock_capture_validate)
+
+    mock_capture_hash = capacity_subparsers.add_parser(
+        "mock-capture-sha256",
+        help="Validate and canonical-hash a capture-only B1 composition.",
+    )
+    _add_mock_capture_artifact_args(mock_capture_hash)
+    mock_capture_hash.set_defaults(handler=_capacity_mock_capture_sha256)
+
+    action_capture = capacity_subparsers.add_parser(
+        "action-capture",
+        help="Atomically capture one validated one-shot mock action.",
+    )
+    action_capture.add_argument(
+        "--expected-action-kind",
+        required=True,
+        action=_SingleUseAction,
+        choices=[
+            "buyer-request",
+            "seller-service-start",
+            "seller-listing-publication",
+        ],
+    )
+    _add_frozen_action_artifact_args(action_capture)
+    action_capture.add_argument("--runtime-binding", type=Path, required=True)
+    action_capture.add_argument(
+        "--concrete-payload-binding",
+        type=Path,
+        required=True,
+    )
+    action_capture.add_argument(
+        "--actor-invocation-capability",
+        type=Path,
+        required=True,
+    )
+    action_capture.add_argument(
+        "--current-frozen-action",
+        type=Path,
+        default=None,
+        help=(
+            "Optional just-in-time frozen-action snapshot. When omitted, the "
+            "validated authority file is rechecked."
+        ),
+    )
+    action_capture.add_argument(
+        "--current-role-plan",
+        type=Path,
+        default=None,
+        help=(
+            "Optional just-in-time role-plan snapshot used to produce a typed "
+            "authority-changed rejection."
+        ),
+    )
+    action_capture.add_argument(
+        "--current-payload",
+        type=Path,
+        default=None,
+        help=(
+            "Optional just-in-time payload snapshot used to produce a typed "
+            "payload/selection rejection."
+        ),
+    )
+    action_capture.add_argument(
+        "--current-oracle-authority",
+        type=Path,
+        default=None,
+        help=(
+            "Optional just-in-time oracle snapshot used to produce a typed "
+            "authority-changed rejection."
+        ),
+    )
+    action_capture.add_argument(
+        "--actor-alive-at-invocation",
+        action="store_true",
+        required=True,
+        help=(
+            "Explicit mock liveness assertion. Real process authentication "
+            "remains private-infrastructure authority."
+        ),
+    )
+    action_capture.add_argument("--claim-ledger", type=Path, required=True)
+    action_capture.add_argument("--result-output", type=Path, required=True)
+    action_capture.set_defaults(handler=_capacity_action_capture)
+
     clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
     clean_room_subparsers = clean_room.add_subparsers(dest="clean_room_command", required=True)
 
@@ -259,6 +597,222 @@ def _capacity_finding_ingest(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_finding_ingest(
         _run_dir(args),
         _repo_path(args, args.finding),
+    )
+
+
+def _capacity_role_plan_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_role_plan_validate(
+        _repo_path(args, args.role_plan),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_role_plan_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_role_plan_sha256(
+        _repo_path(args, args.role_plan),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_role_receipt_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_role_receipt_validate(
+        _repo_path(args, args.role_receipt),
+        role_plan=_repo_path(args, args.role_plan),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_role_receipt_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_role_receipt_sha256(
+        _repo_path(args, args.role_receipt),
+        role_plan=_repo_path(args, args.role_plan),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_oracle_authority_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(
+        repo_root=args.repo_root
+    ).capacity_oracle_authority_validate(
+        _repo_path(args, args.oracle_authority),
+        observer_plan=(
+            _repo_path(args, args.observer_plan)
+            if args.observer_plan is not None
+            else None
+        ),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_oracle_authority_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(
+        repo_root=args.repo_root
+    ).capacity_oracle_authority_sha256(
+        _repo_path(args, args.oracle_authority),
+        observer_plan=(
+            _repo_path(args, args.observer_plan)
+            if args.observer_plan is not None
+            else None
+        ),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_concurrency_policy_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(
+        repo_root=args.repo_root
+    ).capacity_concurrency_policy_validate(
+        _repo_path(args, args.concurrency_policy),
+        role_plans=tuple(_repo_path(args, path) for path in args.role_plans),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_concurrency_policy_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(
+        repo_root=args.repo_root
+    ).capacity_concurrency_policy_sha256(
+        _repo_path(args, args.concurrency_policy),
+        role_plans=tuple(_repo_path(args, path) for path in args.role_plans),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _frozen_action_paths(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "frozen_action": _repo_path(args, args.frozen_action),
+        "role_plan": _repo_path(args, args.role_plan),
+        "payload": _repo_path(args, args.payload),
+        "oracle_authority": _repo_path(args, args.oracle_authority),
+        "observer_plan": (
+            _repo_path(args, args.observer_plan)
+            if args.observer_plan is not None
+            else None
+        ),
+        "concurrency_policy": (
+            _repo_path(args, args.concurrency_policy)
+            if args.concurrency_policy is not None
+            else None
+        ),
+        "policy_role_plans": tuple(
+            _repo_path(args, path) for path in args.policy_role_plans
+        ),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_frozen_action_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_frozen_action_validate(
+        **_frozen_action_paths(args),
+    )
+
+
+def _capacity_frozen_action_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_frozen_action_sha256(
+        **_frozen_action_paths(args),
+    )
+
+
+def _capacity_action_result_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_action_result_validate(
+        _repo_path(args, args.action_result),
+        **_frozen_action_paths(args),
+    )
+
+
+def _capacity_action_result_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_action_result_sha256(
+        _repo_path(args, args.action_result),
+        **_frozen_action_paths(args),
+    )
+
+
+def _role_evidence_paths(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "role_plans": tuple(_repo_path(args, path) for path in args.role_plans),
+        "role_receipts": tuple(
+            _repo_path(args, path) for path in args.role_receipts
+        ),
+        "frozen_actions": tuple(
+            _repo_path(args, path) for path in args.frozen_actions
+        ),
+        "payloads": tuple(_repo_path(args, path) for path in args.payloads),
+        "oracle_authorities": tuple(
+            _repo_path(args, path) for path in args.oracle_authorities
+        ),
+        "action_results": tuple(
+            _repo_path(args, path) for path in args.action_results
+        ),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_actor_set_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_actor_set_validate(
+        _repo_path(args, args.actor_set),
+        concurrency_policy=_repo_path(args, args.concurrency_policy),
+        **_role_evidence_paths(args),
+    )
+
+
+def _capacity_actor_set_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_actor_set_sha256(
+        _repo_path(args, args.actor_set),
+        concurrency_policy=_repo_path(args, args.concurrency_policy),
+        **_role_evidence_paths(args),
+    )
+
+
+def _capacity_mock_capture_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_mock_capture_validate(
+        _repo_path(args, args.mock_capture),
+        **_role_evidence_paths(args),
+    )
+
+
+def _capacity_mock_capture_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_mock_capture_sha256(
+        _repo_path(args, args.mock_capture),
+        **_role_evidence_paths(args),
+    )
+
+
+def _capacity_action_capture(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_action_capture(
+        **_frozen_action_paths(args),
+        expected_action_kind=args.expected_action_kind,
+        current_runtime_binding=_repo_path(args, args.runtime_binding),
+        current_concrete_payload_binding=_repo_path(
+            args,
+            args.concrete_payload_binding,
+        ),
+        current_actor_invocation_capability=_repo_path(
+            args,
+            args.actor_invocation_capability,
+        ),
+        current_action=(
+            _repo_path(args, args.current_frozen_action)
+            if args.current_frozen_action is not None
+            else None
+        ),
+        current_plan=(
+            _repo_path(args, args.current_role_plan)
+            if args.current_role_plan is not None
+            else None
+        ),
+        current_payload=(
+            _repo_path(args, args.current_payload)
+            if args.current_payload is not None
+            else None
+        ),
+        current_oracle_authority=(
+            _repo_path(args, args.current_oracle_authority)
+            if args.current_oracle_authority is not None
+            else None
+        ),
+        actor_alive_at_invocation=args.actor_alive_at_invocation,
+        claim_ledger=_repo_path(args, args.claim_ledger),
+        result_output=_repo_path(args, args.result_output),
     )
 
 
