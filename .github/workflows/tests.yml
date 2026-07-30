@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [staging]
+    branches: [staging, dev]
   pull_request:
-    branches: [staging]
+    branches: [staging, dev]
   workflow_dispatch:
 
 concurrency:
@@ -49,6 +49,9 @@ jobs:
           - { name: core-storefront-client, dir: core/storefront-client }
           - { name: core-registry,          dir: core/registry, predist: true }
           - { name: kit-site,              dir: kit/site }
+          - { name: kit-resource-pools,     dir: kit/resource-pools }
+          - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
+          - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
           # The deselected tests assert that injected/static option flags
           # appear in `typer --help` output; under headless pytest capture
@@ -80,6 +83,12 @@ jobs:
           uv build --no-sources --out-dir .dist core
           uv build --no-sources --out-dir .dist core/storefront
           uv build --no-sources --out-dir .dist kit/site
+          uv build --no-sources --out-dir .dist kit/resource-pools
+          uv build --no-sources --out-dir .dist kit/fulfillment
+          uv build --no-sources --out-dir .dist kit/identity
+          uv build --no-sources --out-dir .dist kit/alkahest
+          uv build --no-sources --out-dir .dist kit/config
+          uv build --no-sources --out-dir .dist kit/policy
           uv build --no-sources --out-dir .dist core/storefront-client
           uv build --no-sources --out-dir .dist core/registry-client
       - name: pytest
