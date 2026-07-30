@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from issue_discovery.capacity import CapacityValidationError
 from issue_discovery.cli import build_parser, main
 
 
@@ -86,9 +91,39 @@ def test_profile_dry_run_prints_profile_env(capsys) -> None:
     assert "  - redis_no_host_port_override" in captured.out
 
 
-def test_capacity_scenario_sha256_prints_machine_readable_digest(capsys) -> None:
+def test_capacity_scenario_sha256_prints_machine_readable_digest(
+    capsys,
+    monkeypatch,
+) -> None:
     root = repo_root()
-    scenario = root / "tools" / "issue-discovery" / "config" / "capacity" / "b1-g1-qualification.json"
+    scm_ref = "a" * 40
+    scenario = "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json"
+    digest = "b" * 64
+    call: dict[str, object] = {}
+
+    def fake_resolve(
+        repository: Path,
+        selected_ref: str,
+        relative_path: str,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        call.update(
+            {
+                "repository": repository,
+                "selected_ref": selected_ref,
+                "relative_path": relative_path,
+                "expected_sha256": expected_sha256,
+            }
+        )
+        return SimpleNamespace(
+            scenario_id="b1-s1-g1",
+            scm_ref=selected_ref,
+            relative_path=relative_path,
+            scenario_sha256=digest,
+            scenario={"scenario_id": "b1-s1-g1"},
+        )
+
+    monkeypatch.setattr("issue_discovery.runner.resolve_pinned_scenario", fake_resolve)
 
     code = main(
         [
@@ -96,14 +131,144 @@ def test_capacity_scenario_sha256_prints_machine_readable_digest(capsys) -> None
             str(root),
             "capacity",
             "scenario-sha256",
-            str(scenario),
+            scenario,
+            "--scm-ref",
+            scm_ref,
         ]
     )
 
-    digest = capsys.readouterr().out.strip()
+    output = capsys.readouterr().out.strip()
     assert code == 0
-    assert digest == (
-        "e3d5b48c2314890b1ff5c191a18face5ff151bbfb8baffa67c8899a2a389a5d9"
+    assert output == digest
+    assert call == {
+        "repository": root,
+        "selected_ref": scm_ref,
+        "relative_path": scenario,
+        "expected_sha256": None,
+    }
+
+
+def test_capacity_scenario_validate_prints_exact_pinned_identity(
+    capsys,
+    monkeypatch,
+) -> None:
+    root = repo_root()
+    scm_ref = "c" * 40
+    scenario = "tools/issue-discovery/config/capacity/scenarios/b2-s1-g1.json"
+    digest = "d" * 64
+
+    def fake_resolve(
+        repository: Path,
+        selected_ref: str,
+        relative_path: str,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        assert repository == root
+        assert selected_ref == scm_ref
+        assert relative_path == scenario
+        assert expected_sha256 == digest
+        return SimpleNamespace(
+            scenario_id="b2-s1-g1",
+            scm_ref=selected_ref,
+            relative_path=relative_path,
+            scenario_sha256=digest,
+            scenario={"scenario_id": "b2-s1-g1"},
+        )
+
+    monkeypatch.setattr("issue_discovery.runner.resolve_pinned_scenario", fake_resolve)
+
+    code = main(
+        [
+            "--repo-root",
+            str(root),
+            "capacity",
+            "scenario-validate",
+            scenario,
+            "--scm-ref",
+            scm_ref,
+            "--expected-sha256",
+            digest,
+        ]
+    )
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "relative_path": scenario,
+        "scenario_id": "b2-s1-g1",
+        "scenario_sha256": digest,
+        "scm_ref": scm_ref,
+    }
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [
+            "capacity",
+            "scenario-sha256",
+            "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json",
+        ],
+        [
+            "capacity",
+            "scenario-validate",
+            "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json",
+            "--scm-ref",
+            "a" * 40,
+        ],
+        [
+            "capacity",
+            "scenario-validate",
+            "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json",
+            "--expected-sha256",
+            "b" * 64,
+        ],
+    ],
+)
+def test_capacity_scenario_commands_require_explicit_authority(
+    arguments: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(arguments)
+
+    assert exc_info.value.code == 2
+
+
+def test_capacity_scenario_cli_does_not_resolve_caller_path(
+    capsys,
+    monkeypatch,
+) -> None:
+    supplied_path = "/tmp/operator-selected.json"
+    scm_ref = "a" * 40
+
+    def reject_absolute(
+        repository: Path,
+        selected_ref: str,
+        relative_path: str,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        assert repository == repo_root()
+        assert selected_ref == scm_ref
+        assert relative_path == supplied_path
+        assert expected_sha256 is None
+        raise CapacityValidationError("scenario path must be repository-relative")
+
+    monkeypatch.setattr("issue_discovery.runner.resolve_pinned_scenario", reject_absolute)
+
+    code = main(
+        [
+            "--repo-root",
+            str(repo_root()),
+            "capacity",
+            "scenario-sha256",
+            supplied_path,
+            "--scm-ref",
+            scm_ref,
+        ]
+    )
+
+    assert code == 1
+    assert capsys.readouterr().out == (
+        "capacity scenario invalid: scenario path must be repository-relative\n"
     )
 
 

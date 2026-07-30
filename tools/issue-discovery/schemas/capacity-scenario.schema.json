@@ -1,41 +1,289 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://simple-compute-market.dev/schemas/capacity-scenario-v1.json",
-  "title": "SCM public VM capacity scenario",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-scenario-v2.json",
+  "title": "SCM portable VM capacity scenario",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "scenario_id", "deal_type", "provisioning", "gpu_assignment", "listing", "wave"],
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "deal_type",
+    "provisioning",
+    "gpu_assignment",
+    "physical_capacity",
+    "actor_slots",
+    "actor_counts",
+    "listing_topology",
+    "load_counts",
+    "requests",
+    "expected_outcomes",
+    "retry_budget"
+  ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
-    "deal_type": { "const": "vm" },
-    "provisioning": { "const": "real-kvm-ansible" },
-    "gpu_assignment": { "const": "whole-device-passthrough" },
-    "listing": {
+    "schema_version": {
+      "const": 2
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/scenario_id"
+    },
+    "deal_type": {
+      "const": "vm"
+    },
+    "provisioning": {
+      "const": "real-kvm-ansible"
+    },
+    "gpu_assignment": {
+      "const": "whole-device-passthrough"
+    },
+    "physical_capacity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["count", "gpus_per_vm", "seller_distribution"],
+      "required": [
+        "independently_assignable_gpus",
+        "gpus_per_successful_vm"
+      ],
       "properties": {
-        "count": { "type": "integer", "minimum": 0 },
-        "gpus_per_vm": { "const": 1 },
-        "seller_distribution": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "integer", "minimum": 1 }
+        "independently_assignable_gpus": {
+          "const": 1
+        },
+        "gpus_per_successful_vm": {
+          "const": 1
         }
       }
     },
-    "wave": {
+    "actor_slots": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["buyers", "sellers", "requests", "expected_successes", "expected_scarcity", "retry_count"],
+      "required": [
+        "observers",
+        "buyers",
+        "sellers",
+        "host_operators"
+      ],
       "properties": {
-        "buyers": { "type": "integer", "minimum": 0 },
-        "sellers": { "type": "integer", "minimum": 0 },
-        "requests": { "type": "integer", "minimum": 0 },
-        "expected_successes": { "type": "integer", "minimum": 0 },
-        "expected_scarcity": { "type": "integer", "minimum": 0 },
-        "retry_count": { "const": 0 }
+        "observers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^observer-[1-9][0-9]*$"
+          }
+        },
+        "buyers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^buyer-[1-9][0-9]*$"
+          }
+        },
+        "sellers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^seller-[1-9][0-9]*$"
+          }
+        },
+        "host_operators": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^host-operator-[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    "actor_counts": {
+      "$ref": "#/$defs/actor_counts"
+    },
+    "listing_topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capacity_authority_mode",
+        "sellers"
+      ],
+      "properties": {
+        "capacity_authority_mode": {
+          "enum": [
+            "single-seller",
+            "shared-globally-fenced"
+          ]
+        },
+        "sellers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seller_slot",
+              "service_slot",
+              "listing_slots"
+            ],
+            "properties": {
+              "seller_slot": {
+                "type": "string",
+                "pattern": "^seller-[1-9][0-9]*$"
+              },
+              "service_slot": {
+                "type": "string",
+                "pattern": "^seller-service-[1-9][0-9]*$"
+              },
+              "listing_slots": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^listing-[1-9][0-9]*$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "load_counts": {
+      "$ref": "#/$defs/load_counts"
+    },
+    "requests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "buyer_slot",
+          "seller_slot",
+          "listing_slot"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^request-[1-9][0-9]*$"
+          },
+          "buyer_slot": {
+            "type": "string",
+            "pattern": "^buyer-[1-9][0-9]*$"
+          },
+          "seller_slot": {
+            "type": "string",
+            "pattern": "^seller-[1-9][0-9]*$"
+          },
+          "listing_slot": {
+            "type": "string",
+            "pattern": "^listing-[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    "expected_outcomes": {
+      "$ref": "#/$defs/expected_outcomes"
+    },
+    "retry_budget": {
+      "const": 0
+    }
+  },
+  "$defs": {
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1"
+      ]
+    },
+    "actor_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observers",
+        "buyers",
+        "sellers",
+        "host_operators"
+      ],
+      "properties": {
+        "observers": {
+          "const": 1
+        },
+        "buyers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "sellers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "host_operators": {
+          "const": 1
+        }
+      }
+    },
+    "load_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected_listings",
+        "requests"
+      ],
+      "properties": {
+        "selected_listings": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
+      }
+    },
+    "expected_outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vm-succeeded",
+        "capacity-refused",
+        "fault"
+      ],
+      "properties": {
+        "vm-succeeded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "capacity-refused": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "fault": {
+          "const": 0
+        }
       }
     }
   }

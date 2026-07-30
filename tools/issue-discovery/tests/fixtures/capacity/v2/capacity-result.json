@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "result_id": "capacity-result-1",
+  "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "profile_stage_id": "b1-s1-g1-qualification",
+  "profile_stage_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scenario_id": "b1-s1-g1",
+  "scenario_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "execution_boundary": "real-qualification",
+  "actor_trigger": "agent-triggered",
+  "actor_set_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "expected_outcomes": {
+    "vm-succeeded": 1,
+    "capacity-refused": 0,
+    "fault": 0
+  },
+  "observed_outcomes": {
+    "vm-succeeded": 1,
+    "capacity-refused": 0,
+    "fault": 0
+  },
+  "request_outcomes": [
+    {
+      "request_id": "request-1",
+      "outcome_kind": "vm-succeeded",
+      "deal_reference": {
+        "request_id": "request-1",
+        "seller_slot": "seller-1",
+        "listing_slot": "listing-1",
+        "runtime_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.runtime-binding.v1",
+          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "negotiation_reference_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "escrow_reference_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "capacity_reservation_id": "reservation-1",
+      "fulfillment_id": "fulfillment-1",
+      "settlement_record_id": "settlement-record-1",
+      "settlement_resource_id": "settlement-resource-1",
+      "provisioned_resource_id": "provisioned-resource-1",
+      "allocation_id": null,
+      "provisioning_job_id": null,
+      "oracle_evidence_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "teardown_complete": true,
+      "failure_category": null
+    }
+  ],
+  "aggregate_observation_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "teardown": {
+    "complete": true,
+    "zero_active_residue": true,
+    "evidence_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "baseline": {
+    "reversible_baseline_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.reversible-baseline.v1",
+      "value": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "baseline_equivalence_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.baseline-equivalence.v1",
+      "value": "5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "reversible_state_equal": true,
+    "accounting_deltas_reconciled": true,
+    "unexplained_value": false,
+    "evidence_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  }
+}

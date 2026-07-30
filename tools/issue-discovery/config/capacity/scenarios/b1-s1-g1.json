@@ -1,0 +1,51 @@
+{
+  "schema_version": 2,
+  "scenario_id": "b1-s1-g1",
+  "deal_type": "vm",
+  "provisioning": "real-kvm-ansible",
+  "gpu_assignment": "whole-device-passthrough",
+  "physical_capacity": {
+    "independently_assignable_gpus": 1,
+    "gpus_per_successful_vm": 1
+  },
+  "actor_slots": {
+    "observers": ["observer-1"],
+    "buyers": ["buyer-1"],
+    "sellers": ["seller-1"],
+    "host_operators": ["host-operator-1"]
+  },
+  "actor_counts": {
+    "observers": 1,
+    "buyers": 1,
+    "sellers": 1,
+    "host_operators": 1
+  },
+  "listing_topology": {
+    "capacity_authority_mode": "single-seller",
+    "sellers": [
+      {
+        "seller_slot": "seller-1",
+        "service_slot": "seller-service-1",
+        "listing_slots": ["listing-1"]
+      }
+    ]
+  },
+  "load_counts": {
+    "selected_listings": 1,
+    "requests": 1
+  },
+  "requests": [
+    {
+      "request_id": "request-1",
+      "buyer_slot": "buyer-1",
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1"
+    }
+  ],
+  "expected_outcomes": {
+    "vm-succeeded": 1,
+    "capacity-refused": 0,
+    "fault": 0
+  },
+  "retry_budget": 0
+}

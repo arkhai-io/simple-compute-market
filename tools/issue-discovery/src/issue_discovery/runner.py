@@ -17,8 +17,7 @@ from issue_discovery.clean_room import (
 from issue_discovery.capacity import (
     CapacityValidationError,
     ingest_finding,
-    scenario_sha256,
-    validate_scenario_file,
+    resolve_pinned_scenario,
 )
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
@@ -150,22 +149,48 @@ class DiscoveryRunner:
         print(f"capacity finding lifecycle: {fingerprint} -> {state}")
         return 0
 
-    def capacity_scenario_validate(self, scenario: Path) -> int:
+    def capacity_scenario_validate(
+        self,
+        scenario: str,
+        *,
+        scm_ref: str,
+        expected_sha256: str,
+    ) -> int:
         try:
-            validate_scenario_file(scenario.resolve(), self.repo_root)
+            resolved = resolve_pinned_scenario(
+                self.repo_root,
+                scm_ref,
+                scenario,
+                expected_sha256=expected_sha256,
+            )
         except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
             print(f"capacity scenario invalid: {exc}")
             return 1
-        print(f"capacity scenario valid: {scenario.resolve()}")
+        print(
+            json.dumps(
+                {
+                    "scenario_id": resolved.scenario_id,
+                    "scenario_sha256": resolved.scenario_sha256,
+                    "scm_ref": resolved.scm_ref,
+                    "relative_path": resolved.relative_path,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
         return 0
 
-    def capacity_scenario_sha256(self, scenario: Path) -> int:
+    def capacity_scenario_sha256(self, scenario: str, *, scm_ref: str) -> int:
         try:
-            validated = validate_scenario_file(scenario.resolve(), self.repo_root)
+            resolved = resolve_pinned_scenario(
+                self.repo_root,
+                scm_ref,
+                scenario,
+            )
         except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
             print(f"capacity scenario invalid: {exc}")
             return 1
-        print(scenario_sha256(validated))
+        print(resolved.scenario_sha256)
         return 0
 
     def capacity_finding_ingest(self, run_dir: Path, finding: Path) -> int:

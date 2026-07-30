@@ -1,0 +1,36 @@
+{
+  "stage_id": "b1-s1-g1-qualification",
+  "stage_class": "qualification",
+  "scenario_binding": {
+    "scenario_id": "b1-s1-g1",
+    "scenario_path": "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json",
+    "scenario_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "execution_boundary": "real-qualification",
+  "actor_trigger": "agent-triggered",
+  "optional": false,
+  "actor_counts": {
+    "observers": 1,
+    "buyers": 1,
+    "sellers": 1,
+    "host_operators": 1
+  },
+  "load_counts": {
+    "selected_listings": 1,
+    "requests": 1
+  },
+  "independently_assignable_gpus": 1,
+  "expected_outcomes": {
+    "vm-succeeded": 1,
+    "capacity-refused": 0,
+    "fault": 0
+  },
+  "retry_budget": 0,
+  "admission": {
+    "all_of": [
+      "reference-complete",
+      "verified-g1-topology"
+    ],
+    "any_of": []
+  }
+}

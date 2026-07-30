@@ -115,16 +115,37 @@ def build_parser() -> argparse.ArgumentParser:
 
     scenario_validate = capacity_subparsers.add_parser(
         "scenario-validate",
-        help="Validate a public VM-only capacity scenario.",
+        help="Validate a pinned public VM-only capacity scenario.",
     )
-    scenario_validate.add_argument("scenario", type=Path)
+    scenario_validate.add_argument(
+        "scenario",
+        help="Known repository-relative capacity-scenario path.",
+    )
+    scenario_validate.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the scenario.",
+    )
+    scenario_validate.add_argument(
+        "--expected-sha256",
+        required=True,
+        help="Expected canonical SHA-256 of the pinned scenario.",
+    )
     scenario_validate.set_defaults(handler=_capacity_scenario_validate)
 
     scenario_hash = capacity_subparsers.add_parser(
         "scenario-sha256",
-        help="Validate a public capacity scenario and print its canonical SHA-256.",
+        help="Validate a pinned public capacity scenario and print its canonical SHA-256.",
     )
-    scenario_hash.add_argument("scenario", type=Path)
+    scenario_hash.add_argument(
+        "scenario",
+        help="Known repository-relative capacity-scenario path.",
+    )
+    scenario_hash.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the scenario.",
+    )
     scenario_hash.set_defaults(handler=_capacity_scenario_sha256)
 
     finding_ingest = capacity_subparsers.add_parser(
@@ -221,13 +242,16 @@ def _issue_transition(args: argparse.Namespace) -> int:
 
 def _capacity_scenario_validate(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_scenario_validate(
-        _repo_path(args, args.scenario)
+        args.scenario,
+        scm_ref=args.scm_ref,
+        expected_sha256=args.expected_sha256,
     )
 
 
 def _capacity_scenario_sha256(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_scenario_sha256(
-        _repo_path(args, args.scenario)
+        args.scenario,
+        scm_ref=args.scm_ref,
     )
 
 

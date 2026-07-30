@@ -20,26 +20,18 @@ def repo_root() -> Path:
 
 
 def valid_scenario() -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "scenario_id": "b2-g1-contention",
-        "deal_type": "vm",
-        "provisioning": "real-kvm-ansible",
-        "gpu_assignment": "whole-device-passthrough",
-        "listing": {
-            "count": 1,
-            "gpus_per_vm": 1,
-            "seller_distribution": [1],
-        },
-        "wave": {
-            "buyers": 2,
-            "sellers": 1,
-            "requests": 2,
-            "expected_successes": 1,
-            "expected_scarcity": 1,
-            "retry_count": 0,
-        },
-    }
+    path = (
+        repo_root()
+        / "tools"
+        / "issue-discovery"
+        / "config"
+        / "capacity"
+        / "scenarios"
+        / "b2-s1-g1.json"
+    )
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(value, dict)
+    return value
 
 
 def valid_finding() -> dict[str, object]:
@@ -124,16 +116,16 @@ def test_capacity_scenario_is_vm_only_and_balances_terminal_outcomes() -> None:
 
 def test_capacity_scenario_rejects_private_runtime_listing_identity() -> None:
     scenario = valid_scenario()
-    scenario["listing"]["fingerprint"] = "runtime-listing-fingerprint"
+    scenario["listing_topology"]["runtime_listing_id"] = "live-listing-123"
 
     try:
         validate_scenario(scenario, repo_root())
     except CapacityValidationError as exc:
-        assert "listing" in str(exc)
-        assert "fingerprint" in str(exc)
+        assert "listing_topology" in str(exc)
+        assert "runtime_listing_id" in str(exc)
         assert "was unexpected" in str(exc)
     else:  # pragma: no cover
-        raise AssertionError("a runtime listing fingerprint passed the public schema")
+        raise AssertionError("a live runtime listing identity passed the public schema")
 
 
 def test_capacity_scenario_sha256_is_canonical() -> None:
@@ -142,7 +134,7 @@ def test_capacity_scenario_sha256_is_canonical() -> None:
 
     digest = scenario_sha256(scenario)
     assert digest == (
-        "dff78da34b800f24423bd3e04c4439eb3f86ab2890a0be7bdb81e5f1e57c17e2"
+        "46e0ff44baed6a1113471bd2e0c3dbf5fb7a50a6b24b43d2b948fff83ab7832c"
     )
     assert digest == scenario_sha256(reordered)
     assert len(digest) == 64
@@ -150,30 +142,57 @@ def test_capacity_scenario_sha256_is_canonical() -> None:
 
 
 def test_all_tracked_capacity_scenarios_are_valid_and_cover_seller_scaling() -> None:
-    scenario_dir = repo_root() / "tools" / "issue-discovery" / "config" / "capacity"
+    scenario_dir = (
+        repo_root()
+        / "tools"
+        / "issue-discovery"
+        / "config"
+        / "capacity"
+        / "scenarios"
+    )
     scenarios = []
     for path in sorted(scenario_dir.glob("*.json")):
         scenario = json.loads(path.read_text(encoding="utf-8"))
         validate_scenario(scenario, repo_root())
         scenarios.append(scenario)
-    ordered_ids = [item["scenario_id"] for item in scenarios]
-    ids = set(ordered_ids)
-    assert {"b2-s2-g1-contention", "b2-s2-g2-fulfillment"}.issubset(ids)
-    assert ordered_ids[0] == "b1-g1-qualification"
-    assert ordered_ids.index("b2-g1-contention") < ordered_ids.index(
-        "b2-s2-g1-contention"
-    )
-    assert ordered_ids.index("b2-g2-fulfillment") < ordered_ids.index(
-        "b2-s2-g2-fulfillment"
-    )
+    ids = {item["scenario_id"] for item in scenarios}
+    assert ids == {
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1",
+    }
     for scenario in scenarios:
-        assert set(scenario["listing"]) == {
-            "count",
-            "gpus_per_vm",
-            "seller_distribution",
+        topology = scenario["listing_topology"]
+        sellers = topology["sellers"]
+        assert len(sellers) == scenario["actor_counts"]["sellers"]
+        assert all(len(seller["listing_slots"]) == 1 for seller in sellers)
+        assert scenario["load_counts"]["selected_listings"] == len(sellers)
+        assert scenario["physical_capacity"] == {
+            "independently_assignable_gpus": 1,
+            "gpus_per_successful_vm": 1,
         }
-        assert len(scenario["listing"]["seller_distribution"]) == scenario["wave"]["sellers"]
-        assert sum(scenario["listing"]["seller_distribution"]) == scenario["listing"]["count"]
+        assert scenario["expected_outcomes"] == {
+            "vm-succeeded": 1,
+            "capacity-refused": scenario["load_counts"]["requests"] - 1,
+            "fault": 0,
+        }
+        expected_mode = (
+            "single-seller"
+            if scenario["actor_counts"]["sellers"] == 1
+            else "shared-globally-fenced"
+        )
+        assert topology["capacity_authority_mode"] == expected_mode
 
 
 def test_capacity_finding_ingest_preserves_defect_identity_and_branch_authority(

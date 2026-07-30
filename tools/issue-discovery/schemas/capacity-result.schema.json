@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-result-v2.json",
+  "title": "SCM independent VM capacity result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "result_id", "scm_ref", "profile_stage_id",
+    "profile_stage_sha256", "scenario_id", "scenario_sha256",
+    "execution_boundary", "actor_trigger", "actor_set_sha256",
+    "expected_outcomes", "observed_outcomes", "request_outcomes",
+    "aggregate_observation_sha256", "teardown", "baseline"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "result_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+    "scm_ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "profile_stage_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "profile_stage_sha256": {"$ref": "#/$defs/digest"},
+    "scenario_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^(?:b[1-8]-s1-g1|b2-s2-g1|b4-s[234]-g1|serialized-reuse-[ab])$"}
+      ]
+    },
+    "scenario_sha256": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/digest"}
+      ]
+    },
+    "execution_boundary": {
+      "enum": ["readiness", "mock", "real-reference", "real-qualification", "real-measured"]
+    },
+    "actor_trigger": {"enum": ["none", "controller-driven", "agent-triggered"]},
+    "actor_set_sha256": {"$ref": "#/$defs/digest"},
+    "expected_outcomes": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/outcome_counts"}
+      ]
+    },
+    "observed_outcomes": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/outcome_counts"}
+      ]
+    },
+    "request_outcomes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/request_outcome"}
+    },
+    "aggregate_observation_sha256": {"$ref": "#/$defs/digest"},
+    "teardown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "zero_active_residue", "evidence_sha256"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "zero_active_residue": {"type": "boolean"},
+        "evidence_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reversible_baseline_binding", "baseline_equivalence_binding",
+        "reversible_state_equal", "accounting_deltas_reconciled",
+        "unexplained_value", "evidence_sha256"
+      ],
+      "properties": {
+        "reversible_baseline_binding": {"$ref": "#/$defs/reversible_binding"},
+        "baseline_equivalence_binding": {"$ref": "#/$defs/equivalence_binding"},
+        "reversible_state_equal": {"type": "boolean"},
+        "accounting_deltas_reconciled": {"type": "boolean"},
+        "unexplained_value": {"const": false},
+        "evidence_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "opaque_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "nullable_id": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/opaque_id"}
+      ]
+    },
+    "runtime_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.runtime-binding.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "reversible_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.reversible-baseline.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "equivalence_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.baseline-equivalence.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "outcome_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vm-succeeded", "capacity-refused", "fault"],
+      "properties": {
+        "vm-succeeded": {"type": "integer", "minimum": 0},
+        "capacity-refused": {"type": "integer", "minimum": 0},
+        "fault": {"type": "integer", "minimum": 0}
+      }
+    },
+    "deal_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id", "seller_slot", "listing_slot", "runtime_binding",
+        "negotiation_reference_sha256", "escrow_reference_sha256"
+      ],
+      "properties": {
+        "request_id": {"type": "string", "pattern": "^request-[1-9][0-9]*$"},
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "listing_slot": {"type": "string", "pattern": "^listing-[1-9][0-9]*$"},
+        "runtime_binding": {"$ref": "#/$defs/runtime_binding"},
+        "negotiation_reference_sha256": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]
+        },
+        "escrow_reference_sha256": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]
+        }
+      }
+    },
+    "request_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id", "outcome_kind", "deal_reference",
+        "capacity_reservation_id", "fulfillment_id", "settlement_record_id",
+        "settlement_resource_id", "provisioned_resource_id", "allocation_id",
+        "provisioning_job_id", "oracle_evidence_sha256", "teardown_complete",
+        "failure_category"
+      ],
+      "properties": {
+        "request_id": {"type": "string", "pattern": "^request-[1-9][0-9]*$"},
+        "outcome_kind": {"enum": ["vm-succeeded", "capacity-refused", "fault"]},
+        "deal_reference": {"$ref": "#/$defs/deal_reference"},
+        "capacity_reservation_id": {"$ref": "#/$defs/nullable_id"},
+        "fulfillment_id": {"$ref": "#/$defs/nullable_id"},
+        "settlement_record_id": {"$ref": "#/$defs/nullable_id"},
+        "settlement_resource_id": {"$ref": "#/$defs/nullable_id"},
+        "provisioned_resource_id": {"$ref": "#/$defs/nullable_id"},
+        "allocation_id": {"$ref": "#/$defs/nullable_id"},
+        "provisioning_job_id": {"$ref": "#/$defs/nullable_id"},
+        "oracle_evidence_sha256": {"$ref": "#/$defs/digest"},
+        "teardown_complete": {"type": "boolean"},
+        "failure_category": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "enum": [
+                "generic-failure", "provisioning-error", "policy-denial",
+                "unknown-reason", "uncompensated", "atomic-refusal-incomplete",
+                "timeout", "cleanup-incomplete", "double-allocation"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

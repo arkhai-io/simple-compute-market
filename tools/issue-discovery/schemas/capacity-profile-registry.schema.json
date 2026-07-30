@@ -1,0 +1,433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-profile-registry-v2.json",
+  "title": "SCM G1 capacity profile-stage registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "scenario_root",
+    "independently_assignable_gpus",
+    "freeze_point",
+    "non_counted_actors",
+    "frozen_scenario_ids",
+    "stages",
+    "qualification_order",
+    "measured_progression"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "profile_id": {
+      "const": "g1-v2"
+    },
+    "scenario_root": {
+      "const": "tools/issue-discovery/config/capacity/scenarios"
+    },
+    "independently_assignable_gpus": {
+      "const": 1
+    },
+    "freeze_point": {
+      "const": "before-q0"
+    },
+    "non_counted_actors": {
+      "const": [
+        "deterministic-controller"
+      ]
+    },
+    "frozen_scenario_ids": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/scenario_id"
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 21,
+      "maxItems": 21,
+      "items": {
+        "$ref": "#/$defs/stage"
+      }
+    },
+    "qualification_order": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stage_id"
+      }
+    },
+    "measured_progression": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_buyer_order",
+        "buyer_refinement",
+        "reuse_order",
+        "seller_progression"
+      ],
+      "properties": {
+        "initial_buyer_order": {
+          "const": [
+            "q0-b1-s1-g1-measured",
+            "b2-s1-g1-measured",
+            "b4-s1-g1-measured",
+            "b8-s1-g1-measured"
+          ]
+        },
+        "buyer_refinement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "candidate_stage_ids",
+            "timing",
+            "retain"
+          ],
+          "properties": {
+            "algorithm": {
+              "const": "deterministic-integer-bisection"
+            },
+            "candidate_stage_ids": {
+              "const": [
+                "b3-s1-g1-measured",
+                "b5-s1-g1-measured",
+                "b6-s1-g1-measured",
+                "b7-s1-g1-measured"
+              ]
+            },
+            "timing": {
+              "const": "immediately-before-reuse"
+            },
+            "retain": {
+              "const": "below-at-above"
+            }
+          }
+        },
+        "reuse_order": {
+          "const": [
+            "serialized-reuse-a-measured",
+            "serialized-reuse-b-measured"
+          ]
+        },
+        "seller_progression": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requires_buyer_frontier_receipt",
+            "initial_stage_id",
+            "b4_entry_stage_id",
+            "conditional_s4_stage_id",
+            "refinement_s3_stage_id",
+            "stop_after_s2_failure",
+            "s3_after_s4_failure_only",
+            "s3_fallback_when_s4_inadmissible"
+          ],
+          "properties": {
+            "requires_buyer_frontier_receipt": {
+              "const": true
+            },
+            "initial_stage_id": {
+              "const": "b2-s2-g1-measured"
+            },
+            "b4_entry_stage_id": {
+              "const": "b4-s2-g1-measured"
+            },
+            "conditional_s4_stage_id": {
+              "const": "b4-s4-g1-measured"
+            },
+            "refinement_s3_stage_id": {
+              "const": "b4-s3-g1-measured"
+            },
+            "stop_after_s2_failure": {
+              "const": true
+            },
+            "s3_after_s4_failure_only": {
+              "const": true
+            },
+            "s3_fallback_when_s4_inadmissible": {
+              "const": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "enum": [
+        "b1-s1-g1",
+        "b2-s1-g1",
+        "b3-s1-g1",
+        "b4-s1-g1",
+        "b5-s1-g1",
+        "b6-s1-g1",
+        "b7-s1-g1",
+        "b8-s1-g1",
+        "serialized-reuse-a",
+        "serialized-reuse-b",
+        "b2-s2-g1",
+        "b4-s2-g1",
+        "b4-s3-g1",
+        "b4-s4-g1"
+      ]
+    },
+    "stage_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observers",
+        "buyers",
+        "sellers",
+        "host_operators"
+      ],
+      "properties": {
+        "observers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "buyers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "sellers": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "host_operators": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "load_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selected_listings",
+        "requests"
+      ],
+      "properties": {
+        "selected_listings": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vm-succeeded",
+        "capacity-refused",
+        "fault"
+      ],
+      "properties": {
+        "vm-succeeded": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "capacity-refused": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "fault": {
+          "const": 0
+        }
+      }
+    },
+    "scenario_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "scenario_path",
+        "scenario_sha256"
+      ],
+      "properties": {
+        "scenario_id": {
+          "$ref": "#/$defs/scenario_id"
+        },
+        "scenario_path": {
+          "type": "string",
+          "pattern": "^tools/issue-discovery/config/capacity/scenarios/(?:b[1-8]-s1-g1|b2-s2-g1|b4-s[234]-g1|serialized-reuse-[ab])\\.json$"
+        },
+        "scenario_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "condition": {
+      "enum": [
+        "private-observer-readiness",
+        "observer-probe-complete",
+        "deterministic-reference-authority",
+        "verified-g1-topology",
+        "reference-complete",
+        "previous-stage-clean",
+        "qualification-complete",
+        "pre-q0-contract-frozen",
+        "q0-complete",
+        "initial-buyer-progression-complete",
+        "deterministic-bisection-selected",
+        "buyer-refinement-complete",
+        "serialized-reuse-a-baseline-equivalent",
+        "serialized-reuse-b-baseline-equivalent",
+        "buyer-frontier-receipt",
+        "buyer-b4-correctness-frontier",
+        "buyer-b4-load-generator-frontier",
+        "distinct-seller-services-2",
+        "distinct-seller-services-3",
+        "distinct-seller-services-4",
+        "b2-s2-stage-complete",
+        "b4-s2-stage-passed",
+        "b4-s4-stage-failed",
+        "four-seller-admission-unavailable"
+      ]
+    },
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "all_of",
+        "any_of"
+      ],
+      "properties": {
+        "all_of": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "any_of": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/condition"
+            }
+          }
+        }
+      }
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage_id",
+        "stage_class",
+        "scenario_binding",
+        "execution_boundary",
+        "actor_trigger",
+        "optional",
+        "actor_counts",
+        "load_counts",
+        "independently_assignable_gpus",
+        "expected_outcomes",
+        "retry_budget",
+        "admission"
+      ],
+      "properties": {
+        "stage_id": {
+          "$ref": "#/$defs/stage_id"
+        },
+        "stage_class": {
+          "enum": [
+            "observer-probe",
+            "reference",
+            "mock",
+            "qualification",
+            "measured"
+          ]
+        },
+        "scenario_binding": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/scenario_binding"
+            }
+          ]
+        },
+        "execution_boundary": {
+          "enum": [
+            "readiness",
+            "mock",
+            "real-reference",
+            "real-qualification",
+            "real-measured"
+          ]
+        },
+        "actor_trigger": {
+          "enum": [
+            "none",
+            "controller-driven",
+            "agent-triggered"
+          ]
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "actor_counts": {
+          "$ref": "#/$defs/counts"
+        },
+        "load_counts": {
+          "$ref": "#/$defs/load_counts"
+        },
+        "independently_assignable_gpus": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "expected_outcomes": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/outcomes"
+            }
+          ]
+        },
+        "retry_budget": {
+          "const": 0
+        },
+        "admission": {
+          "$ref": "#/$defs/admission"
+        }
+      }
+    }
+  }
+}

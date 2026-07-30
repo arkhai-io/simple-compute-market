@@ -1,0 +1,185 @@
+[
+  {
+    "schema_version": 2,
+    "receipt_id": "buyer-receipt-1",
+    "plan_id": "buyer-plan-1",
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "role": "buyer",
+    "actor_slot": "buyer-1",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "docs/quickstart/buyer.md",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00Z",
+      "prepared_at": "2026-07-30T10:00:01Z",
+      "barrier_observed_at": "2026-07-30T10:00:02Z",
+      "completed_at": "2026-07-30T10:00:03Z"
+    },
+    "barrier": {
+      "barrier_kind": "release",
+      "barrier_id": "release-1",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "request-preparation",
+        "status": "passed",
+        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "role_evidence": {
+      "kind": "buyer",
+      "action_result_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "guest_verification": {
+        "fulfillment_id": "fulfillment-1",
+        "ssh_resumed": true,
+        "visible_gpus": 1,
+        "workload_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "success_marker": "SCM_CUDA_VECTOR_ADD_OK",
+        "result_checksum": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  },
+  {
+    "schema_version": 2,
+    "receipt_id": "seller-receipt-1",
+    "plan_id": "seller-plan-1",
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "role": "seller",
+    "actor_slot": "seller-1",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "docs/quickstart/seller.md",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00Z",
+      "prepared_at": "2026-07-30T10:00:01Z",
+      "barrier_observed_at": "2026-07-30T10:00:02Z",
+      "completed_at": "2026-07-30T10:00:03Z"
+    },
+    "barrier": {
+      "barrier_kind": "observation",
+      "barrier_id": "observation-1",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "listing-publication",
+        "status": "passed",
+        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "role_evidence": {
+      "kind": "seller",
+      "service_start_result_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "publication_result_sha256s": [
+        "1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "alive_through_observation": true
+    }
+  },
+  {
+    "schema_version": 2,
+    "receipt_id": "host-receipt-1",
+    "plan_id": "host-plan-1",
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "role": "host-operator",
+    "actor_slot": "host-operator-1",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "tools/issue-discovery/instructions/host-operator.md",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00Z",
+      "prepared_at": "2026-07-30T10:00:01Z",
+      "barrier_observed_at": "2026-07-30T10:00:02Z",
+      "completed_at": "2026-07-30T10:00:03Z"
+    },
+    "barrier": {
+      "barrier_kind": "cleanup",
+      "barrier_id": "cleanup-1",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "baseline-equivalence",
+        "status": "passed",
+        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "role_evidence": {
+      "kind": "host-operator",
+      "topology_authority_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.topology-authority.v1",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "reversible_baseline_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.reversible-baseline.v1",
+        "value": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "baseline_equivalence_binding": {
+        "method": "opaque-random-v1",
+        "domain": "scm.capacity.baseline-equivalence.v1",
+        "value": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "kvm_ansible_ready": true,
+      "cleanup_complete": true
+    }
+  },
+  {
+    "schema_version": 2,
+    "receipt_id": "observer-receipt-1",
+    "plan_id": "observer-plan-1",
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "role": "observer",
+    "actor_slot": "observer-1",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "instruction": {
+      "path": "tools/issue-discovery/instructions/observer.md",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "isolated_identity_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "prepared_authority_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "lifecycle": {
+      "started_at": "2026-07-30T10:00:00Z",
+      "prepared_at": "2026-07-30T10:00:01Z",
+      "barrier_observed_at": "2026-07-30T10:00:02Z",
+      "completed_at": "2026-07-30T10:00:03Z"
+    },
+    "barrier": {
+      "barrier_kind": "observation",
+      "barrier_id": "observation-1",
+      "actor_alive_at_barrier": true
+    },
+    "step_outcomes": [
+      {
+        "step_id": "independent-observation",
+        "status": "passed",
+        "evidence_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ],
+    "role_evidence": {
+      "kind": "observer",
+      "independent_source": true,
+      "native_evidence_bindings": [
+        {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-frozen-action-v2.json",
+  "title": "SCM agent-triggered frozen capacity action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "action_id", "action_kind", "scm_ref", "scenario_id",
+    "scenario_sha256", "profile_stage_id", "profile_stage_sha256",
+    "actor_slot", "logical_selection", "runtime_binding", "payload_sha256",
+    "wrapper", "release_id", "attempt", "expected_result"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "action_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+    "action_kind": {"enum": ["buyer-request", "seller-service-start", "seller-listing-publication"]},
+    "scm_ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "scenario_id": {"type": "string", "pattern": "^(?:b[1-8]-s1-g1|b2-s2-g1|b4-s[234]-g1|serialized-reuse-[ab])$"},
+    "scenario_sha256": {"$ref": "#/$defs/digest"},
+    "profile_stage_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "profile_stage_sha256": {"$ref": "#/$defs/digest"},
+    "actor_slot": {"type": "string", "pattern": "^(?:buyer|seller)-[1-9][0-9]*$"},
+    "logical_selection": {
+      "oneOf": [
+        {"$ref": "#/$defs/buyer_selection"},
+        {"$ref": "#/$defs/service_selection"},
+        {"$ref": "#/$defs/publication_selection"}
+      ]
+    },
+    "runtime_binding": {"$ref": "#/$defs/runtime_binding"},
+    "payload_sha256": {"$ref": "#/$defs/digest"},
+    "wrapper": {"$ref": "#/$defs/tracked_content"},
+    "release_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+    "attempt": {"const": 1},
+    "expected_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "independent_oracle_authority_sha256"],
+      "properties": {
+        "schema_version": {"const": 2},
+        "independent_oracle_authority_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"action_kind": {"const": "buyer-request"}}, "required": ["action_kind"]},
+      "then": {
+        "properties": {
+          "actor_slot": {"pattern": "^buyer-[1-9][0-9]*$"},
+          "logical_selection": {"$ref": "#/$defs/buyer_selection"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"action_kind": {"const": "seller-service-start"}}, "required": ["action_kind"]},
+      "then": {
+        "properties": {
+          "actor_slot": {"pattern": "^seller-[1-9][0-9]*$"},
+          "logical_selection": {"$ref": "#/$defs/service_selection"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"action_kind": {"const": "seller-listing-publication"}}, "required": ["action_kind"]},
+      "then": {
+        "properties": {
+          "actor_slot": {"pattern": "^seller-[1-9][0-9]*$"},
+          "logical_selection": {"$ref": "#/$defs/publication_selection"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tracked_content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "runtime_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "domain", "value"],
+      "properties": {
+        "method": {"enum": ["hmac-sha256-v1", "opaque-random-v1"]},
+        "domain": {"const": "scm.capacity.runtime-binding.v1"},
+        "value": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "buyer_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "request_id", "seller_slot", "listing_slot"],
+      "properties": {
+        "kind": {"const": "buyer-request"},
+        "request_id": {"type": "string", "pattern": "^request-[1-9][0-9]*$"},
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "listing_slot": {"type": "string", "pattern": "^listing-[1-9][0-9]*$"}
+      }
+    },
+    "service_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "seller_slot", "service_slot"],
+      "properties": {
+        "kind": {"const": "seller-service-start"},
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "service_slot": {"type": "string", "pattern": "^seller-service-[1-9][0-9]*$"}
+      }
+    },
+    "publication_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "seller_slot", "service_slot", "listing_slot"],
+      "properties": {
+        "kind": {"const": "seller-listing-publication"},
+        "seller_slot": {"type": "string", "pattern": "^seller-[1-9][0-9]*$"},
+        "service_slot": {"type": "string", "pattern": "^seller-service-[1-9][0-9]*$"},
+        "listing_slot": {"type": "string", "pattern": "^listing-[1-9][0-9]*$"}
+      }
+    }
+  }
+}

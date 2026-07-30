@@ -1,0 +1,100 @@
+[
+  {
+    "schema_version": 2,
+    "action_id": "buyer-request-1",
+    "action_kind": "buyer-request",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor_slot": "buyer-1",
+    "logical_selection": {
+      "kind": "buyer-request",
+      "request_id": "request-1",
+      "seller_slot": "seller-1",
+      "listing_slot": "listing-1"
+    },
+    "runtime_binding": {
+      "method": "hmac-sha256-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/emit-buyer-request.sh",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "release_id": "release-1",
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "independent_oracle_authority_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  {
+    "schema_version": 2,
+    "action_id": "seller-service-start-1",
+    "action_kind": "seller-service-start",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor_slot": "seller-1",
+    "logical_selection": {
+      "kind": "seller-service-start",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1"
+    },
+    "runtime_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/start-seller-service.sh",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "release_id": "release-1",
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "independent_oracle_authority_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  {
+    "schema_version": 2,
+    "action_id": "seller-publication-1",
+    "action_kind": "seller-listing-publication",
+    "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "profile_stage_id": "b1-s1-g1-qualification",
+    "profile_stage_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor_slot": "seller-1",
+    "logical_selection": {
+      "kind": "seller-listing-publication",
+      "seller_slot": "seller-1",
+      "service_slot": "seller-service-1",
+      "listing_slot": "listing-1"
+    },
+    "runtime_binding": {
+      "method": "opaque-random-v1",
+      "domain": "scm.capacity.runtime-binding.v1",
+      "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "wrapper": {
+      "path": "tools/issue-discovery/wrappers/publish-listing.sh",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "release_id": "release-1",
+    "attempt": 1,
+    "expected_result": {
+      "schema_version": 2,
+      "independent_oracle_authority_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  }
+]

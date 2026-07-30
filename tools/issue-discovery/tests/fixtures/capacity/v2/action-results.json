@@ -1,0 +1,32 @@
+[
+  {
+    "schema_version": 2,
+    "action_result_id": "action-result-1",
+    "action_id": "buyer-request-1",
+    "action_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "actor_slot": "buyer-1",
+    "release_id": "release-1",
+    "attempt": 1,
+    "invoked_at": "2026-07-30T10:00:02Z",
+    "terminal_at": "2026-07-30T10:00:03Z",
+    "result_kind": "emitted",
+    "emission_count": 1,
+    "terminal_payload_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "failure_code": null
+  },
+  {
+    "schema_version": 2,
+    "action_result_id": "action-result-2",
+    "action_id": "seller-publication-1",
+    "action_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "actor_slot": "seller-1",
+    "release_id": "release-1",
+    "attempt": 1,
+    "invoked_at": "2026-07-30T10:00:02Z",
+    "terminal_at": "2026-07-30T10:00:03Z",
+    "result_kind": "rejected-before-emission",
+    "emission_count": 0,
+    "terminal_payload_sha256": null,
+    "failure_code": "runtime-binding-changed"
+  }
+]
