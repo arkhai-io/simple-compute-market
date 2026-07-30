@@ -69,8 +69,8 @@ qualification or capacity claims.
 ## Dependencies and Related Changes
 
 - Depends on the reconciled `feat/issue-discovery-harness` product tree at
-  `d00b064155b778973e2cc2f37f32896ea8011852`, which is exact
-  `dev@a66820516751238f01261735e49c4b4ce997c7ef` outside the reviewed portable
+  `7b114f199440ea94c4dc192385a5cf83d6dd0420`, which is exact
+  `dev@0f0126574222ffd09ab148ebc26aecb5d88ed0ea` outside the reviewed portable
   harness roots.
 - The separate `guard-issue-fix-publication` change will consume the final
   finding-v2 contract. Credentialed GitHub mutation, outcome reconciliation,
