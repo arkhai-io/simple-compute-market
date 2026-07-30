@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-reference-policy-v2.json",
+  "title": "SCM deterministic reference execution policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "reference_policy_id",
+    "scm_ref",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "scenario_id",
+    "scenario_sha256",
+    "evaluation_policy",
+    "release_id",
+    "frozen_at",
+    "controller_is_counted",
+    "clock_evidence_binding",
+    "observer_plan",
+    "host_plan",
+    "request_schedule"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "reference_policy_id": {
+      "$ref": "#/$defs/id"
+    },
+    "scm_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "profile_stage_id": {
+      "$ref": "#/$defs/id"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/id"
+    },
+    "scenario_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "evaluation_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evaluation_policy_id",
+        "evaluation_policy_sha256"
+      ],
+      "properties": {
+        "evaluation_policy_id": {
+          "$ref": "#/$defs/id"
+        },
+        "evaluation_policy_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "release_id": {
+      "$ref": "#/$defs/id"
+    },
+    "frozen_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "controller_is_counted": {
+      "const": false
+    },
+    "clock_evidence_binding": {
+      "$ref": "#/$defs/native_evidence_binding"
+    },
+    "observer_plan": {
+      "$ref": "#/$defs/role_plan_authority"
+    },
+    "host_plan": {
+      "$ref": "#/$defs/role_plan_authority"
+    },
+    "request_schedule": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "invoked_offset_ns"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^request-[1-9][0-9]*$"
+          },
+          "invoked_offset_ns": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?Z$"
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "domain",
+        "value"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "hmac-sha256-v1",
+            "opaque-random-v1"
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "value": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "native_evidence_binding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/binding"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "scm.capacity.native-evidence.v1"
+            }
+          }
+        }
+      ]
+    },
+    "role_plan_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plan_id",
+        "plan_sha256"
+      ],
+      "properties": {
+        "plan_id": {
+          "$ref": "#/$defs/id"
+        },
+        "plan_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

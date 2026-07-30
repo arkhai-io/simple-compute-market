@@ -158,6 +158,124 @@ def _add_mock_capture_artifact_args(parser: argparse.ArgumentParser) -> None:
     _add_role_evidence_bundle_args(parser)
 
 
+def _add_evaluation_policy_artifact_args(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument("evaluation_policy", type=Path)
+    parser.add_argument(
+        "--expected-scm-ref",
+        required=True,
+        help="Exact campaign commit the policy and all derived evidence must bind.",
+    )
+
+
+def _add_reference_policy_artifact_args(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument("reference_policy", type=Path)
+    parser.add_argument("--evaluation-policy", type=Path, required=True)
+    parser.add_argument("--observer-plan", type=Path, required=True)
+    parser.add_argument("--host-plan", type=Path, required=True)
+    parser.add_argument("--expected-scm-ref", required=True)
+
+
+def _add_capacity_result_artifact_args(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument(
+        "context_manifest",
+        type=Path,
+        help=(
+            "Strict path-only context identifying the result and every authority "
+            "needed to reconstruct it."
+        ),
+    )
+    parser.add_argument("--evaluation-policy", type=Path, required=True)
+    parser.add_argument(
+        "--predecessor-context",
+        type=Path,
+        default=None,
+        help=(
+            "Exact reuse-A context required for reuse B and for reconstructing "
+            "a seller stage's reuse baseline."
+        ),
+    )
+    parser.add_argument(
+        "--reuse-baseline-context",
+        type=Path,
+        default=None,
+        help="Exact validated reuse-B context required for seller stages.",
+    )
+    parser.add_argument(
+        "--buyer-frontier",
+        type=Path,
+        default=None,
+        help="Validated buyer-frontier receipt required for seller stages.",
+    )
+    parser.add_argument(
+        "--buyer-result-context",
+        dest="buyer_result_contexts",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Ordered buyer result context used to reconstruct the seller "
+            "stage's frontier. Repeat in exact frontier order."
+        ),
+    )
+    parser.add_argument(
+        "--prior-seller-context",
+        dest="prior_seller_contexts",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Ordered prior seller result context. Repeat in exact progression order."
+        ),
+    )
+    parser.add_argument("--expected-scm-ref", required=True)
+
+
+def _add_serialized_reuse_artifact_args(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument("reuse_a_context", type=Path)
+    parser.add_argument("reuse_b_context", type=Path)
+    parser.add_argument("--evaluation-policy", type=Path, required=True)
+    parser.add_argument("--buyer-frontier", type=Path, default=None)
+    parser.add_argument(
+        "--buyer-result-context",
+        dest="buyer_result_contexts",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "Ordered buyer result context used to reconstruct the exact "
+            "frontier that authorizes reuse A."
+        ),
+    )
+    parser.add_argument("--expected-scm-ref", required=True)
+
+
+def _add_buyer_frontier_artifact_args(
+    parser: argparse.ArgumentParser,
+) -> None:
+    parser.add_argument("buyer_frontier", type=Path)
+    parser.add_argument("--evaluation-policy", type=Path, required=True)
+    parser.add_argument(
+        "--result-context",
+        dest="result_contexts",
+        type=Path,
+        action="append",
+        required=True,
+        help=(
+            "Ordered result context. Repeat in exact B1/B2/B4/B8 and "
+            "derived-refinement order."
+        ),
+    )
+    parser.add_argument("--expected-scm-ref", required=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="issue-discovery",
@@ -183,10 +301,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    strict = subparsers.add_parser("strict", help="Run strict local discovery without workarounds.")
+    strict = subparsers.add_parser(
+        "strict", help="Run strict local discovery without workarounds."
+    )
     strict.set_defaults(handler=_run_strict)
 
-    cont = subparsers.add_parser("continue", help="Continue discovery with named workaround(s).")
+    cont = subparsers.add_parser(
+        "continue", help="Continue discovery with named workaround(s)."
+    )
     cont.add_argument(
         "--with",
         dest="workarounds",
@@ -200,7 +322,9 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("name", help="Profile name.")
     profile.set_defaults(handler=_run_profile)
 
-    issue = subparsers.add_parser("issue", help="List, show, or create issue candidates.")
+    issue = subparsers.add_parser(
+        "issue", help="List, show, or create issue candidates."
+    )
     issue_subparsers = issue.add_subparsers(dest="issue_command", required=True)
 
     issue_list = issue_subparsers.add_parser("list", help="List candidates for a run.")
@@ -212,7 +336,9 @@ def build_parser() -> argparse.ArgumentParser:
     issue_show.add_argument("fingerprint")
     issue_show.set_defaults(handler=_issue_show)
 
-    issue_create = issue_subparsers.add_parser("create", help="Create a GitHub issue candidate.")
+    issue_create = issue_subparsers.add_parser(
+        "create", help="Create a GitHub issue candidate."
+    )
     issue_create.add_argument("run_dir", type=Path)
     issue_create.add_argument("fingerprint")
     issue_create.add_argument(
@@ -256,13 +382,25 @@ def build_parser() -> argparse.ArgumentParser:
     issue_transition.add_argument(
         "--state",
         required=True,
-        choices=["triaged", "filed", "fix_in_progress", "fixed_unverified", "verified", "closed", "reopened"],
+        choices=[
+            "triaged",
+            "filed",
+            "fix_in_progress",
+            "fixed_unverified",
+            "verified",
+            "closed",
+            "reopened",
+        ],
     )
     issue_transition.add_argument("--detail", required=True)
     issue_transition.set_defaults(handler=_issue_transition)
 
-    capacity = subparsers.add_parser("capacity", help="Validate VM capacity scenarios and findings.")
-    capacity_subparsers = capacity.add_subparsers(dest="capacity_command", required=True)
+    capacity = subparsers.add_parser(
+        "capacity", help="Validate VM capacity scenarios and findings."
+    )
+    capacity_subparsers = capacity.add_subparsers(
+        dest="capacity_command", required=True
+    )
 
     scenario_validate = capacity_subparsers.add_parser(
         "scenario-validate",
@@ -306,6 +444,78 @@ def build_parser() -> argparse.ArgumentParser:
     finding_ingest.add_argument("run_dir", type=Path)
     finding_ingest.add_argument("finding", type=Path)
     finding_ingest.set_defaults(handler=_capacity_finding_ingest)
+
+    evaluation_policy_validate = capacity_subparsers.add_parser(
+        "evaluation-policy-validate",
+        help="Validate a frozen pre-Q0 capacity evaluation policy.",
+    )
+    _add_evaluation_policy_artifact_args(evaluation_policy_validate)
+    evaluation_policy_validate.set_defaults(
+        handler=_capacity_evaluation_policy_validate
+    )
+
+    evaluation_policy_hash = capacity_subparsers.add_parser(
+        "evaluation-policy-sha256",
+        help="Validate and canonical-hash a capacity evaluation policy.",
+    )
+    _add_evaluation_policy_artifact_args(evaluation_policy_hash)
+    evaluation_policy_hash.set_defaults(handler=_capacity_evaluation_policy_sha256)
+
+    reference_policy_validate = capacity_subparsers.add_parser(
+        "reference-policy-validate",
+        help="Validate a frozen deterministic controller-reference policy.",
+    )
+    _add_reference_policy_artifact_args(reference_policy_validate)
+    reference_policy_validate.set_defaults(handler=_capacity_reference_policy_validate)
+
+    reference_policy_hash = capacity_subparsers.add_parser(
+        "reference-policy-sha256",
+        help="Validate and canonical-hash a controller-reference policy.",
+    )
+    _add_reference_policy_artifact_args(reference_policy_hash)
+    reference_policy_hash.set_defaults(handler=_capacity_reference_policy_sha256)
+
+    capacity_result_validate = capacity_subparsers.add_parser(
+        "capacity-result-validate",
+        help="Reconstruct and validate one independently observed VM result.",
+    )
+    _add_capacity_result_artifact_args(capacity_result_validate)
+    capacity_result_validate.set_defaults(handler=_capacity_result_validate)
+
+    capacity_result_hash = capacity_subparsers.add_parser(
+        "capacity-result-sha256",
+        help="Reconstruct, validate, and canonical-hash one VM result.",
+    )
+    _add_capacity_result_artifact_args(capacity_result_hash)
+    capacity_result_hash.set_defaults(handler=_capacity_result_sha256)
+
+    serialized_reuse_validate = capacity_subparsers.add_parser(
+        "serialized-reuse-validate",
+        help="Validate reuse A followed by baseline-fenced reuse B.",
+    )
+    _add_serialized_reuse_artifact_args(serialized_reuse_validate)
+    serialized_reuse_validate.set_defaults(handler=_capacity_serialized_reuse_validate)
+
+    serialized_reuse_hash = capacity_subparsers.add_parser(
+        "serialized-reuse-sha256",
+        help="Validate serialized reuse and emit the reuse-B chain-head hash.",
+    )
+    _add_serialized_reuse_artifact_args(serialized_reuse_hash)
+    serialized_reuse_hash.set_defaults(handler=_capacity_serialized_reuse_sha256)
+
+    buyer_frontier_validate = capacity_subparsers.add_parser(
+        "buyer-frontier-validate",
+        help="Validate the ordered buyer search and its external frontier receipt.",
+    )
+    _add_buyer_frontier_artifact_args(buyer_frontier_validate)
+    buyer_frontier_validate.set_defaults(handler=_capacity_buyer_frontier_validate)
+
+    buyer_frontier_hash = capacity_subparsers.add_parser(
+        "buyer-frontier-sha256",
+        help="Validate and canonical-hash a buyer-frontier receipt.",
+    )
+    _add_buyer_frontier_artifact_args(buyer_frontier_hash)
+    buyer_frontier_hash.set_defaults(handler=_capacity_buyer_frontier_sha256)
 
     role_plan_validate = capacity_subparsers.add_parser(
         "role-plan-validate",
@@ -494,10 +704,16 @@ def build_parser() -> argparse.ArgumentParser:
     action_capture.add_argument("--result-output", type=Path, required=True)
     action_capture.set_defaults(handler=_capacity_action_capture)
 
-    clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
-    clean_room_subparsers = clean_room.add_subparsers(dest="clean_room_command", required=True)
+    clean_room = subparsers.add_parser(
+        "clean-room", help="Plan clean-room discovery runs."
+    )
+    clean_room_subparsers = clean_room.add_subparsers(
+        dest="clean_room_command", required=True
+    )
 
-    clean_room_plan = clean_room_subparsers.add_parser("plan", help="Print a clean-room run plan.")
+    clean_room_plan = clean_room_subparsers.add_parser(
+        "plan", help="Print a clean-room run plan."
+    )
     clean_room_plan.add_argument("sequence", help="Clean-room sequence id.")
     clean_room_plan.set_defaults(handler=_clean_room_plan)
 
@@ -512,7 +728,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _runner(args: argparse.Namespace) -> DiscoveryRunner:
-    return DiscoveryRunner(repo_root=args.repo_root, output_dir=args.output_dir, dry_run=args.dry_run)
+    return DiscoveryRunner(
+        repo_root=args.repo_root, output_dir=args.output_dir, dry_run=args.dry_run
+    )
 
 
 def _run_strict(args: argparse.Namespace) -> int:
@@ -544,7 +762,9 @@ def _issue_list(args: argparse.Namespace) -> int:
 
 
 def _issue_show(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(repo_root=args.repo_root).issue_show(_run_dir(args), args.fingerprint)
+    return DiscoveryRunner(repo_root=args.repo_root).issue_show(
+        _run_dir(args), args.fingerprint
+    )
 
 
 def _issue_create(args: argparse.Namespace) -> int:
@@ -600,6 +820,164 @@ def _capacity_finding_ingest(args: argparse.Namespace) -> int:
     )
 
 
+def _capacity_evaluation_policy_validate(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(
+        repo_root=args.repo_root
+    ).capacity_evaluation_policy_validate(
+        _repo_path(args, args.evaluation_policy),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_evaluation_policy_sha256(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_evaluation_policy_sha256(
+        _repo_path(args, args.evaluation_policy),
+        expected_scm_ref=args.expected_scm_ref,
+    )
+
+
+def _capacity_reference_policy_paths(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    return {
+        "evaluation_policy": _repo_path(args, args.evaluation_policy),
+        "observer_plan": _repo_path(args, args.observer_plan),
+        "host_plan": _repo_path(args, args.host_plan),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_reference_policy_validate(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_reference_policy_validate(
+        _repo_path(args, args.reference_policy),
+        **_capacity_reference_policy_paths(args),
+    )
+
+
+def _capacity_reference_policy_sha256(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_reference_policy_sha256(
+        _repo_path(args, args.reference_policy),
+        **_capacity_reference_policy_paths(args),
+    )
+
+
+def _capacity_result_paths(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "evaluation_policy": _repo_path(args, args.evaluation_policy),
+        "predecessor_context": (
+            _repo_path(args, args.predecessor_context)
+            if args.predecessor_context is not None
+            else None
+        ),
+        "reuse_baseline_context": (
+            _repo_path(args, args.reuse_baseline_context)
+            if args.reuse_baseline_context is not None
+            else None
+        ),
+        "buyer_frontier": (
+            _repo_path(args, args.buyer_frontier)
+            if args.buyer_frontier is not None
+            else None
+        ),
+        "buyer_result_contexts": tuple(
+            _repo_path(args, path) for path in args.buyer_result_contexts
+        ),
+        "prior_seller_contexts": tuple(
+            _repo_path(args, path) for path in args.prior_seller_contexts
+        ),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_result_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_result_validate(
+        _repo_path(args, args.context_manifest),
+        **_capacity_result_paths(args),
+    )
+
+
+def _capacity_result_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_result_sha256(
+        _repo_path(args, args.context_manifest),
+        **_capacity_result_paths(args),
+    )
+
+
+def _capacity_serialized_reuse_paths(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    return {
+        "evaluation_policy": _repo_path(args, args.evaluation_policy),
+        "buyer_frontier": (
+            _repo_path(args, args.buyer_frontier)
+            if args.buyer_frontier is not None
+            else None
+        ),
+        "buyer_result_contexts": tuple(
+            _repo_path(args, path) for path in args.buyer_result_contexts
+        ),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_serialized_reuse_validate(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_serialized_reuse_validate(
+        _repo_path(args, args.reuse_a_context),
+        _repo_path(args, args.reuse_b_context),
+        **_capacity_serialized_reuse_paths(args),
+    )
+
+
+def _capacity_serialized_reuse_sha256(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_serialized_reuse_sha256(
+        _repo_path(args, args.reuse_a_context),
+        _repo_path(args, args.reuse_b_context),
+        **_capacity_serialized_reuse_paths(args),
+    )
+
+
+def _capacity_buyer_frontier_paths(
+    args: argparse.Namespace,
+) -> dict[str, object]:
+    return {
+        "evaluation_policy": _repo_path(args, args.evaluation_policy),
+        "result_contexts": tuple(
+            _repo_path(args, path) for path in args.result_contexts
+        ),
+        "expected_scm_ref": args.expected_scm_ref,
+    }
+
+
+def _capacity_buyer_frontier_validate(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_buyer_frontier_validate(
+        _repo_path(args, args.buyer_frontier),
+        **_capacity_buyer_frontier_paths(args),
+    )
+
+
+def _capacity_buyer_frontier_sha256(
+    args: argparse.Namespace,
+) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_buyer_frontier_sha256(
+        _repo_path(args, args.buyer_frontier),
+        **_capacity_buyer_frontier_paths(args),
+    )
+
+
 def _capacity_role_plan_validate(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_role_plan_validate(
         _repo_path(args, args.role_plan),
@@ -631,9 +1009,7 @@ def _capacity_role_receipt_sha256(args: argparse.Namespace) -> int:
 
 
 def _capacity_oracle_authority_validate(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(
-        repo_root=args.repo_root
-    ).capacity_oracle_authority_validate(
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_oracle_authority_validate(
         _repo_path(args, args.oracle_authority),
         observer_plan=(
             _repo_path(args, args.observer_plan)
@@ -645,9 +1021,7 @@ def _capacity_oracle_authority_validate(args: argparse.Namespace) -> int:
 
 
 def _capacity_oracle_authority_sha256(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(
-        repo_root=args.repo_root
-    ).capacity_oracle_authority_sha256(
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_oracle_authority_sha256(
         _repo_path(args, args.oracle_authority),
         observer_plan=(
             _repo_path(args, args.observer_plan)
@@ -669,9 +1043,7 @@ def _capacity_concurrency_policy_validate(args: argparse.Namespace) -> int:
 
 
 def _capacity_concurrency_policy_sha256(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(
-        repo_root=args.repo_root
-    ).capacity_concurrency_policy_sha256(
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_concurrency_policy_sha256(
         _repo_path(args, args.concurrency_policy),
         role_plans=tuple(_repo_path(args, path) for path in args.role_plans),
         expected_scm_ref=args.expected_scm_ref,
@@ -730,19 +1102,13 @@ def _capacity_action_result_sha256(args: argparse.Namespace) -> int:
 def _role_evidence_paths(args: argparse.Namespace) -> dict[str, object]:
     return {
         "role_plans": tuple(_repo_path(args, path) for path in args.role_plans),
-        "role_receipts": tuple(
-            _repo_path(args, path) for path in args.role_receipts
-        ),
-        "frozen_actions": tuple(
-            _repo_path(args, path) for path in args.frozen_actions
-        ),
+        "role_receipts": tuple(_repo_path(args, path) for path in args.role_receipts),
+        "frozen_actions": tuple(_repo_path(args, path) for path in args.frozen_actions),
         "payloads": tuple(_repo_path(args, path) for path in args.payloads),
         "oracle_authorities": tuple(
             _repo_path(args, path) for path in args.oracle_authorities
         ),
-        "action_results": tuple(
-            _repo_path(args, path) for path in args.action_results
-        ),
+        "action_results": tuple(_repo_path(args, path) for path in args.action_results),
         "expected_scm_ref": args.expected_scm_ref,
     }
 

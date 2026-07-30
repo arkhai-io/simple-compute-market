@@ -15,11 +15,11 @@
     "33dba15d7423c37e83fe5701d08fc4864e703b46699a434a346a371d6ab6fb88"
   ],
   "seller_receipt_sha256s": [
-    "04823b5c3ba4ed607086d2c986a5bd4de28a83ae2bad12cc4f1372184303d680"
+    "aca9c59c160fd6d6b63d8782396dc6a55518ab21b0cb7ce7c5dd395abea7ea2b"
   ],
   "action_sha256s": [
-    "2a1a560ef82ca677615ff02cb8c7966053e788c25dbbe74336cbfa45f646c1a7",
-    "b25ca788d1b10ce897a2973d59d44789c81ff675e8fa277f16fc332d91bb1819",
+    "96057297b79d3afe6da24257504720ea881f92f01a5ce3b90b5d3b5fe94499e9",
+    "612a1a917c574706c20ddb97bf57bd49a73dcb423eb30548cbf2305b958a6da4",
     "009ac3c975ff411b9254428780d708046b07bedf11f5d021ca1b792785a2c244"
   ],
   "prepared_action_sha256s": [
@@ -28,8 +28,8 @@
     "898b5233b23fac0dcb5e9e1bf88ffaa803587e8a888abbdbcca7af7e41c0787d"
   ],
   "action_result_sha256s": [
-    "3f374f779cba51f84dbf9ae6fcb1f4efc80ffe23bfa48ad9e84b1f02e9a4e013",
-    "cccd2adcba5e9710fe20d9eff85205889000d94cc0304359508b01b709114a48",
+    "04816d02e1c06dd925a25baaa971aacc012faa23afbf21448cf11984a18851a7",
+    "308c01f32ca59c88a7040ce7ff9051c079119b5e85449f8ff4b81c8cc4f8a576",
     "3a784bc5ea429361b03ebaf53464ab8ad657ff684acac956e2c829bb77fd0784"
   ],
   "captured_payloads": [
@@ -38,7 +38,7 @@
       "action_kind": "seller-service-start",
       "actor_slot": "seller-1",
       "release_id": "mock-release",
-      "action_sha256": "2a1a560ef82ca677615ff02cb8c7966053e788c25dbbe74336cbfa45f646c1a7",
+      "action_sha256": "96057297b79d3afe6da24257504720ea881f92f01a5ce3b90b5d3b5fe94499e9",
       "prepared_action_sha256": "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
       "payload_sha256": "7cf4dc84194c445a3e71876ef0f05faa5e91088773eb3c8b1fc8d9c1c38423fd",
       "runtime_binding": {
@@ -57,7 +57,7 @@
       "action_kind": "seller-listing-publication",
       "actor_slot": "seller-1",
       "release_id": "mock-release",
-      "action_sha256": "b25ca788d1b10ce897a2973d59d44789c81ff675e8fa277f16fc332d91bb1819",
+      "action_sha256": "612a1a917c574706c20ddb97bf57bd49a73dcb423eb30548cbf2305b958a6da4",
       "prepared_action_sha256": "fe32e004b9a7d83ab96adc38e190a6f601cc979ac4cc9bbdfcd151bf589b9dfc",
       "payload_sha256": "adef59b942a8e256320f43eb1a635fdd40009ae12daa76c609834b4971f9b6d6",
       "runtime_binding": {

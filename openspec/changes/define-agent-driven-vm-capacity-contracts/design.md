@@ -123,15 +123,17 @@ admits it.
 
 Measured stages use `real-measured`/`agent-triggered` in an exact dynamic order:
 Q0 B1 and buyer B2/B4/B8; immediately selected B3/B5/B6/B7 adjacent buyer
-refinement; reuse A/B; then, after the external buyer-frontier receipt, B2/S2
-and the admitted B4 seller sequence S2, conditional S4, then S3 only if needed
-to refine a passing/failing S2/S4 bracket (or as the bounded fallback when S4
-is not admissible). The pre-Q0 ref carries every integer B1…B8/S1 shape plus
-B2/S2 and B4/S2/S3/S4, so
-deterministic refinement never edits the campaign after Q0. Outcomes are
-unordered cardinalities over request IDs; no buyer is predesignated to win.
-Portable counts do not grant admission, and exhausting the envelope first
-produces only a lower bound.
+refinement; an independently derived buyer-frontier receipt; reuse A, which
+binds that receipt, then reuse B, which binds both reuse A and the same receipt;
+and finally B2/S2 and the admitted B4 seller sequence S2, conditional S4, then
+S3 only if needed to refine a passing/failing S2/S4 bracket (or as the bounded
+fallback when S4 is not admissible). Every seller result binds the buyer
+receipt, the clean reuse-B baseline, and the immediately preceding seller
+result. The pre-Q0 ref carries every integer B1…B8/S1 shape plus B2/S2 and
+B4/S2/S3/S4, so deterministic refinement never edits the campaign after Q0.
+Outcomes are unordered cardinalities over request IDs; no buyer is
+predesignated to win. Portable counts do not grant admission, and exhausting
+the envelope first produces only a lower bound.
 
 **Rejected alternative:** infer GPU capacity from the number of listings. A
 seller can publish multiple truthful market choices backed by one globally
@@ -167,6 +169,19 @@ ID/digest, including the actionless host and observer roles; a standalone
 observer probe or mock receipt binds its exact non-campaign release and null
 policy. This prevents valid cleanup or observation evidence from being replayed
 across waves.
+
+For a seller-bearing stage, the sole H1 plan and every seller plan carry the
+same typed `topology_authority_binding`. The concurrency-policy validator
+compares those exact values before release and fails closed if any seller
+consults a disjoint authority. Because the policy freezes every complete plan
+hash and each frozen seller action binds that plan hash plus the policy, seller
+actions inherit the shared topology fence without adding a cyclic
+future-result reference. Each terminal seller receipt repeats its plan's
+binding, and the capacity result independently repeats the sole H1 binding.
+This is the public opaque proof that all one-GPU sellers consult one globally
+fenced view; private infrastructure retains the host, GPU, allocator, and
+fence identities.
+
 Role-specific sections prove the documented preparation appropriate to that
 role. A host-operator binds the public instruction, private G1/topology and
 baseline authority through the typed privacy-preserving bindings,
@@ -213,6 +228,14 @@ after the wave. Every action interval must also remain inside its owning
 actor's independently observed lifetime. This prevents wall-clock
 disagreement, post-exit actions, or eight serial Codex processes from
 satisfying a B8 contract.
+
+A failed actor invocation, rejected one-shot action, local queue, controller
+throttle, overlap failure, or skew failure is still a valid negative
+observation when its structure, authority, and independent timing are intact.
+The validator retains that receipt as agent provenance and records why the load
+generator failed; it does not promote the row into a capacity frontier. This
+distinguishes evidence that the agent-driven experiment ran and found a fault
+from evidence that the generator successfully applied the intended load.
 
 **Rejected alternative:** one generic readiness receipt with arbitrary
 key/value evidence. It cannot make missing role work or an early actor exit
@@ -277,16 +300,47 @@ actions through the mock adapter, with an empty live-resource ledger,
 thread emits it. That remains useful deterministic-driver evidence but is not
 agent-triggered load.
 
+### Freeze outcome evaluation before Q0
+
+A closed evaluation-policy artifact is frozen before Q0 and binds the exact SCM
+ref, both the canonical and raw digests of the pinned profile registry, a typed
+common-clock evidence binding, request-processing, provisioning-queue, Ansible
+service, and terminal-observation limits, plus the exact definitions of all
+five capacity frontiers. The terminal-observation timeout cannot be shorter
+than the request-processing SLO.
+
+Every reference, qualification, and measured result binds the same validated
+policy by ID and canonical digest. The policy timestamp must precede the
+stage's independently observed release. This makes a timeout, a frontier
+classification, and a pass/fail decision reproducible instead of allowing
+thresholds or frontier meanings to be selected after seeing Q0.
+
+An individual public command proves equality to its supplied policy. Private
+campaign assembly must present one policy ID/hash across reference,
+qualification, and measurement. A second closed reference policy freezes
+strictly after that policy and before controller release, binding the exact
+reference stage/scenario, evaluation policy, release, clock, non-counted
+controller, O1/H1 plan IDs/hashes, and per-request invocation schedule. The
+reference result binds its exact O1/H1 receipt IDs/hashes.
+
+**Rejected alternative:** store thresholds only in private runner flags or add
+them to the result after execution. Neither creates reviewed, immutable
+pre-Q0 authority, and both make two validators capable of classifying the same
+observations differently.
+
 ### Evaluate outcomes from an independent durable correlation
 
-The result schema has exact `vm-succeeded`, `capacity-refused`, and `fault`
-variants. A normalized public `deal_reference` keeps logical request,
-seller/listing, typed runtime binding, negotiation, and escrow digests in the
-storefront domain. Success joins that carrier to `capacity_reservation_id` and
-then separately to `fulfillment_id`, Settlement Record/Resource state,
-`provisioned_resource_id`, the pinned guest exercise, and teardown. Generic
-fulfillment does not gain commercial identity. `allocation_id` and
-`provisioning_job_id` remain optional diagnostics.
+The result schema has closed, discriminated `vm-succeeded`,
+`capacity-refused`, and `fault` variants. A normalized public
+`deal_reference` keeps logical request, seller/listing, typed runtime binding,
+negotiation, and escrow digests in the storefront domain. Success joins that
+carrier to `capacity_reservation_id` and then separately to `fulfillment_id`,
+the Settlement Record keyed by the reservation and its typed selected
+Settlement Resource proof, `provisioned_resource_id`, the real KVM/Ansible
+whole-device passthrough observation, the Git-pinned compiled CUDA guest
+exercise, and teardown. Generic fulfillment does not gain commercial
+identity, and there is no invented buyer-visible Settlement Resource ID.
+`allocation_id` and `provisioning_job_id` remain optional diagnostics.
 
 `capacity-refused` is derived from independent per-site capture proving every
 eligible attempt in the final escrow-scoped atomic reserve returned routine
@@ -297,18 +351,50 @@ not scarcity because current aggregation can swallow site errors. The
 pre-settlement `capacity_hold_unavailable` event is explicitly nonterminal and
 never sufficient. Generic failures, unknown reasons, uncompensated state, and
 timeouts are faults. Aggregate validation applies unordered per-request
-cardinalities and independently rejects double allocation.
+cardinalities. A double allocation is retained as the independently derived
+`double-allocation` fault on the stage assessment while preserving the exact
+per-request observations; it fails correctness and remains eligible for issue
+discovery rather than making the evidence disappear as an invalid document.
+
+Every final or partial atomic observation first proves exact deal, clock,
+request-interval, eligible-site-set, distinct site-binding, and unique-attempt
+authority. Routine-null, reservation-created, error, and missing/skipped
+attempts have closed mutually consistent field combinations; no variant may
+hide a created reservation. Elapsed time equal to the terminal timeout has
+reached the deadline: `elapsed >= timeout` is a timeout fault.
+
+Every request carries invocation and terminal offsets. The aggregate
+independent observation repeats those offsets for every exact request under one
+typed common clock, and each request binds the exact native evidence used by
+its matching aggregate timing and O1 observation.
+O1's terminal receipt seals the canonical hash of every exact request outcome
+and of the complete cleanup object. The aggregate observation time must fall
+inside both the stage and O1 receipt lifecycles. O1 and H1 cannot complete
+before the cleanup they seal or attest, and the next-stage fence is the later
+of their completed evidence timestamps.
+
+The deterministic `real-reference` path has no agent actor set. Its non-counted
+controller binds a reference execution proof, frozen reference policy,
+release, common clock, and independently captured per-request timing, while
+exactly one actionless O1 and one actionless H1 bind that reference policy and
+release. O1 remains the independent author of request-outcome and cleanup
+seals; the controller cannot supply either receipt or become O1.
 
 The observation schema carries logical or redacted correlation identifiers.
 Private infra retains unredacted provider/host evidence and maps it to these
-portable digests.
+portable bindings.
 
 Every stage result also binds a typed terminal snapshot, teardown,
 zero-active-residue proof, and baseline-equivalence result. Reversible
-host/cloud/runtime state must exactly return; expected append-only commercial
-history, fees, and wallet/accounting deltas are reconciled rather than required
-to disappear. No later stage can start from a result that is merely terminal
-without both partitions being clean.
+host/cloud/runtime state is an exact nine-component partition: capacity
+reservations/leases, Settlement Resources, fulfillment/provider jobs, VMs,
+disks, networks, Ansible processes, GPU assignments, and the intended
+listing/service set. Append-only/accounting state is an exact six-category
+partition: deal, Settlement, request, and escrow/claim history, transaction
+fees, and wallet accounting. Each category binds expected and observed native
+evidence and must be reconciled without an active lock or unexplained value.
+No later stage can start from a result that is merely terminal without both
+partitions, all residue counters, H1, and O1 cleanup sealing being clean.
 
 **Rejected alternative:** trust the buyer/emitter terminal status. Neither
 actor owns aggregate allocation, VM, or GPU truth.
@@ -316,10 +402,16 @@ actor owns aggregate allocation, VM, or GPU truth.
 ### Model reuse as two baseline-fenced stages
 
 Reuse A and B are distinct stage/scenario identities even though both have B1
-counts. A result for B includes a hash reference to A's terminal result and the
-intermediate baseline proof. All durable lifecycle identifiers must differ
-between the two stages. The public validator proves ordering and correlation;
-private infra owns baseline capture and verifies its native evidence.
+counts and may reuse logical `request-1`. Measured reuse A binds the completed
+buyer frontier; qualification reuse carries null frontier authority. Reuse B
+starts after A's `progression_ready_at`, binds A's result/baseline, and
+preserves that frontier authority. B uses a distinct result ID, deal,
+negotiation/escrow references, reservation, fulfillment, and provisioned
+resource. Reuse requires correct success, teardown,
+and baseline equivalence, but does not require either request to meet the
+request-processing SLO: safe physical release and reuse is independent of
+latency. The public validator proves ordering and correlation; private infra
+owns baseline capture and verifies its native evidence.
 
 **Rejected alternative:** one scenario with a fractional or repeated count.
 That hides the cleanup barrier and cannot prove that a released GPU was safely
@@ -336,12 +428,34 @@ the full oracle plus cleanup; and load generation requires live overlapping
 actors with bounded skew and no local queue.
 
 Buyer search starts B1/B2/B4/B8 and immediately runs any selected adjacent
-B3/B5/B6/B7 refinement before reuse. After reuse, seller search starts only
-with an external buyer-frontier receipt: B2/S2, then admitted B4/S2. A passing
-B4/S2 advances to conditional B4/S4; failed S4 is refined with B4/S3. When S4
-is inadmissible, an admitted S3 may be the bounded final probe. Failed S2
-already gives the adjacent S1/S2 bracket. If the frozen envelope or generator
-saturates first, the largest clean result is explicitly a lower bound.
+B3/B5/B6/B7 refinement. Selection uses request processing plus provisioning
+plus correctness, while load-generator failure censors the product observation
+rather than being interpreted as SCM failure. The resulting typed
+buyer-frontier receipt binds the exact ordered result IDs/hashes, stage
+observations, retained counts, five separately derived frontiers, and whether
+the product boundary is exact, a lower bound, or has no clean shape. It also
+binds the one exact `topology_authority_binding` shared by every bound
+B1/B2/B4/B8 and selected refinement result.
+
+Only after that receipt may reuse A run, followed by reuse B. Seller search
+then starts at B2/S2 using the clean reuse-B result as its baseline. Each seller
+result binds the buyer-frontier receipt, reuse-B result, H1-derived topology cardinality,
+and the immediately prior seller result by ID/hash, and starts strictly after
+that predecessor's `progression_ready_at`. Reuse-B H1 pre-freezes and attests
+seller/service admission without referring to the future reuse-B result; reuse
+B binds the H1 receipt and seals the derived admission, and downstream seller
+results bind reuse B. Callers cannot inflate the admission. An admitted B4/S2 follows; a passing B4/S2 advances
+to conditional B4/S4, and failed S4 is refined with B4/S3. When S4 is
+inadmissible, an admitted S3 may be the bounded final probe. Failed S2 already
+gives the adjacent S1/S2 bracket. If the frozen envelope or generator saturates
+first, the largest clean result is explicitly a lower bound.
+
+Measured reuse A must equal the buyer-frontier topology authority, and reuse B
+must preserve A's value. Qualification reuse has null frontier authority but
+still preserves topology A→B. Every measured seller result must equal the
+frontier and reuse-B topology and the immediately prior seller result's
+topology. The campaign is therefore one topology-fenced chain, not a sequence
+of individually plausible rows from different physical-capacity views.
 
 **Rejected alternative:** call the greatest buyer count "capacity." Offered
 demand can exceed fulfillment, processing, provisioning, or generator

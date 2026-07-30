@@ -94,7 +94,7 @@
     "schema_version": 2,
     "receipt_id": "seller-1-receipt",
     "plan_id": "seller-1-plan",
-    "plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "plan_sha256": "4a4cd57160d47792b02e461eb7ae94d24c6c332784be50cb37090ea23e8e633d",
     "role": "seller",
     "actor_slot": "seller-1",
     "profile_stage_id": "b1-s1-g1-mock",
@@ -107,7 +107,7 @@
       "sha256": "12b62545d6e054aa6182ba0128fdd345476f3991934f6da73d9590bfbc34950d"
     },
     "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
-    "prepared_authority_sha256": "c32140b86091f828f6e89b37091e227c41859f83c7d31de847b540c518111fc3",
+    "prepared_authority_sha256": "c22e1a1d6db567f6a1e600769bb03b0c563333f9df45ea8915de9ab3320471f8",
     "run_authority": {
       "release_id": "mock-release",
       "concurrency_policy_id": null,
@@ -177,10 +177,15 @@
     ],
     "role_evidence": {
       "kind": "seller",
-      "service_start_result_sha256": "3f374f779cba51f84dbf9ae6fcb1f4efc80ffe23bfa48ad9e84b1f02e9a4e013",
+      "service_start_result_sha256": "04816d02e1c06dd925a25baaa971aacc012faa23afbf21448cf11984a18851a7",
       "publication_result_sha256s": [
-        "cccd2adcba5e9710fe20d9eff85205889000d94cc0304359508b01b709114a48"
+        "308c01f32ca59c88a7040ce7ff9051c079119b5e85449f8ff4b81c8cc4f8a576"
       ],
+      "topology_authority_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.topology-authority.v1",
+        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
       "alive_through_observation": true
     }
   }

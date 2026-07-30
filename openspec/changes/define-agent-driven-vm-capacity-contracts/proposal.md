@@ -21,12 +21,28 @@ qualification or capacity claims.
   serialized reuse A and B, then B2/S2/G1. The observer probe remains a private
   no-request stage rather than a fabricated public request scenario.
 - Define a separately labeled retry-zero measured G1 progression for Q0,
-  buyer B2/B4/B8, measured reuse, seller S2/B2 and S2/B4, and conditional
-  S4/B4; portable validity does not grant private pre-Q0 admission.
+  buyer B2/B4/B8, a hash-bound buyer-frontier receipt, measured reuse, seller
+  S2/B2 and S2/B4, and conditional S4/B4; portable validity does not grant
+  private pre-Q0 admission.
+- Freeze one pre-Q0 evaluation policy containing the exact registry bytes,
+  common clock, SLOs, timeout, and five frontier definitions so outcomes cannot
+  be reclassified after observation.
+- Freeze a typed controller-reference policy after that evaluation policy and
+  before reference release, binding the exact O1/H1 plans, release, campaign
+  clock, and request schedule; bind the exact resulting O1/H1 receipts into the
+  reference result.
 - Define portable buyer, seller, host-operator, observer, frozen-action,
   result, and evidence contracts that distinguish substantive agents from
   readiness probes and keep private runtime identities and credentials outside
   public artifacts.
+- Make every seller plan and terminal receipt repeat the sole H1 plan's typed
+  `topology_authority_binding`. Reject a disjoint seller authority in the
+  concurrency policy before release, carry the shared authority into frozen
+  seller actions through exact plan-hash/policy lineage, and require the
+  capacity result's topology authority to remain equal to H1.
+- Treat that binding as the public opaque proof that all sellers in a one-GPU
+  row consult one globally fenced capacity view, without publishing host, GPU,
+  allocator, or private fencing identities.
 - Require seller processes to own service start and exact listing publication
   and buyer processes to own purchase and guest verification, with every actor
   alive through its barrier and invoking hash-pinned one-shot wrappers.
@@ -38,6 +54,10 @@ qualification or capacity claims.
   especially `fulfillment_id`, without mistaking the nonterminal
   `capacity_hold_unavailable` event for a result or restoring buyer-visible
   physical placement fields.
+- Require exact independent request timing and O1 receipt seals for every
+  request outcome and cleanup object, retain typed negative agent observations,
+  and preserve independently derived double allocation as actionable fault
+  evidence rather than discarding the result.
 - Introduce finding v2 with exact working/upstream authority, reconciliation
   context, immutable `finding_id`, scenario/profile/result hashes, structured
   durable correlations, evidence path/hash objects, public redaction, and an
@@ -48,6 +68,15 @@ qualification or capacity claims.
   according to what actually ran, and report offered
   buyer count separately from request-processing, simultaneous-fulfillment,
   provisioning queue/service, correctness, and load-generator frontiers.
+- Fence measured ordering transitively as buyer frontier → reuse A → reuse B →
+  seller results, with exact result hashes and final H1/O1
+  `progression_ready_at` fences at every edge; derive seller admission only from
+  reuse-B H1's pre-frozen plan/receipt, seal it in reuse B, and let downstream
+  seller results bind that reuse-B authority without a future-result cycle.
+- Carry the same opaque topology authority through every measured buyer result
+  and the buyer-frontier receipt, measured reuse A, reuse B, and every seller
+  result/prior-result edge. Qualification reuse also preserves topology from A
+  to B even though it has no buyer-frontier authority.
 - Preserve historical schema-v1 artifacts only through their pinned historical
   SCM refs; do not weaken schema-v2 validation with an in-place compatibility
   shim.

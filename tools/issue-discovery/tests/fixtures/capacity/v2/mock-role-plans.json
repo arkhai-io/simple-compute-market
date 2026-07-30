@@ -70,13 +70,18 @@
       "domain": "scm.capacity.actor-invocation.v1",
       "value": "d336969a55b003f66a132a0446a30cf27a0d360a929df58aa207d1fd8edc1d62"
     },
-    "prepared_authority_sha256": "c32140b86091f828f6e89b37091e227c41859f83c7d31de847b540c518111fc3",
+    "prepared_authority_sha256": "c22e1a1d6db567f6a1e600769bb03b0c563333f9df45ea8915de9ab3320471f8",
     "role_plan": {
       "kind": "seller",
       "service_slot": "seller-service-1",
       "listing_slots": [
         "listing-1"
       ],
+      "topology_authority_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.topology-authority.v1",
+        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
       "service_start_action_id": "seller-service-start-1",
       "service_start_prepared_action_sha256": "44e75c41692dfe50fbbea69fe11b0503d922e926a1521fecebd13096e4646f25",
       "publication_action_ids": [

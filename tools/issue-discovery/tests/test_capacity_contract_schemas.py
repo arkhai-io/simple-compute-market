@@ -97,8 +97,7 @@ def assert_real_receipt_run_authorities(
         if action["profile_stage_id"] == policy["profile_stage_id"]
     ]
     policy_digests = {
-        action["concurrency_policy_sha256"]
-        for action in qualification_actions
+        action["concurrency_policy_sha256"] for action in qualification_actions
     }
     assert qualification_actions
     assert len(policy_digests) == 1
@@ -134,6 +133,11 @@ def test_capacity_v2_fixture_authority_chain_is_coherent() -> None:
     plans_by_stage_actor = {
         (plan["profile_stage_id"], plan["actor_slot"]): plan for plan in plans
     }
+    host_topology_authority = next(
+        plan["role_plan"]["topology_authority_binding"]
+        for plan in plans
+        if plan["role"] == "host-operator"
+    )
     payloads_by_id = {payload["action_id"]: payload for payload in payloads}
     assert_real_receipt_run_authorities(receipts, actions, policy)
 
@@ -146,6 +150,15 @@ def test_capacity_v2_fixture_authority_chain_is_coherent() -> None:
             receipt["provenance"]["actor_invocation_capability_binding"]
             == plan["actor_invocation_capability_binding"]
         )
+        if plan["role"] == "seller":
+            assert (
+                plan["role_plan"]["topology_authority_binding"]
+                == host_topology_authority
+            )
+            assert (
+                receipt["role_evidence"]["topology_authority_binding"]
+                == host_topology_authority
+            )
 
     prepared_actions: dict[str, str] = {}
     for plan in plans:
@@ -190,8 +203,7 @@ def test_capacity_v2_fixture_authority_chain_is_coherent() -> None:
         if receipt["profile_stage_id"] == policy["profile_stage_id"]
     }
     assert {
-        item["plan_id"]: item["plan_sha256"]
-        for item in policy["role_plan_authorities"]
+        item["plan_id"]: item["plan_sha256"] for item in policy["role_plan_authorities"]
     } == qualification_receipts
     assert {
         item["action_id"]: item["prepared_action_sha256"]
@@ -279,32 +291,25 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
     assert capture["profile_stage_sha256"] == canonical_sha256(stage)
     assert {plan["profile_stage_id"] for plan in plans} == {stage["stage_id"]}
     assert {plan["role"] for plan in plans} == {"buyer", "seller"}
-    assert {receipt["profile_stage_id"] for receipt in receipts} == {
-        stage["stage_id"]
-    }
-    assert {action["profile_stage_id"] for action in actions} == {
-        stage["stage_id"]
-    }
+    assert {receipt["profile_stage_id"] for receipt in receipts} == {stage["stage_id"]}
+    assert {action["profile_stage_id"] for action in actions} == {stage["stage_id"]}
     assert all(action["concurrency_policy_id"] is None for action in actions)
-    assert all(
-        action["concurrency_policy_sha256"] is None for action in actions
-    )
+    assert all(action["concurrency_policy_sha256"] is None for action in actions)
     expected_mock_run_authority = {
         "release_id": capture["release_id"],
         "concurrency_policy_id": None,
         "concurrency_policy_sha256": None,
     }
     assert all(
-        receipt["run_authority"] == expected_mock_run_authority
-        for receipt in receipts
+        receipt["run_authority"] == expected_mock_run_authority for receipt in receipts
     )
     assert all(
         action["release_id"] == expected_mock_run_authority["release_id"]
         for action in actions
     )
-    assert oracle["profile_stage_id"] == capture["profile_stage_id"] == stage[
-        "stage_id"
-    ]
+    assert (
+        oracle["profile_stage_id"] == capture["profile_stage_id"] == stage["stage_id"]
+    )
     assert capture["oracle_authority_id"] == oracle["oracle_authority_id"]
     assert capture["oracle_authority_sha256"] == canonical_sha256(oracle)
 
@@ -323,9 +328,7 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
         role_plan = plan["role_plan"]
         assert plan["prepared_authority_sha256"] == canonical_sha256(role_plan)
         if plan["role"] == "buyer":
-            prepared_by_id[role_plan["action_id"]] = role_plan[
-                "prepared_action_sha256"
-            ]
+            prepared_by_id[role_plan["action_id"]] = role_plan["prepared_action_sha256"]
         else:
             prepared_by_id[role_plan["service_start_action_id"]] = role_plan[
                 "service_start_prepared_action_sha256"
@@ -343,43 +346,37 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
             receipt["provenance"]["actor_invocation_capability_binding"]
             == plan["actor_invocation_capability_binding"]
         )
+        if plan["role"] == "seller":
+            assert (
+                receipt["role_evidence"]["topology_authority_binding"]
+                == role_plan["topology_authority_binding"]
+            )
 
     for action_id, action in actions_by_id.items():
         plan = plans_by_id[action["role_plan_id"]]
         payload = payloads_by_id[action_id]
         result = results_by_action[action_id]
-        prepared_projection = {
-            field: action[field] for field in PREPARED_ACTION_FIELDS
-        }
+        prepared_projection = {field: action[field] for field in PREPARED_ACTION_FIELDS}
         assert action["role_plan_sha256"] == canonical_sha256(plan)
-        assert action["prepared_action_sha256"] == canonical_sha256(
-            prepared_projection
-        )
+        assert action["prepared_action_sha256"] == canonical_sha256(prepared_projection)
         assert action["prepared_action_sha256"] == prepared_by_id[action_id]
         assert action["payload_sha256"] == canonical_sha256(payload)
-        assert (
-            action["expected_result"]["independent_oracle_authority_sha256"]
-            == canonical_sha256(oracle)
-        )
+        assert action["expected_result"][
+            "independent_oracle_authority_sha256"
+        ] == canonical_sha256(oracle)
         assert result["action_sha256"] == canonical_sha256(action)
         assert result["terminal_payload_sha256"] == action["payload_sha256"]
 
     assert set(capture["buyer_receipt_sha256s"]) == {
-        canonical_sha256(receipt)
-        for receipt in receipts
-        if receipt["role"] == "buyer"
+        canonical_sha256(receipt) for receipt in receipts if receipt["role"] == "buyer"
     }
     assert set(capture["seller_receipt_sha256s"]) == {
-        canonical_sha256(receipt)
-        for receipt in receipts
-        if receipt["role"] == "seller"
+        canonical_sha256(receipt) for receipt in receipts if receipt["role"] == "seller"
     }
     assert set(capture["action_sha256s"]) == {
         canonical_sha256(action) for action in actions
     }
-    assert set(capture["prepared_action_sha256s"]) == set(
-        prepared_by_id.values()
-    )
+    assert set(capture["prepared_action_sha256s"]) == set(prepared_by_id.values())
     assert set(capture["action_result_sha256s"]) == {
         canonical_sha256(result) for result in results
     }
@@ -396,21 +393,16 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
     assert capture["live_resource_ledger"] == []
     assert capture["capacity_claimed"] is False
 
-    captured_by_id = {
-        item["action_id"]: item for item in capture["captured_payloads"]
-    }
+    captured_by_id = {item["action_id"]: item for item in capture["captured_payloads"]}
     for action_id, action in actions_by_id.items():
         captured = captured_by_id[action_id]
         assert captured["action_sha256"] == canonical_sha256(action)
-        assert (
-            captured["prepared_action_sha256"]
-            == action["prepared_action_sha256"]
-        )
+        assert captured["prepared_action_sha256"] == action["prepared_action_sha256"]
         assert captured["payload_sha256"] == action["payload_sha256"]
         assert captured["runtime_binding"] == action["runtime_binding"]
-        assert captured["concrete_payload_binding"] == action[
-            "concrete_payload_binding"
-        ]
+        assert (
+            captured["concrete_payload_binding"] == action["concrete_payload_binding"]
+        )
 
     service_runtime = {
         (item["seller_slot"], item["service_slot"]): item["runtime_binding"]
@@ -432,12 +424,8 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
             ]
         assert action["runtime_binding"] == expected_runtime
 
-    buyer_receipt = next(
-        receipt for receipt in receipts if receipt["role"] == "buyer"
-    )
-    buyer_action_id = plans_by_id[buyer_receipt["plan_id"]]["role_plan"][
-        "action_id"
-    ]
+    buyer_receipt = next(receipt for receipt in receipts if receipt["role"] == "buyer")
+    buyer_action_id = plans_by_id[buyer_receipt["plan_id"]]["role_plan"]["action_id"]
     assert buyer_receipt["role_evidence"]["action_result_sha256"] == (
         canonical_sha256(results_by_action[buyer_action_id])
     )
@@ -450,9 +438,7 @@ def test_mock_fixture_chain_is_distinct_exact_and_self_consistent() -> None:
     ] == canonical_sha256(
         results_by_action[seller_role_plan["service_start_action_id"]]
     )
-    assert seller_receipt["role_evidence"][
-        "publication_result_sha256s"
-    ] == [
+    assert seller_receipt["role_evidence"]["publication_result_sha256s"] == [
         canonical_sha256(results_by_action[action_id])
         for action_id in seller_role_plan["publication_action_ids"]
     ]
@@ -638,6 +624,22 @@ NEGATIVE_CASES = [
         "scm.capacity.reversible-baseline.v1",
     ),
     NegativeCase(
+        "wrong seller-plan topology binding domain",
+        "capacity-role-plan.schema.json",
+        "role-plans.json",
+        1,
+        ("role_plan", "topology_authority_binding", "domain"),
+        "scm.capacity.reversible-baseline.v1",
+    ),
+    NegativeCase(
+        "wrong seller-receipt topology binding domain",
+        "capacity-role-receipt.schema.json",
+        "role-receipts.json",
+        1,
+        ("role_evidence", "topology_authority_binding", "domain"),
+        "scm.capacity.reversible-baseline.v1",
+    ),
+    NegativeCase(
         "wrong native-evidence binding domain",
         "capacity-role-receipt.schema.json",
         "role-receipts.json",
@@ -658,7 +660,7 @@ NEGATIVE_CASES = [
         "capacity-result.schema.json",
         "capacity-result.json",
         None,
-        ("baseline", "reversible_baseline_binding", "domain"),
+        ("cleanup", "reversible_baseline_binding", "domain"),
         "scm.capacity.baseline-equivalence.v1",
     ),
     NegativeCase(
@@ -674,7 +676,12 @@ NEGATIVE_CASES = [
         "capacity-result.schema.json",
         "capacity-result.json",
         None,
-        ("aggregate_observation_sha256",),
+        (
+            "aggregate_observation",
+            "native_evidence_bindings",
+            0,
+            "value",
+        ),
         "a" * 63,
     ),
     NegativeCase(
@@ -918,20 +925,20 @@ NEGATIVE_CASES = [
         "scm.capacity.runtime-binding.v1",
     ),
     NegativeCase(
-        "actor starts after release",
+        "actor start offset is not an integer",
         "capacity-actor-set.schema.json",
         "actor-set.json",
         None,
         ("actors", 0, "started_offset_ns"),
-        1,
+        1.5,
     ),
     NegativeCase(
-        "actor completes before release",
+        "actor completion offset is not an integer",
         "capacity-actor-set.schema.json",
         "actor-set.json",
         None,
         ("actors", 0, "completed_offset_ns"),
-        -1,
+        "early",
     ),
     NegativeCase(
         "actor-set controller authors receipts",

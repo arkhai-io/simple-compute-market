@@ -77,6 +77,11 @@
       "listing_slots": [
         "listing-1"
       ],
+      "topology_authority_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.topology-authority.v1",
+        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
       "service_start_action_id": "seller-service-start-1",
       "service_start_prepared_action_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
       "publication_action_ids": [
@@ -137,7 +142,8 @@
       "admitted_gpus": 1,
       "kvm_ansible_readiness": true,
       "observation_plan_sha256": "abababababababababababababababababababababababababababababababab",
-      "teardown_plan_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+      "teardown_plan_sha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "seller_scaling_admission": null
     }
   },
   {

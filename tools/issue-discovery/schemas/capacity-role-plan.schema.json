@@ -209,6 +209,7 @@
         "service_start_prepared_action_sha256",
         "publication_action_ids",
         "publication_prepared_action_sha256s",
+        "topology_authority_binding",
         "required_steps"
       ],
       "properties": {
@@ -234,6 +235,7 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/digest"}
         },
+        "topology_authority_binding": {"$ref": "#/$defs/topology_binding"},
         "required_steps": {
           "const": [
             "install-build", "configuration", "wallet-preparation",
@@ -249,7 +251,8 @@
       "required": [
         "kind", "topology_authority_binding", "reversible_baseline_binding",
         "baseline_equivalence_binding", "admitted_gpus", "kvm_ansible_readiness",
-        "observation_plan_sha256", "teardown_plan_sha256"
+        "observation_plan_sha256", "teardown_plan_sha256",
+        "seller_scaling_admission"
       ],
       "properties": {
         "kind": {"const": "host-operator"},
@@ -259,7 +262,37 @@
         "admitted_gpus": {"const": 1},
         "kvm_ansible_readiness": {"const": true},
         "observation_plan_sha256": {"$ref": "#/$defs/digest"},
-        "teardown_plan_sha256": {"$ref": "#/$defs/digest"}
+        "teardown_plan_sha256": {"$ref": "#/$defs/digest"},
+        "seller_scaling_admission": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/seller_scaling_admission"}
+          ]
+        }
+      }
+    },
+    "seller_scaling_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distinct_seller_identities",
+        "distinct_service_instances",
+        "native_evidence_binding"
+      ],
+      "properties": {
+        "distinct_seller_identities": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4
+        },
+        "distinct_service_instances": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4
+        },
+        "native_evidence_binding": {
+          "$ref": "#/$defs/native_evidence_binding"
+        }
       }
     },
     "observer_plan": {

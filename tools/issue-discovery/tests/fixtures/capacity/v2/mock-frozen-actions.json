@@ -10,7 +10,7 @@
     "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
     "actor_slot": "seller-1",
     "role_plan_id": "seller-1-plan",
-    "role_plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "role_plan_sha256": "4a4cd57160d47792b02e461eb7ae94d24c6c332784be50cb37090ea23e8e633d",
     "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
     "actor_invocation_capability_binding": {
       "method": "hmac-sha256-v1",
@@ -63,7 +63,7 @@
     "profile_stage_sha256": "110307ff33861aae38dfa1079aa4dc948748d031b2615c2eef355a9d3b09ad94",
     "actor_slot": "seller-1",
     "role_plan_id": "seller-1-plan",
-    "role_plan_sha256": "57120e4eed5190c3ddc4f3714efb984bc1f0d4261ba83cbd14c9788bf45b1acf",
+    "role_plan_sha256": "4a4cd57160d47792b02e461eb7ae94d24c6c332784be50cb37090ea23e8e633d",
     "isolated_identity_fingerprint": "185cca370c1647393ec7615c421863c0ed94042175fa484f806a6adbacac498f",
     "actor_invocation_capability_binding": {
       "method": "hmac-sha256-v1",

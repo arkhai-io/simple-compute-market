@@ -85,7 +85,7 @@
         "required": ["step_id", "status", "evidence_sha256"],
         "properties": {
           "step_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-          "status": {"const": "passed"},
+          "status": {"enum": ["passed", "failed"]},
           "evidence_sha256": {"$ref": "#/$defs/digest"}
         }
       }
@@ -252,7 +252,7 @@
     "seller_evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "service_start_result_sha256", "publication_result_sha256s", "alive_through_observation"],
+      "required": ["kind", "service_start_result_sha256", "publication_result_sha256s", "topology_authority_binding", "alive_through_observation"],
       "properties": {
         "kind": {"const": "seller"},
         "service_start_result_sha256": {"$ref": "#/$defs/digest"},
@@ -262,21 +262,66 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/digest"}
         },
+        "topology_authority_binding": {"$ref": "#/$defs/topology_binding"},
         "alive_through_observation": {"const": true}
       }
     },
     "host_evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "topology_authority_binding", "reversible_baseline_binding", "baseline_equivalence_binding", "kvm_ansible_ready", "cleanup_complete"],
+      "required": [
+        "kind",
+        "topology_authority_binding",
+        "reversible_baseline_binding",
+        "baseline_equivalence_binding",
+        "seller_scaling_admission",
+        "kvm_ansible_ready",
+        "cleanup_complete",
+        "baseline_equivalent",
+        "active_residue_detected"
+      ],
       "properties": {
         "kind": {"const": "host-operator"},
         "topology_authority_binding": {"$ref": "#/$defs/topology_binding"},
         "reversible_baseline_binding": {"$ref": "#/$defs/reversible_binding"},
         "baseline_equivalence_binding": {"$ref": "#/$defs/equivalence_binding"},
+        "seller_scaling_admission": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/seller_scaling_admission"}
+          ]
+        },
         "kvm_ansible_ready": {"const": true},
-        "cleanup_complete": {"type": "boolean"}
-      }
+        "cleanup_complete": {"type": "boolean"},
+        "baseline_equivalent": {"type": "boolean"},
+        "active_residue_detected": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"baseline_equivalent": {"const": true}},
+            "required": ["baseline_equivalent"]
+          },
+          "then": {
+            "properties": {
+              "cleanup_complete": {"const": true},
+              "active_residue_detected": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"active_residue_detected": {"const": true}},
+            "required": ["active_residue_detected"]
+          },
+          "then": {
+            "properties": {
+              "cleanup_complete": {"const": false},
+              "baseline_equivalent": {"const": false}
+            }
+          }
+        }
+      ]
     },
     "observer_evidence": {
       "type": "object",
@@ -287,7 +332,9 @@
         "controller_source",
         "release_observed",
         "terminal_observed",
-        "native_evidence_bindings"
+        "native_evidence_bindings",
+        "request_observations",
+        "cleanup_observation"
       ],
       "properties": {
         "kind": {"const": "observer"},
@@ -300,6 +347,84 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/native_evidence_binding"}
+        },
+        "request_observations": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/request_observation"}
+        },
+        "cleanup_observation": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/cleanup_observation"}
+          ]
+        }
+      }
+    },
+    "request_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "request_outcome_sha256",
+        "native_evidence_binding"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "pattern": "^request-[1-9][0-9]*$"
+        },
+        "request_outcome_sha256": {"$ref": "#/$defs/digest"},
+        "native_evidence_binding": {
+          "$ref": "#/$defs/native_evidence_binding"
+        }
+      }
+    },
+    "seller_scaling_admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distinct_seller_identities",
+        "distinct_service_instances",
+        "native_evidence_binding"
+      ],
+      "properties": {
+        "distinct_seller_identities": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4
+        },
+        "distinct_service_instances": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4
+        },
+        "native_evidence_binding": {
+          "$ref": "#/$defs/native_evidence_binding"
+        }
+      }
+    },
+    "cleanup_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanup_sha256",
+        "stage_started_at",
+        "terminal_observed_at",
+        "cleanup_completed_at",
+        "clock_evidence_binding",
+        "native_evidence_binding"
+      ],
+      "properties": {
+        "cleanup_sha256": {"$ref": "#/$defs/digest"},
+        "stage_started_at": {"$ref": "#/$defs/timestamp"},
+        "terminal_observed_at": {"$ref": "#/$defs/timestamp"},
+        "cleanup_completed_at": {"$ref": "#/$defs/timestamp"},
+        "clock_evidence_binding": {
+          "$ref": "#/$defs/native_evidence_binding"
+        },
+        "native_evidence_binding": {
+          "$ref": "#/$defs/native_evidence_binding"
         }
       }
     },

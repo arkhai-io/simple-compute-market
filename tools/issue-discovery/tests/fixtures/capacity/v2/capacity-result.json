@@ -1,18 +1,43 @@
 {
   "schema_version": 2,
-  "result_id": "capacity-result-1",
-  "scm_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "profile_stage_id": "b1-s1-g1-qualification",
-  "profile_stage_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "result_id": "q0-b1-s1-g1-measured-result",
+  "scm_ref": "5df99ce24bb320e1191ab064011fa55e0047db30",
+  "profile_stage_id": "q0-b1-s1-g1-measured",
+  "profile_stage_sha256": "f04afabe4f18fe5f62542f1596ffb7b89dfe55bb49c7cad2f84f94934ed4f935",
   "scenario_id": "b1-s1-g1",
-  "scenario_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "execution_boundary": "real-qualification",
+  "scenario_sha256": "1b161cf35153b795a6af3941b18f0b6da9725f177d93945518e120bcb01f4b71",
+  "execution_boundary": "real-measured",
   "actor_trigger": "agent-triggered",
-  "actor_set_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "evaluation_policy": {
+    "evaluation_policy_id": "g1-capacity-policy",
+    "evaluation_policy_sha256": "4a863dc039e75e00170203a394e6b5f2141bbde31c8a48123770bb512ab78405"
+  },
+  "oracle_authority": {
+    "oracle_authority_id": "q0-b1-s1-g1-measured-oracle",
+    "oracle_authority_sha256": "aa32f54efaf40f0658473a4ef80cef4657c10c1622f43375a0ab2ca5754db783",
+    "observer_plan_sha256": "134315d01e96dd2ada83b0ae4a21399df1e9bef3ef0090715042c8abcd675659"
+  },
+  "execution_authority": {
+    "kind": "agent-actor-set",
+    "actor_set_id": "q0-b1-s1-g1-measured-actor-set",
+    "actor_set_sha256": "c3e7f64f98217c5f974c83217abca74dec1a395cbaaa0736a719df4726555fe7",
+    "release_id": "q0-b1-s1-g1-measured-release",
+    "concurrency_policy_id": "q0-b1-s1-g1-measured-policy",
+    "concurrency_policy_sha256": "369707ee69737e7026b3ab097a70c2b63dfd81e24e9750a1f2ad3eef8afdfb90"
+  },
+  "topology_authority_binding": {
+    "domain": "scm.capacity.topology-authority.v1",
+    "method": "hmac-sha256-v1",
+    "value": "250471746776487c2f4e67c32d04aeab17ece9fe529b63c09ac92224943e69fb"
+  },
+  "started_at": "2026-07-30T10:00:00.000000Z",
+  "terminal_observed_at": "2026-07-30T10:00:10.000000Z",
+  "cleanup_completed_at": "2026-07-30T10:00:11.000000Z",
+  "progression_ready_at": "2026-07-30T10:00:12.000000Z",
   "expected_outcomes": {
-    "vm-succeeded": 1,
     "capacity-refused": 0,
-    "fault": 0
+    "fault": 0,
+    "vm-succeeded": 1
   },
   "observed_outcomes": {
     "vm-succeeded": 1,
@@ -28,45 +53,394 @@
         "seller_slot": "seller-1",
         "listing_slot": "listing-1",
         "runtime_binding": {
-          "method": "hmac-sha256-v1",
           "domain": "scm.capacity.runtime-binding.v1",
-          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          "method": "hmac-sha256-v1",
+          "value": "4b6a41e541c063f1e9605090bb84936a488e688629c7bdea0e202d90263d26a8"
         },
-        "negotiation_reference_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "escrow_reference_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        "negotiation_reference_sha256": "748580ec5acb3c14902298b3d28aab25b1124f41423df3fea48413a6140a6022",
+        "escrow_reference_sha256": "7badb753a66e736fea3375442f816d8e1558b129899ed27f92402f3a1da1d511"
       },
-      "capacity_reservation_id": "reservation-1",
-      "fulfillment_id": "fulfillment-1",
-      "settlement_record_id": "settlement-record-1",
-      "settlement_resource_id": "settlement-resource-1",
-      "provisioned_resource_id": "provisioned-resource-1",
-      "allocation_id": null,
-      "provisioning_job_id": null,
-      "oracle_evidence_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
-      "teardown_complete": true,
-      "failure_category": null
+      "invoked_offset_ns": 410,
+      "terminal_offset_ns": 490,
+      "capacity_reservation_id": "request-1-reservation",
+      "fulfillment_id": "buyer-1-fulfillment",
+      "settlement_record": {
+        "capacity_reservation_id": "request-1-reservation",
+        "fulfillment_id": "buyer-1-fulfillment",
+        "state": "torn_down",
+        "selected_resource_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "d0e69a85e383b2c15253e62aedac66725e6c711869172494d56796cb877f2f44"
+        },
+        "active_claim": false
+      },
+      "provisioned_resource_id": "request-1-vm",
+      "allocation_id": "request-1-allocation",
+      "provisioning_job_id": "request-1-provisioning",
+      "commercial_resolution": {
+        "deal_state": "fulfilled-terminal",
+        "escrow_state": "released",
+        "failure_policy_state": "not-applicable",
+        "zero_active_claims": true,
+        "zero_active_locks": true,
+        "zero_run_owned_funds": true
+      },
+      "independent_observation_bindings": [
+        {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "87502b143adf927083f88f2f4dc887f76632f9563bf6683a88837387ea04c7a1"
+        },
+        {
+          "domain": "scm.capacity.native-evidence.v1",
+          "method": "hmac-sha256-v1",
+          "value": "5b38fdcde6c7f31b5ebd3f4691f2d5087e76e603d1d26604dd1426c79f4d248b"
+        }
+      ],
+      "request_cleanup": {
+        "teardown_complete": true,
+        "zero_active_residue": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "e330374e41860936b59d6d80c2be094ad2d97ad3810f4e45315575afa450cdcf"
+        }
+      },
+      "failure_category": null,
+      "success_observation": {
+        "reservation_fulfillment_join": {
+          "fulfillment_capacity_reservation_id": "request-1-reservation",
+          "settlement_capacity_reservation_id": "request-1-reservation",
+          "settlement_fulfillment_id": "buyer-1-fulfillment",
+          "provisioned_fulfillment_id": "buyer-1-fulfillment"
+        },
+        "provisioning": {
+          "provisioning_kind": "real-kvm-ansible",
+          "gpu_assignment": "whole-device-passthrough",
+          "queue_wait_ns": 10,
+          "ansible_service_ns": 20,
+          "output_observed": true
+        },
+        "gpu_exercise": {
+          "fulfillment_id": "buyer-1-fulfillment",
+          "ssh_resumed": true,
+          "visible_gpus": 1,
+          "wrapper": {
+            "path": "tools/issue-discovery/workloads/cuda/run-vector-add.sh",
+            "sha256": "604e2fe2c06da60563e42c7937c77e3fe6143f368726a1870a1a5fa731f94c38"
+          },
+          "source": {
+            "path": "tools/issue-discovery/workloads/cuda/vector_add.cu",
+            "sha256": "5e522cde6e8b8d6a6a362b06b218dc80c9d6e5740725294619fcc3fdedd7b7d4"
+          },
+          "compiled": true,
+          "device_kernel_executed": true,
+          "success_marker": "SCM_CUDA_VECTOR_ADD_OK",
+          "result_checksum": "98d4c5327244975c7c054483ef7a1a1d95645858abde350e5926dfaa3a265d7e",
+          "native_evidence_binding": {
+            "method": "hmac-sha256-v1",
+            "domain": "scm.capacity.native-evidence.v1",
+            "value": "4bc789f2261bde72f34dd9c10b3aa070006edcf2ab9e718314995c7d4acad571"
+          }
+        },
+        "active_interval": {
+          "start_offset_ns": 420,
+          "end_offset_ns": 480,
+          "interval_semantics": "half-open",
+          "clock_evidence_binding": {
+            "domain": "scm.capacity.native-evidence.v1",
+            "method": "hmac-sha256-v1",
+            "value": "cdd075f1bc3d31a2fe2693b74b0ff4ba902edd32a29db3461823aacea5117de5"
+          }
+        }
+      }
     }
   ],
-  "aggregate_observation_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-  "teardown": {
-    "complete": true,
-    "zero_active_residue": true,
-    "evidence_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  "aggregate_observation": {
+    "observer_plan_sha256": "134315d01e96dd2ada83b0ae4a21399df1e9bef3ef0090715042c8abcd675659",
+    "observed_request_ids": [
+      "request-1"
+    ],
+    "request_timing_observations": [
+      {
+        "request_id": "request-1",
+        "invoked_offset_ns": 410,
+        "terminal_offset_ns": 490,
+        "native_evidence_binding": {
+          "domain": "scm.capacity.native-evidence.v1",
+          "method": "hmac-sha256-v1",
+          "value": "5b38fdcde6c7f31b5ebd3f4691f2d5087e76e603d1d26604dd1426c79f4d248b"
+        }
+      }
+    ],
+    "observed_at": "2026-07-30T10:00:09.000000Z",
+    "common_clock_binding": {
+      "domain": "scm.capacity.native-evidence.v1",
+      "method": "hmac-sha256-v1",
+      "value": "cdd075f1bc3d31a2fe2693b74b0ff4ba902edd32a29db3461823aacea5117de5"
+    },
+    "native_evidence_bindings": [
+      {
+        "domain": "scm.capacity.native-evidence.v1",
+        "method": "hmac-sha256-v1",
+        "value": "5b38fdcde6c7f31b5ebd3f4691f2d5087e76e603d1d26604dd1426c79f4d248b"
+      }
+    ],
+    "max_overlapping_whole_gpu_vms": 1
   },
-  "baseline": {
+  "cleanup": {
+    "terminal_correlations_complete": true,
+    "teardown_complete": true,
+    "residue_counts": {
+      "capacity_reservations": 0,
+      "settlement_resources": 0,
+      "fulfillment_provider_jobs": 0,
+      "vms": 0,
+      "disks": 0,
+      "networks": 0,
+      "ansible_processes": 0,
+      "gpu_assignments": 0,
+      "active_claims": 0,
+      "active_locks": 0
+    },
     "reversible_baseline_binding": {
-      "method": "opaque-random-v1",
       "domain": "scm.capacity.reversible-baseline.v1",
-      "value": "4444444444444444444444444444444444444444444444444444444444444444"
+      "method": "hmac-sha256-v1",
+      "value": "3cb3434bd354904eb682a9cd05d82c9da3b6e535969fcdc64e809e640e436153"
     },
     "baseline_equivalence_binding": {
-      "method": "opaque-random-v1",
       "domain": "scm.capacity.baseline-equivalence.v1",
-      "value": "5555555555555555555555555555555555555555555555555555555555555555"
+      "method": "hmac-sha256-v1",
+      "value": "3b2ce8892abf6e0e90355e92629e23ec885ad30772c00a00626f6657d28d8ac0"
     },
-    "reversible_state_equal": true,
-    "accounting_deltas_reconciled": true,
-    "unexplained_value": false,
-    "evidence_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    "reversible_components": [
+      {
+        "component": "capacity-reservations-and-leases",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "b6a2b66f6b2f70235a62ee4cc30721e624f4e472ae54b41c9df11bcf0fe26cd2"
+        }
+      },
+      {
+        "component": "settlement-resources",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "f42d1a53fb3539a4f116885ed057a0908eaf9bd9c7f5f12ac296897505df12e7"
+        }
+      },
+      {
+        "component": "fulfillment-provider-jobs",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "d151651d0c4d4036ee33e6b0d4c2a0fd33af1f2a46427a074db7089e0736c1b1"
+        }
+      },
+      {
+        "component": "vms",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "9d94209e2c954f64aa521ba0769f853bf9ffd4ed478118d95d616299579bc757"
+        }
+      },
+      {
+        "component": "disks",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "b9bc7312618091fe6c9e823878e5f822a6e1ab05bb09ab75a0f73f4f558391db"
+        }
+      },
+      {
+        "component": "networks",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "d488651283aa4a5f0d524d137916b186df91aae828e4d025ef0c8c689b6080a7"
+        }
+      },
+      {
+        "component": "ansible-processes",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "bc972e5242ad09a8337dcd92117f820cbd6d2c598e437ccfb70ca1070491590f"
+        }
+      },
+      {
+        "component": "gpu-assignments",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "9a76556135287af1420bc5e0e7f908c67cc28d067aa8bc8b34e666ee49f1995d"
+        }
+      },
+      {
+        "component": "listing-service-set",
+        "exactly_equal": true,
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "6a66009f259a19ed2ff3555745a0222e690cb892e845e89ad83e1d0424821f5f"
+        }
+      }
+    ],
+    "accounting_deltas": [
+      {
+        "category": "deal-history",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "18b08a774d066095a49bf583bb5b8229d0d1b0137a15cf9ed05e92ec02f6ba10"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "c7ae5d98027e423daae5905d07758f22a0d095c33ae7c02046ecf1dd841220c7"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      },
+      {
+        "category": "settlement-history",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "90b832a36638c235657f489b9871d0c9d4f55065556c3fdcb39f25c2e735912c"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "c77166c882780699cc4cea8003a34f5cc55049110e3cb34bec2e66bfcf86b207"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      },
+      {
+        "category": "request-history",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "179eb7b0380c21d39e70c4ef22592cbb082fca469276c2fefd6f703f7104996f"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "16fe606403d811d3b4113bf8e331b09d103b87f580366df7737eab31b3f47dd1"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      },
+      {
+        "category": "escrow-claim-history",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "75a7d7d707ee5bff8c1449970cdef99648c6fe6eef20a4c6632c49a54e370997"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "aca21e24482dfdabd080e4b1d01ac877ef1a79f2087373a90648818518c3968b"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      },
+      {
+        "category": "transaction-fees",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "b37c04331fbb9381c2c643f576bd552f660078f6a1fb18c30eec196b8e4d6d6a"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "2011c068e2904b3f432219a8454b8077411f8ee6efc018cdd200a73b0750a5c6"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      },
+      {
+        "category": "wallet-accounting",
+        "expected_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "fbc17181e878a61de98e21cec10e3ecf9baca1694e6a8eaf1c4c481e44c278ce"
+        },
+        "observed_delta_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "29d71378da788d22fd7353218c99b94a3186299dc6e8fc6006883244c3b4d23c"
+        },
+        "reconciled": true,
+        "active_lock": false,
+        "unexplained_value": false
+      }
+    ],
+    "native_evidence_bindings": [
+      {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.native-evidence.v1",
+        "value": "3cd6f9c7586a99430d1be595b376e4b6e550b85052ba0b4f7a69bc3650fc73a0"
+      }
+    ],
+    "ready_for_next_stage": true
+  },
+  "stage_assessment": {
+    "outcomes_match_expected": true,
+    "request_processing_passed": true,
+    "simultaneous_fulfillment_count": 1,
+    "provisioning_passed": true,
+    "correctness_passed": true,
+    "load_generator_passed": true,
+    "cleanup_passed": true,
+    "stage_passed": true,
+    "agent_capacity_evidence": true,
+    "eligible_for_capacity_frontier": true,
+    "derived_faults": []
+  },
+  "buyer_frontier_authority": null,
+  "reuse_predecessor": null,
+  "seller_progression_authority": null,
+  "frontier_observation": {
+    "offered_buyers": 1,
+    "request_processing": {
+      "passed": true,
+      "observed_max_ns": 80,
+      "slo_ns": 1000
+    },
+    "simultaneous_fulfillment": {
+      "max_overlapping_whole_gpu_vms": 1
+    },
+    "provisioning_queue": {
+      "passed": true,
+      "observed_max_ns": 10,
+      "slo_ns": 100
+    },
+    "ansible_service": {
+      "passed": true,
+      "observed_max_ns": 20,
+      "slo_ns": 100
+    },
+    "correctness_passed": true,
+    "load_generator_passed": true
   }
 }

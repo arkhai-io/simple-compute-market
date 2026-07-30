@@ -143,6 +143,11 @@
       "publication_result_sha256s": [
         "1919191919191919191919191919191919191919191919191919191919191919"
       ],
+      "topology_authority_binding": {
+        "method": "hmac-sha256-v1",
+        "domain": "scm.capacity.topology-authority.v1",
+        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
       "alive_through_observation": true
     }
   },
@@ -218,8 +223,11 @@
         "domain": "scm.capacity.baseline-equivalence.v1",
         "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
+      "seller_scaling_admission": null,
       "kvm_ansible_ready": true,
-      "cleanup_complete": true
+      "cleanup_complete": true,
+      "baseline_equivalent": true,
+      "active_residue_detected": false
     }
   },
   {
@@ -289,7 +297,34 @@
           "domain": "scm.capacity.native-evidence.v1",
           "value": "3434343434343434343434343434343434343434343434343434343434343434"
         }
-      ]
+      ],
+      "request_observations": [
+        {
+          "request_id": "request-1",
+          "request_outcome_sha256": "3535353535353535353535353535353535353535353535353535353535353535",
+          "native_evidence_binding": {
+            "method": "hmac-sha256-v1",
+            "domain": "scm.capacity.native-evidence.v1",
+            "value": "3434343434343434343434343434343434343434343434343434343434343434"
+          }
+        }
+      ],
+      "cleanup_observation": {
+        "cleanup_sha256": "3636363636363636363636363636363636363636363636363636363636363636",
+        "stage_started_at": "2026-07-30T10:00:01Z",
+        "terminal_observed_at": "2026-07-30T10:00:05Z",
+        "cleanup_completed_at": "2026-07-30T10:00:06Z",
+        "clock_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "3434343434343434343434343434343434343434343434343434343434343434"
+        },
+        "native_evidence_binding": {
+          "method": "hmac-sha256-v1",
+          "domain": "scm.capacity.native-evidence.v1",
+          "value": "3434343434343434343434343434343434343434343434343434343434343434"
+        }
+      }
     }
   },
   {
@@ -359,7 +394,9 @@
           "domain": "scm.capacity.native-evidence.v1",
           "value": "3030303030303030303030303030303030303030303030303030303030303030"
         }
-      ]
+      ],
+      "request_observations": [],
+      "cleanup_observation": null
     }
   }
 ]

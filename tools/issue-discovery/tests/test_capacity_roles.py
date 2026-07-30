@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
-from typing import Any, Iterator
+from typing import Any, Iterable, Mapping
 
 import pytest
 
@@ -53,10 +53,12 @@ from issue_discovery.capacity_roles import (
     ValidatedFrozenAction,
     ValidatedOracleAuthority,
     ValidatedRolePlan,
+    ValidatedRoleReceipt,
     action_capture,
     prepared_action_sha256,
     prepared_authority_sha256,
     validate_action_result,
+    validate_actor_set_observation,
     validate_concurrency_policy,
     validate_frozen_action,
     validate_invocation_offsets,
@@ -73,15 +75,10 @@ from issue_discovery.capacity_roles import (
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[1]
-CAPACITY_RESULT_SCHEMA = (
-    "tools/issue-discovery/schemas/capacity-result.schema.json"
-)
-PROFILE_REGISTRY_PATH = (
-    "tools/issue-discovery/config/capacity/profiles/g1-v2.json"
-)
+CAPACITY_RESULT_SCHEMA = "tools/issue-discovery/schemas/capacity-result.schema.json"
+PROFILE_REGISTRY_PATH = "tools/issue-discovery/config/capacity/profiles/g1-v2.json"
 MOCK_STAGE_PATH = (
-    "tools/issue-discovery/config/capacity/profile-stages/"
-    "b1-s1-g1-mock.json"
+    "tools/issue-discovery/config/capacity/profile-stages/b1-s1-g1-mock.json"
 )
 
 
@@ -98,6 +95,11 @@ def git(repo: Path, *args: str) -> str:
 
 def digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _shifted_timestamp(value: str, shift: timedelta) -> str:
+    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")) + shift
+    return timestamp.isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def binding(domain: str, identity: str) -> dict[str, str]:
@@ -233,19 +235,13 @@ def _oracle_value(
         "profile_stage_sha256": stage.canonical_sha256,
         "execution_boundary": boundary,
         "actor_trigger": stage.stage["actor_trigger"],
-        "oracle_kind": (
-            "capture-only" if is_mock else "independent-vm-capacity"
-        ),
+        "oracle_kind": ("capture-only" if is_mock else "independent-vm-capacity"),
         "result_schema": tracked(
             repo,
-            MOCK_CAPTURE_SCHEMA.as_posix()
-            if is_mock
-            else CAPACITY_RESULT_SCHEMA,
+            MOCK_CAPTURE_SCHEMA.as_posix() if is_mock else CAPACITY_RESULT_SCHEMA,
         ),
         "observer_plan_sha256": (
-            None
-            if is_mock
-            else canonical_sha256(observer_plan_value)
+            None if is_mock else canonical_sha256(observer_plan_value)
         ),
         "real_oracle_allowed": not is_mock,
     }
@@ -289,9 +285,7 @@ def _prepared_action_fields(
             "profile_stage_sha256": base_plan["profile_stage_sha256"],
             "actor_slot": base_plan["actor_slot"],
             "role_plan_id": base_plan["plan_id"],
-            "isolated_identity_fingerprint": base_plan[
-                "isolated_identity_fingerprint"
-            ],
+            "isolated_identity_fingerprint": base_plan["isolated_identity_fingerprint"],
             "actor_invocation_capability_binding": base_plan[
                 "actor_invocation_capability_binding"
             ],
@@ -309,12 +303,8 @@ def _prepared_action_fields(
                     repo,
                     ACTION_RESULT_SCHEMA.as_posix(),
                 ),
-                "oracle_authority_id": oracle_value[
-                    "oracle_authority_id"
-                ],
-                "independent_oracle_authority_sha256": canonical_sha256(
-                    oracle_value
-                ),
+                "oracle_authority_id": oracle_value["oracle_authority_id"],
+                "independent_oracle_authority_sha256": canonical_sha256(oracle_value),
             },
         },
         payload,
@@ -327,6 +317,9 @@ def _plan_values(
     stage_id: str,
     *,
     roles: set[str] | None = None,
+    topology_authority_binding: Mapping[str, str] | None = None,
+    host_reversible_baseline_binding: Mapping[str, str] | None = None,
+    seller_scaling_admission_counts: tuple[int, int] = (4, 4),
 ) -> list[dict[str, Any]]:
     stage = resolve_pinned_profile_stage(repo, scm_ref, stage_id)
     assert stage.scenario is not None
@@ -338,6 +331,13 @@ def _plan_values(
         "host-operator",
         "observer",
     }
+    campaign_topology_authority = dict(
+        topology_authority_binding
+        or binding(
+            TOPOLOGY_BINDING_DOMAIN,
+            "g1-capacity-campaign-topology",
+        )
+    )
     values_by_role: dict[str, list[dict[str, Any]]] = {
         role: [] for role in selected_roles
     }
@@ -358,9 +358,7 @@ def _plan_values(
         )
         observer_value["role_plan"] = {
             "kind": "observer",
-            "independent_source_plan_sha256": digest(
-                f"{stage_id}:independent-source"
-            ),
+            "independent_source_plan_sha256": digest(f"{stage_id}:independent-source"),
             "native_evidence_bindings": [
                 binding(
                     NATIVE_EVIDENCE_BINDING_DOMAIN,
@@ -368,8 +366,8 @@ def _plan_values(
                 )
             ],
         }
-        observer_value["prepared_authority_sha256"] = (
-            prepared_authority_sha256(observer_value["role_plan"])
+        observer_value["prepared_authority_sha256"] = prepared_authority_sha256(
+            observer_value["role_plan"]
         )
 
     oracle_value = _oracle_value(
@@ -417,9 +415,7 @@ def _plan_values(
                 "kind": "buyer",
                 "request_id": request["request_id"],
                 "action_id": action_id,
-                "prepared_action_sha256": prepared_action_sha256(
-                    prepared_fields
-                ),
+                "prepared_action_sha256": prepared_action_sha256(prepared_fields),
                 "preparation_steps": list(BUYER_PRE_RELEASE_STEPS),
                 "success_steps": list(BUYER_GUEST_STEPS),
                 "guest_exercise": {
@@ -468,10 +464,7 @@ def _plan_values(
             publication_ids: list[str] = []
             publication_digests: list[str] = []
             for listing in seller["listing_slots"]:
-                action_id = (
-                    f"seller-{number}-publication-"
-                    f"{listing.rsplit('-', 1)[1]}"
-                )
+                action_id = f"seller-{number}-publication-{listing.rsplit('-', 1)[1]}"
                 fields, _ = _prepared_action_fields(
                     repo,
                     value,
@@ -496,6 +489,7 @@ def _plan_values(
                 "kind": "seller",
                 "service_slot": seller["service_slot"],
                 "listing_slots": list(seller["listing_slots"]),
+                "topology_authority_binding": dict(campaign_topology_authority),
                 "service_start_action_id": service_id,
                 "service_start_prepared_action_sha256": (
                     prepared_action_sha256(service_fields)
@@ -524,13 +518,13 @@ def _plan_values(
         )
         value["role_plan"] = {
             "kind": "host-operator",
-            "topology_authority_binding": binding(
-                TOPOLOGY_BINDING_DOMAIN,
-                f"{stage_id}:topology",
-            ),
-            "reversible_baseline_binding": binding(
-                REVERSIBLE_BASELINE_BINDING_DOMAIN,
-                f"{stage_id}:before",
+            "topology_authority_binding": dict(campaign_topology_authority),
+            "reversible_baseline_binding": dict(
+                host_reversible_baseline_binding
+                or binding(
+                    REVERSIBLE_BASELINE_BINDING_DOMAIN,
+                    f"{stage_id}:before",
+                )
             ),
             "baseline_equivalence_binding": binding(
                 BASELINE_EQUIVALENCE_BINDING_DOMAIN,
@@ -540,6 +534,18 @@ def _plan_values(
             "kvm_ansible_readiness": True,
             "observation_plan_sha256": digest(f"{stage_id}:observation-plan"),
             "teardown_plan_sha256": digest(f"{stage_id}:teardown-plan"),
+            "seller_scaling_admission": (
+                {
+                    "distinct_seller_identities": (seller_scaling_admission_counts[0]),
+                    "distinct_service_instances": (seller_scaling_admission_counts[1]),
+                    "native_evidence_binding": binding(
+                        NATIVE_EVIDENCE_BINDING_DOMAIN,
+                        f"{stage_id}:seller-scaling-admission",
+                    ),
+                }
+                if scenario["scenario_id"] == "serialized-reuse-b"
+                else None
+            ),
         }
         value["prepared_authority_sha256"] = prepared_authority_sha256(
             value["role_plan"]
@@ -560,6 +566,9 @@ def _validated_plans(
     stage_id: str,
     *,
     roles: set[str] | None = None,
+    topology_authority_binding: Mapping[str, str] | None = None,
+    host_reversible_baseline_binding: Mapping[str, str] | None = None,
+    seller_scaling_admission_counts: tuple[int, int] = (4, 4),
 ) -> list[ValidatedRolePlan]:
     return [
         validate_role_plan(value, repo, expected_scm_ref=scm_ref)
@@ -568,6 +577,9 @@ def _validated_plans(
             scm_ref,
             stage_id,
             roles=roles,
+            topology_authority_binding=topology_authority_binding,
+            host_reversible_baseline_binding=(host_reversible_baseline_binding),
+            seller_scaling_admission_counts=(seller_scaling_admission_counts),
         )
     ]
 
@@ -613,9 +625,7 @@ def _concurrency_policy(
             prepared_action_authorities.append(
                 {
                     "action_id": role_plan["action_id"],
-                    "prepared_action_sha256": role_plan[
-                        "prepared_action_sha256"
-                    ],
+                    "prepared_action_sha256": role_plan["prepared_action_sha256"],
                 }
             )
         elif plan.role == "seller":
@@ -668,7 +678,7 @@ def _concurrency_policy(
         ),
         "clock_evidence_binding": binding(
             NATIVE_EVIDENCE_BINDING_DOMAIN,
-            f"{stage_id}:clock",
+            "evaluation-policy-clock",
         ),
         "invocation_windows": [
             {
@@ -718,9 +728,7 @@ def _action_chains(
         assert scenario is not None
         scenario_value = scenario.scenario
         role_plan = plan.plan["role_plan"]
-        definitions: list[
-            tuple[str, str, dict[str, Any], str, dict[str, str]]
-        ] = []
+        definitions: list[tuple[str, str, dict[str, Any], str, dict[str, str]]] = []
         if plan.role == "buyer":
             request = next(
                 item
@@ -746,7 +754,6 @@ def _action_chains(
                 )
             )
         else:
-            number = plan.actor_slot.rsplit("-", 1)[1]
             definitions.append(
                 (
                     role_plan["service_start_action_id"],
@@ -799,9 +806,7 @@ def _action_chains(
             value = {
                 **prepared_fields,
                 "role_plan_sha256": plan.canonical_sha256,
-                "prepared_action_sha256": prepared_action_sha256(
-                    prepared_fields
-                ),
+                "prepared_action_sha256": prepared_action_sha256(prepared_fields),
                 "release_id": release_id,
                 "concurrency_policy_id": (
                     policy.policy_id if policy is not None else None
@@ -861,7 +866,11 @@ def _result(
     return validate_action_result(value, action)
 
 
-def _populate_results(chains: list[ActionChain]) -> None:
+def _populate_results(
+    chains: list[ActionChain],
+    *,
+    wall_clock_shift: timedelta = timedelta(),
+) -> None:
     counters = {
         "seller-service-start": 0,
         "seller-listing-publication": 0,
@@ -879,16 +888,26 @@ def _populate_results(chains: list[ActionChain]) -> None:
         base = bases[kind]
         chain.result = _result(
             chain,
-            invoked_at=f"2026-07-30T10:00:0{base}.{suffix:06d}Z",
-            terminal_at=f"2026-07-30T10:00:0{base + 1}.{suffix:06d}Z",
+            invoked_at=_shifted_timestamp(
+                f"2026-07-30T10:00:0{base}.{suffix:06d}Z",
+                wall_clock_shift,
+            ),
+            terminal_at=_shifted_timestamp(
+                f"2026-07-30T10:00:0{base + 1}.{suffix:06d}Z",
+                wall_clock_shift,
+            ),
         )
 
 
-def _step_outcomes(steps: tuple[str, ...]) -> list[dict[str, str]]:
+def _step_outcomes(
+    steps: tuple[str, ...],
+    *,
+    failed_steps: tuple[str, ...] = (),
+) -> list[dict[str, str]]:
     return [
         {
             "step_id": step,
-            "status": "passed",
+            "status": "failed" if step in failed_steps else "passed",
             "evidence_sha256": digest(f"step:{step}"),
         }
         for step in steps
@@ -900,11 +919,27 @@ def _receipt_value(
     chains: list[ActionChain],
     *,
     successful_guest: bool = False,
+    guest_fulfillment_id: str | None = None,
+    wall_clock_shift: timedelta = timedelta(),
+    run_authority_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     action_chains = [
         chain for chain in chains if chain.authority.actor_slot == plan.actor_slot
     ]
     plan_value = plan.plan
+    run_authority = (
+        dict(run_authority_override)
+        if run_authority_override is not None
+        else {
+            "release_id": chains[0].authority.release_id,
+            "concurrency_policy_id": chains[0].authority.action[
+                "concurrency_policy_id"
+            ],
+            "concurrency_policy_sha256": chains[0].authority.action[
+                "concurrency_policy_sha256"
+            ],
+        }
+    )
     common = {
         "schema_version": 2,
         "receipt_id": f"{plan.actor_slot}-receipt",
@@ -918,19 +953,9 @@ def _receipt_value(
         "scenario_sha256": plan.scenario_sha256,
         "scm_ref": plan.scm_ref,
         "instruction": plan_value["instruction"],
-        "isolated_identity_fingerprint": plan_value[
-            "isolated_identity_fingerprint"
-        ],
+        "isolated_identity_fingerprint": plan_value["isolated_identity_fingerprint"],
         "prepared_authority_sha256": plan_value["prepared_authority_sha256"],
-        "run_authority": {
-            "release_id": chains[0].authority.release_id,
-            "concurrency_policy_id": chains[0].authority.action[
-                "concurrency_policy_id"
-            ],
-            "concurrency_policy_sha256": chains[0].authority.action[
-                "concurrency_policy_sha256"
-            ],
-        },
+        "run_authority": run_authority,
         "provenance": {
             "producer": "actor-process",
             "controller_authored": False,
@@ -943,10 +968,22 @@ def _receipt_value(
             ),
         },
         "lifecycle": {
-            "started_at": "2026-07-30T10:00:00.100000Z",
-            "prepared_at": "2026-07-30T10:00:01.000000Z",
-            "barrier_observed_at": "2026-07-30T10:00:08.000000Z",
-            "completed_at": "2026-07-30T10:00:09.000000Z",
+            "started_at": _shifted_timestamp(
+                "2026-07-30T10:00:00.100000Z",
+                wall_clock_shift,
+            ),
+            "prepared_at": _shifted_timestamp(
+                "2026-07-30T10:00:01.000000Z",
+                wall_clock_shift,
+            ),
+            "barrier_observed_at": _shifted_timestamp(
+                "2026-07-30T10:00:08.000000Z",
+                wall_clock_shift,
+            ),
+            "completed_at": _shifted_timestamp(
+                "2026-07-30T10:00:09.000000Z",
+                wall_clock_shift,
+            ),
         },
     }
     if plan.role == "buyer":
@@ -956,7 +993,9 @@ def _receipt_value(
         if successful_guest:
             steps += BUYER_GUEST_STEPS
             guest = {
-                "fulfillment_id": f"{plan.actor_slot}-fulfillment",
+                "fulfillment_id": (
+                    guest_fulfillment_id or f"{plan.actor_slot}-fulfillment"
+                ),
                 "ssh_resumed": True,
                 "visible_gpus": 1,
                 "workload_sha256": canonical_sha256(
@@ -970,8 +1009,9 @@ def _receipt_value(
             "barrier_id": action_chains[0].authority.release_id,
             "actor_alive_at_barrier": True,
         }
-        common["lifecycle"]["barrier_observed_at"] = (
-            "2026-07-30T10:00:05.000000Z"
+        common["lifecycle"]["barrier_observed_at"] = _shifted_timestamp(
+            "2026-07-30T10:00:05.000000Z",
+            wall_clock_shift,
         )
         common["step_outcomes"] = _step_outcomes(steps)
         common["role_evidence"] = {
@@ -1003,10 +1043,21 @@ def _receipt_value(
             "publication_result_sha256s": [
                 chain.result.canonical_sha256 for chain in publications
             ],
+            "topology_authority_binding": plan_value["role_plan"][
+                "topology_authority_binding"
+            ],
             "alive_through_observation": True,
         }
     elif plan.role == "host-operator":
         role_plan = plan_value["role_plan"]
+        common["lifecycle"]["barrier_observed_at"] = _shifted_timestamp(
+            "2026-07-30T10:00:11.500000Z",
+            wall_clock_shift,
+        )
+        common["lifecycle"]["completed_at"] = _shifted_timestamp(
+            "2026-07-30T10:00:12.000000Z",
+            wall_clock_shift,
+        )
         common["barrier"] = {
             "barrier_kind": "cleanup",
             "barrier_id": f"{plan.profile_stage_id}-cleanup",
@@ -1015,25 +1066,38 @@ def _receipt_value(
         common["step_outcomes"] = _step_outcomes(HOST_OPERATOR_STEPS)
         common["role_evidence"] = {
             "kind": "host-operator",
-            "topology_authority_binding": role_plan[
-                "topology_authority_binding"
-            ],
-            "reversible_baseline_binding": role_plan[
-                "reversible_baseline_binding"
-            ],
-            "baseline_equivalence_binding": role_plan[
-                "baseline_equivalence_binding"
-            ],
+            "topology_authority_binding": role_plan["topology_authority_binding"],
+            "reversible_baseline_binding": role_plan["reversible_baseline_binding"],
+            "baseline_equivalence_binding": role_plan["baseline_equivalence_binding"],
+            "seller_scaling_admission": role_plan["seller_scaling_admission"],
             "kvm_ansible_ready": True,
             "cleanup_complete": True,
+            "baseline_equivalent": True,
+            "active_residue_detected": False,
         }
     else:
+        common["lifecycle"]["completed_at"] = _shifted_timestamp(
+            "2026-07-30T10:00:12.000000Z",
+            wall_clock_shift,
+        )
         common["barrier"] = {
             "barrier_kind": "observation",
             "barrier_id": f"{plan.profile_stage_id}-observation",
             "actor_alive_at_barrier": True,
         }
         common["step_outcomes"] = _step_outcomes(OBSERVER_STEPS)
+        scenario = plan.profile_stage.scenario
+        request_ids = (
+            [request["request_id"] for request in scenario.scenario["requests"]]
+            if scenario is not None
+            else []
+        )
+        native_binding = plan_value["role_plan"]["native_evidence_bindings"][0]
+        real_boundary = plan.profile_stage.stage["execution_boundary"] in {
+            "real-reference",
+            "real-qualification",
+            "real-measured",
+        }
         common["role_evidence"] = {
             "kind": "observer",
             "independent_source": True,
@@ -1043,6 +1107,44 @@ def _receipt_value(
             "native_evidence_bindings": plan_value["role_plan"][
                 "native_evidence_bindings"
             ],
+            "request_observations": (
+                [
+                    {
+                        "request_id": request_id,
+                        "request_outcome_sha256": digest(
+                            f"{plan.profile_stage_id}:{request_id}:outcome"
+                        ),
+                        "native_evidence_binding": native_binding,
+                    }
+                    for request_id in request_ids
+                ]
+                if real_boundary
+                else []
+            ),
+            "cleanup_observation": (
+                {
+                    "cleanup_sha256": digest(f"{plan.profile_stage_id}:cleanup"),
+                    "stage_started_at": _shifted_timestamp(
+                        "2026-07-30T10:00:00.200000Z",
+                        wall_clock_shift,
+                    ),
+                    "terminal_observed_at": _shifted_timestamp(
+                        "2026-07-30T10:00:10.000000Z",
+                        wall_clock_shift,
+                    ),
+                    "cleanup_completed_at": _shifted_timestamp(
+                        "2026-07-30T10:00:11.000000Z",
+                        wall_clock_shift,
+                    ),
+                    "clock_evidence_binding": binding(
+                        NATIVE_EVIDENCE_BINDING_DOMAIN,
+                        "evaluation-policy-clock",
+                    ),
+                    "native_evidence_binding": native_binding,
+                }
+                if real_boundary
+                else None
+            ),
         }
     return common
 
@@ -1050,7 +1152,14 @@ def _receipt_value(
 def _role_evidence(
     plans: list[ValidatedRolePlan],
     chains: list[ActionChain],
+    *,
+    successful_guest_request_ids: Iterable[str] = (),
+    guest_fulfillment_ids: Mapping[str, str] | None = None,
+    wall_clock_shift: timedelta = timedelta(),
+    run_authority_override: Mapping[str, Any] | None = None,
 ) -> list[SubstantiveRoleEvidence]:
+    successful_requests = frozenset(successful_guest_request_ids)
+    fulfillment_ids = dict(guest_fulfillment_ids or {})
     evidence: list[SubstantiveRoleEvidence] = []
     for plan in plans:
         owned = [
@@ -1058,8 +1167,24 @@ def _role_evidence(
         ]
         results = [chain.result for chain in owned]
         assert all(result is not None for result in results)
+        request_id = plan.plan["role_plan"].get("request_id")
         receipt = validate_role_receipt(
-            _receipt_value(plan, chains),
+            _receipt_value(
+                plan,
+                chains,
+                successful_guest=(
+                    plan.role == "buyer"
+                    and isinstance(request_id, str)
+                    and request_id in successful_requests
+                ),
+                guest_fulfillment_id=(
+                    fulfillment_ids.get(request_id)
+                    if isinstance(request_id, str)
+                    else None
+                ),
+                wall_clock_shift=wall_clock_shift,
+                run_authority_override=run_authority_override,
+            ),
             plan,
         )
         evidence.append(
@@ -1085,13 +1210,37 @@ class RealChain:
     actor_set: dict[str, Any]
 
 
-def _real_chain(repo: Path, scm_ref: str, stage_id: str) -> RealChain:
-    plans = _validated_plans(repo, scm_ref, stage_id)
+def _real_chain(
+    repo: Path,
+    scm_ref: str,
+    stage_id: str,
+    *,
+    successful_guest_request_ids: Iterable[str] = (),
+    guest_fulfillment_ids: Mapping[str, str] | None = None,
+    topology_authority_binding: Mapping[str, str] | None = None,
+    host_reversible_baseline_binding: Mapping[str, str] | None = None,
+    seller_scaling_admission_counts: tuple[int, int] = (4, 4),
+    wall_clock_shift: timedelta = timedelta(),
+) -> RealChain:
+    plans = _validated_plans(
+        repo,
+        scm_ref,
+        stage_id,
+        topology_authority_binding=topology_authority_binding,
+        host_reversible_baseline_binding=host_reversible_baseline_binding,
+        seller_scaling_admission_counts=seller_scaling_admission_counts,
+    )
     oracle = _oracle(repo, scm_ref, stage_id, plans)
     policy = _concurrency_policy(repo, scm_ref, stage_id, plans)
     chains = _action_chains(plans, oracle, policy)
-    _populate_results(chains)
-    evidence = _role_evidence(plans, chains)
+    _populate_results(chains, wall_clock_shift=wall_clock_shift)
+    evidence = _role_evidence(
+        plans,
+        chains,
+        successful_guest_request_ids=successful_guest_request_ids,
+        guest_fulfillment_ids=guest_fulfillment_ids,
+        wall_clock_shift=wall_clock_shift,
+    )
     scenario = plans[0].profile_stage.scenario
     assert scenario is not None
 
@@ -1148,15 +1297,16 @@ def _real_chain(repo: Path, scm_ref: str, stage_id: str) -> RealChain:
         "scenario_sha256": scenario.scenario_sha256,
         "profile_stage_id": stage_id,
         "profile_stage_sha256": plans[0].profile_stage_sha256,
-        "execution_boundary": plans[0].profile_stage.stage[
-            "execution_boundary"
-        ],
+        "execution_boundary": plans[0].profile_stage.stage["execution_boundary"],
         "actor_trigger": "agent-triggered",
         "release_id": policy.release_id,
         "concurrency_policy_id": policy.policy_id,
         "concurrency_policy_sha256": policy.canonical_sha256,
         "clock_evidence_binding": policy.policy["clock_evidence_binding"],
-        "release_observed_at": "2026-07-30T10:00:01.000000Z",
+        "release_observed_at": _shifted_timestamp(
+            "2026-07-30T10:00:01.000000Z",
+            wall_clock_shift,
+        ),
         "actors": [
             {
                 "role": item.plan.role,
@@ -1190,6 +1340,57 @@ def _real_chain(repo: Path, scm_ref: str, stage_id: str) -> RealChain:
     )
 
 
+def _replace_host_observation(
+    chain: RealChain,
+    *,
+    cleanup_complete: bool,
+    baseline_equivalent: bool,
+    active_residue_detected: bool,
+) -> tuple[
+    ValidatedRoleReceipt,
+    list[SubstantiveRoleEvidence],
+    dict[str, Any],
+]:
+    host = next(item for item in chain.evidence if item.plan.role == "host-operator")
+    receipt_value = host.receipt.receipt
+    receipt_value["role_evidence"].update(
+        {
+            "cleanup_complete": cleanup_complete,
+            "baseline_equivalent": baseline_equivalent,
+            "active_residue_detected": active_residue_detected,
+        }
+    )
+    expected_statuses = {
+        "baseline-equivalence": ("passed" if baseline_equivalent else "failed"),
+        "cleanup": "passed" if cleanup_complete else "failed",
+    }
+    for outcome in receipt_value["step_outcomes"]:
+        status = expected_statuses.get(outcome["step_id"])
+        if status is not None:
+            outcome["status"] = status
+    receipt = validate_role_receipt(receipt_value, host.plan)
+    evidence = [
+        (
+            SubstantiveRoleEvidence(
+                plan=item.plan,
+                receipt=receipt,
+                actions=item.actions,
+                results=item.results,
+            )
+            if item.plan.actor_slot == host.plan.actor_slot
+            else item
+        )
+        for item in chain.evidence
+    ]
+    actor_set = deepcopy(chain.actor_set)
+    next(
+        item
+        for item in actor_set["actors"]
+        if item["actor_slot"] == host.plan.actor_slot
+    )["receipt_sha256"] = receipt.canonical_sha256
+    return receipt, evidence, actor_set
+
+
 def test_real_b2_s2_chain_proves_exact_roles_and_per_listing_bindings(
     authority_repo: tuple[Path, str],
 ) -> None:
@@ -1214,6 +1415,222 @@ def test_real_b2_s2_chain_proves_exact_roles_and_per_listing_bindings(
     assert len(validated.runtime_listing_bindings) == 2
     assert validated.buyer_invocation_skew_ns == 5
     assert validated.publication_invocation_skew_ns == 5
+    assert validated.load_generator_passed is True
+    assert validated.capacity_eligible is True
+    assert validated.failure_reasons == ()
+
+
+def test_real_chain_marks_only_selected_buyer_guest_success(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(
+        repo,
+        scm_ref,
+        "b2-s1-g1-measured",
+        successful_guest_request_ids={"request-2"},
+    )
+    buyer_guests = {
+        item.plan.plan["role_plan"]["request_id"]: item.receipt.receipt[
+            "role_evidence"
+        ]["guest_verification"]
+        for item in chain.evidence
+        if item.plan.role == "buyer"
+    }
+
+    assert buyer_guests["request-1"] is None
+    assert buyer_guests["request-2"]["fulfillment_id"] == ("buyer-2-fulfillment")
+
+
+def test_host_cleanup_failure_is_recordable_but_cannot_be_promoted(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b1-s1-g1-qualification")
+    receipt, evidence, actor_set = _replace_host_observation(
+        chain,
+        cleanup_complete=False,
+        baseline_equivalent=False,
+        active_residue_detected=True,
+    )
+
+    assert receipt.observation_passed is False
+    assert receipt.failure_reasons == (
+        "cleanup-incomplete",
+        "baseline-not-equivalent",
+        "active-residue-detected",
+    )
+    observation = validate_actor_set_observation(
+        actor_set,
+        chain.policy,
+        evidence,
+    )
+    assert observation.load_generator_passed is True
+    assert observation.capacity_eligible is False
+    assert observation.failure_reasons == (
+        "host-operator-1:cleanup-incomplete",
+        "host-operator-1:baseline-not-equivalent",
+        "host-operator-1:active-residue-detected",
+    )
+    with pytest.raises(CapacityValidationError, match="not capacity-eligible"):
+        validate_substantive_actor_set(actor_set, chain.policy, evidence)
+
+
+def test_host_baseline_mismatch_after_completed_cleanup_is_recordable(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b1-s1-g1-qualification")
+    receipt, evidence, actor_set = _replace_host_observation(
+        chain,
+        cleanup_complete=True,
+        baseline_equivalent=False,
+        active_residue_detected=False,
+    )
+
+    assert receipt.observation_passed is False
+    assert receipt.failure_reasons == ("baseline-not-equivalent",)
+    observation = validate_actor_set_observation(
+        actor_set,
+        chain.policy,
+        evidence,
+    )
+    assert observation.load_generator_passed is True
+    assert observation.capacity_eligible is False
+
+
+def test_host_observation_rejects_failed_preparation_or_incoherent_cleanup(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b1-s1-g1-qualification")
+    host = next(item for item in chain.evidence if item.plan.role == "host-operator")
+
+    failed_preparation = host.receipt.receipt
+    next(
+        item
+        for item in failed_preparation["step_outcomes"]
+        if item["step_id"] == "topology-authority"
+    )["status"] = "failed"
+    with pytest.raises(
+        CapacityValidationError,
+        match="preparation steps before cleanup observation",
+    ):
+        validate_role_receipt(failed_preparation, host.plan)
+
+    incoherent = host.receipt.receipt
+    incoherent["role_evidence"].update(
+        {
+            "cleanup_complete": True,
+            "baseline_equivalent": True,
+            "active_residue_detected": True,
+        }
+    )
+    with pytest.raises(CapacityValidationError, match="role receipt validation"):
+        validate_role_receipt(incoherent, host.plan)
+
+
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("local_queue_detected", "local queue"),
+        ("throttle_detected", "throttling"),
+    ],
+)
+def test_generator_saturation_is_recordable_but_not_capacity_eligible(
+    authority_repo: tuple[Path, str],
+    field: str,
+    reason: str,
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b2-s2-g1-qualification")
+    actor_set = deepcopy(chain.actor_set)
+    actor_set["controller_observation"][field] = True
+
+    observation = validate_actor_set_observation(
+        actor_set,
+        chain.policy,
+        chain.evidence,
+    )
+    assert observation.load_generator_passed is False
+    assert observation.capacity_eligible is False
+    assert any(reason in item for item in observation.failure_reasons)
+    with pytest.raises(CapacityValidationError, match=reason):
+        validate_substantive_actor_set(
+            actor_set,
+            chain.policy,
+            chain.evidence,
+        )
+
+
+def test_overlap_and_skew_failures_are_recordable_but_not_promotable(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b2-s2-g1-qualification")
+
+    overlap_failure = deepcopy(chain.actor_set)
+    buyer = next(
+        item for item in overlap_failure["actors"] if item["actor_slot"] == "buyer-1"
+    )
+    buyer["started_offset_ns"] = 350
+    overlap_observation = validate_actor_set_observation(
+        overlap_failure,
+        chain.policy,
+        chain.evidence,
+    )
+    assert overlap_observation.load_generator_passed is False
+    assert any(
+        "buyer-1 does not overlap every invocation window" in item
+        for item in overlap_observation.failure_reasons
+    )
+    with pytest.raises(CapacityValidationError, match="does not overlap"):
+        validate_substantive_actor_set(
+            overlap_failure,
+            chain.policy,
+            chain.evidence,
+        )
+
+    skew_failure = deepcopy(chain.actor_set)
+    buyer_actions = [
+        item
+        for item in skew_failure["actions"]
+        if item["action_kind"] == "buyer-request"
+    ]
+    buyer_actions[1]["invoked_offset_ns"] = 500
+    buyer_actions[1]["terminal_offset_ns"] = 501
+    skew_observation = validate_actor_set_observation(
+        skew_failure,
+        chain.policy,
+        chain.evidence,
+    )
+    assert skew_observation.load_generator_passed is False
+    assert skew_observation.buyer_invocation_skew_ns == 90
+    assert any(
+        "buyer-request invocation skew exceeds frozen bound" in item
+        for item in skew_observation.failure_reasons
+    )
+    with pytest.raises(CapacityValidationError, match="skew exceeds"):
+        validate_substantive_actor_set(
+            skew_failure,
+            chain.policy,
+            chain.evidence,
+        )
+
+    malformed_lifetime = deepcopy(chain.actor_set)
+    observer = next(
+        item
+        for item in malformed_lifetime["actors"]
+        if item["actor_slot"] == "observer-1"
+    )
+    observer["started_offset_ns"] = 2
+    observer["completed_offset_ns"] = 1
+    with pytest.raises(CapacityValidationError, match="strictly ordered"):
+        validate_actor_set_observation(
+            malformed_lifetime,
+            chain.policy,
+            chain.evidence,
+        )
 
 
 def test_actor_set_rejects_actions_validated_under_another_same_stage_policy(
@@ -1230,9 +1647,7 @@ def test_actor_set_rejects_actions_validated_under_another_same_stage_policy(
     )
     substituted_actor_set = deepcopy(chain.actor_set)
     substituted_actor_set["concurrency_policy_id"] = other_policy.policy_id
-    substituted_actor_set[
-        "concurrency_policy_sha256"
-    ] = other_policy.canonical_sha256
+    substituted_actor_set["concurrency_policy_sha256"] = other_policy.canonical_sha256
 
     with pytest.raises(
         CapacityValidationError,
@@ -1277,9 +1692,9 @@ def test_role_evidence_rejects_result_from_another_same_id_action(
     )
     assert substituted_result is not None
     changed_receipt = buyer.receipt.receipt
-    changed_receipt["role_evidence"][
-        "action_result_sha256"
-    ] = substituted_result.canonical_sha256
+    changed_receipt["role_evidence"]["action_result_sha256"] = (
+        substituted_result.canonical_sha256
+    )
     receipt = validate_role_receipt(changed_receipt, buyer.plan)
 
     with pytest.raises(
@@ -1297,11 +1712,14 @@ def test_role_evidence_rejects_result_from_another_same_id_action(
 def test_privacy_binding_is_closed_typed_and_domain_separated() -> None:
     value = binding(RUNTIME_BINDING_DOMAIN, "runtime")
     assert value["value"] != digest("runtime")
-    assert validate_privacy_preserving_binding(
-        value,
-        expected_domain=RUNTIME_BINDING_DOMAIN,
-        field_name="runtime_binding",
-    ) == value
+    assert (
+        validate_privacy_preserving_binding(
+            value,
+            expected_domain=RUNTIME_BINDING_DOMAIN,
+            field_name="runtime_binding",
+        )
+        == value
+    )
     with pytest.raises(CapacityValidationError, match="exactly method"):
         validate_privacy_preserving_binding(
             digest("raw-private-value"),
@@ -1339,6 +1757,32 @@ def test_role_plan_rechecks_git_pins_and_rejects_controller_fields(
         encoding="utf-8",
     )
     with pytest.raises(CapacityValidationError, match="worktree bytes differ"):
+        validate_role_plan(value, repo)
+
+
+def test_seller_role_plan_rejects_wrong_topology_binding_domain(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    value = next(
+        item
+        for item in _plan_values(
+            repo,
+            scm_ref,
+            "b2-s2-g1-qualification",
+        )
+        if item["role"] == "seller"
+    )
+    value["role_plan"]["topology_authority_binding"] = binding(
+        NATIVE_EVIDENCE_BINDING_DOMAIN,
+        "seller-wrong-topology-domain",
+    )
+    value["prepared_authority_sha256"] = prepared_authority_sha256(value["role_plan"])
+
+    with pytest.raises(
+        CapacityValidationError,
+        match="role_plan.topology_authority_binding.*domain",
+    ):
         validate_role_plan(value, repo)
 
 
@@ -1402,9 +1846,7 @@ def test_concurrency_policy_freezes_plan_and_prepared_action_content(
     )
 
     changed = policy.policy
-    changed["prepared_action_authorities"][0][
-        "prepared_action_sha256"
-    ] = "0" * 64
+    changed["prepared_action_authorities"][0]["prepared_action_sha256"] = "0" * 64
     with pytest.raises(CapacityValidationError, match="prepared action"):
         validate_concurrency_policy(changed, repo, plans)
 
@@ -1474,6 +1916,31 @@ def test_concurrency_policy_rejects_duplicate_role_plan_ids(
         )
 
 
+def test_concurrency_policy_rejects_disjoint_seller_host_topology(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    stage_id = "b2-s2-g1-qualification"
+    values = _plan_values(repo, scm_ref, stage_id)
+    seller = next(
+        value
+        for value in values
+        if value["role"] == "seller" and value["actor_slot"] == "seller-2"
+    )
+    seller["role_plan"]["topology_authority_binding"] = binding(
+        TOPOLOGY_BINDING_DOMAIN,
+        "disjoint-seller-topology",
+    )
+    seller["prepared_authority_sha256"] = prepared_authority_sha256(seller["role_plan"])
+    plans = [validate_role_plan(value, repo) for value in values]
+
+    with pytest.raises(
+        CapacityValidationError,
+        match="every seller plan must bind the host's shared topology authority",
+    ):
+        _concurrency_policy(repo, scm_ref, stage_id, plans)
+
+
 def test_real_action_oracle_must_use_the_policy_frozen_observer(
     authority_repo: tuple[Path, str],
 ) -> None:
@@ -1503,9 +1970,9 @@ def test_real_action_oracle_must_use_the_policy_frozen_observer(
             "observer-alternate-evidence",
         )
     ]
-    alternate_value[
-        "prepared_authority_sha256"
-    ] = prepared_authority_sha256(alternate_value["role_plan"])
+    alternate_value["prepared_authority_sha256"] = prepared_authority_sha256(
+        alternate_value["role_plan"]
+    )
     alternate_observer = validate_role_plan(alternate_value, repo)
     alternate_oracle = validate_oracle_authority(
         _oracle_value(
@@ -1532,7 +1999,9 @@ def test_receipts_reject_readiness_only_controller_authorship_and_early_exit(
     chain = _real_chain(repo, scm_ref, "b2-s1-g1-qualification")
     buyer = next(item for item in chain.evidence if item.plan.role == "buyer")
     owned = [
-        item for item in chain.chains if item.authority.actor_slot == buyer.plan.actor_slot
+        item
+        for item in chain.chains
+        if item.authority.actor_slot == buyer.plan.actor_slot
     ]
 
     readiness = buyer.receipt.receipt
@@ -1555,6 +2024,25 @@ def test_receipts_reject_readiness_only_controller_authorship_and_early_exit(
             [owned[0].authority],
             [owned[0].result],
         )
+
+
+def test_seller_receipt_rejects_plan_topology_mismatch(
+    authority_repo: tuple[Path, str],
+) -> None:
+    repo, scm_ref = authority_repo
+    chain = _real_chain(repo, scm_ref, "b2-s2-g1-qualification")
+    seller = next(item for item in chain.evidence if item.plan.role == "seller")
+    receipt_value = seller.receipt.receipt
+    receipt_value["role_evidence"]["topology_authority_binding"] = binding(
+        TOPOLOGY_BINDING_DOMAIN,
+        "mismatched-receipt-topology",
+    )
+
+    with pytest.raises(
+        CapacityValidationError,
+        match="seller receipt topology authority does not match its plan",
+    ):
+        validate_role_receipt(receipt_value, seller.plan)
 
 
 def test_successful_buyer_receipt_proves_guest_ssh_one_gpu_and_pinned_cuda(
@@ -1598,9 +2086,7 @@ def test_successful_buyer_receipt_proves_guest_ssh_one_gpu_and_pinned_cuda(
     }
     for field_name, changed_value in mutations.items():
         changed = deepcopy(receipt_value)
-        changed["role_evidence"]["guest_verification"][
-            field_name
-        ] = changed_value
+        changed["role_evidence"]["guest_verification"][field_name] = changed_value
         with pytest.raises(CapacityValidationError):
             validate_role_receipt(changed, buyer_plan)
 
@@ -1696,9 +2182,7 @@ def test_typed_retry_and_duplicate_results_preserve_attempt_counts(
         "terminal_payload_sha256": None,
         "failure_code": "unauthorized-retry",
     }
-    assert validate_unauthorized_retry_rejection(retry, action).result[
-        "attempt"
-    ] == 2
+    assert validate_unauthorized_retry_rejection(retry, action).result["attempt"] == 2
     duplicate = {**retry}
     duplicate.update(
         {
@@ -1708,9 +2192,7 @@ def test_typed_retry_and_duplicate_results_preserve_attempt_counts(
             "failure_code": "duplicate-release",
         }
     )
-    assert validate_action_result(duplicate, action).result[
-        "release_claim_count"
-    ] == 2
+    assert validate_action_result(duplicate, action).result["release_claim_count"] == 2
 
 
 def test_actor_set_rejects_duplicate_identity_wrong_maps_and_controller_queue(
@@ -1725,9 +2207,9 @@ def test_actor_set_rejects_duplicate_identity_wrong_maps_and_controller_queue(
         validate_substantive_actor_set(queued, chain.policy, chain.evidence)
 
     changed_map = deepcopy(chain.actor_set)
-    changed_map["runtime_listing_bindings"][0]["runtime_binding"] = (
-        changed_map["runtime_service_bindings"][0]["runtime_binding"]
-    )
+    changed_map["runtime_listing_bindings"][0]["runtime_binding"] = changed_map[
+        "runtime_service_bindings"
+    ][0]["runtime_binding"]
     with pytest.raises(CapacityValidationError, match="one-to-one|does not match"):
         validate_substantive_actor_set(
             changed_map,
@@ -1736,9 +2218,9 @@ def test_actor_set_rejects_duplicate_identity_wrong_maps_and_controller_queue(
         )
 
     duplicate_identity_plans = deepcopy(chain.actor_set)
-    duplicate_identity_plans["actors"][1]["plan_sha256"] = (
-        duplicate_identity_plans["actors"][0]["plan_sha256"]
-    )
+    duplicate_identity_plans["actors"][1]["plan_sha256"] = duplicate_identity_plans[
+        "actors"
+    ][0]["plan_sha256"]
     with pytest.raises(CapacityValidationError, match="plan_sha256"):
         validate_substantive_actor_set(
             duplicate_identity_plans,
@@ -1859,16 +2341,12 @@ def test_capture_only_composition_is_portably_bound_one_shot_and_zero_resource(
     outputs = tmp_path / "results"
     ledger.mkdir(mode=0o700)
     outputs.mkdir(mode=0o700)
-    clock = SequenceClock(
-        datetime(2026, 7, 30, 10, 0, 6, tzinfo=UTC)
-    )
+    clock = SequenceClock(datetime(2026, 7, 30, 10, 0, 6, tzinfo=UTC))
     for index, chain in enumerate(chains):
         captured = action_capture(
             chain.authority,
             next(
-                plan
-                for plan in plans
-                if plan.actor_slot == chain.authority.actor_slot
+                plan for plan in plans if plan.actor_slot == chain.authority.actor_slot
             ),
             payload_bytes=chain.payload,
             oracle_authority=oracle,
@@ -1918,15 +2396,10 @@ def test_capture_only_composition_is_portably_bound_one_shot_and_zero_resource(
             for item in evidence
             if item.plan.role == "seller"
         ],
-        "action_result_sha256s": [
-            chain.result.canonical_sha256 for chain in chains
-        ],
-        "action_sha256s": [
-            chain.authority.canonical_sha256 for chain in chains
-        ],
+        "action_result_sha256s": [chain.result.canonical_sha256 for chain in chains],
+        "action_sha256s": [chain.authority.canonical_sha256 for chain in chains],
         "prepared_action_sha256s": [
-            chain.authority.action["prepared_action_sha256"]
-            for chain in chains
+            chain.authority.action["prepared_action_sha256"] for chain in chains
         ],
         "captured_payloads": [
             {
@@ -1939,9 +2412,7 @@ def test_capture_only_composition_is_portably_bound_one_shot_and_zero_resource(
                     "prepared_action_sha256"
                 ],
                 "payload_sha256": chain.authority.action["payload_sha256"],
-                "runtime_binding": chain.authority.action[
-                    "runtime_binding"
-                ],
+                "runtime_binding": chain.authority.action["runtime_binding"],
                 "concrete_payload_binding": chain.authority.action[
                     "concrete_payload_binding"
                 ],
@@ -1971,9 +2442,7 @@ def test_capture_only_composition_is_portably_bound_one_shot_and_zero_resource(
         "actor_invocation_capabilities": [
             {
                 "actor_slot": plan.actor_slot,
-                "binding": plan.plan[
-                    "actor_invocation_capability_binding"
-                ],
+                "binding": plan.plan["actor_invocation_capability_binding"],
             }
             for plan in plans
         ],
@@ -1992,17 +2461,13 @@ def test_capture_only_composition_is_portably_bound_one_shot_and_zero_resource(
     )
     assert "b1-s1-g1-mock" not in {
         item["stage_id"]
-        for item in json.loads((repo / PROFILE_REGISTRY_PATH).read_text())[
-            "stages"
-        ]
+        for item in json.loads((repo / PROFILE_REGISTRY_PATH).read_text())["stages"]
     }
 
     duplicate = action_capture(
         chains[0].authority,
         next(
-            plan
-            for plan in plans
-            if plan.actor_slot == chains[0].authority.actor_slot
+            plan for plan in plans if plan.actor_slot == chains[0].authority.actor_slot
         ),
         payload_bytes=chains[0].payload,
         oracle_authority=oracle,
@@ -2039,9 +2504,7 @@ def test_capture_rejects_changed_runtime_binding_before_claim(
     oracle = _oracle(repo, scm_ref, "b1-s1-g1-mock", plans)
     chains = _action_chains(plans, oracle, None)
     chain = next(
-        item
-        for item in chains
-        if item.authority.action_kind == "buyer-request"
+        item for item in chains if item.authority.action_kind == "buyer-request"
     )
     ledger = tmp_path / "claims"
     results = tmp_path / "results"
@@ -2049,11 +2512,7 @@ def test_capture_rejects_changed_runtime_binding_before_claim(
     results.mkdir(mode=0o700)
     captured = action_capture(
         chain.authority,
-        next(
-            plan
-            for plan in plans
-            if plan.actor_slot == chain.authority.actor_slot
-        ),
+        next(plan for plan in plans if plan.actor_slot == chain.authority.actor_slot),
         payload_bytes=chain.payload,
         oracle_authority=oracle,
         concurrency_policy=None,
@@ -2079,11 +2538,7 @@ def test_capture_rejects_changed_runtime_binding_before_claim(
 
     corrected = action_capture(
         chain.authority,
-        next(
-            plan
-            for plan in plans
-            if plan.actor_slot == chain.authority.actor_slot
-        ),
+        next(plan for plan in plans if plan.actor_slot == chain.authority.actor_slot),
         payload_bytes=chain.payload,
         oracle_authority=oracle,
         concurrency_policy=None,
@@ -2120,9 +2575,7 @@ def test_capture_emits_typed_rejections_for_every_just_in_time_guard(
         for item in _action_chains(plans, oracle, None)
         if item.authority.action_kind == "buyer-request"
     )
-    plan = next(
-        item for item in plans if item.actor_slot == chain.authority.actor_slot
-    )
+    plan = next(item for item in plans if item.actor_slot == chain.authority.actor_slot)
     ledger = tmp_path / "claims"
     results = tmp_path / "results"
     ledger.mkdir(mode=0o700)
@@ -2155,63 +2608,90 @@ def test_capture_emits_typed_rejections_for_every_just_in_time_guard(
 
     changed_action = deepcopy(chain.authority.action)
     changed_action["release_id"] = "changed-release"
-    assert capture(
-        "authority-action",
-        current_action=changed_action,
-    ) == "authority-changed"
+    assert (
+        capture(
+            "authority-action",
+            current_action=changed_action,
+        )
+        == "authority-changed"
+    )
 
     changed_plan = deepcopy(plan.plan)
     changed_plan["actor_slot"] = "buyer-99"
-    assert capture(
-        "authority-plan",
-        current_plan=changed_plan,
-    ) == "authority-changed"
+    assert (
+        capture(
+            "authority-plan",
+            current_plan=changed_plan,
+        )
+        == "authority-changed"
+    )
 
     changed_oracle = deepcopy(oracle.authority)
     changed_oracle["oracle_authority_id"] = "changed-oracle"
-    assert capture(
-        "authority-oracle",
-        current_oracle_authority=changed_oracle,
-    ) == "authority-changed"
+    assert (
+        capture(
+            "authority-oracle",
+            current_oracle_authority=changed_oracle,
+        )
+        == "authority-changed"
+    )
 
     changed_payload = json.loads(chain.payload)
     changed_payload["operation"] = "changed-operation"
-    assert capture(
-        "payload",
-        current_payload_bytes=canonical_json_bytes(changed_payload),
-    ) == "payload-changed"
+    assert (
+        capture(
+            "payload",
+            current_payload_bytes=canonical_json_bytes(changed_payload),
+        )
+        == "payload-changed"
+    )
 
-    assert capture(
-        "selection",
-        expected_action_kind="seller-service-start",
-    ) == "selection-changed"
+    assert (
+        capture(
+            "selection",
+            expected_action_kind="seller-service-start",
+        )
+        == "selection-changed"
+    )
 
-    assert capture(
-        "concrete-payload",
-        current_concrete_payload_binding=binding(
-            CONCRETE_PAYLOAD_BINDING_DOMAIN,
-            "changed-concrete-payload",
-        ),
-    ) == "payload-changed"
+    assert (
+        capture(
+            "concrete-payload",
+            current_concrete_payload_binding=binding(
+                CONCRETE_PAYLOAD_BINDING_DOMAIN,
+                "changed-concrete-payload",
+            ),
+        )
+        == "payload-changed"
+    )
 
-    assert capture(
-        "capability",
-        current_actor_invocation_capability=binding(
-            ACTOR_INVOCATION_BINDING_DOMAIN,
-            "changed-capability",
-        ),
-    ) == "authority-changed"
+    assert (
+        capture(
+            "capability",
+            current_actor_invocation_capability=binding(
+                ACTOR_INVOCATION_BINDING_DOMAIN,
+                "changed-capability",
+            ),
+        )
+        == "authority-changed"
+    )
 
-    assert capture(
-        "actor-exited",
-        actor_alive_at_invocation=False,
-    ) == "actor-exited"
+    assert (
+        capture(
+            "actor-exited",
+            actor_alive_at_invocation=False,
+        )
+        == "actor-exited"
+    )
     assert capture("retry", attempt=2) == "unauthorized-retry"
-    assert capture(
-        "retry-after-exit",
-        attempt=2,
-        actor_alive_at_invocation=False,
-    ) == "unauthorized-retry"
+    assert (
+        capture(
+            "retry-after-exit",
+            attempt=2,
+            actor_alive_at_invocation=False,
+        )
+        == "unauthorized-retry"
+    )
 
     wrapper = repo / chain.authority.action["wrapper"]["path"]
     wrapper.write_text(
@@ -2236,13 +2716,9 @@ def test_atomic_capture_record_recovers_terminal_result_after_output_failure(
     oracle = _oracle(repo, scm_ref, "b1-s1-g1-mock", plans)
     chains = _action_chains(plans, oracle, None)
     chain = next(
-        item
-        for item in chains
-        if item.authority.action_kind == "buyer-request"
+        item for item in chains if item.authority.action_kind == "buyer-request"
     )
-    plan = next(
-        item for item in plans if item.actor_slot == chain.authority.actor_slot
-    )
+    plan = next(item for item in plans if item.actor_slot == chain.authority.actor_slot)
     ledger = tmp_path / "ledger"
     results = tmp_path / "results"
     ledger.mkdir(mode=0o700)
@@ -2371,9 +2847,7 @@ def test_atomic_capture_record_recovers_terminal_result_after_output_failure(
     assert json.loads(result_output.read_text()) == first_result
 
     post_link_chain = next(
-        item
-        for item in chains
-        if item.authority.action_kind == "seller-service-start"
+        item for item in chains if item.authority.action_kind == "seller-service-start"
     )
     post_link_plan = next(
         item

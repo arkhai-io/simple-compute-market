@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
-from issue_discovery import capacity_roles
+from issue_discovery import capacity_outcomes, capacity_roles
 from issue_discovery.artifacts import ArtifactStore, utc_now_iso
 from issue_discovery.clean_room import (
     CleanRoomSequence,
@@ -217,11 +217,15 @@ def _validated_action_context(
     )
     policy = None
     if concurrency_policy is not None:
-        policy_plans = _validated_role_plans(
-            policy_role_plans,
-            repo_root,
-            expected_scm_ref=expected_scm_ref,
-        ) if policy_role_plans else ()
+        policy_plans = (
+            _validated_role_plans(
+                policy_role_plans,
+                repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            if policy_role_plans
+            else ()
+        )
         policy = capacity_roles.validate_concurrency_policy(
             _strict_capacity_object(
                 concurrency_policy,
@@ -268,9 +272,7 @@ def _unique_capacity_objects(
         value = _strict_capacity_object(path, label=label)
         identity = value.get(identity_field)
         if not isinstance(identity, str) or not identity:
-            raise CapacityValidationError(
-                f"{label} lacks string {identity_field}"
-            )
+            raise CapacityValidationError(f"{label} lacks string {identity_field}")
         if identity in values:
             raise CapacityValidationError(
                 f"duplicate {label} {identity_field} {identity!r}"
@@ -283,6 +285,10 @@ def _unique_capacity_objects(
 class _ValidatedEvidenceBundle:
     evidence: tuple[capacity_roles.SubstantiveRoleEvidence, ...]
     concurrency_policy: capacity_roles.ValidatedConcurrencyPolicy | None
+    oracle_authorities: tuple[
+        capacity_roles.ValidatedOracleAuthority,
+        ...,
+    ] = ()
 
 
 def _validated_evidence_bundle(
@@ -422,9 +428,7 @@ def _validated_evidence_bundle(
         action_id = value.get("action_id")
         action = actions.get(action_id)
         if action is None:
-            raise CapacityValidationError(
-                "action result has no supplied frozen action"
-            )
+            raise CapacityValidationError("action result has no supplied frozen action")
         if action_id in results:
             raise CapacityValidationError(
                 f"more than one action result claims {action_id!r}"
@@ -445,9 +449,7 @@ def _validated_evidence_bundle(
         plan_id = value.get("plan_id")
         plan = plans_by_id.get(plan_id)
         if plan is None:
-            raise CapacityValidationError(
-                "role receipt has no supplied role plan"
-            )
+            raise CapacityValidationError("role receipt has no supplied role plan")
         if plan_id in receipts:
             raise CapacityValidationError(
                 f"more than one role receipt claims {plan_id!r}"
@@ -477,6 +479,349 @@ def _validated_evidence_bundle(
     return _ValidatedEvidenceBundle(
         evidence=tuple(evidence),
         concurrency_policy=policy,
+        oracle_authorities=tuple(oracles.values()),
+    )
+
+
+_CAPACITY_RESULT_CONTEXT_KEYS = frozenset(
+    {
+        "capacity_result",
+        "oracle_authority",
+        "reference_policy",
+        "observer_plan",
+        "actor_set",
+        "concurrency_policy",
+        "role_plans",
+        "role_receipts",
+        "frozen_actions",
+        "payloads",
+        "action_results",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _CapacityResultContextPaths:
+    capacity_result: Path
+    oracle_authority: Path
+    reference_policy: Path | None
+    observer_plan: Path | None
+    actor_set: Path | None
+    concurrency_policy: Path | None
+    role_plans: tuple[Path, ...]
+    role_receipts: tuple[Path, ...]
+    frozen_actions: tuple[Path, ...]
+    payloads: tuple[Path, ...]
+    action_results: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedCapacityResultContext:
+    result: capacity_outcomes.ValidatedCapacityResult
+    evaluation_policy: capacity_outcomes.ValidatedEvaluationPolicy
+    oracle_authority: capacity_roles.ValidatedOracleAuthority
+    actor_set: capacity_roles.ValidatedActorSet | None
+    role_evidence: tuple[capacity_roles.SubstantiveRoleEvidence, ...]
+
+
+def _capacity_context_path(
+    value: object,
+    repo_root: Path,
+    *,
+    label: str,
+    nullable: bool = False,
+) -> Path | None:
+    if nullable and value is None:
+        return None
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise CapacityValidationError(
+            f"capacity-result context {label} must be a nonempty path string"
+        )
+    path = Path(value)
+    return path if path.is_absolute() else repo_root / path
+
+
+def _capacity_context_paths(
+    value: object,
+    repo_root: Path,
+    *,
+    label: str,
+) -> tuple[Path, ...]:
+    if not isinstance(value, list):
+        raise CapacityValidationError(
+            f"capacity-result context {label} must be an array of paths"
+        )
+    paths = tuple(
+        _capacity_context_path(item, repo_root, label=label) for item in value
+    )
+    if len(paths) != len(set(paths)):
+        raise CapacityValidationError(
+            f"capacity-result context {label} contains duplicate paths"
+        )
+    return tuple(path for path in paths if path is not None)
+
+
+def _capacity_result_context_paths(
+    context_manifest: Path,
+    repo_root: Path,
+) -> _CapacityResultContextPaths:
+    value = _strict_capacity_object(
+        context_manifest,
+        label="capacity-result context",
+    )
+    if set(value) != _CAPACITY_RESULT_CONTEXT_KEYS:
+        raise CapacityValidationError(
+            "capacity-result context must contain the exact path-only field set"
+        )
+    capacity_result = _capacity_context_path(
+        value["capacity_result"],
+        repo_root,
+        label="capacity_result",
+    )
+    oracle_authority = _capacity_context_path(
+        value["oracle_authority"],
+        repo_root,
+        label="oracle_authority",
+    )
+    assert capacity_result is not None
+    assert oracle_authority is not None
+    return _CapacityResultContextPaths(
+        capacity_result=capacity_result,
+        oracle_authority=oracle_authority,
+        reference_policy=_capacity_context_path(
+            value["reference_policy"],
+            repo_root,
+            label="reference_policy",
+            nullable=True,
+        ),
+        observer_plan=_capacity_context_path(
+            value["observer_plan"],
+            repo_root,
+            label="observer_plan",
+            nullable=True,
+        ),
+        actor_set=_capacity_context_path(
+            value["actor_set"],
+            repo_root,
+            label="actor_set",
+            nullable=True,
+        ),
+        concurrency_policy=_capacity_context_path(
+            value["concurrency_policy"],
+            repo_root,
+            label="concurrency_policy",
+            nullable=True,
+        ),
+        role_plans=_capacity_context_paths(
+            value["role_plans"],
+            repo_root,
+            label="role_plans",
+        ),
+        role_receipts=_capacity_context_paths(
+            value["role_receipts"],
+            repo_root,
+            label="role_receipts",
+        ),
+        frozen_actions=_capacity_context_paths(
+            value["frozen_actions"],
+            repo_root,
+            label="frozen_actions",
+        ),
+        payloads=_capacity_context_paths(
+            value["payloads"],
+            repo_root,
+            label="payloads",
+        ),
+        action_results=_capacity_context_paths(
+            value["action_results"],
+            repo_root,
+            label="action_results",
+        ),
+    )
+
+
+def _validated_evaluation_policy(
+    path: Path,
+    repo_root: Path,
+    *,
+    expected_scm_ref: str,
+) -> capacity_outcomes.ValidatedEvaluationPolicy:
+    return capacity_outcomes.validate_evaluation_policy(
+        _strict_capacity_object(path, label="evaluation policy"),
+        repo_root,
+        expected_scm_ref=expected_scm_ref,
+    )
+
+
+def _validated_capacity_result_context(
+    context_manifest: Path,
+    repo_root: Path,
+    *,
+    evaluation_policy: capacity_outcomes.ValidatedEvaluationPolicy,
+    expected_scm_ref: str,
+    predecessor: capacity_outcomes.ValidatedCapacityResult | None = None,
+    buyer_frontier: (capacity_outcomes.ValidatedBuyerFrontierReceipt | None) = None,
+    reuse_baseline: capacity_outcomes.ValidatedCapacityResult | None = None,
+    prior_seller_results: Sequence[capacity_outcomes.ValidatedCapacityResult] = (),
+) -> _ValidatedCapacityResultContext:
+    paths = _capacity_result_context_paths(context_manifest, repo_root)
+    result_value = _strict_capacity_object(
+        paths.capacity_result,
+        label="capacity result",
+    )
+    boundary = result_value.get("execution_boundary")
+
+    if boundary == "real-reference":
+        if (
+            paths.observer_plan is None
+            or paths.reference_policy is None
+            or paths.actor_set is not None
+            or paths.concurrency_policy is not None
+            or paths.frozen_actions
+            or paths.payloads
+            or paths.action_results
+        ):
+            raise CapacityValidationError(
+                "reference capacity-result context requires observer, host, "
+                "and oracle evidence without actor-set or market-action paths"
+            )
+        observer = _validated_role_plan(
+            paths.observer_plan,
+            repo_root,
+            expected_scm_ref=expected_scm_ref,
+        )
+        supporting_plans = _validated_role_plans(
+            paths.role_plans,
+            repo_root,
+            expected_scm_ref=expected_scm_ref,
+        )
+        plans = (observer, *supporting_plans)
+        if len(plans) != 2 or {plan.role for plan in plans} != {
+            "host-operator",
+            "observer",
+        }:
+            raise CapacityValidationError(
+                "reference result requires exactly one observer plan and "
+                "one host-operator plan"
+            )
+        plans_by_id = {plan.plan_id: plan for plan in plans}
+        host_plan = next(plan for plan in plans if plan.role == "host-operator")
+        receipt_values = _unique_capacity_objects(
+            paths.role_receipts,
+            label="role receipt",
+            identity_field="receipt_id",
+        )
+        receipts: dict[
+            str,
+            capacity_roles.ValidatedRoleReceipt,
+        ] = {}
+        for receipt_value in receipt_values.values():
+            plan_id = receipt_value.get("plan_id")
+            plan = plans_by_id.get(plan_id)
+            if plan is None or plan_id in receipts:
+                raise CapacityValidationError(
+                    "reference receipt does not map one-to-one to its role plan"
+                )
+            receipts[plan_id] = capacity_roles.validate_role_receipt(
+                receipt_value,
+                plan,
+            )
+        if set(receipts) != set(plans_by_id):
+            raise CapacityValidationError(
+                "reference receipts must cover the observer and host plans"
+            )
+        evidence = tuple(
+            capacity_roles.validate_substantive_role_evidence(
+                plan,
+                receipts[plan.plan_id],
+                (),
+                (),
+            )
+            for plan in plans
+        )
+        oracle = capacity_roles.validate_oracle_authority(
+            _strict_capacity_object(
+                paths.oracle_authority,
+                label="oracle authority",
+            ),
+            repo_root,
+            observer_plan=observer,
+        )
+        reference_policy = capacity_outcomes.validate_reference_policy(
+            _strict_capacity_object(
+                paths.reference_policy,
+                label="reference policy",
+            ),
+            repo_root,
+            evaluation_policy=evaluation_policy,
+            observer_plan=observer,
+            host_plan=host_plan,
+            expected_scm_ref=expected_scm_ref,
+        )
+        _require_expected_scm_ref(
+            oracle.scm_ref,
+            expected_scm_ref,
+            label="oracle authority",
+        )
+        actor_set = None
+    else:
+        if (
+            paths.observer_plan is not None
+            or paths.reference_policy is not None
+            or paths.actor_set is None
+            or paths.concurrency_policy is None
+        ):
+            raise CapacityValidationError(
+                "agent capacity-result context requires actor-set, concurrency-"
+                "policy, and complete evidence paths without a separate "
+                "observer-plan path"
+            )
+        bundle = _validated_evidence_bundle(
+            repo_root=repo_root,
+            role_plans=paths.role_plans,
+            role_receipts=paths.role_receipts,
+            frozen_actions=paths.frozen_actions,
+            payloads=paths.payloads,
+            oracle_authorities=(paths.oracle_authority,),
+            action_results=paths.action_results,
+            concurrency_policy=paths.concurrency_policy,
+            expected_scm_ref=expected_scm_ref,
+        )
+        if (
+            bundle.concurrency_policy is None or len(bundle.oracle_authorities) != 1
+        ):  # pragma: no cover - guarded by the exact context
+            raise CapacityValidationError(
+                "agent capacity-result context lacks one exact authority chain"
+            )
+        actor_set = capacity_roles.validate_actor_set_observation(
+            _strict_capacity_object(paths.actor_set, label="actor set"),
+            bundle.concurrency_policy,
+            bundle.evidence,
+        )
+        oracle = bundle.oracle_authorities[0]
+        evidence = bundle.evidence
+        reference_policy = None
+
+    result = capacity_outcomes.validate_capacity_result(
+        result_value,
+        repo_root,
+        evaluation_policy=evaluation_policy,
+        oracle_authority=oracle,
+        actor_set=actor_set,
+        reference_policy=reference_policy,
+        role_evidence=evidence,
+        predecessor=predecessor,
+        buyer_frontier=buyer_frontier,
+        reuse_baseline=reuse_baseline,
+        prior_seller_results=prior_seller_results,
+        expected_scm_ref=expected_scm_ref,
+    )
+    return _ValidatedCapacityResultContext(
+        result=result,
+        evaluation_policy=evaluation_policy,
+        oracle_authority=oracle,
+        actor_set=actor_set,
+        role_evidence=evidence,
     )
 
 
@@ -493,7 +838,9 @@ class RunState:
 
 
 class DiscoveryRunner:
-    def __init__(self, repo_root: Path, output_dir: Path | None = None, dry_run: bool = False) -> None:
+    def __init__(
+        self, repo_root: Path, output_dir: Path | None = None, dry_run: bool = False
+    ) -> None:
         self.repo_root = repo_root.resolve()
         self.output_dir = output_dir.resolve() if output_dir is not None else None
         self.dry_run = dry_run
@@ -513,7 +860,11 @@ class DiscoveryRunner:
             print("at least one workaround is required")
             return 2
         available = load_workarounds(self.paths.config_dir / "workarounds.yaml")
-        missing = [workaround_id for workaround_id in workaround_ids if workaround_id not in available]
+        missing = [
+            workaround_id
+            for workaround_id in workaround_ids
+            if workaround_id not in available
+        ]
         if missing:
             print(f"unknown workaround: {', '.join(missing)}")
             print("available workarounds:")
@@ -530,7 +881,9 @@ class DiscoveryRunner:
         )
 
     def run_profile(self, name: str) -> int:
-        profiles = load_yaml(self.paths.config_dir / "profiles.yaml").get("profiles", [])
+        profiles = load_yaml(self.paths.config_dir / "profiles.yaml").get(
+            "profiles", []
+        )
         selected = next((item for item in profiles if item.get("id") == name), None)
         if selected is None:
             print(f"unknown profile: {name}")
@@ -540,7 +893,9 @@ class DiscoveryRunner:
             return 2
         phase_path = self.paths.config_dir / str(selected["phase_file"])
         phase_ids = tuple(str(item) for item in selected.get("phases", []))
-        profile_env = {str(key): str(value) for key, value in (selected.get("env") or {}).items()}
+        profile_env = {
+            str(key): str(value) for key, value in (selected.get("env") or {}).items()
+        }
         return self._run_phase_file(
             mode=f"profile:{name}",
             phase_path=phase_path,
@@ -581,7 +936,9 @@ class DiscoveryRunner:
         )
         return repository.create(fingerprint, dry_run=dry_run, force=force)
 
-    def issue_propose_fix(self, run_dir: Path, fingerprint: str, head_branch: str) -> int:
+    def issue_propose_fix(
+        self, run_dir: Path, fingerprint: str, head_branch: str
+    ) -> int:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         try:
             path = repository.propose_fix(fingerprint, head_branch)
@@ -591,7 +948,9 @@ class DiscoveryRunner:
         print(path)
         return 0
 
-    def issue_transition(self, run_dir: Path, fingerprint: str, state: str, detail: str) -> int:
+    def issue_transition(
+        self, run_dir: Path, fingerprint: str, state: str, detail: str
+    ) -> int:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         try:
             repository.transition(fingerprint, state, detail)
@@ -657,6 +1016,499 @@ class DiscoveryRunner:
             return 1
         print(f"capacity finding ingested: {ingested['finding_id']}")
         return 0
+
+    def capacity_evaluation_policy_validate(
+        self,
+        evaluation_policy: Path,
+        *,
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_evaluation_policy(
+            evaluation_policy,
+            operation="validate",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_evaluation_policy_sha256(
+        self,
+        evaluation_policy: Path,
+        *,
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_evaluation_policy(
+            evaluation_policy,
+            operation="sha256",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_evaluation_policy(
+        self,
+        evaluation_policy: Path,
+        *,
+        operation: str,
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            policy = _validated_evaluation_policy(
+                evaluation_policy,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+        except CapacityValidationError as exc:
+            return _capacity_failure("evaluation-policy", exc)
+        return _capacity_success(
+            artifact_kind="evaluation-policy",
+            operation=operation,
+            sha256=policy.canonical_sha256,
+            identity={
+                "evaluation_policy_id": policy.policy_id,
+                "profile_registry_sha256": (policy.profile_registry_sha256),
+                "scm_ref": policy.scm_ref,
+            },
+        )
+
+    def capacity_reference_policy_validate(
+        self,
+        reference_policy: Path,
+        *,
+        evaluation_policy: Path,
+        observer_plan: Path,
+        host_plan: Path,
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_reference_policy(
+            reference_policy,
+            evaluation_policy=evaluation_policy,
+            observer_plan=observer_plan,
+            host_plan=host_plan,
+            operation="validate",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_reference_policy_sha256(
+        self,
+        reference_policy: Path,
+        *,
+        evaluation_policy: Path,
+        observer_plan: Path,
+        host_plan: Path,
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_reference_policy(
+            reference_policy,
+            evaluation_policy=evaluation_policy,
+            observer_plan=observer_plan,
+            host_plan=host_plan,
+            operation="sha256",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_reference_policy(
+        self,
+        reference_policy: Path,
+        *,
+        evaluation_policy: Path,
+        observer_plan: Path,
+        host_plan: Path,
+        operation: str,
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            campaign_policy = _validated_evaluation_policy(
+                evaluation_policy,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            observer = _validated_role_plan(
+                observer_plan,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            host = _validated_role_plan(
+                host_plan,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            policy = capacity_outcomes.validate_reference_policy(
+                _strict_capacity_object(
+                    reference_policy,
+                    label="reference policy",
+                ),
+                self.repo_root,
+                evaluation_policy=campaign_policy,
+                observer_plan=observer,
+                host_plan=host,
+                expected_scm_ref=expected_scm_ref,
+            )
+        except CapacityValidationError as exc:
+            return _capacity_failure("reference-policy", exc)
+        return _capacity_success(
+            artifact_kind="reference-policy",
+            operation=operation,
+            sha256=policy.canonical_sha256,
+            identity={
+                "profile_stage_id": policy.profile_stage_id,
+                "reference_policy_id": policy.policy_id,
+                "release_id": policy.release_id,
+                "scm_ref": policy.scm_ref,
+            },
+        )
+
+    def capacity_result_validate(
+        self,
+        context_manifest: Path,
+        *,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_result(
+            context_manifest,
+            evaluation_policy=evaluation_policy,
+            predecessor_context=predecessor_context,
+            reuse_baseline_context=reuse_baseline_context,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            prior_seller_contexts=prior_seller_contexts,
+            operation="validate",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_result_sha256(
+        self,
+        context_manifest: Path,
+        *,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_result(
+            context_manifest,
+            evaluation_policy=evaluation_policy,
+            predecessor_context=predecessor_context,
+            reuse_baseline_context=reuse_baseline_context,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            prior_seller_contexts=prior_seller_contexts,
+            operation="sha256",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_result(
+        self,
+        context_manifest: Path,
+        *,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        operation: str,
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            policy = _validated_evaluation_policy(
+                evaluation_policy,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            if buyer_frontier is None and (
+                buyer_result_contexts
+                or reuse_baseline_context is not None
+                or prior_seller_contexts
+            ):
+                raise CapacityValidationError(
+                    "progression contexts require a buyer-frontier artifact"
+                )
+            if buyer_frontier is not None:
+                buyer_results = tuple(
+                    _validated_capacity_result_context(
+                        buyer_context,
+                        self.repo_root,
+                        evaluation_policy=policy,
+                        expected_scm_ref=expected_scm_ref,
+                    ).result
+                    for buyer_context in buyer_result_contexts
+                )
+                frontier = capacity_outcomes.validate_buyer_frontier_receipt(
+                    _strict_capacity_object(
+                        buyer_frontier,
+                        label="buyer frontier",
+                    ),
+                    self.repo_root,
+                    evaluation_policy=policy,
+                    results=buyer_results,
+                    expected_scm_ref=expected_scm_ref,
+                )
+            else:
+                frontier = None
+            predecessor = (
+                _validated_capacity_result_context(
+                    predecessor_context,
+                    self.repo_root,
+                    evaluation_policy=policy,
+                    expected_scm_ref=expected_scm_ref,
+                    buyer_frontier=frontier,
+                ).result
+                if predecessor_context is not None
+                else None
+            )
+            reuse_baseline = (
+                _validated_capacity_result_context(
+                    reuse_baseline_context,
+                    self.repo_root,
+                    evaluation_policy=policy,
+                    expected_scm_ref=expected_scm_ref,
+                    predecessor=predecessor,
+                ).result
+                if reuse_baseline_context is not None
+                else None
+            )
+            prior_seller_results: list[capacity_outcomes.ValidatedCapacityResult] = []
+            for seller_context in prior_seller_contexts:
+                prior_seller_results.append(
+                    _validated_capacity_result_context(
+                        seller_context,
+                        self.repo_root,
+                        evaluation_policy=policy,
+                        expected_scm_ref=expected_scm_ref,
+                        buyer_frontier=frontier,
+                        reuse_baseline=reuse_baseline,
+                        prior_seller_results=tuple(prior_seller_results),
+                    ).result
+                )
+            context = _validated_capacity_result_context(
+                context_manifest,
+                self.repo_root,
+                evaluation_policy=policy,
+                expected_scm_ref=expected_scm_ref,
+                predecessor=(predecessor if reuse_baseline is None else None),
+                buyer_frontier=(
+                    frontier
+                    if predecessor is None or reuse_baseline is not None
+                    else None
+                ),
+                reuse_baseline=reuse_baseline,
+                prior_seller_results=tuple(prior_seller_results),
+            )
+        except CapacityValidationError as exc:
+            return _capacity_failure("capacity-result", exc)
+        result = context.result
+        return _capacity_success(
+            artifact_kind="capacity-result",
+            operation=operation,
+            sha256=result.canonical_sha256,
+            identity={
+                "actor_trigger": result.actor_trigger,
+                "execution_boundary": result.execution_boundary,
+                "profile_stage_id": result.profile_stage_id,
+                "result_id": result.result_id,
+                "scenario_id": result.scenario_id,
+                "scm_ref": result.scm_ref,
+            },
+        )
+
+    def capacity_serialized_reuse_validate(
+        self,
+        reuse_a_context: Path,
+        reuse_b_context: Path,
+        *,
+        evaluation_policy: Path,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_serialized_reuse(
+            reuse_a_context,
+            reuse_b_context,
+            evaluation_policy=evaluation_policy,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            operation="validate",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_serialized_reuse_sha256(
+        self,
+        reuse_a_context: Path,
+        reuse_b_context: Path,
+        *,
+        evaluation_policy: Path,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_serialized_reuse(
+            reuse_a_context,
+            reuse_b_context,
+            evaluation_policy=evaluation_policy,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            operation="sha256",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_serialized_reuse(
+        self,
+        reuse_a_context: Path,
+        reuse_b_context: Path,
+        *,
+        evaluation_policy: Path,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        operation: str,
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            policy = _validated_evaluation_policy(
+                evaluation_policy,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            if buyer_frontier is None and buyer_result_contexts:
+                raise CapacityValidationError(
+                    "buyer result contexts require a buyer-frontier artifact"
+                )
+            if buyer_frontier is not None:
+                buyer_results = tuple(
+                    _validated_capacity_result_context(
+                        buyer_context,
+                        self.repo_root,
+                        evaluation_policy=policy,
+                        expected_scm_ref=expected_scm_ref,
+                    ).result
+                    for buyer_context in buyer_result_contexts
+                )
+                frontier = capacity_outcomes.validate_buyer_frontier_receipt(
+                    _strict_capacity_object(
+                        buyer_frontier,
+                        label="buyer frontier",
+                    ),
+                    self.repo_root,
+                    evaluation_policy=policy,
+                    results=buyer_results,
+                    expected_scm_ref=expected_scm_ref,
+                )
+            else:
+                frontier = None
+            reuse_a = _validated_capacity_result_context(
+                reuse_a_context,
+                self.repo_root,
+                evaluation_policy=policy,
+                expected_scm_ref=expected_scm_ref,
+                buyer_frontier=frontier,
+            ).result
+            reuse_b = _validated_capacity_result_context(
+                reuse_b_context,
+                self.repo_root,
+                evaluation_policy=policy,
+                expected_scm_ref=expected_scm_ref,
+                predecessor=reuse_a,
+            ).result
+            capacity_outcomes.validate_serialized_reuse(reuse_a, reuse_b)
+        except CapacityValidationError as exc:
+            return _capacity_failure("serialized-reuse", exc)
+        return _capacity_success(
+            artifact_kind="serialized-reuse",
+            operation=operation,
+            sha256=reuse_b.canonical_sha256,
+            identity={
+                "reuse_a_result_id": reuse_a.result_id,
+                "reuse_a_sha256": reuse_a.canonical_sha256,
+                "reuse_b_result_id": reuse_b.result_id,
+                "reuse_b_sha256": reuse_b.canonical_sha256,
+                "scm_ref": reuse_b.scm_ref,
+            },
+        )
+
+    def capacity_buyer_frontier_validate(
+        self,
+        buyer_frontier: Path,
+        *,
+        evaluation_policy: Path,
+        result_contexts: Sequence[Path],
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_buyer_frontier(
+            buyer_frontier,
+            evaluation_policy=evaluation_policy,
+            result_contexts=result_contexts,
+            operation="validate",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_buyer_frontier_sha256(
+        self,
+        buyer_frontier: Path,
+        *,
+        evaluation_policy: Path,
+        result_contexts: Sequence[Path],
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_buyer_frontier(
+            buyer_frontier,
+            evaluation_policy=evaluation_policy,
+            result_contexts=result_contexts,
+            operation="sha256",
+            expected_scm_ref=expected_scm_ref,
+        )
+
+    def capacity_buyer_frontier(
+        self,
+        buyer_frontier: Path,
+        *,
+        evaluation_policy: Path,
+        result_contexts: Sequence[Path],
+        operation: str,
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            policy = _validated_evaluation_policy(
+                evaluation_policy,
+                self.repo_root,
+                expected_scm_ref=expected_scm_ref,
+            )
+            results = tuple(
+                _validated_capacity_result_context(
+                    context_manifest,
+                    self.repo_root,
+                    evaluation_policy=policy,
+                    expected_scm_ref=expected_scm_ref,
+                ).result
+                for context_manifest in result_contexts
+            )
+            frontier = capacity_outcomes.validate_buyer_frontier_receipt(
+                _strict_capacity_object(
+                    buyer_frontier,
+                    label="buyer frontier",
+                ),
+                self.repo_root,
+                evaluation_policy=policy,
+                results=results,
+                expected_scm_ref=expected_scm_ref,
+            )
+        except CapacityValidationError as exc:
+            return _capacity_failure("buyer-frontier", exc)
+        return _capacity_success(
+            artifact_kind="buyer-frontier",
+            operation=operation,
+            sha256=frontier.canonical_sha256,
+            identity={
+                "classification": frontier.classification,
+                "frontier_receipt_id": frontier.frontier_receipt_id,
+                "largest_clean_buyer_count": (frontier.largest_clean_buyer_count),
+                "scm_ref": frontier.scm_ref,
+            },
+        )
 
     def capacity_role_plan_validate(
         self,
@@ -1212,8 +2064,7 @@ class DiscoveryRunner:
                 expected_scm_ref=expected_scm_ref,
             )
             if (
-                context.plan.profile_stage.stage.get("execution_boundary")
-                != "mock"
+                context.plan.profile_stage.stage.get("execution_boundary") != "mock"
                 or context.concurrency_policy is not None
             ):
                 raise CapacityValidationError(
@@ -1271,12 +2122,8 @@ class DiscoveryRunner:
                 concurrency_policy=context.concurrency_policy,
                 expected_action_kind=expected_action_kind,
                 current_runtime_binding=runtime_binding,
-                current_concrete_payload_binding=(
-                    concrete_payload_binding
-                ),
-                current_actor_invocation_capability=(
-                    actor_invocation_capability
-                ),
+                current_concrete_payload_binding=(concrete_payload_binding),
+                current_actor_invocation_capability=(actor_invocation_capability),
                 current_action=current_action_value,
                 current_plan=current_plan_value,
                 current_payload_bytes=current_payload_bytes,
@@ -1331,13 +2178,17 @@ class DiscoveryRunner:
         workarounds = _normalize_workarounds(workaround)
         phase_scope_start = _earliest_start_phase(phase_file, workarounds)
         if selected_phase_ids is None and phase_scope_start is not None:
-            phases, assumed_phase_ids = _select_phases_from_start(phase_file, phase_scope_start)
+            phases, assumed_phase_ids = _select_phases_from_start(
+                phase_file, phase_scope_start
+            )
         else:
             phases = _select_phases(phase_file, selected_phase_ids)
             assumed_phase_ids = ()
         profile_env = profile_env or {}
         env = {**profile_env, **_merged_workaround_env(workarounds)}
-        skip_phases = {phase_id for spec in workarounds for phase_id in spec.skip_phases}
+        skip_phases = {
+            phase_id for spec in workarounds for phase_id in spec.skip_phases
+        }
 
         if self.dry_run:
             self._print_plan(
@@ -1375,7 +2226,9 @@ class DiscoveryRunner:
             "phase_scope_start": phase_scope_start,
             "assumed_passed_phases": list(assumed_phase_ids),
             "profile_env": profile_env,
-            "workaround": _workaround_json(workarounds[0]) if len(workarounds) == 1 else None,
+            "workaround": _workaround_json(workarounds[0])
+            if len(workarounds) == 1
+            else None,
             "workarounds": [_workaround_json(spec) for spec in workarounds],
             "output_dir": str(store.run_dir),
             "started_at": utc_now_iso(),
@@ -1393,7 +2246,9 @@ class DiscoveryRunner:
                 break
         if state.blocking_failure is None:
             self._record_assumed_phases(phase_file, assumed_phase_ids, store, state)
-            self._run_phases(phases, store, redactor, collectors, state, env, skip_phases)
+            self._run_phases(
+                phases, store, redactor, collectors, state, env, skip_phases
+            )
 
         status = "failed" if state.failed else "passed"
         manifest.update(
@@ -1428,7 +2283,9 @@ class DiscoveryRunner:
             if state.blocking_failure is not None:
                 self._record_skip(store, state, phase, "blocked")
                 continue
-            self._run_one_phase(phase, store, redactor, collectors, state, env, skip_phases)
+            self._run_one_phase(
+                phase, store, redactor, collectors, state, env, skip_phases
+            )
 
         for phase in always_phases:
             self._run_one_phase(phase, store, redactor, collectors, state, env, set())
@@ -1452,7 +2309,9 @@ class DiscoveryRunner:
             if not _dependency_satisfied(state.phase_status.get(required))
         ]
         if missing and not phase.always_run:
-            self._record_skip(store, state, phase, "dependency_not_passed", {"missing": missing})
+            self._record_skip(
+                store, state, phase, "dependency_not_passed", {"missing": missing}
+            )
             return
 
         print(f"phase: {phase.id}")
@@ -1472,11 +2331,15 @@ class DiscoveryRunner:
         state.phase_status[phase.id] = status
         if status == "failed":
             state.failed_phases.append(phase.id)
-            collectors.collect_many(phase.collect_on_failure, reason=f"phase_failed:{phase.id}")
+            collectors.collect_many(
+                phase.collect_on_failure, reason=f"phase_failed:{phase.id}"
+            )
             if phase.blocking and not phase.always_run:
                 state.blocking_failure = phase.id
         else:
-            collectors.collect_many(phase.collect_on_success, reason=f"phase_passed:{phase.id}")
+            collectors.collect_many(
+                phase.collect_on_success, reason=f"phase_passed:{phase.id}"
+            )
 
         record = {
             "id": phase.id,
@@ -1551,7 +2414,9 @@ class DiscoveryRunner:
         results = []
         ok = True
         for command in workaround.commands:
-            result = self._run_command(store, redactor, f"workaround_{workaround.id}", command, env)
+            result = self._run_command(
+                store, redactor, f"workaround_{workaround.id}", command, env
+            )
             results.append(result.to_json(store.run_dir))
             ok = ok and result.ok
             if not result.ok:
@@ -1637,7 +2502,11 @@ class DiscoveryRunner:
         assumed_phase_ids: tuple[str, ...],
         profile_env: dict[str, str],
     ) -> None:
-        output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
+        output = (
+            self.output_dir
+            if self.output_dir is not None
+            else self.paths.default_output_root
+        )
         print(f"issue-discovery command: {mode}")
         print(f"repo_root: {self.repo_root}")
         print(f"output: {output}")
@@ -1662,7 +2531,11 @@ class DiscoveryRunner:
             print(f"  - {phase.id}{suffix}")
 
     def _print_pending(self, command: str) -> None:
-        output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
+        output = (
+            self.output_dir
+            if self.output_dir is not None
+            else self.paths.default_output_root
+        )
         dry_run = "yes" if self.dry_run else "no"
         print(f"issue-discovery command: {command}")
         print(f"repo_root: {self.repo_root}")
@@ -1670,13 +2543,17 @@ class DiscoveryRunner:
         print(f"dry_run: {dry_run}")
 
 
-def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | None) -> tuple[PhaseSpec, ...]:
+def _select_phases(
+    phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | None
+) -> tuple[PhaseSpec, ...]:
     if selected_phase_ids is None:
         return phase_file.phases
     by_id = {phase.id: phase for phase in phase_file.phases}
     missing = [phase_id for phase_id in selected_phase_ids if phase_id not in by_id]
     if missing:
-        raise ValueError(f"unknown phase ids in {phase_file.name}: {', '.join(missing)}")
+        raise ValueError(
+            f"unknown phase ids in {phase_file.name}: {', '.join(missing)}"
+        )
     included: set[str] = set()
     visiting: set[str] = set()
 
@@ -1684,10 +2561,14 @@ def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | 
         if phase_id in included:
             return
         if phase_id in visiting:
-            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"cyclic phase dependency in {phase_file.name}: {phase_id}"
+            )
         phase = by_id.get(phase_id)
         if phase is None:
-            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"unknown required phase id in {phase_file.name}: {phase_id}"
+            )
         visiting.add(phase_id)
         for required in phase.requires:
             include_with_dependencies(required)
@@ -1708,7 +2589,9 @@ def _select_phases_from_start(
     try:
         start_index = phase_ids.index(start_phase)
     except ValueError as exc:
-        raise ValueError(f"unknown continuation start phase in {phase_file.name}: {start_phase}") from exc
+        raise ValueError(
+            f"unknown continuation start phase in {phase_file.name}: {start_phase}"
+        ) from exc
     selected = tuple(phase_file.phases[start_index:])
     assumed = _dependency_closure_outside_selection(phase_file, selected)
     return selected, assumed
@@ -1748,10 +2631,14 @@ def _dependency_closure_outside_selection(
 
     def visit(phase_id: str) -> None:
         if phase_id in visiting:
-            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"cyclic phase dependency in {phase_file.name}: {phase_id}"
+            )
         phase = by_id.get(phase_id)
         if phase is None:
-            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"unknown required phase id in {phase_file.name}: {phase_id}"
+            )
         visiting.add(phase_id)
         for required_id in phase.requires:
             if required_id not in selected_ids:

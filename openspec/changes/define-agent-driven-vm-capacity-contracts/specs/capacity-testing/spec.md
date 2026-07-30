@@ -74,9 +74,16 @@ the frozen actions against the mock boundary in preparation for that target
 shape. Its result MUST NOT claim that the scenario's declared real
 provisioning, GPU, fulfillment, or cleanup oracle ran.
 
+A capacity result MUST be emitted only for `real-reference`,
+`real-qualification`, or `real-measured`. Readiness/probe observations and
+mock captures are evidence artifacts, not capacity results, and MUST NOT use a
+capacity-result schema or enter any capacity frontier. A controller process
+that exits after release invalidates its row rather than converting the row
+into a readiness, mock, or partial capacity result.
+
 #### Scenario: One shape is reused without relabeling
 - **WHEN** mock preparation, the deterministic reference, and Q0 each use the same pinned B1/S1/G1 scenario
-- **THEN** their profile-stage and result records carry `mock`/`agent-triggered`, `real-reference`/`controller-driven`, and `real-measured`/`agent-triggered`, respectively, while the scenario identity and digest remain unchanged
+- **THEN** their profile-stage records carry `mock`/`agent-triggered`, `real-reference`/`controller-driven`, and `real-measured`/`agent-triggered`, respectively; only the two real executions emit capacity results, while the scenario identity and digest remain unchanged
 
 #### Scenario: Scenario attempts to grant admission
 - **WHEN** a scenario document contains an evidence class, qualification status, measured status, or private admission decision
@@ -188,9 +195,13 @@ The measured execution order MUST be:
    deterministic selection order, until the first passing/first failing bracket
    is adjacent, retaining the results immediately below, at, and above the
    candidate boundary;
-3. `serialized-reuse-a-measured` and then
-   `serialized-reuse-b-measured`;
-4. after an external buyer-frontier receipt, `b2-s2-g1-measured`, followed—only
+3. an external buyer-frontier receipt, derived from and hash-binding those
+   exact ordered buyer results, before any reuse stage begins;
+4. `serialized-reuse-a-measured`, which binds that buyer-frontier receipt, and
+   then `serialized-reuse-b-measured`, which binds reuse A and preserves the
+   exact buyer-frontier lineage;
+5. `b2-s2-g1-measured`, which binds the clean reuse-B baseline and the same
+   buyer-frontier receipt, followed—only
    when B4 is inside both the buyer correctness and load-generator
    frontiers—by `b4-s2-g1-measured`; if B4/S2 passes and four-seller admission
    exists, run `b4-s4-g1-measured`, then run `b4-s3-g1-measured` only when S4
@@ -203,6 +214,17 @@ Neither the registry nor scenario bytes may change after Q0 begins. If B8
 passes, or an earlier generator limit prevents a product failure, B8 or the last
 clean shape is only a lower bound.
 
+Every measured seller result MUST bind the buyer-frontier receipt ID/hash, the
+clean reuse-B result ID/hash, the admitted distinct-seller and distinct-service
+cardinalities, and the immediately preceding seller result ID/hash (null only
+for B2/S2). Seller admission MUST be derived by H1 from independently observed,
+simultaneously live seller processes and truthful distinct published services;
+declared counts alone are not authority. Its start MUST be strictly after
+reuse B's `progression_ready_at` or the preceding seller result's
+`progression_ready_at`, respectively. Thus the portable lineage is exactly
+buyer frontier → reuse A → reuse B → seller stage, then seller result by seller
+result, with both hash and temporal fencing.
+
 Expected concurrent outcomes are unordered cardinality constraints over the
 declared request IDs. No scenario may predesignate which buyer wins. Every
 observed outcome MUST still correlate to exactly one request ID.
@@ -212,8 +234,8 @@ observed outcome MUST still correlate to exactly one request ID.
 - **THEN** its portable counts are valid while private admission and resource authority remain independently required
 
 #### Scenario: Seller progression follows buyer completion
-- **WHEN** a measured seller row declares S2/B2 or S2/B4 after the buyer frontier receipt and binds distinct seller/listing choices to one globally fenced G1 authority
-- **THEN** the row may be assembled by private infrastructure
+- **WHEN** a measured seller row declares S2/B2 or S2/B4 after the hash-bound buyer frontier and clean reuse-B baseline, binds its exact prior seller result, and binds distinct seller/listing choices to one globally fenced G1 authority
+- **THEN** the row may be assembled by private infrastructure only as the next temporally admitted seller stage
 
 #### Scenario: Four-seller row is conditional
 - **WHEN** S4/B4 is selected without four distinct seller identities and service instances
@@ -234,8 +256,16 @@ distribution MUST contain exactly one positive listing count per seller and
 MUST sum to the total listing count. In a one-GPU multi-seller row, every
 seller MUST bind one shared, globally fenced physical-capacity authority;
 disjoint seller views that can independently allocate the same GPU MUST fail
-validation. Every request MUST select one declared seller and one declared
-listing.
+validation. Every seller plan MUST carry the exact same typed
+`topology_authority_binding` as the stage's sole H1 plan. The pre-release
+concurrency policy MUST reject any missing or unequal seller binding before
+release. Each frozen seller action MUST inherit that authority through its
+exact seller-plan hash and concurrency-policy authority, each terminal seller
+receipt MUST repeat the same binding as its plan, and the capacity result's
+topology authority MUST equal H1's. This opaque public binding proves that all
+one-GPU sellers consult one globally fenced view without exposing the private
+host, GPU, allocator, or fence identity. Every request MUST select one declared
+seller and one declared listing.
 
 #### Scenario: Safe two-seller one-GPU row is accepted
 - **WHEN** two distinct sellers each expose one selected VM listing, both bind the same globally fenced one-GPU authority, and each request targets an exact declared seller/listing pair
@@ -244,6 +274,14 @@ listing.
 #### Scenario: Duplicate or partitioned seller authority is rejected
 - **WHEN** seller identities or service identities repeat, seller distribution does not match listing count, a request targets an unselected listing, or two one-GPU sellers use independent allocation views
 - **THEN** validation fails before publication or request release
+
+#### Scenario: Seller plan diverges from H1 topology authority
+- **WHEN** any seller plan omits or changes the sole H1 plan's typed `topology_authority_binding`
+- **THEN** concurrency-policy validation rejects the stage before release, so no frozen seller action can inherit or exercise the disjoint authority
+
+#### Scenario: Seller receipt or result changes topology authority
+- **WHEN** a terminal seller receipt differs from its exact plan binding or the capacity result differs from the sole H1 receipt binding
+- **THEN** role/result validation fails and the row cannot contribute qualification, measurement, or a frontier
 
 ### Requirement: Logical slots bind privately to live identities
 Public scenarios MUST use only logical actor, seller, listing, and request slots.
@@ -323,6 +361,15 @@ credential identity. An observer receipt MUST bind its pinned observation
 instruction, independent-source plan, release/terminal observations, and
 typed `native_evidence_bindings` without copying private evidence.
 
+Only reuse B's H1 evidence may authorize seller scaling. The H1 plan MUST
+pre-freeze the eligible distinct-seller/service identities and cardinalities
+with typed native-evidence bindings, and the H1 receipt MUST exactly repeat and
+attest that plan without referring to the not-yet-created reuse-B result. The
+reuse-B result MUST bind that exact H1 receipt, derive and seal the admission
+predicate, and bind the buyer-frontier/reuse-A lineage and baseline equivalence.
+Downstream seller results MUST bind the exact reuse-B result and its sealed
+frontier/admission authority. No H1 artifact may bind a future result ID/hash.
+
 The successful buyer MUST bind the pinned public workload paths
 `tools/issue-discovery/workloads/cuda/run-vector-add.sh` and
 `tools/issue-discovery/workloads/cuda/vector_add.cu` and their Git blob
@@ -345,6 +392,21 @@ integer-truncated duration is invalid. A serially executed actor set MUST NOT
 satisfy a concurrent stage. Every action's invocation and terminal offsets
 MUST fall inside its owning actor's independently observed lifetime.
 
+An otherwise authoritative actor set whose one-shot action is rejected, or
+whose independently observed overlap, skew, local-queue, or
+controller-throttle predicate fails, MUST remain valid negative observation
+evidence. Its role/action provenance and failure reasons MUST be retained, but
+`load_generator_passed` and `eligible_for_capacity_frontier` MUST be false.
+Structural, identity, authority, correlation, or timing fabrication remains
+invalid rather than becoming a negative observation.
+
+For every real request-bearing result, O1's terminal receipt MUST enumerate
+each exact request ID once and seal the canonical SHA-256 of that request's
+complete outcome bytes. The same receipt MUST seal the canonical SHA-256 of
+the complete stage-cleanup object and bind the native evidence used for each
+seal. Recomputing an outcome or cleanup object outside O1, even from equivalent
+facts, MUST NOT substitute for these exact byte seals.
+
 #### Scenario: Substantive buyer receipt is accepted
 - **WHEN** a buyer receipt proves pinned-instruction inspection, isolated preparation, listing discovery, exact frozen-request preparation, and liveness through release at the exact SCM commit
 - **THEN** it may contribute to agent-driven evidence
@@ -364,6 +426,14 @@ MUST fall inside its owning actor's independently observed lifetime.
 #### Scenario: Declared actors overlap
 - **WHEN** a concurrent stage declares multiple buyers or sellers
 - **THEN** the aggregate receipts prove exact distinct cardinality, overlapping actor lifetimes, bounded invocation skew, and absence of local queuing or throttling
+
+#### Scenario: Generator failure remains a negative observation
+- **WHEN** authoritative agent receipts prove that a frozen action was rejected or independently observe failed overlap/skew or local queue/throttle
+- **THEN** the row retains agent provenance and the exact failure reason but is censored from capacity-frontier promotion
+
+#### Scenario: Independent observer seals exact result bytes
+- **WHEN** O1 completes a real request-bearing stage
+- **THEN** its terminal receipt binds each request ID to the canonical hash of its exact outcome object and separately binds the exact cleanup-object hash
 
 #### Scenario: Buyer verifies the successful guest
 - **WHEN** a buyer's real VM request succeeds
@@ -429,7 +499,7 @@ zero live effects, not private process authenticity.
 
 #### Scenario: Controller emission after actor exit is classified accurately
 - **WHEN** an actor approves a request digest and exits before another process emits the request
-- **THEN** the result records `actor_trigger=controller-driven` with the boundary actually exercised and MUST NOT claim `agent-triggered`
+- **THEN** the controller-driven observation is retained as accurately labeled negative evidence, but the attempted agent row is invalid and no qualification/measured capacity result may claim `agent-triggered`
 
 #### Scenario: Mutation or retry is rejected
 - **WHEN** the request bytes, scenario authority, selected seller/listing, wrapper digest, or attempt count differs from the frozen action
@@ -451,10 +521,49 @@ zero live effects, not private process authenticity.
 - **WHEN** the first invocation fails a frozen authority, payload, selection, runtime-binding, wrapper, retry, or liveness check
 - **THEN** its typed zero-emission result is the atomically recorded first terminal result, and a later corrected invocation under the same action/release cannot emit as a new attempt one
 
+### Requirement: Outcome evaluation policy is frozen before Q0
+Before Q0, the campaign MUST freeze one closed evaluation-policy artifact
+containing the exact SCM ref; the pinned profile-registry path plus canonical
+and raw SHA-256 values; a typed common-clock evidence binding; positive-integer
+request-processing, provisioning-queue, Ansible-service, and
+terminal-observation limits; and these exact five frontier-definition values:
+
+- request processing:
+  `all-expected-terminal-within-slo-without-generator-saturation`;
+- simultaneous fulfillment:
+  `maximum-independent-overlapping-whole-gpu-vms`;
+- provisioning: `greatest-shape-meeting-queue-and-ansible-slos`;
+- correctness:
+  `greatest-shape-with-complete-oracle-cleanup-and-baseline`; and
+- load generator:
+  `greatest-shape-with-overlap-skew-liveness-and-no-local-queue`.
+
+The terminal-observation timeout MUST NOT be shorter than the
+request-processing SLO. Every real-reference, real-qualification, and
+real-measured result MUST bind that validated policy's ID and canonical digest,
+and its independently observed release MUST be later than the policy's
+`frozen_at`. Profile-registry or policy bytes MUST NOT drift after Q0.
+For every request, `elapsed = terminal_offset - invocation_offset`;
+`elapsed >= terminal_observation_timeout` is a `timeout` fault, while a
+non-timeout terminal MUST satisfy `elapsed < terminal_observation_timeout`.
+The same frozen policy MUST govern the private campaign executor and every
+individual public command; private orchestration MAY add secrets and native
+proofs but MUST NOT alter thresholds, ordering, outcome semantics, or frontier
+rules.
+
+#### Scenario: Pre-Q0 policy is accepted
+- **WHEN** one policy was frozen before release, binds the exact canonical and raw profile-registry bytes, common clock, SLOs, timeout, and five fixed definitions
+- **THEN** the same policy ID/hash may govern reference, qualification, and measured result evaluation
+
+#### Scenario: Post-observation threshold is rejected
+- **WHEN** a result binds a different policy, the registry digest drifts, the policy was not frozen before release, or the terminal timeout is shorter than the request-processing SLO
+- **THEN** outcome evaluation fails rather than selecting thresholds after observing the wave
+
 ### Requirement: Independent VM-capacity oracle
 Capacity outcomes MUST be evaluated from independent observations rather than
 an actor's or emitter's success claim. Each result MUST have exactly one
-`outcome_kind`: `vm-succeeded`, `capacity-refused`, or `fault`.
+closed, discriminated `outcome_kind`: `vm-succeeded`, `capacity-refused`, or
+`fault`; fields belonging to another variant MUST be rejected.
 
 The public `deal_reference` carrier MUST be a closed object containing
 `request_id`, logical seller/listing slots, the typed `runtime_binding`,
@@ -462,13 +571,16 @@ and nullable non-secret digests of the storefront negotiation and escrow
 references. A successful outcome requires both commercial digests and
 independent joins from that storefront-owned carrier to
 `capacity_reservation_id`, then separately to durable `fulfillment_id`,
-Settlement Record state and selected Settlement Resource,
-`provisioned_resource_id`, the pinned guest GPU exercise, and torn-down state.
+the Settlement Record keyed by `capacity_reservation_id`, its typed private
+selected-Settlement-Resource binding, `provisioned_resource_id`, real
+KVM/Ansible provisioning with whole-device GPU passthrough, the Git-pinned
+compiled CUDA guest exercise, and torn-down state.
 The generic fulfillment record MUST NOT be required to contain commercial
 agreement identity. `fulfillment_id` is the durable fulfillment identity.
 `allocation_id` and `provisioning_job_id` MAY appear as diagnostics but MUST
 NOT be required as universal identities. Public buyer evidence MUST NOT require
-physical `resource_id` or `vm_host`.
+physical `resource_id` or `vm_host`, and the harness MUST NOT invent a
+buyer-visible Settlement Resource ID.
 
 `capacity-refused` is a harness oracle outcome, not a product terminal-status
 alias. It MUST require an independent per-site observation proving that every
@@ -490,9 +602,72 @@ The current `capacity_hold_unavailable` stage event is only a nonterminal,
 best-effort pre-settlement signal: it MAY support the observation trail but
 MUST NEVER establish `capacity-refused`. Generic provisioning errors, policy
 denials, unknown reasons, uncompensated or nonterminal commercial state,
-missing atomic-refusal proof, and timeouts MUST be `fault`. On a one-GPU
+missing atomic-refusal proof, and timeouts MUST be `fault`. A fault MUST use
+exactly one of `generic-failure`, `provisioning-error`, `policy-denial`,
+`unknown-reason`, `uncompensated`, `atomic-refusal-incomplete`, `timeout`,
+`missing-durable-correlation`, `cleanup-incomplete`, or `generator-failure`;
+its typed observation MUST identify the lifecycle phase and timeout state, and
+an atomic-refusal-incomplete fault MUST preserve the partial site observation.
+A complete routine atomic refusal with terminal compensation and clean request
+teardown MUST NOT be mislabeled as a fault. On a one-GPU
 topology, any observation of more than one simultaneous successful whole-GPU
-VM MUST fail correctness regardless of expected counts.
+VM MUST preserve the exact request outcomes, add the derived stage fault
+`double-allocation`, and fail correctness regardless of expected counts. The
+artifact remains valid negative issue-discovery evidence rather than being
+discarded by schema or correlation validation.
+
+Each request outcome MUST carry invocation and terminal monotonic offsets. The
+aggregate independent observation MUST cover every exact request once, repeat
+those exact offsets, bind a native timing-evidence value also present on that
+request, and use the same typed common-clock authority as the actor set or
+reference policy. For an agent-driven row, invocation MUST equal the exact
+frozen buyer action's independently observed invocation, the market terminal
+MUST not precede the one-shot wrapper terminal, and both MUST remain inside the
+owning buyer's observed lifetime. Aggregate observation time MUST fall inside
+both the stage lifecycle and O1's receipt lifecycle.
+
+O1's receipt MUST seal the canonical hash of every exact request outcome and
+the complete cleanup object. A `real-reference` result MUST instead have no
+agent actor set and MUST bind a non-counted controller's reference execution,
+reference policy, release, common clock, and per-request timing. It MUST still
+include exactly one independent actionless O1 receipt and one actionless H1
+receipt bound to that reference policy and release; the controller MUST NOT
+author either role receipt or O1's outcome/cleanup seals.
+
+The typed reference policy MUST be created after the campaign evaluation
+policy is frozen and before reference release. It MUST bind the exact H1 and O1
+plans (including H1's teardown plan), release authority, campaign clock, and
+request schedule. The reference result MUST separately bind the controller's
+execution proof and the exact H1 and O1 receipt IDs/hashes that attest those
+plans. Substitution of any plan, receipt, release, clock, or schedule
+invalidates the reference.
+
+The per-site atomic-reservation observation MUST treat the exact deal-reference
+hash as base authority and MUST prove that invocation and terminal offsets are
+ordered, inside the request interval, and on the campaign clock; that the
+typed eligible-site-set binding verifies; that eligible slots are nonempty and
+unique; that attempt slots are unique and exactly cover the eligible set for a
+complete observation; and that typed site bindings are distinct. Each attempt
+MUST satisfy exactly one row of this truth table:
+
+- `routine-reservation-null`: `reservation=null`, `error=null`, `observed=true`,
+  `skipped=false`;
+- `reservation-created`: nonempty `reservation`, `error=null`,
+  `observed=true`, `skipped=false`;
+- `error`: `reservation=null`, nonempty `error`, `observed=true`,
+  `skipped=false`;
+- `missing`: `reservation=null`, `error=null`, and either attempted-no-response
+  (`observed=true`, `skipped=false`) or skipped
+  (`observed=false`, `skipped=true`); or
+- `non-routine`: `reservation=null`, nonempty diagnostic `error`,
+  `observed=true`, `skipped=false`.
+
+No response kind may hide a reservation, and `skipped=true` is valid only for
+`missing`. A complete capacity refusal
+MUST be the final escrow-scoped call, cover the eligible set exactly once, use
+only `routine-reservation-null` rows, and have null aggregate reservation. A partial
+observation remains base-valid negative evidence but MUST be classified
+`fault/atomic-refusal-incomplete`; a complete clean routine refusal MUST NOT.
 
 #### Scenario: Successful lifecycle is correlated
 - **WHEN** independent evidence joins one request through `deal_reference`, `capacity_reservation_id`, `fulfillment_id`, Settlement Record state, `provisioned_resource_id`, VM/GPU exercise, and teardown with the selected seller/listing
@@ -514,26 +689,64 @@ VM MUST fail correctness regardless of expected counts.
 - **WHEN** a request times out, returns only a generic failure, remains uncompensated, or lacks independent atomic-refusal and zero-active-residue proof
 - **THEN** the oracle records `fault`
 
+#### Scenario: Timeout equality is terminal
+- **WHEN** request elapsed time equals the frozen terminal-observation timeout
+- **THEN** the oracle records `fault/timeout`, because only elapsed time strictly below the timeout may be non-timeout
+
+#### Scenario: Partial atomic observation is retained
+- **WHEN** the atomic observation has valid base authority and truthful attempt rows but does not cover the eligible set exactly once
+- **THEN** the oracle preserves it as `fault/atomic-refusal-incomplete` and does not call it capacity scarcity
+
 #### Scenario: One-GPU double allocation fails
 - **WHEN** independent observation finds two simultaneous successful VM lifecycles assigned to the one verified GPU authority
-- **THEN** correctness fails even if all actor receipts report success
+- **THEN** the validator preserves both request observations, derives `double-allocation`, fails correctness, and retains the result as fault evidence even if all actor receipts report success
+
+#### Scenario: Independent timing cannot be replayed
+- **WHEN** a request changes its offsets, uses an unrelated timing binding, falls outside its buyer lifetime, or disagrees with the reference policy timing
+- **THEN** result validation fails before the request can contribute to any SLO or frontier
+
+#### Scenario: Deterministic reference preserves independent O1 and H1
+- **WHEN** the non-counted controller completes a real-reference B1 lifecycle under a frozen reference policy
+- **THEN** exact actionless O1 and H1 receipts bind that policy/release, O1 seals the request and cleanup bytes, and neither role is attributed to the controller
 
 ### Requirement: Serialized teardown and reuse
-Serialized reuse A and B MUST be separate ordered integer-count B1 stages. Reuse
-A MUST reach terminal teardown and an independently verified intermediate
-baseline before reuse B may emit. Reuse B MUST create a distinct request,
-`deal_reference`, `capacity_reservation_id`, `fulfillment_id`, Settlement
-Record, `provisioned_resource_id`, VM, and teardown lifecycle and MUST restore
-the same baseline again. Serialized reuse MUST NOT be reported as concurrent
+Serialized reuse A and B MUST be separate ordered integer-count B1 stages.
+Reuse A MUST begin strictly after, and bind the ID/hash of, the completed
+buyer-frontier receipt. It MUST reach one correct successful lifecycle,
+terminal teardown, and an independently verified intermediate baseline before
+reuse B may emit. Reuse B MUST begin strictly after reuse A's
+`progression_ready_at`, bind the exact reuse-A result ID/hash, cleanup
+completion and baseline-equivalence binding, and preserve the same
+buyer-frontier authority, evaluation policy, and topology authority. For
+measured reuse, A MUST match the buyer-frontier receipt's topology; for
+qualification reuse, the frontier authority is null but B MUST still match A's
+topology.
+
+The two stages intentionally repeat the same frozen logical request slot
+`request-1`; the repeated slot proves reuse and is not itself a durable product
+identity. Their `deal_reference` hashes, negotiation references, escrow
+references, `capacity_reservation_id` values, `fulfillment_id` values,
+Settlement Records, `provisioned_resource_id` values, VM lifecycles, and
+teardown lifecycles MUST each be distinct. Reuse B MUST restore the same
+reversible baseline again.
+
+Reuse correctness MUST depend on successful durable correlation, teardown,
+zero residue, and baseline equivalence, not on the request-processing SLO.
+A clean, correct A/B pair that misses that latency SLO still proves safe
+physical release and reuse. Serialized reuse MUST NOT be reported as concurrent
 fulfillment capacity.
 
 #### Scenario: Ordered reuse succeeds
-- **WHEN** reuse A completes one correlated VM/GPU lifecycle, restores the required baseline, and reuse B then completes a distinct lifecycle and restores that baseline again
+- **WHEN** reuse A and B repeat logical slot `request-1` while proving distinct commercial, reservation, fulfillment, Settlement, provisioned-resource, VM, and teardown identities and each restores the required baseline
 - **THEN** the profile proves release and safe serial reuse
 
 #### Scenario: Reuse B is fenced by cleanup
 - **WHEN** reuse A lacks terminal teardown, baseline equivalence, or an empty active-resource observation
 - **THEN** reuse B cannot release its request
+
+#### Scenario: Reuse remains valid across an SLO miss
+- **WHEN** reuse A and B each prove a correct durable success, complete teardown, zero residue, and the same restored baseline but exceed the request-processing SLO
+- **THEN** request-processing fails while serialized-reuse validation still proves safe physical release and reuse
 
 ### Requirement: Every stage restores its declared baseline
 Every request-bearing stage MUST durably record its complete terminal
@@ -542,22 +755,31 @@ zero-active-residue result, and baseline-equivalence comparison.
 
 The baseline model MUST partition:
 
-- reversible state, whose native digest must return exactly to the declared
-  stage baseline, including active capacity reservations/leases, Settlement
-  Resources, fulfillment/provider jobs, VMs, disks, networks, Ansible
-  processes, GPU assignment, and the stage's intended listing/service set; and
-- append-only or accounting state, whose expected deal, Settlement, request,
-  escrow/claim, transaction-fee, wallet-balance, and terminal history deltas
-  must be completely enumerated, reconciled, and contain no active lock or
-  unexplained value.
+- exactly nine reversible components, each with exact equality and typed native
+  evidence: `capacity-reservations-and-leases`, `settlement-resources`,
+  `fulfillment-provider-jobs`, `vms`, `disks`, `networks`,
+  `ansible-processes`, `gpu-assignments`, and `listing-service-set`; and
+- exactly six append-only/accounting delta categories, each with expected and
+  observed native bindings, reconciliation status, no active lock, and no
+  unexplained value: `deal-history`, `settlement-history`, `request-history`,
+  `escrow-claim-history`, `transaction-fees`, and `wallet-accounting`.
 
 Baseline equivalence means exact reversible-state equality plus only the
 allowlisted reconciled immutable/accounting deltas. It does not require
 append-only history or wallet balances to equal their pre-stage bytes. Missing
-or unexplained state in either partition MUST fail the stage. The next stage
-MUST NOT start before the prior stage is teardown-verified and
-baseline-equivalent. Public artifacts MUST bind privacy-preserving private proof
-values rather than expose private resource identifiers.
+or duplicated categories, false equality/reconciliation, any nonzero active
+reservation, Settlement Resource, provider job, VM, disk, network, Ansible
+process, GPU assignment, claim, or lock residue, or unexplained state in either
+partition MUST fail the stage. `ready_for_next_stage` MUST equal this derived
+clean-state predicate rather than be trusted as a producer assertion. H1's
+cleanup/baseline observation and O1's exact cleanup-object hash seal MUST agree
+with the result. Neither H1 nor O1 may complete before the cleanup it attests.
+Each result MUST derive
+`progression_ready_at = max(H1 receipt completed_at,
+O1 receipt completed_at)` on the common campaign clock; neither receipt may
+complete before actual cleanup completion. Every following buyer, reuse, or
+seller stage MUST start strictly after that value. Public artifacts MUST bind privacy-preserving private proof values
+rather than expose private resource identifiers.
 
 #### Scenario: Clean stage can advance
 - **WHEN** every request has a terminal correlation, teardown completes, reversible state returns exactly, every immutable/accounting delta is expected and reconciled, and no undeclared active residue or lock remains
@@ -566,6 +788,10 @@ values rather than expose private resource identifiers.
 #### Scenario: Residue prevents advancement
 - **WHEN** any governed market, settlement, request, funds, job, VM, Ansible/process, or GPU state is missing, active outside the declared reversible baseline, or an unexplained immutable/accounting delta
 - **THEN** the stage fails clean-state verification and the next stage remains fenced
+
+#### Scenario: Producer clean flag cannot override a partition
+- **WHEN** `ready_for_next_stage` is true but one required reversible/accounting category is omitted, duplicated, unreconciled, non-equal, or not sealed by O1
+- **THEN** the validator derives cleanup failure and refuses to advance
 
 ### Requirement: Private authority bindings resist identifier enumeration
 Every public value that binds a private runtime identity map, concrete action
@@ -621,13 +847,25 @@ scenario requirement. Scenario documents MUST carry neither field. Only
 `real-measured`/`agent-triggered` results may be agent-capacity evidence.
 `mock` proves preparation only; `real-reference`/`controller-driven` remains a
 product/environment control. Buyer count MUST be reported as offered demand,
-not as capacity.
+not as capacity. `agent_capacity_evidence` records the provenance of a valid
+qualification/measured agent observation even when that observation discovers
+a product or generator failure. `eligible_for_capacity_frontier` MUST be true
+only for a `real-measured` row whose load generator passed; these two booleans
+MUST NOT be conflated.
+
+A `real-qualification` result MUST set every derived frontier and
+buyer-frontier-receipt reference to null: qualification proves readiness but
+does not measure a boundary. Every `real-measured` result MUST carry all five
+derived frontier observations, even when their classification is
+`not-observed`, and MUST bind the frozen campaign clock used for ordering and
+SLO arithmetic.
 
 Measured results MUST report these frontiers separately:
 
-- the request-processing frontier is the greatest offered-concurrency shape in
-  which every request reaches its expected `outcome_kind` within the
-  declared request-processing SLO without local generator saturation;
+- the request-processing predicate is every request reaching its expected
+  `outcome_kind` inside both the request-processing SLO and terminal timeout;
+  generator failure censors the shape from frontier promotion rather than
+  becoming an SCM request-processing failure;
 - the simultaneous-fulfillment frontier is the greatest independently observed
   count of concurrently active successful whole-GPU fulfillments;
 - the provisioning frontier reports queue wait separately from Ansible service
@@ -639,17 +877,50 @@ Measured results MUST report these frontiers separately:
   overlap, remain live, meet emission skew, and show no local queue or
   controller throttle.
 
-Buyer search MUST begin with B1, B2, B4, and B8 against S1/G1. A boundary
-refinement MUST select frozen shapes immediately below, at, and above the
-candidate integer boundary and MUST change only the dimension being measured.
-Seller scaling MUST not begin without an external receipt for the completed
-buyer frontier. If the frozen envelope or load-generator frontier ends before
-an SCM boundary is exceeded, the result MUST be reported only as a validated
-lower bound.
+Buyer search MUST begin in the exact order B1, B2, B4, and B8 against S1/G1.
+The product progression predicate MUST be request processing plus provisioning
+plus correctness, with load-generator failure treated as censoring. If that
+predicate brackets a product boundary, refinement MUST select only the frozen
+B3/B5/B6/B7 shapes required by deterministic integer bisection, in its exact
+selection order, until the passing/failing bracket is adjacent. It MUST retain
+the applicable observations immediately below, at, and above the candidate
+boundary and MUST change only buyer count.
+
+A closed buyer-frontier receipt MUST bind the exact SCM ref, pinned
+profile-registry canonical/raw digests, evaluation-policy ID/hash, ordered
+result IDs/hashes, exact initial and refinement stage IDs, retained counts,
+per-stage predicate observations, all five independently derived frontiers,
+the one exact typed `topology_authority_binding` shared by every bound
+B1/B2/B4/B8 and refinement result, the selection predicate, and a completion
+time strictly after every bound
+result's `progression_ready_at` on the frozen campaign clock. Result IDs,
+stage IDs, retained counts, and ordered result entries MUST be unique, and the
+receipt MUST include every selected stage exactly once. Each shape frontier MUST be classified `exact-bound`,
+`lower-bound`, or `not-observed`; the overall progression MUST be
+`exact-bound`, `lower-bound`, or `no-clean-shape`. A shape exact bound MUST use
+`observed-failure`, a lower bound MUST use `frozen-envelope-ended` or
+`load-generator-ended-first`, and `not-observed` MUST use `no-passing-shape`.
+Overall `exact-bound` and `no-clean-shape` use a null lower-bound reason;
+overall `lower-bound` uses one of the two lower-bound reasons.
+
+No result with unclean final state may authorize this receipt or reuse. Reuse A
+MUST start strictly after and hash-bind the receipt, and measured reuse A's
+topology authority MUST equal the receipt's. Reuse B MUST preserve both reuse
+A's topology authority and, when measured, its frontier authority.
+Qualification reuse has null frontier authority but MUST still preserve
+topology from A to B. Seller scaling MUST then bind the same receipt and clean
+reuse-B result. Every seller result MUST match the frontier, reuse-B, and
+immediately prior seller result topology authorities and additionally bind H1-derived admitted distinct
+seller/service counts and immediately prior seller result, and MUST begin
+strictly after that predecessor's `progression_ready_at` on the campaign clock.
+All seller result and predecessor IDs MUST be unique, and the seller sequence
+MUST contain each admitted selected stage exactly once. If the frozen envelope or
+load-generator frontier ends before an SCM boundary is exceeded, the result
+MUST be reported only as a validated lower bound.
 
 #### Scenario: Mock path is classified as preparation
 - **WHEN** substantive agents complete publication and purchase through mock provisioning with clean teardown
-- **THEN** the result is `execution_boundary=mock` and `actor_trigger=agent-triggered`, and no real provisioning or system-capacity claim is permitted
+- **THEN** the mock capture is classified `execution_boundary=mock` and `actor_trigger=agent-triggered`, no capacity result is emitted, and no real provisioning or system-capacity claim is permitted
 
 #### Scenario: Measured result reports distinct frontiers
 - **WHEN** an admitted measured wave completes
@@ -666,6 +937,18 @@ lower bound.
 #### Scenario: Generator saturation limits the claim
 - **WHEN** the actor or load-generator layer saturates before SCM fails
 - **THEN** the report states the largest validated lower bound and does not claim the unobserved SCM limit
+
+#### Scenario: Agent provenance does not imply frontier eligibility
+- **WHEN** an authoritative measured agent row observes a generator rejection, queue, throttle, overlap failure, or skew failure
+- **THEN** it remains agent-originated negative evidence while `eligible_for_capacity_frontier` is false and the product frontier is censored
+
+#### Scenario: Buyer frontier precedes reuse and seller scaling
+- **WHEN** the exact B1/B2/B4/B8 and selected refinement results finish cleanly
+- **THEN** one typed receipt hash-binds those observations and their shared topology before reuse A, the topology/frontier authority propagates through measured reuse B, and every seller result transitively matches the same topology, receipt, reuse-B baseline, and immediate predecessor
+
+#### Scenario: Qualification reuse changes topology
+- **WHEN** qualification reuse B binds a topology authority different from qualification reuse A
+- **THEN** reuse validation fails even though both stages correctly carry null buyer-frontier authority
 
 ### Requirement: Sanitized immutable capacity findings
 A current capacity finding MUST use schema version 2 and bind its canonical

@@ -14,7 +14,6 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from issue_discovery.capacity import (
     CapacityValidationError,
-    PinnedScenario,
     ValidatedProfileStage,
     _checked_pinned_worktree_blob,
     _run_git,
@@ -71,9 +70,7 @@ SELLER_INSTRUCTION_PATH = "docs/seller-quickstart.md"
 HOST_OPERATOR_INSTRUCTION_PATH = (
     "tools/issue-discovery/instructions/capacity/host-operator.md"
 )
-OBSERVER_INSTRUCTION_PATH = (
-    "tools/issue-discovery/instructions/capacity/observer.md"
-)
+OBSERVER_INSTRUCTION_PATH = "tools/issue-discovery/instructions/capacity/observer.md"
 
 CUDA_WRAPPER_PATH = "tools/issue-discovery/workloads/cuda/run-vector-add.sh"
 CUDA_SOURCE_PATH = "tools/issue-discovery/workloads/cuda/vector_add.cu"
@@ -82,15 +79,9 @@ CUDA_RESULT_CHECKSUM = (
     "98d4c5327244975c7c054483ef7a1a1d95645858abde350e5926dfaa3a265d7e"
 )
 
-BUYER_REQUEST_WRAPPER_PATH = (
-    "tools/issue-discovery/wrappers/emit-buyer-request.sh"
-)
-SELLER_SERVICE_WRAPPER_PATH = (
-    "tools/issue-discovery/wrappers/start-seller-service.sh"
-)
-SELLER_PUBLICATION_WRAPPER_PATH = (
-    "tools/issue-discovery/wrappers/publish-listing.sh"
-)
+BUYER_REQUEST_WRAPPER_PATH = "tools/issue-discovery/wrappers/emit-buyer-request.sh"
+SELLER_SERVICE_WRAPPER_PATH = "tools/issue-discovery/wrappers/start-seller-service.sh"
+SELLER_PUBLICATION_WRAPPER_PATH = "tools/issue-discovery/wrappers/publish-listing.sh"
 
 BUYER_PRE_RELEASE_STEPS = (
     "install-build",
@@ -215,6 +206,8 @@ class ValidatedRoleReceipt:
     receipt_id: str
     role: str
     actor_slot: str
+    observation_passed: bool
+    failure_reasons: tuple[str, ...]
     canonical_sha256: str
     started_at: datetime
     prepared_at: datetime
@@ -246,6 +239,9 @@ class ValidatedActorSet:
     runtime_listing_bindings: tuple[dict[str, Any], ...]
     buyer_invocation_skew_ns: int
     publication_invocation_skew_ns: int
+    load_generator_passed: bool
+    capacity_eligible: bool
+    failure_reasons: tuple[str, ...]
     concurrency_policy_sha256: str
     canonical_sha256: str
     _canonical_bytes: bytes = field(repr=False)
@@ -375,12 +371,7 @@ def _schema_errors(
 
 
 def _normalized_relative_path(raw: object, *, field_name: str) -> PurePosixPath:
-    if (
-        not isinstance(raw, str)
-        or not raw
-        or "\0" in raw
-        or "\\" in raw
-    ):
+    if not isinstance(raw, str) or not raw or "\0" in raw or "\\" in raw:
         raise CapacityValidationError(
             f"{field_name} must be a non-empty repository-relative POSIX path"
         )
@@ -481,9 +472,7 @@ def _validate_binding_collection(
         )
         for index, binding in enumerate(bindings)
     )
-    identities = {
-        (item["method"], item["domain"], item["value"]) for item in validated
-    }
+    identities = {(item["method"], item["domain"], item["value"]) for item in validated}
     if len(identities) != len(validated):
         raise CapacityValidationError(f"{field_name} must contain distinct bindings")
     return validated
@@ -692,17 +681,21 @@ def validate_role_plan(
             ]
             if len(action_ids) != len(set(action_ids)):
                 errors.append("seller plan action IDs must be globally distinct")
-            publication_intents = role_plan.get(
-                "publication_prepared_action_sha256s"
-            )
+            try:
+                validate_privacy_preserving_binding(
+                    role_plan.get("topology_authority_binding"),
+                    expected_domain=TOPOLOGY_BINDING_DOMAIN,
+                    field_name="role_plan.topology_authority_binding",
+                )
+            except CapacityValidationError as error:
+                errors.append(str(error))
+            publication_intents = role_plan.get("publication_prepared_action_sha256s")
             if (
                 isinstance(publication_intents, list)
                 and isinstance(listing_slots, list)
                 and len(publication_intents) != len(listing_slots)
             ):
-                errors.append(
-                    "seller plan must bind one prepared action per listing"
-                )
+                errors.append("seller plan must bind one prepared action per listing")
         elif role == "host-operator":
             for key, domain in (
                 ("topology_authority_binding", TOPOLOGY_BINDING_DOMAIN),
@@ -723,6 +716,29 @@ def validate_role_plan(
                     )
                 except CapacityValidationError as error:
                     errors.append(str(error))
+            admission = role_plan.get("seller_scaling_admission")
+            if scenario_id == "serialized-reuse-b":
+                if not isinstance(admission, dict):
+                    errors.append(
+                        "serialized reuse B host plan must freeze seller-scaling "
+                        "admission"
+                    )
+                else:
+                    try:
+                        validate_privacy_preserving_binding(
+                            admission.get("native_evidence_binding"),
+                            expected_domain=NATIVE_EVIDENCE_BINDING_DOMAIN,
+                            field_name=(
+                                "role_plan.seller_scaling_admission."
+                                "native_evidence_binding"
+                            ),
+                        )
+                    except CapacityValidationError as error:
+                        errors.append(str(error))
+            elif admission is not None:
+                errors.append(
+                    "seller-scaling admission is only valid on serialized reuse B"
+                )
         elif role == "observer":
             try:
                 _validate_binding_collection(
@@ -737,10 +753,7 @@ def validate_role_plan(
         except CapacityValidationError as error:
             errors.append(str(error))
         else:
-            if (
-                plan.get("prepared_authority_sha256")
-                != expected_prepared_authority
-            ):
+            if plan.get("prepared_authority_sha256") != expected_prepared_authority:
                 errors.append(
                     "prepared_authority_sha256 does not match its exact public referent"
                 )
@@ -793,6 +806,17 @@ def _step_ids(receipt: Mapping[str, Any]) -> tuple[str, ...]:
     )
 
 
+def _step_statuses(receipt: Mapping[str, Any]) -> dict[str, object]:
+    outcomes = receipt.get("step_outcomes")
+    if not isinstance(outcomes, list):
+        return {}
+    return {
+        outcome["step_id"]: outcome.get("status")
+        for outcome in outcomes
+        if isinstance(outcome, dict) and isinstance(outcome.get("step_id"), str)
+    }
+
+
 def _expected_receipt_steps(receipt: Mapping[str, Any]) -> tuple[str, ...]:
     role = receipt.get("role")
     evidence = receipt.get("role_evidence")
@@ -836,9 +860,7 @@ def validate_role_receipt(
         "scenario_sha256": plan.scenario_sha256,
         "scm_ref": plan.scm_ref,
         "instruction": plan.plan["instruction"],
-        "isolated_identity_fingerprint": plan.plan[
-            "isolated_identity_fingerprint"
-        ],
+        "isolated_identity_fingerprint": plan.plan["isolated_identity_fingerprint"],
         "prepared_authority_sha256": plan.plan["prepared_authority_sha256"],
     }
     for key, expected in expected_common.items():
@@ -846,9 +868,9 @@ def validate_role_receipt(
             errors.append(f"{key} does not match the validated role plan")
     provenance = receipt.get("provenance")
     if isinstance(provenance, dict):
-        if provenance.get(
+        if provenance.get("actor_invocation_capability_binding") != plan.plan.get(
             "actor_invocation_capability_binding"
-        ) != plan.plan.get("actor_invocation_capability_binding"):
+        ):
             errors.append(
                 "receipt actor invocation capability does not match the role plan"
             )
@@ -856,9 +878,7 @@ def validate_role_receipt(
             validate_privacy_preserving_binding(
                 provenance.get("actor_invocation_capability_binding"),
                 expected_domain=ACTOR_INVOCATION_BINDING_DOMAIN,
-                field_name=(
-                    "provenance.actor_invocation_capability_binding"
-                ),
+                field_name=("provenance.actor_invocation_capability_binding"),
             )
         except CapacityValidationError as error:
             errors.append(str(error))
@@ -919,11 +939,22 @@ def validate_role_receipt(
         errors.append(
             "step_outcomes must prove the exact ordered substantive role steps"
         )
+    step_statuses = _step_statuses(receipt)
+    if plan.role == "host-operator":
+        for step_id in HOST_OPERATOR_STEPS[:-2]:
+            if step_statuses.get(step_id) != "passed":
+                errors.append(
+                    "all host preparation steps before cleanup observation must pass"
+                )
+                break
+    elif any(step_statuses.get(step_id) != "passed" for step_id in expected_steps):
+        errors.append("every substantive role step must pass")
 
     role_evidence = receipt.get("role_evidence")
     role_plan = plan.plan["role_plan"]
     run_authority = receipt.get("run_authority")
     boundary = plan.profile_stage.stage.get("execution_boundary")
+    observation_failure_reasons: list[str] = []
     if isinstance(run_authority, dict):
         if boundary == "mock" or plan.scenario_id is None:
             if (
@@ -933,12 +964,11 @@ def validate_role_receipt(
                 errors.append(
                     "mock role receipt concurrency-policy authority must be null"
                 )
-        elif (
-            not isinstance(run_authority.get("concurrency_policy_id"), str)
-            or not isinstance(
-                run_authority.get("concurrency_policy_sha256"),
-                str,
-            )
+        elif not isinstance(
+            run_authority.get("concurrency_policy_id"), str
+        ) or not isinstance(
+            run_authority.get("concurrency_policy_sha256"),
+            str,
         ):
             errors.append(
                 "real role receipt requires exact concurrency-policy authority"
@@ -960,20 +990,80 @@ def validate_role_receipt(
                     errors.append(
                         "buyer CUDA checksum does not match the pinned workload"
                     )
+        elif plan.role == "seller":
+            if role_evidence.get("topology_authority_binding") != role_plan.get(
+                "topology_authority_binding"
+            ):
+                errors.append(
+                    "seller receipt topology authority does not match its plan"
+                )
         elif plan.role == "host-operator":
             for key in (
                 "topology_authority_binding",
                 "reversible_baseline_binding",
                 "baseline_equivalence_binding",
+                "seller_scaling_admission",
             ):
                 if role_evidence.get(key) != role_plan.get(key):
+                    errors.append(f"role_evidence.{key} does not match the host plan")
+            admission = role_evidence.get("seller_scaling_admission")
+            if plan.scenario_id == "serialized-reuse-b":
+                if not isinstance(admission, dict):
                     errors.append(
-                        f"role_evidence.{key} does not match the host plan"
+                        "serialized reuse B host must attest seller-scaling admission"
                     )
+                else:
+                    try:
+                        validate_privacy_preserving_binding(
+                            admission.get("native_evidence_binding"),
+                            expected_domain=NATIVE_EVIDENCE_BINDING_DOMAIN,
+                            field_name=(
+                                "role_evidence.seller_scaling_admission."
+                                "native_evidence_binding"
+                            ),
+                        )
+                    except CapacityValidationError as error:
+                        errors.append(str(error))
+            elif admission is not None:
+                errors.append(
+                    "seller-scaling admission is only valid on serialized reuse B"
+                )
             if role_evidence.get("kvm_ansible_ready") is not True:
                 errors.append("host receipt must prove KVM/Ansible readiness")
-            if role_evidence.get("cleanup_complete") is not True:
-                errors.append("substantive host receipt must prove cleanup completion")
+            cleanup_complete = role_evidence.get("cleanup_complete")
+            baseline_equivalent = role_evidence.get("baseline_equivalent")
+            active_residue_detected = role_evidence.get("active_residue_detected")
+            if baseline_equivalent is True and (
+                cleanup_complete is not True or active_residue_detected is not False
+            ):
+                errors.append(
+                    "baseline equivalence requires complete cleanup and no "
+                    "active residue"
+                )
+            if active_residue_detected is True and (
+                cleanup_complete is not False or baseline_equivalent is not False
+            ):
+                errors.append(
+                    "active residue requires incomplete cleanup and a "
+                    "non-equivalent baseline"
+                )
+            expected_observation_statuses = {
+                "baseline-equivalence": (
+                    "passed" if baseline_equivalent is True else "failed"
+                ),
+                "cleanup": ("passed" if cleanup_complete is True else "failed"),
+            }
+            for step_id, expected_status in expected_observation_statuses.items():
+                if step_statuses.get(step_id) != expected_status:
+                    errors.append(
+                        f"host {step_id} status must match its typed observation"
+                    )
+            if cleanup_complete is not True:
+                observation_failure_reasons.append("cleanup-incomplete")
+            if baseline_equivalent is not True:
+                observation_failure_reasons.append("baseline-not-equivalent")
+            if active_residue_detected is True:
+                observation_failure_reasons.append("active-residue-detected")
         elif plan.role == "observer":
             if role_evidence.get("independent_source") is not True:
                 errors.append("observer receipt must prove an independent source")
@@ -983,12 +1073,94 @@ def validate_role_receipt(
                 errors.append("observer must capture the release observation")
             if role_evidence.get("terminal_observed") is not True:
                 errors.append("observer must capture terminal observation")
-            if role_evidence.get("native_evidence_bindings") != role_plan.get(
-                "native_evidence_bindings"
-            ):
+            native_evidence_bindings = role_evidence.get("native_evidence_bindings")
+            if native_evidence_bindings != role_plan.get("native_evidence_bindings"):
                 errors.append(
                     "observer evidence bindings do not match the observer plan"
                 )
+            request_observations = role_evidence.get("request_observations")
+            cleanup_observation = role_evidence.get("cleanup_observation")
+            if boundary in {
+                "real-reference",
+                "real-qualification",
+                "real-measured",
+            }:
+                if (
+                    not isinstance(request_observations, list)
+                    or not request_observations
+                    or not isinstance(cleanup_observation, dict)
+                ):
+                    errors.append(
+                        "real observer receipt must seal request and cleanup "
+                        "observations"
+                    )
+            elif request_observations != [] or cleanup_observation is not None:
+                errors.append(
+                    "probe/mock observer receipt cannot claim real outcome observations"
+                )
+            observed_request_ids: list[str] = []
+            if isinstance(request_observations, list):
+                for observation in request_observations:
+                    if not isinstance(observation, dict):
+                        continue
+                    request_id = observation.get("request_id")
+                    if isinstance(request_id, str):
+                        observed_request_ids.append(request_id)
+                    if (
+                        not isinstance(native_evidence_bindings, list)
+                        or observation.get("native_evidence_binding")
+                        not in native_evidence_bindings
+                    ):
+                        errors.append(
+                            "observer request observation does not bind its "
+                            "planned native evidence"
+                        )
+                if len(observed_request_ids) != len(set(observed_request_ids)):
+                    errors.append(
+                        "observer request observations must have unique request IDs"
+                    )
+            if isinstance(cleanup_observation, dict) and (
+                not isinstance(native_evidence_bindings, list)
+                or cleanup_observation.get("native_evidence_binding")
+                not in native_evidence_bindings
+            ):
+                errors.append(
+                    "observer cleanup observation does not bind its planned "
+                    "native evidence"
+                )
+            if isinstance(cleanup_observation, dict) and len(timestamps) == 4:
+                try:
+                    observed_stage_started = _parse_timestamp(
+                        cleanup_observation.get("stage_started_at"),
+                        field_name=(
+                            "role_evidence.cleanup_observation.stage_started_at"
+                        ),
+                    )
+                    observed_terminal = _parse_timestamp(
+                        cleanup_observation.get("terminal_observed_at"),
+                        field_name=(
+                            "role_evidence.cleanup_observation.terminal_observed_at"
+                        ),
+                    )
+                    observed_cleanup = _parse_timestamp(
+                        cleanup_observation.get("cleanup_completed_at"),
+                        field_name=(
+                            "role_evidence.cleanup_observation.cleanup_completed_at"
+                        ),
+                    )
+                    if not (
+                        timestamps[0]
+                        <= observed_stage_started
+                        < observed_terminal
+                        <= observed_cleanup
+                        <= timestamps[3]
+                    ):
+                        errors.append(
+                            "observer-sealed stage lifecycle must fall inside "
+                            "the observer receipt"
+                        )
+                except CapacityValidationError as error:
+                    errors.append(str(error))
 
     _raise_errors("role receipt", errors)
     assert len(timestamps) == 4
@@ -996,6 +1168,8 @@ def validate_role_receipt(
         receipt_id=receipt["receipt_id"],
         role=plan.role,
         actor_slot=plan.actor_slot,
+        observation_passed=not observation_failure_reasons,
+        failure_reasons=tuple(observation_failure_reasons),
         canonical_sha256=canonical_sha256(receipt),
         started_at=timestamps[0],
         prepared_at=timestamps[1],
@@ -1107,13 +1281,8 @@ def validate_oracle_authority(
                 or observer_plan.profile_stage_sha256 != stage.canonical_sha256
             ):
                 errors.append("oracle observer plan does not bind the same stage")
-            if (
-                authority.get("observer_plan_sha256")
-                != observer_plan.canonical_sha256
-            ):
-                errors.append(
-                    "oracle authority does not bind the exact observer plan"
-                )
+            if authority.get("observer_plan_sha256") != observer_plan.canonical_sha256:
+                errors.append("oracle authority does not bind the exact observer plan")
         if authority.get("real_oracle_allowed") is not True:
             errors.append("real stage oracle authority must allow its real oracle")
 
@@ -1201,9 +1370,7 @@ def validate_frozen_action(
         "actor_slot": plan.actor_slot,
         "role_plan_id": plan.plan_id,
         "role_plan_sha256": plan.canonical_sha256,
-        "isolated_identity_fingerprint": plan.plan[
-            "isolated_identity_fingerprint"
-        ],
+        "isolated_identity_fingerprint": plan.plan["isolated_identity_fingerprint"],
         "actor_invocation_capability_binding": plan.plan[
             "actor_invocation_capability_binding"
         ],
@@ -1214,7 +1381,9 @@ def validate_frozen_action(
     boundary = plan.profile_stage.stage.get("execution_boundary")
     if boundary == "mock":
         if concurrency_policy is not None:
-            errors.append("capture-only mock actions cannot bind a real concurrency policy")
+            errors.append(
+                "capture-only mock actions cannot bind a real concurrency policy"
+            )
         if (
             action.get("concurrency_policy_id") is not None
             or action.get("concurrency_policy_sha256") is not None
@@ -1225,7 +1394,9 @@ def validate_frozen_action(
             not isinstance(concurrency_policy, ValidatedConcurrencyPolicy)
             or concurrency_policy._validation_token is not _VALIDATED_POLICY_TOKEN
         ):
-            errors.append("real agent-triggered action requires frozen concurrency policy")
+            errors.append(
+                "real agent-triggered action requires frozen concurrency policy"
+            )
         else:
             policy = concurrency_policy.policy
             expected_policy = {
@@ -1360,10 +1531,8 @@ def validate_frozen_action(
             if selection.get("request_id") != role_plan.get("request_id"):
                 errors.append("buyer action request does not match the role plan")
         elif action_kind == "seller-service-start":
-            if (
-                plan.role != "seller"
-                or action.get("action_id")
-                != role_plan.get("service_start_action_id")
+            if plan.role != "seller" or action.get("action_id") != role_plan.get(
+                "service_start_action_id"
             ):
                 errors.append(
                     "service-start action is not authorized by the seller role plan"
@@ -1386,9 +1555,8 @@ def validate_frozen_action(
                 errors.append(
                     "listing-publication action is not authorized by the seller plan"
                 )
-            elif (
-                not isinstance(publication_ids, list)
-                or not isinstance(planned_listing_slots, list)
+            elif not isinstance(publication_ids, list) or not isinstance(
+                planned_listing_slots, list
             ):
                 errors.append(
                     "seller publication actions require ordered listing authority"
@@ -1412,9 +1580,7 @@ def validate_frozen_action(
                     errors.append(
                         "publication service does not match the scenario seller"
                     )
-                if selection.get("listing_slot") not in seller.get(
-                    "listing_slots", ()
-                ):
+                if selection.get("listing_slot") not in seller.get("listing_slots", ()):
                     errors.append(
                         "publication listing does not belong to the scenario seller"
                     )
@@ -1440,14 +1606,10 @@ def validate_frozen_action(
     if action_kind == "buyer-request":
         planned_prepared_action = role_plan.get("prepared_action_sha256")
     elif action_kind == "seller-service-start":
-        planned_prepared_action = role_plan.get(
-            "service_start_prepared_action_sha256"
-        )
+        planned_prepared_action = role_plan.get("service_start_prepared_action_sha256")
     elif action_kind == "seller-listing-publication":
         publication_ids = role_plan.get("publication_action_ids")
-        publication_intents = role_plan.get(
-            "publication_prepared_action_sha256s"
-        )
+        publication_intents = role_plan.get("publication_prepared_action_sha256s")
         if (
             isinstance(publication_ids, list)
             and isinstance(publication_intents, list)
@@ -1469,9 +1631,7 @@ def validate_frozen_action(
             "prepared_action_authorities",
             (),
         ):
-            errors.append(
-                "prepared action was not frozen by the concurrency policy"
-            )
+            errors.append("prepared action was not frozen by the concurrency policy")
     _raise_errors("frozen action", errors)
     assert isinstance(action_kind, str)
     return ValidatedFrozenAction(
@@ -1516,9 +1676,7 @@ def validate_action_result(
     timestamps: list[datetime] = []
     for key in ("invoked_at", "terminal_at"):
         try:
-            timestamps.append(
-                _parse_timestamp(result.get(key), field_name=key)
-            )
+            timestamps.append(_parse_timestamp(result.get(key), field_name=key))
         except CapacityValidationError as error:
             errors.append(str(error))
     if len(timestamps) == 2 and not timestamps[0] < timestamps[1]:
@@ -1551,9 +1709,7 @@ def validate_action_result(
             errors.append("emitted action requires a live initiating actor")
         if checks != all_checks:
             errors.append("emitted action requires every pre-emission check")
-        if result.get("terminal_payload_sha256") != action_value.get(
-            "payload_sha256"
-        ):
+        if result.get("terminal_payload_sha256") != action_value.get("payload_sha256"):
             errors.append("emitted terminal payload does not match frozen bytes")
     elif result_kind == "rejected-before-emission":
         if result.get("emission_count") != 0:
@@ -1563,10 +1719,9 @@ def validate_action_result(
         if failure_code == "unauthorized-retry":
             if not isinstance(result.get("attempt"), int) or result["attempt"] <= 1:
                 errors.append("unauthorized retry must preserve attempted value > 1")
-        elif (
-            failure_code != "duplicate-release"
-            and result.get("attempt") != action_value.get("attempt")
-        ):
+        elif failure_code != "duplicate-release" and result.get(
+            "attempt"
+        ) != action_value.get("attempt"):
             errors.append("non-retry rejection must preserve frozen attempt one")
         if failure_code == "duplicate-release":
             if (
@@ -1580,8 +1735,7 @@ def validate_action_result(
             if result.get("actor_alive_at_invocation") is not False:
                 errors.append("actor-exited rejection must record failed liveness")
         elif (
-            failure_code
-            not in {"unauthorized-retry", "duplicate-release"}
+            failure_code not in {"unauthorized-retry", "duplicate-release"}
             and result.get("actor_alive_at_invocation") is not True
         ):
             errors.append("non-liveness rejection requires a live initiating actor")
@@ -1638,6 +1792,8 @@ def validate_substantive_role_evidence(
     receipt: ValidatedRoleReceipt,
     actions: Sequence[ValidatedFrozenAction],
     results: Sequence[ValidatedActionResult],
+    *,
+    allow_rejected_observation: bool = False,
 ) -> SubstantiveRoleEvidence:
     errors: list[str] = []
     if plan._validation_token is not _VALIDATED_ROLE_PLAN_TOKEN:
@@ -1645,13 +1801,11 @@ def validate_substantive_role_evidence(
     if receipt._validation_token is not _VALIDATED_RECEIPT_TOKEN:
         errors.append("role evidence receipt is not validated authority")
     if any(
-        action._validation_token is not _VALIDATED_ACTION_TOKEN
-        for action in actions
+        action._validation_token is not _VALIDATED_ACTION_TOKEN for action in actions
     ):
         errors.append("role evidence contains an unvalidated action")
     if any(
-        result._validation_token is not _VALIDATED_RESULT_TOKEN
-        for result in results
+        result._validation_token is not _VALIDATED_RESULT_TOKEN for result in results
     ):
         errors.append("role evidence contains an unvalidated result")
     if receipt.role != plan.role or receipt.actor_slot != plan.actor_slot:
@@ -1683,9 +1837,7 @@ def validate_substantive_role_evidence(
             "actor_slot": plan.actor_slot,
             "role_plan_id": plan.plan_id,
             "role_plan_sha256": plan.canonical_sha256,
-            "isolated_identity_fingerprint": plan.plan[
-                "isolated_identity_fingerprint"
-            ],
+            "isolated_identity_fingerprint": plan.plan["isolated_identity_fingerprint"],
             "actor_invocation_capability_binding": plan.plan[
                 "actor_invocation_capability_binding"
             ],
@@ -1706,8 +1858,7 @@ def validate_substantive_role_evidence(
             != action_value.get("concurrency_policy_sha256")
         ):
             errors.append(
-                f"receipt run authority does not match action "
-                f"{action.action_id}"
+                f"receipt run authority does not match action {action.action_id}"
             )
         result = result_by_action.get(action.action_id)
         if result is None:
@@ -1724,7 +1875,7 @@ def validate_substantive_role_evidence(
             )
         if result.actor_slot != plan.actor_slot:
             errors.append("action result actor does not match the role actor")
-        if result.result_kind != "emitted":
+        if result.result_kind != "emitted" and not allow_rejected_observation:
             errors.append(
                 "rejected-before-emission cannot satisfy substantive role evidence"
             )
@@ -1753,15 +1904,15 @@ def validate_substantive_role_evidence(
         if len(actions) != 1 or actions[0].action_kind != "buyer-request":
             errors.append("buyer evidence requires exactly one owned request action")
         evidence = receipt.receipt["role_evidence"]
-        if len(results) == 1 and evidence.get(
-            "action_result_sha256"
-        ) != results[0].canonical_sha256:
-            errors.append(
-                "buyer receipt does not bind its exact action-result digest"
-            )
-        if actions and receipt.receipt["barrier"].get("barrier_id") != actions[
-            0
-        ].release_id:
+        if (
+            len(results) == 1
+            and evidence.get("action_result_sha256") != results[0].canonical_sha256
+        ):
+            errors.append("buyer receipt does not bind its exact action-result digest")
+        if (
+            actions
+            and receipt.receipt["barrier"].get("barrier_id") != actions[0].release_id
+        ):
             errors.append("buyer release barrier does not match its frozen action")
     elif plan.role == "seller":
         role_plan = plan.plan["role_plan"]
@@ -1774,18 +1925,14 @@ def validate_substantive_role_evidence(
                 "seller evidence must cover service start and every publication action"
             )
         evidence = receipt.receipt["role_evidence"]
-        service_result = result_by_action.get(
-            role_plan["service_start_action_id"]
-        )
+        service_result = result_by_action.get(role_plan["service_start_action_id"])
         publication_results = [
             result_by_action[action_id].canonical_sha256
             for action_id in role_plan["publication_action_ids"]
             if action_id in result_by_action
         ]
-        if (
-            service_result is None
-            or service_result.canonical_sha256
-            != evidence.get("service_start_result_sha256")
+        if service_result is None or service_result.canonical_sha256 != evidence.get(
+            "service_start_result_sha256"
         ):
             errors.append("seller receipt does not bind its service-start result")
         if publication_results != evidence.get(
@@ -1829,9 +1976,7 @@ def _planned_prepared_action_authorities(
             authorities.append(
                 {
                     "action_id": role_plan["action_id"],
-                    "prepared_action_sha256": role_plan[
-                        "prepared_action_sha256"
-                    ],
+                    "prepared_action_sha256": role_plan["prepared_action_sha256"],
                 }
             )
         elif plan.role == "seller":
@@ -1942,13 +2087,15 @@ def validate_concurrency_policy(
         stage = None
         stage_value = {}
     scenario_authority = stage.scenario if stage is not None else None
-    scenario = (
-        scenario_authority.scenario if scenario_authority is not None else None
-    )
-    if stage_value.get("execution_boundary") not in {
-        "real-qualification",
-        "real-measured",
-    } or stage_value.get("actor_trigger") != "agent-triggered":
+    scenario = scenario_authority.scenario if scenario_authority is not None else None
+    if (
+        stage_value.get("execution_boundary")
+        not in {
+            "real-qualification",
+            "real-measured",
+        }
+        or stage_value.get("actor_trigger") != "agent-triggered"
+    ):
         errors.append(
             "concurrency policy is valid only for a real agent-triggered stage"
         )
@@ -1981,9 +2128,7 @@ def validate_concurrency_policy(
     plans = tuple(role_plans)
     if not plans:
         errors.append("concurrency policy requires every declared role plan")
-    if any(
-        plan._validation_token is not _VALIDATED_ROLE_PLAN_TOKEN for plan in plans
-    ):
+    if any(plan._validation_token is not _VALIDATED_ROLE_PLAN_TOKEN for plan in plans):
         errors.append("concurrency policy contains an unvalidated role plan")
     if any(
         plan.scm_ref != scm_ref
@@ -2008,21 +2153,34 @@ def validate_concurrency_policy(
     if tuple(sorted(policy.get("actor_slots", ()))) != expected_actor_slots:
         errors.append("concurrency policy actor slots do not match role plans")
 
-    fingerprints = [
-        plan.plan["isolated_identity_fingerprint"] for plan in plans
-    ]
+    fingerprints = [plan.plan["isolated_identity_fingerprint"] for plan in plans]
     if len(fingerprints) != len(set(fingerprints)):
         errors.append("concurrency policy role plans contain duplicate identities")
     capabilities = [
-        _binding_identity(
-            plan.plan["actor_invocation_capability_binding"]
-        )
+        _binding_identity(plan.plan["actor_invocation_capability_binding"])
         for plan in plans
     ]
     if len(capabilities) != len(set(capabilities)):
         errors.append(
             "concurrency policy role plans contain duplicate invocation capabilities"
         )
+    host_plans = [plan for plan in plans if plan.role == "host-operator"]
+    seller_plans = [plan for plan in plans if plan.role == "seller"]
+    if seller_plans:
+        if len(host_plans) != 1:
+            errors.append("seller plans require one host topology authority")
+        else:
+            topology_authority = (
+                host_plans[0].plan["role_plan"].get("topology_authority_binding")
+            )
+            if any(
+                plan.plan["role_plan"].get("topology_authority_binding")
+                != topology_authority
+                for plan in seller_plans
+            ):
+                errors.append(
+                    "every seller plan must bind the host's shared topology authority"
+                )
     expected_role_authorities = sorted(
         (
             {
@@ -2034,9 +2192,7 @@ def validate_concurrency_policy(
         key=lambda item: item["plan_id"],
     )
     if policy.get("role_plan_authorities") != expected_role_authorities:
-        errors.append(
-            "concurrency policy must freeze every exact role-plan authority"
-        )
+        errors.append("concurrency policy must freeze every exact role-plan authority")
 
     action_ids = _planned_action_ids(plans)
     if len(action_ids) != len(set(action_ids)):
@@ -2051,13 +2207,8 @@ def validate_concurrency_policy(
     except CapacityValidationError as error:
         errors.append(str(error))
         expected_prepared_authorities = []
-    if (
-        policy.get("prepared_action_authorities")
-        != expected_prepared_authorities
-    ):
-        errors.append(
-            "concurrency policy must freeze every exact prepared action"
-        )
+    if policy.get("prepared_action_authorities") != expected_prepared_authorities:
+        errors.append("concurrency policy must freeze every exact prepared action")
     if policy.get("deny_local_queue") is not True:
         errors.append("concurrency policy must deny a local actor queue")
     if policy.get("deny_controller_throttle") is not True:
@@ -2104,17 +2255,23 @@ def validate_invocation_offsets(
         )
     skew = max(offsets) - min(offsets)
     if skew > max_emission_skew_ns:
-        raise CapacityValidationError(
-            f"{label} invocation skew exceeds frozen bound"
-        )
+        raise CapacityValidationError(f"{label} invocation skew exceeds frozen bound")
     return skew
 
 
-def validate_substantive_actor_set(
+def validate_actor_set_observation(
     actor_set: dict[str, Any],
     concurrency_policy: ValidatedConcurrencyPolicy,
     role_evidence: Sequence[SubstantiveRoleEvidence],
 ) -> ValidatedActorSet:
+    """Validate and retain a complete actor-set observation.
+
+    Queueing, throttling, actor-window overlap, emission-skew, and typed host
+    cleanup failures are observed campaign outcomes rather than malformed
+    authority.  They therefore produce an immutable validated observation
+    whose derived eligibility fields are false.  Structural, provenance, and
+    authority failures remain validation errors.
+    """
     if (
         not isinstance(concurrency_policy, ValidatedConcurrencyPolicy)
         or concurrency_policy._validation_token is not _VALIDATED_POLICY_TOKEN
@@ -2147,6 +2304,7 @@ def validate_substantive_actor_set(
             item.receipt,
             item.actions,
             item.results,
+            allow_rejected_observation=True,
         )
         for item in raw_evidence
         if isinstance(item, SubstantiveRoleEvidence)
@@ -2155,6 +2313,12 @@ def validate_substantive_actor_set(
         raise CapacityValidationError(
             "actor set requires validated substantive role evidence"
         )
+    role_failure_reasons = [
+        f"{item.plan.actor_slot}:{reason}"
+        for item in sorted(evidence, key=lambda value: value.plan.actor_slot)
+        for reason in item.receipt.failure_reasons
+    ]
+    load_generator_failure_reasons: list[str] = []
     plans = tuple(item.plan for item in evidence)
     receipt_ids = [item.receipt.receipt_id for item in evidence]
     if len(receipt_ids) != len(set(receipt_ids)):
@@ -2162,9 +2326,7 @@ def validate_substantive_actor_set(
     actor_slots = [plan.actor_slot for plan in plans]
     if len(actor_slots) != len(set(actor_slots)):
         errors.append("aggregate role evidence contains duplicate actor slots")
-    fingerprints = [
-        plan.plan["isolated_identity_fingerprint"] for plan in plans
-    ]
+    fingerprints = [plan.plan["isolated_identity_fingerprint"] for plan in plans]
     if len(fingerprints) != len(set(fingerprints)):
         errors.append("aggregate role evidence contains duplicate identities")
     expected_slots = set(_scenario_actor_slots(scenario))
@@ -2195,13 +2357,8 @@ def validate_substantive_actor_set(
         ),
         key=lambda item: item["plan_id"],
     )
-    if (
-        evidence_role_authorities
-        != policy.get("role_plan_authorities")
-    ):
-        errors.append(
-            "actor-set evidence does not match the policy's exact role plans"
-        )
+    if evidence_role_authorities != policy.get("role_plan_authorities"):
+        errors.append("actor-set evidence does not match the policy's exact role plans")
     try:
         evidence_prepared_authorities = sorted(
             _planned_prepared_action_authorities(plans),
@@ -2210,20 +2367,13 @@ def validate_substantive_actor_set(
     except CapacityValidationError as error:
         errors.append(str(error))
         evidence_prepared_authorities = []
-    if (
-        evidence_prepared_authorities
-        != policy.get("prepared_action_authorities")
-    ):
-        errors.append(
-            "actor-set evidence does not match the policy's prepared actions"
-        )
+    if evidence_prepared_authorities != policy.get("prepared_action_authorities"):
+        errors.append("actor-set evidence does not match the policy's prepared actions")
 
     common = {
         "scm_ref": scm_ref,
         "scenario_id": scenario.get("scenario_id"),
-        "scenario_sha256": (
-            stage.scenario.scenario_sha256 if stage.scenario else None
-        ),
+        "scenario_sha256": (stage.scenario.scenario_sha256 if stage.scenario else None),
         "profile_stage_id": stage.stage_id,
         "profile_stage_sha256": stage.canonical_sha256,
         "execution_boundary": stage_value.get("execution_boundary"),
@@ -2243,19 +2393,24 @@ def validate_substantive_actor_set(
         "concurrency_policy_sha256": concurrency_policy.canonical_sha256,
     }
     if any(
-        item.receipt.receipt.get("run_authority")
-        != expected_run_authority
+        item.receipt.receipt.get("run_authority") != expected_run_authority
         for item in evidence
     ):
         errors.append(
             "every role receipt must bind the actor set's exact run authority"
         )
-    if actor_set.get("controller_observation") != {
-        "role_receipts_authored": False,
-        "local_queue_detected": False,
-        "throttle_detected": False,
-    }:
-        errors.append("actor set controller observation is not clean")
+    controller_observation = actor_set.get("controller_observation")
+    if isinstance(controller_observation, dict):
+        if controller_observation.get("role_receipts_authored") is not False:
+            errors.append("controller cannot author actor-set role receipts")
+        if controller_observation.get("local_queue_detected") is True:
+            load_generator_failure_reasons.append(
+                "controller observation detected a local queue"
+            )
+        if controller_observation.get("throttle_detected") is True:
+            load_generator_failure_reasons.append(
+                "controller observation detected throttling"
+            )
 
     try:
         release_observed_at = _parse_timestamp(
@@ -2268,17 +2423,17 @@ def validate_substantive_actor_set(
     if release_observed_at <= concurrency_policy.frozen_at:
         errors.append("concurrency policy must be frozen before release")
 
-    action_records: list[
-        tuple[ValidatedFrozenAction, ValidatedActionResult]
-    ] = []
+    action_records: list[tuple[ValidatedFrozenAction, ValidatedActionResult]] = []
     for item in evidence:
-        result_by_action = {
-            result.action_id: result for result in item.results
-        }
+        result_by_action = {result.action_id: result for result in item.results}
         for action in item.actions:
             result = result_by_action.get(action.action_id)
             if result is not None:
                 action_records.append((action, result))
+                if result.result_kind != "emitted":
+                    load_generator_failure_reasons.append(
+                        f"{action.action_id} was rejected before emission"
+                    )
     action_ids = [action.action_id for action, _ in action_records]
     result_ids = [result.action_result_id for _, result in action_records]
     if len(action_ids) != len(set(action_ids)):
@@ -2293,8 +2448,7 @@ def validate_substantive_actor_set(
     ):
         errors.append("every action must bind the one frozen release")
     if any(
-        action.action.get("concurrency_policy_id")
-        != concurrency_policy.policy_id
+        action.action.get("concurrency_policy_id") != concurrency_policy.policy_id
         or action.action.get("concurrency_policy_sha256")
         != concurrency_policy.canonical_sha256
         for action, _ in action_records
@@ -2304,20 +2458,14 @@ def validate_substantive_actor_set(
         (
             {
                 "action_id": action.action_id,
-                "prepared_action_sha256": action.action.get(
-                    "prepared_action_sha256"
-                ),
+                "prepared_action_sha256": action.action.get("prepared_action_sha256"),
             }
             for action, _ in action_records
         ),
         key=lambda item: item["action_id"],
     )
-    if actual_prepared_authorities != policy.get(
-        "prepared_action_authorities"
-    ):
-        errors.append(
-            "actor-set actions do not match the policy's prepared actions"
-        )
+    if actual_prepared_authorities != policy.get("prepared_action_authorities"):
+        errors.append("actor-set actions do not match the policy's prepared actions")
     if any(
         result.invoked_at <= concurrency_policy.frozen_at
         for _, result in action_records
@@ -2341,7 +2489,7 @@ def validate_substantive_actor_set(
         latest_close = max(item[1] for item in windows.values())
     else:
         earliest_open = latest_close = 0
-    for item in evidence:
+    for item in sorted(evidence, key=lambda value: value.plan.actor_slot):
         entry = actor_by_slot.get(item.plan.actor_slot)
         if entry is None:
             continue
@@ -2357,14 +2505,13 @@ def validate_substantive_actor_set(
                 )
         started = entry.get("started_offset_ns")
         completed = entry.get("completed_offset_ns")
-        if (
-            type(started) is not int
-            or type(completed) is not int
-            or started > earliest_open
-            or completed < latest_close
-        ):
-            errors.append(
-                "every declared actor must overlap every invocation window"
+        if type(started) is not int or type(completed) is not int:
+            errors.append("actor lifetime offsets must be exact integers")
+        elif started >= completed:
+            errors.append("actor lifetime offsets must be strictly ordered")
+        elif started > earliest_open or completed < latest_close:
+            load_generator_failure_reasons.append(
+                f"{item.plan.actor_slot} does not overlap every invocation window"
             )
 
     action_entries = actor_set.get("actions")
@@ -2378,9 +2525,7 @@ def validate_substantive_actor_set(
     if set(entry_by_action) != set(action_ids):
         errors.append("actor set action entries do not cover exact terminal actions")
 
-    offsets_by_kind: dict[str, list[int]] = {
-        kind: [] for kind in _ACTION_WRAPPER_PATHS
-    }
+    offsets_by_kind: dict[str, list[int]] = {kind: [] for kind in _ACTION_WRAPPER_PATHS}
     for action, result in action_records:
         entry = entry_by_action.get(action.action_id)
         if entry is None:
@@ -2408,12 +2553,7 @@ def validate_substantive_actor_set(
             if (
                 type(owner_started) is not int
                 or type(owner_completed) is not int
-                or not (
-                    owner_started
-                    <= invoked
-                    < terminal
-                    <= owner_completed
-                )
+                or not (owner_started <= invoked < terminal <= owner_completed)
             ):
                 errors.append(
                     f"action {action.action_id} must remain inside its "
@@ -2439,10 +2579,13 @@ def validate_substantive_actor_set(
                 label=kind,
             )
         except CapacityValidationError as error:
-            errors.append(str(error))
-            skews[kind] = (
-                max(offsets) - min(offsets) if offsets else 0
-            )
+            message = str(error)
+            if "invocation skew exceeds frozen bound" in message:
+                skews[kind] = max(offsets) - min(offsets) if offsets else 0
+                load_generator_failure_reasons.append(message)
+            else:
+                errors.append(message)
+                skews[kind] = 0
 
     topology = scenario.get("listing_topology")
     sellers = topology.get("sellers") if isinstance(topology, dict) else []
@@ -2563,8 +2706,7 @@ def validate_substantive_actor_set(
         if (
             len(publication) != 1
             or len(service) != 1
-            or service[0]["terminal_offset_ns"]
-            > publication[0]["invoked_offset_ns"]
+            or service[0]["terminal_offset_ns"] > publication[0]["invoked_offset_ns"]
         ):
             errors.append("seller service must start before exact publication")
         if len(publication) == 1 and any(
@@ -2573,7 +2715,11 @@ def validate_substantive_actor_set(
         ):
             errors.append("listing publication must finish before buyer request")
 
-    _raise_errors("actor set", errors)
+    _raise_errors("actor set observation", errors)
+    failure_reasons = tuple(
+        dict.fromkeys((*role_failure_reasons, *load_generator_failure_reasons))
+    )
+    load_generator_passed = not load_generator_failure_reasons
     return ValidatedActorSet(
         actor_set_id=actor_set["actor_set_id"],
         profile_stage_id=stage.stage_id,
@@ -2582,14 +2728,34 @@ def validate_substantive_actor_set(
         runtime_service_bindings=tuple(service_entries),
         runtime_listing_bindings=tuple(listing_entries),
         buyer_invocation_skew_ns=skews["buyer-request"],
-        publication_invocation_skew_ns=skews[
-            "seller-listing-publication"
-        ],
+        publication_invocation_skew_ns=skews["seller-listing-publication"],
+        load_generator_passed=load_generator_passed,
+        capacity_eligible=load_generator_passed and not role_failure_reasons,
+        failure_reasons=failure_reasons,
         concurrency_policy_sha256=concurrency_policy.canonical_sha256,
         canonical_sha256=canonical_sha256(actor_set),
         _canonical_bytes=canonical_json_bytes(actor_set),
         _validation_token=_VALIDATED_ACTOR_SET_TOKEN,
     )
+
+
+def validate_substantive_actor_set(
+    actor_set: dict[str, Any],
+    concurrency_policy: ValidatedConcurrencyPolicy,
+    role_evidence: Sequence[SubstantiveRoleEvidence],
+) -> ValidatedActorSet:
+    """Require a validated actor observation that is capacity-eligible."""
+    observation = validate_actor_set_observation(
+        actor_set,
+        concurrency_policy,
+        role_evidence,
+    )
+    if not observation.capacity_eligible:
+        raise CapacityValidationError(
+            "substantive actor set is not capacity-eligible:\n- "
+            + "\n- ".join(observation.failure_reasons)
+        )
+    return observation
 
 
 def validate_mock_capture(
@@ -2658,22 +2824,16 @@ def validate_mock_capture(
     if any(plan.profile_stage_id != stage.stage_id for plan in plans):
         errors.append("mock role plans must bind the standalone mock stage")
     buyer_receipts = sorted(
-        item.receipt.canonical_sha256
-        for item in evidence
-        if item.plan.role == "buyer"
+        item.receipt.canonical_sha256 for item in evidence if item.plan.role == "buyer"
     )
     seller_receipts = sorted(
-        item.receipt.canonical_sha256
-        for item in evidence
-        if item.plan.role == "seller"
+        item.receipt.canonical_sha256 for item in evidence if item.plan.role == "seller"
     )
     if sorted(capture.get("buyer_receipt_sha256s", ())) != buyer_receipts:
         errors.append("mock capture buyer receipts do not match")
     if sorted(capture.get("seller_receipt_sha256s", ())) != seller_receipts:
         errors.append("mock capture seller receipts do not match")
-    fingerprints = [
-        plan.plan["isolated_identity_fingerprint"] for plan in plans
-    ]
+    fingerprints = [plan.plan["isolated_identity_fingerprint"] for plan in plans]
     if len(fingerprints) != len(set(fingerprints)):
         errors.append("mock capture actor identities must be distinct")
     plan_ids = [plan.plan_id for plan in plans]
@@ -2683,19 +2843,13 @@ def validate_mock_capture(
     if len(receipt_ids) != len(set(receipt_ids)):
         errors.append("mock role-receipt IDs must be globally unique")
 
-    action_records: list[
-        tuple[ValidatedFrozenAction, ValidatedActionResult]
-    ] = []
+    action_records: list[tuple[ValidatedFrozenAction, ValidatedActionResult]] = []
     for item in evidence:
-        result_by_action = {
-            result.action_id: result for result in item.results
-        }
+        result_by_action = {result.action_id: result for result in item.results}
         for action in item.actions:
             result = result_by_action.get(action.action_id)
             if result is None:
-                errors.append(
-                    f"mock action {action.action_id} lacks a terminal result"
-                )
+                errors.append(f"mock action {action.action_id} lacks a terminal result")
                 continue
             action_records.append((action, result))
     action_ids = [action.action_id for action, _ in action_records]
@@ -2715,19 +2869,14 @@ def validate_mock_capture(
         "concurrency_policy_sha256": None,
     }
     if any(
-        item.receipt.receipt.get("run_authority")
-        != expected_mock_run_authority
+        item.receipt.receipt.get("run_authority") != expected_mock_run_authority
         for item in evidence
     ):
-        errors.append(
-            "every mock role receipt must bind the exact capture release"
-        )
+        errors.append("every mock role receipt must bind the exact capture release")
     oracle_pairs = {
         (
             action.action["expected_result"]["oracle_authority_id"],
-            action.action["expected_result"][
-                "independent_oracle_authority_sha256"
-            ],
+            action.action["expected_result"]["independent_oracle_authority_sha256"],
         )
         for action, _ in action_records
     }
@@ -2746,17 +2895,11 @@ def validate_mock_capture(
     if sorted(capture.get("action_sha256s", ())) != expected_action_sha256s:
         errors.append("mock capture frozen actions do not match")
     expected_prepared_sha256s = sorted(
-        action.action["prepared_action_sha256"]
-        for action, _ in action_records
+        action.action["prepared_action_sha256"] for action, _ in action_records
     )
-    if (
-        sorted(capture.get("prepared_action_sha256s", ()))
-        != expected_prepared_sha256s
-    ):
+    if sorted(capture.get("prepared_action_sha256s", ())) != expected_prepared_sha256s:
         errors.append("mock capture prepared actions do not match")
-    expected_results = sorted(
-        result.canonical_sha256 for _, result in action_records
-    )
+    expected_results = sorted(result.canonical_sha256 for _, result in action_records)
     if sorted(capture.get("action_result_sha256s", ())) != expected_results:
         errors.append("mock capture action results do not match")
     expected_payloads = sorted(
@@ -2859,25 +3002,19 @@ def validate_mock_capture(
             key = (selection["seller_slot"], selection["listing_slot"])
             expected_runtime = listing_map.get(key)
         if runtime != expected_runtime:
-            errors.append(
-                "mock action does not bind the exact service/listing map"
-            )
+            errors.append("mock action does not bind the exact service/listing map")
 
     expected_capabilities = sorted(
         (
             plan.actor_slot,
-            _binding_identity(
-                plan.plan["actor_invocation_capability_binding"]
-            ),
+            _binding_identity(plan.plan["actor_invocation_capability_binding"]),
         )
         for plan in plans
     )
-    if len(
-        {capability for _, capability in expected_capabilities}
-    ) != len(expected_capabilities):
-        errors.append(
-            "mock actors must have distinct invocation capabilities"
-        )
+    if len({capability for _, capability in expected_capabilities}) != len(
+        expected_capabilities
+    ):
+        errors.append("mock actors must have distinct invocation capabilities")
     actual_capabilities = sorted(
         (
             item.get("actor_slot"),
@@ -2889,17 +3026,13 @@ def validate_mock_capture(
     if actual_capabilities != expected_capabilities:
         errors.append("mock capture invocation capabilities do not match actors")
     if (
-        capture.get("agent_ownership_proof_scope")
-        != "portable-binding-only"
+        capture.get("agent_ownership_proof_scope") != "portable-binding-only"
         or capture.get("private_actor_ownership_verified") is not False
     ):
-        errors.append(
-            "public mock capture cannot claim private process authentication"
-        )
+        errors.append("public mock capture cannot claim private process authentication")
     buyers = [item for item in evidence if item.plan.role == "buyer"]
     if any(
-        item.receipt.receipt["role_evidence"].get("guest_verification")
-        is not None
+        item.receipt.receipt["role_evidence"].get("guest_verification") is not None
         for item in buyers
     ):
         errors.append("mock buyer cannot claim guest or CUDA success")
@@ -2914,9 +3047,7 @@ def validate_mock_capture(
 
     by_kind = {
         kind: [
-            result
-            for action, result in action_records
-            if action.action_kind == kind
+            result for action, result in action_records if action.action_kind == kind
         ]
         for kind in _ACTION_WRAPPER_PATHS
     }
@@ -2940,13 +3071,11 @@ def validate_mock_capture(
     except CapacityValidationError as error:
         errors.append(str(error))
     else:
-        terminal_times = [
-            result.terminal_at for _, result in action_records
-        ] + [item.receipt.completed_at for item in evidence]
+        terminal_times = [result.terminal_at for _, result in action_records] + [
+            item.receipt.completed_at for item in evidence
+        ]
         if terminal_times and completed_at < max(terminal_times):
-            errors.append(
-                "mock capture completion must follow every action and role"
-            )
+            errors.append("mock capture completion must follow every action and role")
 
     _raise_errors("mock capture", errors)
     return ValidatedMockCapture(
@@ -3016,9 +3145,7 @@ def _exclusive_owner_only_write(path: Path, content: bytes, *, label: str) -> No
         os.close(descriptor)
     directory_descriptor = os.open(
         parent,
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_CLOEXEC", 0),
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
     )
     try:
         os.fsync(directory_descriptor)
@@ -3035,9 +3162,7 @@ def _atomic_install_owner_only(
     """Install complete bytes with no replace and an fsynced directory entry."""
     parent = _owner_only_directory(path.parent, label=f"{label} parent")
     target = parent / path.name
-    temporary = parent / (
-        f".{path.name}.tmp-{os.getpid()}-{os.urandom(8).hex()}"
-    )
+    temporary = parent / (f".{path.name}.tmp-{os.getpid()}-{os.urandom(8).hex()}")
     try:
         _exclusive_owner_only_write(
             temporary,
@@ -3047,9 +3172,7 @@ def _atomic_install_owner_only(
         os.link(temporary, target, follow_symlinks=False)
         directory_descriptor = os.open(
             parent,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_CLOEXEC", 0),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
         )
         try:
             os.fsync(directory_descriptor)
@@ -3066,9 +3189,7 @@ def _read_owner_only_file(path: Path, *, label: str) -> bytes:
     try:
         descriptor = os.open(
             path,
-            os.O_RDONLY
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
     except OSError as error:
         raise CapacityValidationError(f"{label} is unavailable") from error
@@ -3178,9 +3299,7 @@ def _validate_capture_record(
         "release_id": action.release_id,
         "action_id": action.action_id,
         "action_sha256": action.canonical_sha256,
-        "prepared_action_sha256": action.action[
-            "prepared_action_sha256"
-        ],
+        "prepared_action_sha256": action.action["prepared_action_sha256"],
         "actor_slot": action.actor_slot,
         "payload_sha256": action.action["payload_sha256"],
         "payload": dict(payload),
@@ -3380,9 +3499,9 @@ def action_capture(
             "payload_sha256"
         ):
             checks["payload_unchanged"] = False
-        if observed_payload_value.get(
+        if observed_payload_value.get("logical_selection") != frozen_action_value.get(
             "logical_selection"
-        ) != frozen_action_value.get("logical_selection"):
+        ):
             checks["selection_unchanged"] = False
     if expected_action_kind != action.action_kind:
         checks["selection_unchanged"] = False
@@ -3428,7 +3547,9 @@ def action_capture(
     release_claim_count = 1
     recovered = False
     if type(attempt) is not int or attempt < 1:
-        raise CapacityValidationError("action capture attempt must be a positive integer")
+        raise CapacityValidationError(
+            "action capture attempt must be a positive integer"
+        )
     if attempt > 1:
         checks = dict(all_checks)
         failure_code = "unauthorized-retry"
@@ -3444,11 +3565,7 @@ def action_capture(
             ("runtime_binding_unchanged", "runtime-binding-changed"),
         )
         failure_code = next(
-            (
-                code
-                for check, code in failure_precedence
-                if checks[check] is False
-            ),
+            (code for check, code in failure_precedence if checks[check] is False),
             None,
         )
 
@@ -3482,9 +3599,7 @@ def action_capture(
         "release_id": action.release_id,
         "action_id": action.action_id,
         "action_sha256": action.canonical_sha256,
-        "prepared_action_sha256": action.action[
-            "prepared_action_sha256"
-        ],
+        "prepared_action_sha256": action.action["prepared_action_sha256"],
         "actor_slot": action.actor_slot,
         "payload_sha256": action.action["payload_sha256"],
         "payload": payload_value,

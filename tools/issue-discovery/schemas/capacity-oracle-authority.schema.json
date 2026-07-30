@@ -38,12 +38,16 @@
     "execution_boundary": {
       "enum": [
         "mock",
+        "real-reference",
         "real-qualification",
         "real-measured"
       ]
     },
     "actor_trigger": {
-      "const": "agent-triggered"
+      "enum": [
+        "controller-driven",
+        "agent-triggered"
+      ]
     },
     "oracle_kind": {
       "enum": [
@@ -103,6 +107,32 @@
           },
           "observer_plan_sha256": {
             "$ref": "#/$defs/digest"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "execution_boundary": {
+            "const": "real-reference"
+          }
+        },
+        "required": [
+          "execution_boundary"
+        ]
+      },
+      "then": {
+        "properties": {
+          "actor_trigger": {
+            "const": "controller-driven"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "actor_trigger": {
+            "const": "agent-triggered"
           }
         }
       }

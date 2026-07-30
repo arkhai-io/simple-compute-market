@@ -130,10 +130,10 @@
           "const": false
         },
         "local_queue_detected": {
-          "const": false
+          "type": "boolean"
         },
         "throttle_detected": {
-          "const": false
+          "type": "boolean"
         }
       }
     }
@@ -248,12 +248,10 @@
           "$ref": "#/$defs/digest"
         },
         "started_offset_ns": {
-          "type": "integer",
-          "maximum": 0
+          "type": "integer"
         },
         "completed_offset_ns": {
-          "type": "integer",
-          "minimum": 0
+          "type": "integer"
         }
       }
     },
