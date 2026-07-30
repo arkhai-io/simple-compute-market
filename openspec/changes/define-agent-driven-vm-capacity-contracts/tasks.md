@@ -1,0 +1,72 @@
+## 1. Freeze the public v2 contract surface
+
+- [ ] 1.1 Record the current schema-v1 scenario/finding fixtures and validator behavior in focused compatibility tests so historical behavior remains attributable to its pinned ref rather than silently reinterpreted.
+- [ ] 1.2 Replace `tools/issue-discovery/schemas/capacity-scenario.schema.json` with the closed, mode-neutral schema-v2 VM contract separating listing topology, independently assignable GPUs, actor/load counts, request choices, outcomes, and retry authority while rejecting evidence/admission fields.
+- [ ] 1.3 Add closed schemas under `tools/issue-discovery/schemas/` for profile-stage bindings, capacity role plans, substantive role receipts, frozen actions/results, and independent capacity results; define buyer, seller, host-operator, and observer variants plus exact `execution_boundary`/`actor_trigger` enums without secret-bearing or executor-local fields.
+- [ ] 1.4 Replace `tools/issue-discovery/schemas/capacity-finding.schema.json` with finding v2, including immutable `finding_id`, exact scenario/profile/result hashes, the complete `observed` working/upstream/inbound/reconciliation authority, structured durable correlation, exact `{path, sha256}` evidence objects, observed outcome, cleanup-gated filing readiness, and no producer authority over the stable fingerprint.
+- [ ] 1.5 Add schema fixtures and negative tests for unknown keys, missing authority, unresolved placeholders, private identity fields, malformed digests/timestamps, duplicate identities, retry attempts, and cross-variant fields.
+
+## 2. Implement pinned scenarios and profiles
+
+- [ ] 2.1 Refactor `tools/issue-discovery/src/issue_discovery/capacity.py` so in-memory semantic validation is distinct from a pinned Git-backed scenario resolver that rejects absolute/escaping paths, symlinks, non-regular or untracked entries, hidden worktree drift, wrong refs, schema failures, and digest mismatch.
+- [ ] 2.2 Replace the current v1/G2 files under `tools/issue-discovery/config/capacity/` with the exact mode-neutral envelope: every integer B1…B8/S1/G1 shape, serialized reuse A/B, B2/S2/G1, and B4/S2/S3/S4/G1; delete unqualified G2 files rather than retaining them as current authority.
+- [ ] 2.3 Add a versioned profile-stage registry that reuses pinned mode-neutral shapes while encoding exact `execution_boundary`/`actor_trigger`, exact `observer-probe` (`readiness`/`none`) and `b1-s1-g1-reference` (`real-reference`/`controller-driven`) identities with a non-counted controller distinct from O1, the five-row qualification matrix, the exact dynamic measured order, optional B3/B5/B6/B7/S3 refinement stages, the observer's scenario-null binding, and the pre-Q0 freeze.
+- [ ] 2.4 Enforce exact qualification and measured order/O/B/S/H/L/R/G counts, unordered success/refusal cardinalities, deterministic integer bisection, one-dimension below/at/above retention, B4 seller admission, and seller-frontier receipt fencing; reject missing/extra/duplicate stages, predesignated winning buyers, post-Q0 drift, or a G2 row.
+- [ ] 2.5 Correct semantic validation so expected simultaneous success is bounded by independently assignable GPUs rather than listing count, seller distribution matches distinct logical sellers/listings, every request targets one logical selection, and the portable chain binds a one-to-one private runtime-listing map through typed `runtime_binding` without exposing live IDs.
+- [ ] 2.6 Update the scenario CLI and runner entry points to require or resolve an exact SCM ref and known relative path for authority-bearing validation/hash output while retaining explicitly named in-memory helpers for tests.
+- [ ] 2.7 Extend `tools/issue-discovery/tests/test_capacity.py`, `test_cli.py`, and temporary-Git fixtures to cover the exact UTF-8/sorted/compact/one-newline canonical algorithm, non-finite rejection, tracked object modes, symlinks, traversal, hidden drift, ref mismatch, mode-neutral reuse, exact G1 profiles, measured/qualification separation, seller topology, frozen refinement, and G2 rejection.
+
+## 3. Model substantive roles and agent-triggered actions
+
+- [ ] 3.1 Implement public role-plan and role-receipt validators/canonical digest helpers in `capacity.py`, including exact SCM/instruction authority, non-secret isolated identity, role-specific preparation, ordered lifecycle timestamps, and release/observation-barrier liveness.
+- [ ] 3.2 Implement the closed `{method, domain, value}` privacy-preserving binding type and frozen-action/one-shot result validation that binds scenario, actor, logical seller/listing selection, typed private runtime binding, request bytes, pinned wrapper, release, attempt one, expected result schema/oracle authority, and rejects raw private-identifier hashes, wrong domains, changed mapping/bytes, duplicate release, wrapper substitution, early exit, or retry; make the terminal result bind the action digest and compute its own digest afterward.
+- [ ] 3.3 Add CLI/runner commands that validate and canonical-hash each portable role/action artifact without consuming private credentials or executor-local paths.
+- [ ] 3.4 Add fixtures proving substantive buyer, seller, host-operator, and observer paths and negative tests for readiness-only receipts, controller-synthesized evidence, duplicate identities, premature exit, malformed timestamps, changed refs/instructions/actions/mappings, unauthorized retries, and leaked personal host/GPU identity.
+- [ ] 3.5 Add aggregate actor-set validation for exact declared cardinality, overlapping process lifetimes, bounded request/publication skew, and no controller-side queue/throttle; prove serial B2/B4/B8 execution cannot satisfy a concurrent stage.
+- [ ] 3.6 Require buyer receipts to prove install/build, wallet/SSH preparation, endpoint/balance/listing checks, exact request ownership, and successful guest SSH/resume plus the pinned compiled CUDA vector-add marker/checksum correlated to `fulfillment_id`; require seller publication ownership and host-operator G1/baseline/KVM/Ansible/cleanup ownership using only typed outcomes and public digests.
+- [ ] 3.7 Add the pinned public CUDA wrapper/source and deterministic tests, plus a capture-only composition proving seller and buyer agent-owned publication/purchase against a mock boundary while explicitly denying the real scenario oracle.
+
+## 4. Implement independent VM outcome and reuse oracles
+
+- [ ] 4.1 Implement exact `vm-succeeded`, `capacity-refused`, and `fault` variants; define the closed normalized public `deal_reference`, keep commercial identity storefront-owned, and validate success joins through reservation, fulfillment, Settlement Resource/Record, provisioned output, pinned GPU exercise, and teardown while keeping allocation/job IDs optional.
+- [ ] 4.2 Implement `capacity-refused` only from independent capture of the final escrow-scoped atomic `reservation: null` response across eligible sites, null durable capacity/fulfillment/output IDs, terminal commercial/failure-policy compensation, and zero active residue; prove `capacity_hold_unavailable` alone is nonterminal and classify generic, uncompensated, policy, unknown, or timeout outcomes as faults.
+- [ ] 4.3 Reject more simultaneous whole-GPU VM successes than independently assignable GPUs regardless of actor-reported success or expected counts.
+- [ ] 4.4 Implement serialized-reuse validation requiring reuse A terminal teardown and intermediate baseline equivalence before B, distinct durable identifiers for B, and final equivalence.
+- [ ] 4.5 Implement exact orthogonal execution-boundary/actor-trigger validation and the exact request-processing, simultaneous-fulfillment, provisioning queue/Ansible-service, correctness, and load-generator frontier definitions.
+- [ ] 4.6 Implement B1/B2/B4/B8 buyer search, frozen one-dimension below/at/above refinement, buyer-frontier receipt fencing before seller scaling, and explicit lower-bound results when the frozen envelope or generator ends first.
+- [ ] 4.7 Add positive and negative oracle tests for success correlation, final per-site atomic refusal with zero site errors/skips, aggregate null after swallowed site errors, nonterminal soft-hold events, uncompensated/fault outcomes, wrong logical/runtime binding, missing durable identity, optional diagnostics, double allocation, reuse ordering, baseline mismatch, exact refinement order, seller fencing, lower bounds, and raw private-identifier digest rejection.
+- [ ] 4.8 Add per-stage cleanup validation partitioning exact reversible-state restoration from allowlisted reconciled append-only/accounting deltas, requiring zero active residue/locks and fencing the next stage on any omission, unexplained value, or mismatch.
+
+## 5. Bind findings to durable VM fulfillment
+
+- [ ] 5.1 Implement immutable `finding_id`; exact classifications; expected `capacity-refused` exclusion; SCM/infra branch mappings; nullable inbound merge ref; exact evidence path/hash verification; sensitive-value rejection; and normalized stable fingerprinting that excludes profile/result/occurrence IDs, refs, evidence hashes, and concrete lifecycle correlations.
+- [ ] 5.2 Update finding ingestion, run manifests, lifecycle records, packet models, and rendered issue bodies to carry exact scenario/profile/result IDs and SHA-256 values, the complete `observed` working/upstream/reconciliation authority, structured durable correlation, and per-occurrence evidence authority while keeping occurrence metadata out of defect identity.
+- [ ] 5.3 Replace the public finding example with a fully sanitized v2 fixture and add fixtures for public-product, public-harness, private-orchestration, and environment-provider classifications at their valid destinations.
+- [ ] 5.4 Extend capacity/issue/runner/CLI tests for reproducible SCM-owned fingerprints across new results/refs, same-defect/new-`finding_id` occurrences, destination/scenario separation, exact branch mapping/ancestry, expected-refusal exclusion, cleanup-gated `ready_to_file`, evidence mutation, unsafe paths, private identifiers, redaction, and immutable ingest collisions.
+- [ ] 5.5 Keep credentialed issue and PR mutation outside this change; expose only the validated finding and proposal/action inputs consumed by `guard-issue-fix-publication`.
+
+## 6. Promote permanent behavior and operational truth
+
+- [ ] 6.1 Create `openspec/specs/capacity-testing/spec.md` with the verified normative contract and `openspec/specs/capacity-testing/architecture.md` with the scenario/topology, actor/action, oracle, evidence, public/private ownership, and compatibility models.
+- [ ] 6.2 Synchronize exact execution-boundary/actor-trigger requirements into `openspec/specs/test-compatibility/spec.md` and add the durable rationale to its architecture.
+- [ ] 6.3 Preserve the executor seam by proving local Codex and future cloud/Tekton execution consume the same repository-relative commands and portable inputs/results while credentials, cancellation, native evidence, and cleanup stay private.
+- [ ] 6.4 Update `docs/development/ARCHITECTURE.md#testing-strategy` with present-tense public/private test authority, evidence vocabulary, and agent-triggered boundary, and add `capacity-testing` to `openspec/specs/README.md`.
+- [ ] 6.5 Update `docs/development/ISSUE_DISCOVERY.md` and `tools/issue-discovery/README.md` only after the implementation passes, using the exact v2 commands, profiles, compatibility limits, and publication boundary.
+- [ ] 6.6 Complete the design-promotion record with final stable headings and verify production code/docs do not depend on or cite `openspec/changes/define-agent-driven-vm-capacity-contracts`.
+
+## 7. Validate, synchronize, and archive
+
+- [ ] 7.1 Run focused scenario, role/action, oracle, finding, CLI, runner, and issue tests, then the complete `tools/issue-discovery` package suite under the supported Python environment.
+- [ ] 7.2 Validate every tracked scenario/profile and reproduce every canonical digest; run a capture-only mock artifact chain with an empty live-resource ledger.
+- [ ] 7.3 Run strict OpenSpec validation for this change and disclose unrelated inherited global validation failures rather than editing them in this scope.
+- [ ] 7.4 Run staged whitespace, secret/credential signature, artifact-path, symlink/mode, and owner-only personal-host denylist scans; inspect exact staged paths and the final diff.
+- [ ] 7.5 Synchronize the verified delta into permanent specifications, mark only actually completed tasks, archive the change, rerun strict validation, and commit/push each bounded implementation outcome through the guarded one-ref procedure.
+
+## 8. Traditional commit checkpoints
+
+- [ ] 8.1 Commit scenario/profile/schema behavior and focused tests as `fix(issue-discovery): align VM capacity scenarios with dev`.
+- [ ] 8.2 Commit substantive roles, logical/runtime binding, actor-owned wrappers, pinned CUDA workload, receipt aggregation, and capture-only mock composition as `feat(issue-discovery): model substantive capacity roles`.
+- [ ] 8.3 Commit durable success/refusal/fault oracles, independent frontiers, baseline-equivalence cleanup, and focused tests as `feat(issue-discovery): evaluate VM capacity outcomes`.
+- [ ] 8.4 Commit finding v2, stable/occurrence identity separation, ingestion/rendering, redaction, and focused tests as `fix(issue-discovery): bind findings to durable VM fulfillment`.
+- [ ] 8.5 Commit permanent specs/architecture, operational docs, completed promotion record, archived change, and complete-suite evidence as `docs(issue-discovery): promote VM capacity testing contracts`.
+- [ ] 8.6 For every checkpoint, stage only exact reviewed paths; use the repository-traditional body sections in this order: `Plain-language summary`, `Architectural summary`, `Change groups`, `Boundary decisions and deferrals`, `Issue tracking` when applicable, `Validation`, and `Result`. Run staged whitespace, secret, artifact-path, symlink/mode, and owner-only host scans plus the tests proportional to that commit. Then guarded-push only `feat/issue-discovery-harness`, persist the push receipt, and prove remote `dev` and private-infra `main`/scratch refs did not move.
