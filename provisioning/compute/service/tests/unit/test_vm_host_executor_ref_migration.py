@@ -396,3 +396,45 @@ class TestTableRebuildPreservesIndexesAndConstraints:
         with pytest.raises(ValueError):
             _drop_columns_via_table_rebuild(engine, "only_one_column", ["junk"])
 
+    def test_rejects_an_unsafe_table_name(self):
+        from compute_provisioning_service.db.migrations import (
+            _drop_columns_via_table_rebuild,
+        )
+
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        with pytest.raises(ValueError, match="Not a safe SQL identifier"):
+            _drop_columns_via_table_rebuild(
+                engine, "capacity_reservations; DROP TABLE api_keys;--", ["vm_host"],
+            )
+
+    def test_rejects_an_unsafe_column_name(self):
+        from compute_provisioning_service.db.migrations import (
+            _drop_columns_via_table_rebuild,
+        )
+
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        with pytest.raises(ValueError, match="Not a safe SQL identifier"):
+            _drop_columns_via_table_rebuild(
+                engine, "capacity_reservations", ["vm_host; DROP TABLE api_keys;--"],
+            )
+
+    def test_validator_accepts_ordinary_identifiers_and_rejects_others(self):
+        from compute_provisioning_service.db.migrations import (
+            _validate_sql_identifier,
+        )
+
+        assert _validate_sql_identifier("capacity_reservations") == "capacity_reservations"
+        assert _validate_sql_identifier("_leading_underscore") == "_leading_underscore"
+        for unsafe in (
+            "table; DROP TABLE x;--",
+            "table name",
+            "table-name",
+            "table.name",
+            "1table",
+            "",
+            "table'name",
+            'table"name',
+        ):
+            with pytest.raises(ValueError):
+                _validate_sql_identifier(unsafe)
+

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -136,6 +137,22 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
     }
 
 
+_SQLITE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_sql_identifier(name: str) -> str:
+    """Reject anything that isn't a bare SQLite identifier before it is
+    interpolated into raw SQL. ``table_name``/``columns_to_drop`` are
+    ordinary Python arguments, not user input, on every caller this
+    helper has today — this validates them anyway so the helper stays
+    provably safe to call generically rather than safe only by every
+    caller happening to pass a literal.
+    """
+    if not _SQLITE_IDENTIFIER.match(name):
+        raise ValueError(f"Not a safe SQL identifier: {name!r}")
+    return name
+
+
 def _drop_columns_via_table_rebuild(
     engine: Engine, table_name: str, columns_to_drop: Sequence[str],
 ) -> None:
@@ -152,7 +169,10 @@ def _drop_columns_via_table_rebuild(
     columns rather than needing to be kept in sync by hand; preserves
     every other column's type, nullability, default, and primary-key
     flag, and recreates every named index that doesn't reference a
-    dropped column.
+    dropped column. Every identifier this function interpolates into raw
+    SQL — the table name, the columns to drop, and every column name
+    read back from ``PRAGMA table_info`` — is validated against a strict
+    ``[A-Za-z_][A-Za-z0-9_]*`` rule first.
 
     Follows SQLite's documented offline-schema-change procedure for a
     table other rows may reference by foreign key: the whole rebuild runs
@@ -172,6 +192,10 @@ def _drop_columns_via_table_rebuild(
     silently dropping them unnoticed. Extend it deliberately if a future
     caller needs that.
     """
+    _validate_sql_identifier(table_name)
+    for column in columns_to_drop:
+        _validate_sql_identifier(column)
+
     present = {
         column for column in columns_to_drop
         if _column_exists(engine, table_name, column)
@@ -223,7 +247,7 @@ def _drop_columns_via_table_rebuild(
                     raise ValueError(
                         f"Refusing to drop every column of {table_name!r}"
                     )
-                keep_names = [c[1] for c in keep]
+                keep_names = [_validate_sql_identifier(c[1]) for c in keep]
 
                 # Captured before the table is dropped -- once the
                 # rebuilt table is renamed into place, a query for

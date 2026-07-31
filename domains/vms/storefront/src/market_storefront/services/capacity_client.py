@@ -53,21 +53,12 @@ from market_site import dict_resource_satisfies_claim
 logger = logging.getLogger(__name__)
 
 VM_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units", "gpu_count")
-"""This domain's legacy single-quantity claim aliases -- "gpu_count" is
-VM's alias for the generic "units" claim key, matching
+"""Must match the VM capacity authority's legacy unit-claim aliases:
 ``provisioning/compute/service/container.py``'s
-``CapacityLedgerService(unit_claim_keys=("units", "gpu_count"))``.
-
-Necessarily duplicated, not imported from a shared module: the
-provisioning service is domain-neutral (also serves bare-metal) and
-deliberately does not depend on any VM-domain package for this value —
-see that composition site's own comment. The storefront and the
-provisioning service are separate deployables communicating only over
-HTTP; there is no package both could import this from without either
-making the provisioning service VM-aware or introducing a dependency
-neither side otherwise needs. This is the one place the storefront
-itself needs the value, named so it isn't duplicated a second time
-within this codebase.
+``CapacityLedgerService(unit_claim_keys=("units", "gpu_count"))``. The
+provisioning service is domain-neutral and cannot import this value from
+a VM-domain package, so it is necessarily duplicated at this composition
+site.
 """
 
 SQLiteClientFactory = Callable[[], Any]

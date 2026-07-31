@@ -5,14 +5,10 @@ existing ones. This module tracks completed migrations in a
 ``schema_migrations`` table so schema evolution can be applied exactly
 once, in order, idempotently, across restarts.
 
-Unlike ``compute_provisioning_service``'s migration system, this service
-has no standalone migration CLI and no Kubernetes init container to run
-one in — it has no Helm chart at all today. Migrations run in-process at
-startup, before the app is ready to serve, via ``run_migrations`` in
-``db/database.py``. ``check_schema_version`` is provided for the same
-fail-fast use compute_provisioning_service makes of it, for when this
-service gains a deployment topology that can run migrations as a
-separate step first.
+Migrations run in-process at startup, before the app is ready to serve,
+via ``run_migrations`` in ``db/database.py``. ``check_schema_version``
+raises if the database is behind the migrations this module defines;
+nothing in this service's own startup path calls it today.
 """
 
 from __future__ import annotations
@@ -59,10 +55,9 @@ def check_schema_version(engine: Engine) -> None:
     """Raise :class:`SchemaDriftError` if the DB schema is behind the
     last known migration -- meaning migrations were never run, or the
     code shipped in this image is ahead of what's been applied to this
-    database. Not currently called by this service's own startup (which
-    applies migrations in-process instead, see this module's docstring),
-    but kept ready for when it gains a deployment topology that runs
-    migrations as a separate step first.
+    database. This service's own startup applies migrations in-process
+    instead of calling this function (see ``db/database.py``'s
+    ``run_migrations``).
     """
     expected = _MIGRATIONS[-1].id if _MIGRATIONS else None
     if expected is None:
