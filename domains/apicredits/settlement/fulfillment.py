@@ -16,10 +16,9 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
-from domains.apicredits.settlement.issuance import (
+from domains.apicredits.settlement.credits_client import (
+    CreditsServiceClient,
     CreditsServiceError,
-    rollback_issuance,
-    submit_credit_issuance,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,6 +104,7 @@ async def fulfill_api_credits_obligation(
         else None
     )
     resource_id = offer_resource.get("resource_id")
+    credits_client = CreditsServiceClient(service_url, admin_key)
 
     async def _fail(reason: str, message: str) -> dict[str, Any]:
         if apply_failure_policy is not None:
@@ -137,9 +137,7 @@ async def fulfill_api_credits_obligation(
         }
 
     try:
-        issuance = await submit_credit_issuance(
-            service_url=service_url,
-            admin_key=admin_key,
+        issuance = await credits_client.submit_credit_issuance(
             escrow_uid=escrow_uid,
             quantity=quantity,
             key_mode=key_mode,
@@ -178,9 +176,7 @@ async def fulfill_api_credits_obligation(
             payload=payload,
         )
     except Exception as error:
-        rollback = await rollback_issuance(
-            service_url=service_url,
-            admin_key=admin_key,
+        rollback = await credits_client.rollback_issuance(
             escrow_uid=escrow_uid,
             issuance=issuance,
             key_mode=key_mode,

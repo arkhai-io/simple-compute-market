@@ -173,10 +173,11 @@ def test_most_available_placement_gets_the_kit_site_exact_claim_matcher():
     """Selecting "most_available" must not rank against the aggregator's
     own coarse default -- this domain's backing site is kit/site, which
     owns the only full claim-parsing and feasibility semantics, so
-    composition must inject its exact matcher instead."""
+    composition must inject its exact matcher instead, bound with this
+    domain's legacy unit-claim-key vocabulary."""
     import functools
 
-    from market_site.ledger import dict_resource_satisfies_claim
+    from market_site import dict_resource_satisfies_claim
 
     with patch(
         "market_storefront.utils.config.settings",
@@ -185,7 +186,19 @@ def test_most_available_placement_gets_the_kit_site_exact_claim_matcher():
         built = cc.build_capacity_client(lambda: None)
     assert isinstance(built._placement, functools.partial)
     assert built._placement.func is cc.most_available
-    assert built._placement.keywords["claim_matcher"] is dict_resource_satisfies_claim
+    injected_matcher = built._placement.keywords["claim_matcher"]
+    assert isinstance(injected_matcher, functools.partial)
+    assert injected_matcher.func is dict_resource_satisfies_claim
+    assert injected_matcher.keywords["unit_claim_keys"] == cc.VM_UNIT_CLAIM_KEYS
+    assert cc.VM_UNIT_CLAIM_KEYS == ("units", "gpu_count")
+    # Behavioral, not just structural: the bound matcher must actually
+    # apply VM's legacy gpu_count alias, not the module default.
+    row = {
+        "pool_id": "p", "resource_id": "r", "available_units": 3,
+        "available": {"gpu_count": 3},
+    }
+    assert injected_matcher(row, {"gpu_count": 2}) is True
+    assert injected_matcher(row, {"gpu_count": 5}) is False
 
 
 def test_fill_first_placement_is_not_wrapped_with_a_claim_matcher():
@@ -198,6 +211,75 @@ def test_fill_first_placement_is_not_wrapped_with_a_claim_matcher():
     ):
         built = cc.build_capacity_client(lambda: None)
     assert built._placement is cc.fill_first
+
+
+@pytest.mark.asyncio
+async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_aggregate_client():
+    """Behavioral, not structural: proves the composed AggregateCapacityClient
+    actually ranks a top-level {"gpu_count": N} claim -- VM's legacy,
+    non-dimensional claim shape -- correctly through the full snapshot ->
+    placement -> probe path, using real FakeSite-backed HTTP transports,
+    not by inspecting functools.partial keywords in isolation."""
+    small_site = FakeSite()
+    small_site.add_resource("small-res", 2, attributes={"gpu_model": "H200"})
+    big_site = FakeSite()
+    big_site.add_resource("big-res", 10, attributes={"gpu_model": "H200"})
+
+    with patch(
+        "market_storefront.utils.config.settings",
+        _settings(
+            placement="most_available",
+            sites={"small": "http://small:8081", "big": "http://big:8081"},
+        ),
+    ):
+        built = cc.build_capacity_client(lambda: None)
+    # Swap in the fake transports for each named site without going
+    # through real HTTP.
+    built._sites["small"] = cc.RemoteCapacityClient(
+        "http://small:8081", "test-key", transport=small_site.transport(),
+    )
+    built._sites["big"] = cc.RemoteCapacityClient(
+        "http://big:8081", "test-key", transport=big_site.transport(),
+    )
+
+    match = await built.probe(claim={"gpu_count": 2})
+
+    assert match is not None
+    assert match["resource_id"] == "big-res"
+
+
+@pytest.mark.asyncio
+async def test_most_available_excludes_a_resource_type_mismatch_through_the_real_aggregate_client():
+    """Behavioral counterpart to kit/site's own low-level resource_type
+    match/mismatch coverage: a claim naming a resource_type no available
+    resource actually has must not select any site, even one reporting
+    abundant available_units."""
+    wrong_type_site = FakeSite()
+    wrong_type_site.add_resource("cpu-only-res", 20, attributes={"gpu_model": "H200"})
+    right_type_site = FakeSite()
+    right_type_site.add_resource("gpu-res", 1, attributes={"gpu_model": "H200"})
+
+    with patch(
+        "market_storefront.utils.config.settings",
+        _settings(
+            placement="most_available",
+            sites={"wrong": "http://wrong:8081", "right": "http://right:8081"},
+        ),
+    ):
+        built = cc.build_capacity_client(lambda: None)
+    built._sites["wrong"] = cc.RemoteCapacityClient(
+        "http://wrong:8081", "test-key", transport=wrong_type_site.transport(),
+    )
+    built._sites["right"] = cc.RemoteCapacityClient(
+        "http://right:8081", "test-key", transport=right_type_site.transport(),
+    )
+
+    match = await built.probe(claim={"resource_type": "compute.cpu", "gpu_count": 1})
+
+    # FakeSite always reports "compute.gpu" (see its snapshot handler) --
+    # neither site actually satisfies a compute.cpu claim, so this proves
+    # the exact matcher's resource_type check excludes both from ranking.
+    assert match is None
 
 
 @pytest.mark.asyncio

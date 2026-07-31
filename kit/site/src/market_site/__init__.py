@@ -24,6 +24,7 @@ from .db import (  # noqa: F401
 from .ledger import (  # noqa: F401
     CapacityConflictError,
     CapacityLedgerService,
+    dict_resource_satisfies_claim,
     parse_utc,
     ResourceFeasibilityView,
     resource_feasibility_view,

@@ -63,35 +63,35 @@ def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict
     """
     if not order_dict:
         raise ValueError("Cannot build a capacity claim without a settlement order.")
-    required_attributes: dict[str, Any] = {}
+    capacity_claim: dict[str, Any] = {}
     dimensions: dict[str, Any] = {}
-    required_attributes["resource_type"] = _VM_RESOURCE_TYPE
+    capacity_claim["resource_type"] = _VM_RESOURCE_TYPE
     compute_resource = extract_compute_from_order(order_dict)
     if hasattr(compute_resource, "model_dump"):
         compute_resource = compute_resource.model_dump()
     if isinstance(compute_resource, dict):
         for key in _REQUIRED_COMPUTE_KEYS:
             if compute_resource.get(key) is not None:
-                required_attributes[key] = compute_resource[key]
+                capacity_claim[key] = compute_resource[key]
         for key in _DIMENSION_COMPUTE_KEYS:
             if compute_resource.get(key) is not None:
                 dimensions[key] = compute_resource[key]
     for identity_key in ("pool_id", "resource_id"):
-        if identity_key in required_attributes:
-            required_attributes[identity_key] = Listing.normalize_capacity_identifier(
-                required_attributes[identity_key], field_name=identity_key
+        if identity_key in capacity_claim:
+            capacity_claim[identity_key] = Listing.normalize_capacity_identifier(
+                capacity_claim[identity_key], field_name=identity_key
             )
-    if required_attributes.get("resource_id") is not None:
-        required_attributes.pop("pool_id", None)
-    if not required_attributes.get("pool_id") and not required_attributes.get("resource_id"):
+    if capacity_claim.get("resource_id") is not None:
+        capacity_claim.pop("pool_id", None)
+    if not capacity_claim.get("pool_id") and not capacity_claim.get("resource_id"):
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         raise ValueError(
             f"Cannot build a capacity claim for order {order_id!r}: neither "
             "pool_id nor resource_id is present on its offer_resource."
         )
     if dimensions:
-        required_attributes["dimensions"] = dimensions
-    return required_attributes
+        capacity_claim["dimensions"] = dimensions
+    return capacity_claim
 
 
 async def build_provisioning_job_spec(
@@ -103,8 +103,8 @@ async def build_provisioning_job_spec(
     vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
     """Probe the capacity ledger (read-only) and build a VM job spec."""
-    required_attributes = compute_capacity_claim_from_order(order_dict)
-    selected = await capacity.probe(claim=required_attributes)
+    capacity_claim = compute_capacity_claim_from_order(order_dict)
+    selected = await capacity.probe(claim=capacity_claim)
     if not selected:
         return None
 
@@ -113,7 +113,7 @@ async def build_provisioning_job_spec(
         "resource_id": str(selected["resource_id"]),
         "vm_host": selected["vm_host"],
         "vm_target": make_vm_target(),
-        "required_attributes": required_attributes,
+        "required_attributes": capacity_claim,
         "ssh_public_key": ssh_public_key,
         "duration_seconds": duration_seconds,
     }

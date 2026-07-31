@@ -4331,3 +4331,123 @@ sites found statically, and a real typing-coverage gap is flagged as an
 open scope question rather than resolved (item 9). 11.6 (`vm_host` schema
 question) is decided: migrate now, scoped strictly to `vm_host`, with a
 concrete write/read/query/migration plan recorded above (item 7).
+## Section 11 code-review amendment and planning decisions (2026-07-30)
+
+This entry supersedes the implementation direction in Section 11 design-review
+item 3 where it proposed hardcoding complete claim interpretation inside
+`core/storefront/aggregation.py`. The original diagnosis remains valid —
+`most_available` must rank only capacity relevant to the request — but review
+established that duplicating the site authority's requirement semantics in core
+storefront would create a second, diverging implementation.
+
+### Accepted matcher composition
+
+- `core/storefront` owns placement orchestration over bounded plain-dict
+  projections and remains independent of `kit/site`.
+- `most_available` accepts an injected `ClaimMatcher`; its default is an
+  intentionally coarse matcher covering pool/resource identity and quantitative
+  dimensions so existing generic callers preserve their behavior.
+- `kit/site` exposes a public plain-dict adapter,
+  `dict_resource_satisfies_claim`, that reconstructs the existing
+  `ResourceFeasibilityView`, uses the existing claim parser, and delegates to
+  `resource_satisfies_requirement`. It must not implement a second parser or
+  matcher.
+- A domain composition root may combine these layers. The VM storefront injects
+  the exact kit/site adapter under the same placement gate already used for
+  `most_available`; domains that do not want site-exact semantics are not forced
+  to adopt them.
+- VM composition must bind the exact legacy quantity vocabulary used by its
+  authoritative ledger: `unit_claim_keys=("units", "gpu_count")`. A bare
+  adapter reference uses kit/site's default `("units",)` and is therefore not
+  equivalent for legacy VM claims.
+- Missing projected categorical fields fail closed for ranking. Site admission
+  remains authoritative; stale or incomplete projections may produce a less
+  useful order, but identical projected and authoritative data must be
+  interpreted identically.
+
+### Projection and authority boundary
+
+The accepted design does not permit storefront to fetch unrestricted provider
+inventory. The domain-owned projection still decides which resource fields are
+advertised and grouped. Shared matching semantics operate over two different
+views: the site authority's current inventory and storefront's bounded, possibly
+stale projection. The matcher is shared; data authority and disclosure are not.
+
+### Current `resource_type` decision
+
+The VM claim's current `resource_type="compute.gpu"` is accepted in Section 11
+only as the existing site-inventory adapter discriminator consumed by
+`resource_satisfies_requirement`. It is not a buyer-facing statement that the
+market offering is "VM GPU" and does not replace a future market/offering type.
+VM storefront capacity wiring is domain-scoped today, so buyer-facing
+cross-domain routing vocabulary is not introduced in this section.
+
+### Deferred cross-domain requirement vocabulary
+
+The following are one coupled future OpenSpec change, not Section 11 cleanup:
+
+- a buyer-facing nested `requirements` shape (for example
+  `gpu.{count, model}`);
+- domain parsing of that shape into the existing generic quantitative
+  `dimensions` and categorical `attributes` split;
+- canonical `ResourceRequirement`/`CapacityClaim` vocabulary;
+- compatibility migration of the persisted and external
+  `required_attributes` field;
+- whether a buyer-facing `offering_type` is needed in addition to the
+  site-inventory `resource_type`.
+
+A nested domain shape does not change the generic matcher invariant. Domain
+parsers decide that `gpu.count` is quantitative and `gpu.model` is categorical,
+then feed the existing flat feasibility contract. The generic matcher must not
+learn VM-specific component schemas.
+
+The local `required_attributes` variable inside VM job-spec construction may be
+renamed to `capacity_claim` now because it is function-local. The serialized
+`required_attributes` key is a real admin API, durable-resume, and external
+storefront-client compatibility surface and remains unchanged until the future
+cross-domain change supplies an explicit migration strategy.
+
+### SQLite rebuild correction
+
+The deterministic table-rebuild direction remains accepted, but code review
+proved that dropping the referenced `capacity_reservations` table with
+`PRAGMA foreign_keys=ON` triggers `ON DELETE CASCADE` and silently deletes
+`capacity_reservation_debits`. The implementation must use a foreign-key-safe
+offline rebuild on one connection, preserve child rows, run
+`PRAGMA foreign_key_check`, and restore the prior foreign-key setting. Tests
+must assert child-row survival, not only referential consistency.
+
+### Section 11 scope expansion: API-credits modernization
+
+The broader audit found API credits is current at the market protocol level but
+still uses older repository packaging, persistence-evolution, and direct-HTTP
+composition patterns. The following are accepted Section 11 implementation
+work:
+
+- replace relative editable sibling sources and repository-root import assembly
+  with repository-built wheels installed through reinit targets;
+- add service-owned ordered SQLite migrations, deployment init wiring, and
+  startup schema-version validation, without adding a migration CLI;
+- add a typed capacity-administration client for resource registration/update;
+- add an API-credits-domain client so settlement callers do not construct
+  service URLs directly.
+
+Background-task supervision, core watchdog/persistence changes, generic remote
+capacity assembly, durable issuance/compensation design, quota-release
+compensation, and exact API-credit matcher adoption remain deferred for further
+design review.
+
+### Permanent documentation destinations after review acceptance
+
+Promotion is intentionally deferred until the implementation stabilizes, but
+planning identifies these exact destinations:
+
+| Accepted durable decision | Permanent destination |
+|---|---|
+| Core placement accepts domain-composed matching without depending on site authority packages | `openspec/specs/market-composition/architecture.md`, `Composition from above and below`; `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Projected ranking and authoritative admission share requirement semantics while retaining different data authority | `openspec/specs/site-capacity/architecture.md`, add/update projected-feasibility matching section; `docs/development/ARCHITECTURE.md#storefront-capacity-boundary` |
+| Site-inventory `resource_type` is distinct from any future buyer-facing offering vocabulary | `openspec/specs/site-capacity/spec.md`, resource feasibility/claim vocabulary; `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities` |
+| API-credit service uses ordered SQLite migrations and deployment-time initialization | `openspec/specs/deployment-state/spec.md`, service schema initialization; API-credit subsystem specification if one exists or is added |
+| Operator capacity mutation uses a typed administration client, separate from buyer reservation use | `openspec/specs/site-capacity/spec.md`, capacity administration surface; `docs/development/ARCHITECTURE.md#site-authority` |
+| API-credit callers use a domain-owned client instead of constructing service URLs | API-credit subsystem spec/architecture; `docs/development/ARCHITECTURE.md#package-and-dependency-layers` only if the repository-wide client ownership rule needs clarification |
+

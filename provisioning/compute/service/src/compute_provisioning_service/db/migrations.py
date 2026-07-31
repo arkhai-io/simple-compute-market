@@ -153,6 +153,24 @@ def _drop_columns_via_table_rebuild(
     every other column's type, nullability, default, and primary-key
     flag, and recreates every named index that doesn't reference a
     dropped column.
+
+    Follows SQLite's documented offline-schema-change procedure for a
+    table other rows may reference by foreign key: the whole rebuild runs
+    on one dedicated connection with foreign-key enforcement disabled for
+    its duration (dropping the original table would otherwise cascade-delete
+    every referencing child row if the caller's database has
+    ``PRAGMA foreign_keys=ON`` — those rows are never touched by this
+    function, but a plain ``DROP TABLE`` under FK enforcement would delete
+    them as a side effect of the rebuild, not preserve them), verifies with
+    ``PRAGMA foreign_key_check`` before committing, and restores whatever
+    the connection's foreign-key setting was before this function ran.
+
+    Does not preserve triggers, views, or outbound foreign-key constraints
+    *defined on this table* — ``capacity_reservations`` (this helper's
+    only caller today) has none of those, confirmed by inspection, and
+    this function refuses to run against a table that does rather than
+    silently dropping them unnoticed. Extend it deliberately if a future
+    caller needs that.
     """
     present = {
         column for column in columns_to_drop
@@ -160,58 +178,111 @@ def _drop_columns_via_table_rebuild(
     }
     if not present:
         return
-    with engine.begin() as connection:
-        columns = connection.execute(
-            text(f"PRAGMA table_info({table_name})")
-        ).fetchall()
-        keep = [c for c in columns if c[1] not in present]
-        if not keep:
-            raise ValueError(
-                f"Refusing to drop every column of {table_name!r}"
-            )
-        keep_names = [c[1] for c in keep]
 
-        # Captured before the table is dropped -- once the rebuilt table
-        # is renamed into place, a query for tbl_name = table_name would
-        # find the *new*, index-less table instead of the original's
-        # indexes.
-        indexes = connection.execute(text(
-            "SELECT sql FROM sqlite_master "
-            "WHERE type = 'index' AND tbl_name = :table_name "
-            "AND sql IS NOT NULL"
+    with engine.connect() as connection:
+        triggers_and_views = connection.execute(text(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE tbl_name = :table_name AND type IN ('trigger', 'view')"
         ), {"table_name": table_name}).fetchall()
+        if triggers_and_views:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"triggers/views, but {table_name!r} has: "
+                f"{sorted(f'{kind}:{name}' for kind, name in triggers_and_views)}. "
+                "Extend this helper before using it on this table."
+            )
+        outbound_fks = connection.execute(
+            text(f"PRAGMA foreign_key_list({table_name})")
+        ).fetchall()
+        if outbound_fks:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"outbound foreign key constraints, but {table_name!r} "
+                f"has some. Extend this helper before using it on this "
+                "table."
+            )
 
-        def _column_def(col) -> str:
-            _cid, name, col_type, notnull, default, pk = col
-            parts = [name, col_type or ""]
-            if pk:
-                parts.append("PRIMARY KEY")
-            if notnull and not pk:
-                parts.append("NOT NULL")
-            if default is not None:
-                parts.append(f"DEFAULT {default}")
-            return " ".join(part for part in parts if part)
+        # PRAGMA foreign_keys can only be changed with no transaction
+        # open -- read and set it before starting the rebuild's own
+        # transaction, using exec_driver_sql + an explicit commit to
+        # close out SQLAlchemy's autobegin rather than assuming none is
+        # open.
+        prior_foreign_keys = connection.exec_driver_sql(
+            "PRAGMA foreign_keys"
+        ).scalar()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
 
-        rebuild_table = f"{table_name}__rebuild"
-        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
-        connection.execute(text(
-            f"CREATE TABLE {rebuild_table} "
-            f"({', '.join(_column_def(c) for c in keep)})"
-        ))
-        column_list = ", ".join(keep_names)
-        connection.execute(text(
-            f"INSERT INTO {rebuild_table} ({column_list}) "
-            f"SELECT {column_list} FROM {table_name}"
-        ))
-        connection.execute(text(f"DROP TABLE {table_name}"))
-        connection.execute(text(
-            f"ALTER TABLE {rebuild_table} RENAME TO {table_name}"
-        ))
+        try:
+            with connection.begin():
+                columns = connection.execute(
+                    text(f"PRAGMA table_info({table_name})")
+                ).fetchall()
+                keep = [c for c in columns if c[1] not in present]
+                if not keep:
+                    raise ValueError(
+                        f"Refusing to drop every column of {table_name!r}"
+                    )
+                keep_names = [c[1] for c in keep]
 
-        for (index_sql,) in indexes:
-            if any(dropped in index_sql for dropped in present):
-                continue
-            connection.execute(text(index_sql))
+                # Captured before the table is dropped -- once the
+                # rebuilt table is renamed into place, a query for
+                # tbl_name = table_name would find the *new*, index-less
+                # table instead of the original's indexes.
+                indexes = connection.execute(text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'index' AND tbl_name = :table_name "
+                    "AND sql IS NOT NULL"
+                ), {"table_name": table_name}).fetchall()
+
+                def _column_def(col) -> str:
+                    _cid, name, col_type, notnull, default, pk = col
+                    parts = [name, col_type or ""]
+                    if pk:
+                        parts.append("PRIMARY KEY")
+                    if notnull and not pk:
+                        parts.append("NOT NULL")
+                    if default is not None:
+                        parts.append(f"DEFAULT {default}")
+                    return " ".join(part for part in parts if part)
+
+                rebuild_table = f"{table_name}__rebuild"
+                connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
+                connection.execute(text(
+                    f"CREATE TABLE {rebuild_table} "
+                    f"({', '.join(_column_def(c) for c in keep)})"
+                ))
+                column_list = ", ".join(keep_names)
+                connection.execute(text(
+                    f"INSERT INTO {rebuild_table} ({column_list}) "
+                    f"SELECT {column_list} FROM {table_name}"
+                ))
+                connection.execute(text(f"DROP TABLE {table_name}"))
+                connection.execute(text(
+                    f"ALTER TABLE {rebuild_table} RENAME TO {table_name}"
+                ))
+
+                for (index_sql,) in indexes:
+                    if any(dropped in index_sql for dropped in present):
+                        continue
+                    connection.execute(text(index_sql))
+
+                violations = connection.execute(text(
+                    "PRAGMA foreign_key_check"
+                )).fetchall()
+                if violations:
+                    raise ValueError(
+                        f"{table_name!r} rebuild left dangling foreign-key "
+                        f"references: {violations!r}"
+                    )
+        finally:
+            # Restored even if the rebuild raised, and outside any
+            # transaction (the `with connection.begin()` block above has
+            # already committed or rolled back by the time we get here).
+            connection.exec_driver_sql(
+                f"PRAGMA foreign_keys={'ON' if prior_foreign_keys else 'OFF'}"
+            )
+            connection.commit()
 
 
 def _add_column_if_missing(

@@ -28,8 +28,13 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             APICREDITS / "storefront",
             "arkhai_apicredits_storefront-*.whl",
         ),
+        "service": (
+            APICREDITS / "service",
+            "arkhai_apicredits_service-*.whl",
+        ),
         "core": (REPO / "core", "arkhai_core-*.whl"),
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
+        "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():
@@ -97,10 +102,10 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     storefront_metadata = _metadata(wheels["storefront"])
 
     assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain" in buyer_metadata
+    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core-buyer>=0.2.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain" in storefront_metadata
+    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
     assert (
         "Requires-Dist: arkhai-core-storefront>=0.2.0"
@@ -158,6 +163,53 @@ assert "site-packages" in module_path.parts
     subprocess.run(
         [str(python), "-I", "-c", code],
         cwd=wheels["domain"].parent,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_service_schema_module_imports_from_built_wheel(
+    wheels: dict[str, Path],
+) -> None:
+    """The service wheel installs controllers/db/middleware/models/services
+    as flat top-level packages (no wrapping arkhai_apicredits_service
+    package name, confirmed by inspecting the built wheel's own file
+    list) -- this is the one package in this file that previously had no
+    real-install-and-import coverage at all, unlike domain's existing
+    test above.
+    """
+    venv = wheels["service"].parent / "venv-service"
+    subprocess.run(
+        ["uv", "venv", str(venv)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    subprocess.run(
+        [
+            "uv", "pip", "install",
+            "--python", str(python),
+            "--find-links", str(wheels["service"].parent),
+            str(wheels["service"]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    code = """
+from pathlib import Path
+from db import models
+module_path = Path(models.__file__).resolve()
+assert hasattr(models, "ApiKey")
+assert hasattr(models, "CreditGrant")
+assert hasattr(models, "ConsumptionEvent")
+assert "site-packages" in module_path.parts
+"""
+    subprocess.run(
+        [str(python), "-I", "-c", code],
+        cwd=wheels["service"].parent,
         check=True,
         capture_output=True,
         text=True,

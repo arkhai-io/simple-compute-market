@@ -162,6 +162,62 @@ class TestVmHostBackfill:
         _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
 
 
+class TestPublicRunMigrationsEntrypointAppliesTheBackfill:
+    """Every other test in this file calls
+    _migrate_capacity_reservations_vm_host_to_executor_ref directly --
+    useful for isolating that function's own behavior, but it doesn't
+    prove the registered migration actually runs through the real
+    apply_schema_migrations()/run_migrations() path a database restart
+    or the Helm init container actually uses. This test does.
+    """
+
+    def test_run_migrations_backfills_vm_host_for_a_database_that_never_recorded_the_cutover(self):
+        # A "fresh, already-migrated" database, then rewound to simulate
+        # one that predates this migration: the cutover migration's own
+        # completion record removed, and the pre-cutover vm_host column
+        # added back -- the actual schema shape such a database would
+        # have had.
+        engine = _sqlite_memory_engine()
+        run_migrations(
+            engine,
+            default_playbook_path=_PLAYBOOK_PATH,
+            default_inventory_group=_INVENTORY_GROUP,
+        )
+        with engine.begin() as connection:
+            connection.execute(text(
+                "DELETE FROM schema_migrations "
+                "WHERE id = '20260722_001_pools7_capacity_model_cutover'"
+            ))
+            connection.execute(text(
+                "ALTER TABLE capacity_reservations ADD COLUMN vm_host VARCHAR"
+            ))
+            connection.execute(text(
+                "INSERT INTO capacity_reservations "
+                "(capacity_reservation_id, units, state, vm_host) "
+                "VALUES ('r-public', 2, 'reserved', 'kvm-public')"
+            ))
+
+        # The public entrypoint, not the private migration function.
+        run_migrations(
+            engine,
+            default_playbook_path=_PLAYBOOK_PATH,
+            default_inventory_group=_INVENTORY_GROUP,
+        )
+
+        row = _row(engine, "r-public")
+        assert "vm_host" not in row
+        assert json.loads(row["executor_ref"]) == {"vm_host": "kvm-public"}
+        with engine.begin() as connection:
+            recorded = connection.execute(text(
+                "SELECT id FROM schema_migrations "
+                "WHERE id = '20260722_001_pools7_capacity_model_cutover'"
+            )).fetchone()
+        assert recorded is not None, (
+            "run_migrations must re-record the cutover migration as "
+            "applied, not just fix the schema and leave bookkeeping stale"
+        )
+
+
 class TestTableRebuildPreservesIndexesAndConstraints:
     """_drop_columns_via_table_rebuild does a full create/copy/drop/rename
     cycle rather than ALTER TABLE ... DROP COLUMN (deterministic across
@@ -169,6 +225,78 @@ class TestTableRebuildPreservesIndexesAndConstraints:
     the rebuild doesn't lose the things a naive rebuild could drop:
     named indexes, the primary key, NOT NULL columns, and unrelated data.
     """
+
+    def test_child_debit_rows_survive_under_real_foreign_key_enforcement(self):
+        """A plain DROP TABLE
+        on capacity_reservations, with PRAGMA foreign_keys=ON, cascades
+        and silently deletes every capacity_reservation_debits row that
+        references it -- before this function ever gets a chance to
+        preserve them. Uses StaticPool's single shared connection so
+        enabling foreign_keys here is still in effect when the migration
+        itself opens its own connection from this engine.
+        """
+        engine = _bootstrap_engine_with_legacy_vm_host_column()
+        with engine.connect() as setup:
+            setup.exec_driver_sql("PRAGMA foreign_keys=ON")
+            setup.commit()
+            setup.execute(text(
+                "INSERT INTO capacity_buckets "
+                "(capacity_bucket_id, backing_resource_id, resource_type, "
+                "total_units, capacity, attributes, enabled) "
+                "VALUES ('bucket-1', 'res-1', 'compute.gpu', 4, '{}', '{}', 1)"
+            ))
+            setup.execute(text(
+                "INSERT INTO capacity_reservations "
+                "(capacity_reservation_id, units, state, vm_host) "
+                "VALUES ('r-fk', 4, 'reserved', 'kvm-fk')"
+            ))
+            setup.execute(text(
+                "INSERT INTO capacity_reservation_debits "
+                "(capacity_reservation_id, capacity_bucket_id, dimensions) "
+                "VALUES ('r-fk', 'bucket-1', '{}')"
+            ))
+            setup.commit()
+
+        _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+
+        with engine.connect() as check:
+            reservation = check.execute(text(
+                "SELECT capacity_reservation_id, executor_ref "
+                "FROM capacity_reservations WHERE capacity_reservation_id = 'r-fk'"
+            )).fetchone()
+            debit = check.execute(text(
+                "SELECT capacity_reservation_id, capacity_bucket_id "
+                "FROM capacity_reservation_debits "
+                "WHERE capacity_reservation_id = 'r-fk'"
+            )).fetchone()
+            violations = check.execute(text("PRAGMA foreign_key_check")).fetchall()
+            restored_setting = check.exec_driver_sql("PRAGMA foreign_keys").scalar()
+
+        assert reservation is not None, "parent row was lost during the rebuild"
+        assert json.loads(reservation[1]) == {"vm_host": "kvm-fk"}
+        assert debit is not None, "child row was cascade-deleted by the rebuild"
+        assert debit[1] == "bucket-1"
+        assert violations == []
+        assert restored_setting == 1, (
+            "foreign_keys enforcement was not restored to its prior ON state"
+        )
+
+    def test_rebuild_refuses_a_table_with_triggers_or_views(self):
+        from compute_provisioning_service.db.migrations import (
+            _drop_columns_via_table_rebuild,
+        )
+
+        engine = _sqlite_memory_engine()
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE has_a_trigger (id VARCHAR PRIMARY KEY, junk VARCHAR)"
+            ))
+            connection.execute(text(
+                "CREATE TRIGGER trg_noop AFTER INSERT ON has_a_trigger "
+                "BEGIN SELECT 1; END"
+            ))
+        with pytest.raises(NotImplementedError):
+            _drop_columns_via_table_rebuild(engine, "has_a_trigger", ["junk"])
 
     def test_named_indexes_survive_the_rebuild(self):
         engine = _bootstrap_engine_with_legacy_vm_host_column()

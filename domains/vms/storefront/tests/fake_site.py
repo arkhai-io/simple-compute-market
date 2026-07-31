@@ -88,6 +88,15 @@ class FakeSite:
                     "unit": "count",
                     "value": row["total_units"],
                     "available_units": self._available(rid),
+                    # Real kit/site's snapshot always includes a
+                    # multidimensional "available" map (PRIMARY_DIMENSION
+                    # is "gpu_count") -- without it, an injected exact
+                    # ClaimMatcher (which always resolves both legacy and
+                    # modern claims through this map, never
+                    # available_units directly) sees every row as
+                    # zero-capacity for ranking purposes, regardless of
+                    # this fake's own separate reservation-matching logic.
+                    "available": {"gpu_count": self._available(rid)},
                     "state": (
                         "available" if self._available(rid) > 0 else "leased"
                     ),

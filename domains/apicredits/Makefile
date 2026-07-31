@@ -1,8 +1,11 @@
 DIST_DIR ?= ../../.dist
 
-.PHONY: test test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
+.PHONY: test test-domain test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
 
-test: test-service test-storefront test-buyer test-sample-app test-middleware
+test: test-domain test-service test-storefront test-buyer test-sample-app test-middleware
+
+test-domain: ## Domain-package-level tests (distribution/wheel-import + credits client contract)
+	uv run --find-links $(DIST_DIR) pytest tests -q
 
 test-service:
 	cd service && make test

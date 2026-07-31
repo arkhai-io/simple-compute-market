@@ -48,9 +48,27 @@ from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
     site_events_poller,
 )
 from market_fulfillment import VersionedEnvelope
-from market_site.ledger import dict_resource_satisfies_claim
+from market_site import dict_resource_satisfies_claim
 
 logger = logging.getLogger(__name__)
+
+VM_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units", "gpu_count")
+"""This domain's legacy single-quantity claim aliases -- "gpu_count" is
+VM's alias for the generic "units" claim key, matching
+``provisioning/compute/service/container.py``'s
+``CapacityLedgerService(unit_claim_keys=("units", "gpu_count"))``.
+
+Necessarily duplicated, not imported from a shared module: the
+provisioning service is domain-neutral (also serves bare-metal) and
+deliberately does not depend on any VM-domain package for this value —
+see that composition site's own comment. The storefront and the
+provisioning service are separate deployables communicating only over
+HTTP; there is no package both could import this from without either
+making the provisioning service VM-aware or introducing a dependency
+neither side otherwise needs. This is the one place the storefront
+itself needs the value, named so it isn't duplicated a second time
+within this codebase.
+"""
 
 SQLiteClientFactory = Callable[[], Any]
 
@@ -218,7 +236,11 @@ def _aggregate_for(
         # change to what other domains get when they select
         # "most_available".
         placement = functools.partial(
-            most_available, claim_matcher=dict_resource_satisfies_claim,
+            most_available,
+            claim_matcher=functools.partial(
+                dict_resource_satisfies_claim,
+                unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+            ),
         )
     aggregate = AggregateCapacityClient(
         {
