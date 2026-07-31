@@ -1,6 +1,6 @@
 """Migration-produced backfill through the current teardown path end to end.
 
-POOLS-7 §10.15 (review finding): every other teardown test in this suite
+Every other teardown test in this suite
 hand-constructs a `SettlementRecord` row directly (`_create_active_fulfillment`
 and its siblings in `test_ledger_lease_lifecycle.py`/`test_compute_contract_api.py`),
 which is the right choice for tests whose subject is teardown submission or

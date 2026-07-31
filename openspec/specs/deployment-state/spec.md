@@ -35,6 +35,10 @@ Each stateful service MUST run and record its own ordered migration chain agains
 - **WHEN** the application process starts against a database missing the latest known migration
 - **THEN** startup fails with an actionable schema-drift error and does not mutate the schema
 
+#### Scenario: A service has no separate deployment step for migrations
+- **WHEN** a stateful service has no Kubernetes init container or standalone migration CLI to apply migrations ahead of the application process (for example, the API-credit service, which has no Helm chart)
+- **THEN** it MAY apply its own ordered migration chain in-process at application startup, before serving requests, rather than rejecting drift from its normal startup path — this is a valid instantiation of service-owned migration history for a service without the provisioning service's deployment topology, not an exception to it
+
 ### Requirement: Installable package boundaries
 Published wheels MUST resolve internal runtime dependencies by distribution version or a supplied wheel directory and MUST NOT encode parent-directory monorepo paths in customer-facing lock metadata.
 

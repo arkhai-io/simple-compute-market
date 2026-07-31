@@ -1,12 +1,8 @@
 """API-credits settlement helpers."""
 
-from domains.apicredits.settlement.issuance import (
+from domains.apicredits.settlement.credits_client import (
+    CreditsServiceClient,
     CreditsServiceError,
-    adjust_key_balance,
-    get_key,
-    revoke_key,
-    rollback_issuance,
-    submit_credit_issuance,
 )
 from domains.apicredits.settlement.fulfillment import (
     encode_credit_fulfillment,
@@ -14,12 +10,8 @@ from domains.apicredits.settlement.fulfillment import (
 )
 
 __all__ = [
+    "CreditsServiceClient",
     "CreditsServiceError",
-    "adjust_key_balance",
     "encode_credit_fulfillment",
     "fulfill_api_credits_obligation",
-    "get_key",
-    "revoke_key",
-    "rollback_issuance",
-    "submit_credit_issuance",
 ]

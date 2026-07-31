@@ -56,6 +56,32 @@ Caching and batching reduce service calls but do not create another balance auth
 
 Settlement evidence is verified before issuance. If downstream on-chain fulfillment fails after credits were issued, the storefront attempts a compensating balance adjustment and revokes a key created solely for the failed operation. Compensation is best-effort recovery after a split authority transition, not proof that chain and database updates are one atomic transaction.
 
+## Implementation composition
+
+The storefront talks to the credits service through one domain-owned
+HTTP client, `CreditsServiceClient` (`domains/apicredits/settlement/credits_client.py`),
+constructed once at the storefront's composition boundary
+(`apicredits_storefront/services/credits_service_client.py`'s
+`get_credits_service_client()`) and reused by every settlement and
+key-lookup caller, rather than each operation constructing its own
+transient client. This mirrors the `kit/site` + `kit/site-client` split
+used for the separate operator-facing capacity-administration surface
+(`SiteCapacityAdminClient`): a typed client package, independently
+versioned request/response models, and centralized authentication,
+timeout, and error-translation behavior.
+
+The service tracks its own schema evolution in a `schema_migrations`
+table, applied in-process at application startup before the service is
+ready to serve requests. The service has no separate deployment step
+(no Kubernetes init container, no standalone migration CLI) to run
+migrations ahead of the application process — in-process startup
+migration is the current, non-provisional mechanism for the current
+deployment topology, not a placeholder for a future one.
+
+Every API-credit package resolves its internal dependencies from built
+wheels, not repository-relative editable paths or `pythonpath`
+fallbacks — see `docs/development/ARCHITECTURE.md#wheel-based-development`.
+
 ## Current limits
 
 Current metering charges one fixed configured amount per admitted request; route-specific or variable-cost metering is not established. Possession-challenge protocols for existing keys are not implemented. Verification caching means revocation is not globally instantaneous, and optional batching must not be described as a strict zero-overdraft guarantee.

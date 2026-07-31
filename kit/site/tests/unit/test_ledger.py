@@ -252,6 +252,27 @@ def test_generic_ledger_has_no_attribute_requirement():
         generic.probe(claim={"units": 0})
 
 
+def test_reserve_derives_executor_ref_from_resource_vm_host(seeded: CapacityLedgerService):
+    """reserve() writes executor_ref (not a dedicated vm_host column) from
+    the matched resource's vm_host attribute, and derives executor_kind
+    alongside it.
+
+    reserve()'s own return payload is assembled from _match_payload (the
+    resource's live attributes at match time), not _reservation_payload,
+    so it never includes executor_ref/executor_kind directly. The durable
+    row itself, read back via get_reservation (which does use
+    _reservation_payload), is where the write actually lands.
+    """
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xn"})
+    assert reserved is not None
+    assert reserved["vm_host"] == "kvm1"  # _match_payload, from the resource's own attributes
+
+    row = seeded.get_reservation(reserved["capacity_reservation_id"])
+    assert row["executor_ref"] == {"vm_host": "kvm1"}
+    assert row["executor_kind"] == "vm"
+    assert row["vm_host"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
+
+
 def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     reserved = seeded.reserve(
         claim={"gpu_count": 3},
@@ -570,16 +591,22 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
 
 
 def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService):
+    """CapacityReservation carries no VM-domain-specific column names --
+    callers pass executor_kind/executor_target/executor_ref directly (as
+    kit/site/authority.py's adapter already does); attach_lease no longer
+    accepts or self-heals a vm_host/vm_target kwarg.
+    """
     reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xl"})
     attached = seeded.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
-        vm_host="kvm1",
-        vm_target="tenant-abcd",
+        executor_kind="vm",
+        executor_target="tenant-abcd",
+        executor_ref={"vm_host": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
         create_job_id="job-1",
     )
     assert attached["state"] == "leased"
-    assert attached["vm_target"] == "tenant-abcd"
+    assert attached["vm_target"] == "tenant-abcd"  # payload key, sourced from executor_target
     assert attached["executor_kind"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
     assert attached["executor_ref"] == {"vm_host": "kvm1"}
@@ -590,6 +617,32 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
 
     # Unknown / no-longer-held reservations fall back to the legacy table.
     assert seeded.attach_lease(capacity_reservation_id="missing") is None
+
+
+def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
+    """vm_host is matched through executor_ref's JSON payload
+    (func.json_extract) and vm_target through executor_target -- neither
+    is a dedicated column. Previously untested -- this is new coverage,
+    not just a migration of an existing test."""
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xm"})
+    seeded.attach_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        executor_kind="vm",
+        executor_target="tenant-find-me",
+        executor_ref={"vm_host": "kvm1"},
+        lease_end_utc="2099-01-01 00:00",
+    )
+
+    found = seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me")
+    assert found is not None
+    assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+
+    # A different vm_host must not match, even with the same vm_target --
+    # proves the filter actually discriminates on the JSON value rather
+    # than matching any row with a non-null executor_ref.
+    assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
+    # A different vm_target must not match either.
+    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-someone-else") is None
     seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     assert seeded.attach_lease(capacity_reservation_id=reserved["capacity_reservation_id"]) is None
 

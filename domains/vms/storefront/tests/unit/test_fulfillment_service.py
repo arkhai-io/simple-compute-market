@@ -282,7 +282,7 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_terminate_vm_lease_calls_the_same_client_as_registration(monkeypatch):
-    """No early-termination business flow calls this yet (POOLS-7 §10.6) --
+    """No early-termination business flow calls this yet --
     this only confirms the plumbing: same client class registration uses,
     correct endpoint-backing method, and the reason passed through."""
     captured = {}

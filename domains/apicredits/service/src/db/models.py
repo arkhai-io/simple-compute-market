@@ -14,7 +14,7 @@ Bearer secrets are hashed at rest (`secret_hash`); ``owner_scheme`` /
 the negotiation guards consult and issuance re-checks authoritatively.
 
 The site-authority quota ledger tables ride ``market_site``'s own
-metadata — ``init_db`` creates both.
+metadata — ``run_migrations`` creates both.
 """
 
 from __future__ import annotations

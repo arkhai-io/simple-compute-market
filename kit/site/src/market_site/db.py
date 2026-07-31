@@ -129,8 +129,6 @@ class CapacityReservation(Base):
     executor_target = Column(String, nullable=True)
     release_job_id = Column(String, nullable=True)
     executor_ref = Column(JSON, nullable=True)
-    vm_host = Column(String, nullable=True)
-    vm_target = Column(String, nullable=True)
     lease_start_utc = Column(String, nullable=True)
     lease_end_utc = Column(String, nullable=True)
     create_job_id = Column(String, nullable=True)

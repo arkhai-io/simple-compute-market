@@ -308,7 +308,11 @@ async def fulfill_vm_obligation(
     order_id: str | None = None
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
-    logger.info("[ALKAHEST] Order for fulfillment: %s", order)
+    logger.info(
+        "[ALKAHEST] Order for fulfillment: type=%s keys=%s",
+        type(order).__name__,
+        sorted(order.keys()) if isinstance(order, dict) else "n/a",
+    )
 
     try:
         plan, recovery_context = await _build_vm_fulfillment_context(

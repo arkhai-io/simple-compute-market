@@ -468,3 +468,93 @@ class TestPublicHostConnection:
         )
         assert parsed.vm_host_ip == "203.0.113.9"
         assert parsed.ssh_command == "ssh -i <your_private_key> -p 9000 tenantx@203.0.113.9"
+
+
+# ---------------------------------------------------------------------------
+# redact_ansible_output -- shared credential scrubber. Covers the
+# module-level function directly; test_job_service.py's TestRedactLogs
+# covers it again through job_service._redact_logs's delegation, proving
+# the two consumers share one definition.
+# ---------------------------------------------------------------------------
+
+
+class TestRedactAnsibleOutput:
+    def test_redacts_json_password_field(self):
+        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+
+        result = redact_ansible_output('"password": "supersecret"')
+        assert "supersecret" not in result
+
+    def test_redacts_backslash_escaped_json_password(self):
+        """json-output.yml's `debug: msg:` task (the literal transport
+        _extract_ansible_json parses -- see json_service.py's
+        TestRedactLogs for the full rationale) can render its JSON string
+        value backslash-escaped inside the outer task result."""
+        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+
+        text = 'ok: [h] => {"msg": "{\\n    \\"password\\": \\"aB3xY9zQ1mK7pL2n\\"\\n}"}'
+        result = redact_ansible_output(text)
+        assert "aB3xY9zQ1mK7pL2n" not in result
+
+    def test_redacts_yaml_password_line(self):
+        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+
+        result = redact_ansible_output("password: mysecretpassword")
+        assert "mysecretpassword" not in result
+
+    def test_empty_and_none_returned_unchanged(self):
+        from vm_provisioning_adapter.services.ansible_service import redact_ansible_output
+
+        assert redact_ansible_output("") == ""
+        assert redact_ansible_output(None) is None
+
+
+class TestStreamingDebugLoggingIsRedacted:
+    """The real-time per-line stdout/stderr debug stream must be redacted
+    just like the persisted job log -- it is a separate code path from
+    job_service.py's persisted-log redaction and must not skip it."""
+
+    def test_extract_ansible_json_still_sees_raw_unredacted_text(self):
+        """Redaction must apply only to what gets logged, never to the
+        text credential/result extraction actually parses -- otherwise
+        fixing the log leak would break credential delivery entirely."""
+        svc = _make_service()
+        raw = '"vm_creation_data": {"action": "create", "authentication": {"root": {"password": "aB3xY9zQ1mK7pL2n"}}}'
+        result = svc._extract_ansible_json(raw, "create")
+        assert result is not None
+        assert result["authentication"]["root"]["password"] == "aB3xY9zQ1mK7pL2n"
+
+    def test_ansible_service_logger_debug_calls_are_redacted(self, caplog):
+        """Exercises the actual streaming code path against a real
+        subprocess (select.select() needs genuine file descriptors, not
+        fakes) to prove logger.debug never receives an unredacted line."""
+        import asyncio
+        import logging
+        import subprocess
+        import sys as _sys
+        from pathlib import Path
+
+        from vm_provisioning_adapter.services.ansible_service import AnsibleRun
+
+        svc = _make_service()
+        process = subprocess.Popen(
+            [
+                _sys.executable, "-c",
+                "print('password: aB3xY9zQ1mK7pL2n')",
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        run = AnsibleRun(
+            process=process, process_id=process.pid,
+            vars_path=Path("/tmp/does-not-exist-redaction-test.yml"),
+        )
+
+        caplog.set_level(
+            logging.DEBUG, logger="vm_provisioning_adapter.services.ansible_service",
+        )
+
+        asyncio.run(svc.wait_for_playbook(run, timeout_seconds=5))
+
+        debug_records = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+        assert any("ansible stdout" in m for m in debug_records), debug_records
+        assert not any("aB3xY9zQ1mK7pL2n" in m for m in debug_records), debug_records

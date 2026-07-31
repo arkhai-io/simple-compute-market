@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from domains.apicredits.settlement import fulfillment as fulfillment_module
+from domains.apicredits.settlement.credits_client import CreditsServiceClient, CreditsServiceError
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
-from domains.apicredits.settlement.issuance import CreditsServiceError
 from market_core import ImmutableFulfillmentCapability
 
 _BUYER = "0xBuyerAAAA0000000000000000000000000000ab"
@@ -40,7 +40,7 @@ def _events():
 async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     issued = {}
 
-    async def fake_issue(**kwargs):
+    async def fake_issue(self, **kwargs):
         issued.update(kwargs)
         return {
             "key_id": "ak_new", "secret": "ak_new.s3cret",
@@ -49,7 +49,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
             "already_issued": False,
         }
 
-    monkeypatch.setattr(fulfillment_module, "submit_credit_issuance", fake_issue)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
 
     result = await fulfill_api_credits_obligation(
@@ -81,10 +81,10 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
 
 
 async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
-    async def fake_issue(**kwargs):
+    async def fake_issue(self, **kwargs):
         raise CreditsServiceError("quota_exhausted", "no units", status_code=409)
 
-    monkeypatch.setattr(fulfillment_module, "submit_credit_issuance", fake_issue)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
     policy_calls = []
 
@@ -110,7 +110,7 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
 
 
 async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
-    async def fake_issue(**kwargs):
+    async def fake_issue(self, **kwargs):
         return {"key_id": "ak_new", "secret": "s", "quantity": 3, "balance": 3}
 
     async def fake_submit(**kwargs):
@@ -118,13 +118,13 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
 
     rollbacks = []
 
-    async def fake_rollback(**kwargs):
+    async def fake_rollback(self, **kwargs):
         rollbacks.append(kwargs)
         return {"rolled_back": True}
 
-    monkeypatch.setattr(fulfillment_module, "submit_credit_issuance", fake_issue)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     monkeypatch.setattr(fulfillment_module, "_submit_token_fulfillment", fake_submit)
-    monkeypatch.setattr(fulfillment_module, "rollback_issuance", fake_rollback)
+    monkeypatch.setattr(CreditsServiceClient, "rollback_issuance", fake_rollback)
     events, stage_event = _events()
 
     result = await fulfill_api_credits_obligation(

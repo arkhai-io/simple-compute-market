@@ -362,8 +362,6 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260722_001_pools7_capacity_model_cutover",
         "20260724_001_legacy_vm_leases_to_fulfillment",
         "20260724_002_drop_vm_leases_table",
-        "20260725_001_remove_provisioned_resource_domain_ref",
-        "20260728_001_ansible_pool_requirement_delegate",
     }
 
 
@@ -416,7 +414,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 13
+    assert migration_count == 11
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +440,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260728_001_ansible_pool_requirement_delegate'"
+                "'20260724_002_drop_vm_leases_table'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

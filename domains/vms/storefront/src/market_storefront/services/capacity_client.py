@@ -20,6 +20,7 @@ lease tails — is the ledger's.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from typing import Any, Callable, Iterable, Mapping
 
@@ -36,6 +37,7 @@ from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
     fill_first,
+    most_available,
 )
 from core_storefront.capacity import (
     CapacityDelta,
@@ -46,8 +48,18 @@ from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
     site_events_poller,
 )
 from market_fulfillment import VersionedEnvelope
+from market_site import dict_resource_satisfies_claim
 
 logger = logging.getLogger(__name__)
+
+VM_UNIT_CLAIM_KEYS: tuple[str, ...] = ("units", "gpu_count")
+"""Must match the VM capacity authority's legacy unit-claim aliases:
+``provisioning/compute/service/container.py``'s
+``CapacityLedgerService(unit_claim_keys=("units", "gpu_count"))``. The
+provisioning service is domain-neutral and cannot import this value from
+a VM-domain package, so it is necessarily duplicated at this composition
+site.
+"""
 
 SQLiteClientFactory = Callable[[], Any]
 
@@ -205,6 +217,22 @@ def _aggregate_for(
             "(known: %s)", placement_name, sorted(PLACEMENT_POLICIES),
         )
         placement = fill_first
+    if placement is most_available:
+        # This domain's backing site is kit/site, which owns the only
+        # full claim-parsing and feasibility semantics — inject its exact
+        # matcher rather than ranking against the aggregator's own
+        # deliberately coarse default (pool/resource/dimensions only,
+        # not region/gpu_model/etc). PLACEMENT_POLICIES itself stays
+        # generic; this substitution is domain-composition-local, not a
+        # change to what other domains get when they select
+        # "most_available".
+        placement = functools.partial(
+            most_available,
+            claim_matcher=functools.partial(
+                dict_resource_satisfies_claim,
+                unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+            ),
+        )
     aggregate = AggregateCapacityClient(
         {
             name: RemoteCapacityClient(url, admin_key)
