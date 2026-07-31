@@ -113,28 +113,22 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     """Register the demo quota resource in the credits-service ledger.
 
     The ledger is the credits service's; the storefront is a client, so
-    registration is a direct admin-gated PUT (RemoteCapacityClient only
-    reads/commits). A re-PUT on restart re-asserts the resource.
+    registration goes through the typed capacity-administration client
+    (``RemoteCapacityClient`` only reads/commits, never registers). A
+    re-registration on restart re-asserts the resource.
     """
-    import httpx
+    from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
 
     authority = _capacity_authority_url()
-    url = f"{authority}/api/v1/capacity/resources/{resource_id}"
-    headers = {}
-    admin = config.credits_admin_key()
-    if admin:
-        headers["X-Admin-Key"] = admin
-    body = {
-        "total_units": int(total_units),
-        "resource_type": "api_credits",
-        "enabled": True,
-    }
-    async with httpx.AsyncClient(timeout=10) as http:
-        resp = await http.put(url, json=body, headers=headers)
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"quota register PUT {url} -> HTTP {resp.status_code}: {resp.text[:200]}"
+    admin_client = SiteCapacityAdminClient(authority, config.credits_admin_key())
+    try:
+        await admin_client.register_resource(
+            resource_id, total_units=total_units, resource_type="api_credits",
         )
+    except SiteCapacityAdminClientError as exc:
+        raise RuntimeError(
+            f"quota registration for {resource_id!r} at {authority!r} failed: {exc}"
+        ) from exc
     logger.info(
         "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
         resource_id, total_units,

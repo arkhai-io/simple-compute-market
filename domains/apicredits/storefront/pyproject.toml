@@ -6,13 +6,14 @@ description = "Seller-side storefront for the API-credits domain: quota-backed l
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-core>=0.2.0",
-    "arkhai-apicredits-domain",
+    "arkhai-apicredits-domain>=0.1.0",
     "arkhai-core-registry-client",
     "arkhai-core-storefront>=0.2.0",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-identity",
     "arkhai-kit-policy",
+    "arkhai-kit-site-client>=0.1.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
@@ -57,7 +58,7 @@ allow-direct-references = true
 packages = ["src/apicredits_storefront"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "../../.."]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

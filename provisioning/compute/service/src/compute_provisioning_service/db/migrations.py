@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
@@ -134,6 +135,178 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
     return column_name in {
         column["name"] for column in inspect(engine).get_columns(table_name)
     }
+
+
+_SQLITE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_sql_identifier(name: str) -> str:
+    """Reject anything that isn't a bare SQLite identifier before it is
+    interpolated into raw SQL. ``table_name``/``columns_to_drop`` are
+    ordinary Python arguments, not user input, on every caller this
+    helper has today — this validates them anyway so the helper stays
+    provably safe to call generically rather than safe only by every
+    caller happening to pass a literal.
+    """
+    if not _SQLITE_IDENTIFIER.match(name):
+        raise ValueError(f"Not a safe SQL identifier: {name!r}")
+    return name
+
+
+def _drop_columns_via_table_rebuild(
+    engine: Engine, table_name: str, columns_to_drop: Sequence[str],
+) -> None:
+    """Deterministically drop columns from a SQLite table via a full
+    create/copy/drop/rename cycle, instead of ``ALTER TABLE ... DROP
+    COLUMN`` (unavailable before SQLite 3.35, and this repository
+    supports SQLite only — so there is no reason to accept a silent
+    partial migration rather than doing the rebuild every version
+    actually supports).
+
+    A no-op if none of ``columns_to_drop`` are present. Introspects the
+    table's current columns via ``PRAGMA table_info`` rather than a
+    hardcoded column list, so this stays correct as the model gains
+    columns rather than needing to be kept in sync by hand; preserves
+    every other column's type, nullability, default, and primary-key
+    flag, and recreates every named index that doesn't reference a
+    dropped column. Every identifier this function interpolates into raw
+    SQL — the table name, the columns to drop, and every column name
+    read back from ``PRAGMA table_info`` — is validated against a strict
+    ``[A-Za-z_][A-Za-z0-9_]*`` rule first.
+
+    Follows SQLite's documented offline-schema-change procedure for a
+    table other rows may reference by foreign key: the whole rebuild runs
+    on one dedicated connection with foreign-key enforcement disabled for
+    its duration (dropping the original table would otherwise cascade-delete
+    every referencing child row if the caller's database has
+    ``PRAGMA foreign_keys=ON`` — those rows are never touched by this
+    function, but a plain ``DROP TABLE`` under FK enforcement would delete
+    them as a side effect of the rebuild, not preserve them), verifies with
+    ``PRAGMA foreign_key_check`` before committing, and restores whatever
+    the connection's foreign-key setting was before this function ran.
+
+    Does not preserve triggers, views, or outbound foreign-key constraints
+    *defined on this table* — ``capacity_reservations`` (this helper's
+    only caller today) has none of those, confirmed by inspection, and
+    this function refuses to run against a table that does rather than
+    silently dropping them unnoticed. Extend it deliberately if a future
+    caller needs that.
+    """
+    _validate_sql_identifier(table_name)
+    for column in columns_to_drop:
+        _validate_sql_identifier(column)
+
+    present = {
+        column for column in columns_to_drop
+        if _column_exists(engine, table_name, column)
+    }
+    if not present:
+        return
+
+    with engine.connect() as connection:
+        triggers_and_views = connection.execute(text(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE tbl_name = :table_name AND type IN ('trigger', 'view')"
+        ), {"table_name": table_name}).fetchall()
+        if triggers_and_views:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"triggers/views, but {table_name!r} has: "
+                f"{sorted(f'{kind}:{name}' for kind, name in triggers_and_views)}. "
+                "Extend this helper before using it on this table."
+            )
+        outbound_fks = connection.execute(
+            text(f"PRAGMA foreign_key_list({table_name})")
+        ).fetchall()
+        if outbound_fks:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"outbound foreign key constraints, but {table_name!r} "
+                f"has some. Extend this helper before using it on this "
+                "table."
+            )
+
+        # PRAGMA foreign_keys can only be changed with no transaction
+        # open -- read and set it before starting the rebuild's own
+        # transaction, using exec_driver_sql + an explicit commit to
+        # close out SQLAlchemy's autobegin rather than assuming none is
+        # open.
+        prior_foreign_keys = connection.exec_driver_sql(
+            "PRAGMA foreign_keys"
+        ).scalar()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+
+        try:
+            with connection.begin():
+                columns = connection.execute(
+                    text(f"PRAGMA table_info({table_name})")
+                ).fetchall()
+                keep = [c for c in columns if c[1] not in present]
+                if not keep:
+                    raise ValueError(
+                        f"Refusing to drop every column of {table_name!r}"
+                    )
+                keep_names = [_validate_sql_identifier(c[1]) for c in keep]
+
+                # Captured before the table is dropped -- once the
+                # rebuilt table is renamed into place, a query for
+                # tbl_name = table_name would find the *new*, index-less
+                # table instead of the original's indexes.
+                indexes = connection.execute(text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'index' AND tbl_name = :table_name "
+                    "AND sql IS NOT NULL"
+                ), {"table_name": table_name}).fetchall()
+
+                def _column_def(col) -> str:
+                    _cid, name, col_type, notnull, default, pk = col
+                    parts = [name, col_type or ""]
+                    if pk:
+                        parts.append("PRIMARY KEY")
+                    if notnull and not pk:
+                        parts.append("NOT NULL")
+                    if default is not None:
+                        parts.append(f"DEFAULT {default}")
+                    return " ".join(part for part in parts if part)
+
+                rebuild_table = f"{table_name}__rebuild"
+                connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
+                connection.execute(text(
+                    f"CREATE TABLE {rebuild_table} "
+                    f"({', '.join(_column_def(c) for c in keep)})"
+                ))
+                column_list = ", ".join(keep_names)
+                connection.execute(text(
+                    f"INSERT INTO {rebuild_table} ({column_list}) "
+                    f"SELECT {column_list} FROM {table_name}"
+                ))
+                connection.execute(text(f"DROP TABLE {table_name}"))
+                connection.execute(text(
+                    f"ALTER TABLE {rebuild_table} RENAME TO {table_name}"
+                ))
+
+                for (index_sql,) in indexes:
+                    if any(dropped in index_sql for dropped in present):
+                        continue
+                    connection.execute(text(index_sql))
+
+                violations = connection.execute(text(
+                    "PRAGMA foreign_key_check"
+                )).fetchall()
+                if violations:
+                    raise ValueError(
+                        f"{table_name!r} rebuild left dangling foreign-key "
+                        f"references: {violations!r}"
+                    )
+        finally:
+            # Restored even if the rebuild raised, and outside any
+            # transaction (the `with connection.begin()` block above has
+            # already committed or rolled back by the time we get here).
+            connection.exec_driver_sql(
+                f"PRAGMA foreign_keys={'ON' if prior_foreign_keys else 'OFF'}"
+            )
+            connection.commit()
 
 
 def _add_column_if_missing(
@@ -759,13 +932,24 @@ def _migrate_retire_site_resources(engine: Engine) -> None:
 
 
 def _migrate_capacity_model_cutover(engine: Engine) -> None:
-    """Apply the reservation and private capacity-accounting cutover."""
+    """Apply the full reservation and capacity-accounting cutover.
+
+    A single migration ID rather than several sequential ones: nothing
+    built on this cutover has been deployed anywhere, so there is no
+    intermediate, partially-migrated database to preserve compatibility
+    with. Folding every related schema change in here (rather than
+    registering each as its own dated migration) keeps the migration list
+    reflecting only states a real database has actually been in.
+    """
     _migrate_rename_site_allocations_to_capacity_reservations(engine)
     _migrate_capacity_reservations_settlement_resource_id(engine)
     _migrate_site_resources_pool_id(engine)
     _migrate_capacity_buckets_and_current_debits(engine)
     _migrate_retire_site_resources(engine)
-
+    _migrate_remove_provisioned_resource_domain_ref(engine)
+    _migrate_ansible_pool_requirement_delegate(engine)
+    _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+    _migrate_capacity_reservations_vm_target_to_executor_target(engine)
 
 
 def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
@@ -809,6 +993,60 @@ def _migrate_ansible_pool_requirement_delegate(engine: Engine) -> None:
         "VARCHAR NOT NULL DEFAULT 'vm_management_v1'",
     )
 
+
+def _migrate_capacity_reservations_vm_host_to_executor_ref(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_host`` in favor of the generic
+    ``executor_ref`` JSON field.
+
+    ``kit/site`` carries no VM-domain-specific column names on the shared,
+    domain-neutral reservation table -- physical placement identity lives
+    uniformly in ``executor_ref`` across every domain, matching
+    bare-metal's ``physical_host_id`` pattern (which was never given its
+    own column). Backfills any existing ``vm_host`` value into
+    ``executor_ref`` (merged via ``json_set``, not overwritten -- a row
+    may already carry other ``executor_ref`` keys) before dropping the
+    column. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_host"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_ref = json_set(COALESCE(executor_ref, '{}'), '$.vm_host', vm_host) "
+            "WHERE vm_host IS NOT NULL "
+            "AND (executor_ref IS NULL OR json_extract(executor_ref, '$.vm_host') IS NULL)"
+        ))
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_host"])
+
+
+def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_target`` in favor of the generic
+    ``executor_target`` field.
+
+    Unlike ``vm_host``, ``vm_target`` was never actually distinct from
+    ``executor_target`` -- every reservation-binding write site sets both
+    columns to the same value at the same time. This backfill exists only
+    for defensiveness against a row where the two happened to diverge; on
+    every row this repository's own code could have produced, it is a
+    no-op. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_target"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_target = vm_target "
+            "WHERE vm_target IS NOT NULL AND executor_target IS NULL"
+        ))
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_target"])
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -841,13 +1079,5 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260724_002_drop_vm_leases_table",
         _migrate_drop_vm_leases_table,
-    ),
-    Migration(
-        "20260725_001_remove_provisioned_resource_domain_ref",
-        _migrate_remove_provisioned_resource_domain_ref,
-    ),
-    Migration(
-        "20260728_001_ansible_pool_requirement_delegate",
-        _migrate_ansible_pool_requirement_delegate,
     ),
 )

@@ -66,6 +66,13 @@ def test_authority_delegates_reservation_queries_and_anonymous_events():
 
 
 def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
+    """CapacityReservation carries no VM-domain-specific column names --
+    the adapter passes executor_kind/executor_target/executor_ref straight
+    through to the ledger unchanged, with no legacy vm_host/vm_target
+    synthesis. Physical placement identity (vm_host) and lease-target
+    identity (vm_target) both live in the generic executor_ref/
+    executor_target fields, matching bare-metal's pattern.
+    """
     ledger = FakeLedger()
     authority = LedgerSiteAuthority(ledger)
 
@@ -82,10 +89,10 @@ def test_authority_maps_generic_vm_executor_metadata_only_at_ledger_boundary():
         executor_ref={"vm_host": "kvm-2"},
     )
 
-    assert attached["vm_host"] == "kvm-1"
-    assert attached["vm_target"] == "tenant-vm"
-    assert updated["vm_host"] == "kvm-2"
-    assert updated["vm_target"] == "tenant-vm-2"
+    assert attached["executor_ref"]["vm_host"] == "kvm-1"
+    assert attached["executor_target"] == "tenant-vm"
+    assert updated["executor_ref"]["vm_host"] == "kvm-2"
+    assert updated["executor_target"] == "tenant-vm-2"
     assert "vm_host" not in inspect.signature(
         authority.attach_lease_reservation
     ).parameters

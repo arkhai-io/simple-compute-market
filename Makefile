@@ -425,8 +425,9 @@ review-wheelhouse-prepare: dist-clean ## Rebuild wheels and refresh selected loc
 	@$(MAKE) review-locks
 
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
-	@$(CURDIR)/scripts/refresh-review-locks.py \
+	@uv run python $(CURDIR)/scripts/refresh-review-locks.py \
 		--root "$(CURDIR)" \
+		--dist-dir "$(DIST_DIR)" \
 		--python "$${REVIEW_PYTHON:-3.13}" \
 		--projects $${REVIEW_PROJECTS}
 

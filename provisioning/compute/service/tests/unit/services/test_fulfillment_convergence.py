@@ -599,8 +599,8 @@ async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_sta
 
 async def test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restart(tmp_path):
     """Teardown-path counterpart to
-    test_fresh_watchdog_against_the_same_database_resumes_from_durable_state
-    (POOLS-7 §10.8): the claim/lease/resume machinery is shared between
+    test_fresh_watchdog_against_the_same_database_resumes_from_durable_state:
+    the claim/lease/resume machinery is shared between
     dispatch_pending_creates and dispatch_pending_teardowns, but that
     sharing was never itself asserted for the teardown path -- only
     exercised through it incidentally, if at all."""

@@ -160,6 +160,7 @@ dependencies = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-site-client" },
     { name = "dynaconf" },
     { name = "fastapi" },
     { name = "fastapi-utils", extra = ["all"] },
@@ -178,7 +179,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-apicredits-domain" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.2.0" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront", specifier = ">=0.2.0" },
@@ -186,6 +187,7 @@ requires-dist = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-site-client", specifier = ">=0.1.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "fastapi-utils", extras = ["all"], specifier = ">=0.8.0" },
@@ -287,6 +289,18 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-site-client"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_site_client-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

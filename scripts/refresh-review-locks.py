@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--python", default=os.environ.get("REVIEW_PYTHON", "3.13"))
+    parser.add_argument("--dist-dir", type=Path)
     parser.add_argument("--projects", nargs="+", required=True)
     return parser.parse_args()
 
@@ -60,7 +61,10 @@ def internal_packages(lockfile: Path, available: set[str]) -> list[str]:
 def main() -> int:
     args = parse_args()
     root = args.root.resolve()
-    dist_dir = root / ".dist"
+    dist_dir = args.dist_dir or (root / ".dist")
+    if not dist_dir.is_absolute():
+        dist_dir = root / dist_dir
+    dist_dir = dist_dir.resolve()
     if not dist_dir.is_dir():
         raise ValueError(f"missing wheel directory: {dist_dir}")
     available = wheel_names(dist_dir)
@@ -80,7 +84,7 @@ def main() -> int:
             "--python",
             args.python,
             "--find-links",
-            str(dist_dir),
+            os.path.relpath(dist_dir, project),
         ]
         for package in packages:
             command.extend(("--upgrade-package", package))

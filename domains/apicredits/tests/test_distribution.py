@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -10,6 +11,27 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 APICREDITS = REPO / "domains" / "apicredits"
+
+
+def test_no_apicredits_project_declares_an_internal_editable_source() -> None:
+    """Scoped to the API-credit domain only. The repository-wide version
+    of this check -- covering every consumable project, not just this
+    domain -- belongs to `remove-relative-uv-sources`, an existing,
+    separate change already scoped to exactly that; this test does not
+    duplicate it.
+    """
+    apicredits_pyprojects = sorted(APICREDITS.glob("**/pyproject.toml"))
+    assert apicredits_pyprojects, "expected to find at least one pyproject.toml"
+
+    violations: list[str] = []
+    for path in apicredits_pyprojects:
+        text = path.read_text()
+        if "[tool.uv.sources]" in text:
+            violations.append(str(path.relative_to(REPO)))
+
+    assert violations == [], (
+        f"internal editable [tool.uv.sources] override(s) found: {violations}"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -28,8 +50,21 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             APICREDITS / "storefront",
             "arkhai_apicredits_storefront-*.whl",
         ),
+        "service": (
+            APICREDITS / "service",
+            "arkhai_apicredits_service-*.whl",
+        ),
         "core": (REPO / "core", "arkhai_core-*.whl"),
+        "core_storefront": (REPO / "core" / "storefront", "arkhai_core_storefront-*.whl"),
+        "core_registry_client": (
+            REPO / "core" / "registry-client", "arkhai_core_registry_client-*.whl",
+        ),
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
+        "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
+        "identity": (REPO / "kit" / "identity", "arkhai_kit_identity-*.whl"),
+        "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
+        "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
+        "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():
@@ -97,10 +132,10 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     storefront_metadata = _metadata(wheels["storefront"])
 
     assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain" in buyer_metadata
+    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core-buyer>=0.2.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-apicredits-domain" in storefront_metadata
+    assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
     assert (
         "Requires-Dist: arkhai-core-storefront>=0.2.0"
@@ -158,6 +193,114 @@ assert "site-packages" in module_path.parts
     subprocess.run(
         [str(python), "-I", "-c", code],
         cwd=wheels["domain"].parent,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_service_schema_module_imports_from_built_wheel(
+    wheels: dict[str, Path],
+) -> None:
+    """The service wheel installs controllers/db/middleware/models/services
+    as flat top-level packages (no wrapping arkhai_apicredits_service
+    package name, confirmed by inspecting the built wheel's own file
+    list) -- this is the one package in this file that previously had no
+    real-install-and-import coverage at all, unlike domain's existing
+    test above.
+    """
+    venv = wheels["service"].parent / "venv-service"
+    subprocess.run(
+        ["uv", "venv", str(venv)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    subprocess.run(
+        [
+            "uv", "pip", "install",
+            "--python", str(python),
+            "--find-links", str(wheels["service"].parent),
+            str(wheels["service"]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    code = """
+from pathlib import Path
+from db import models
+module_path = Path(models.__file__).resolve()
+assert hasattr(models, "ApiKey")
+assert hasattr(models, "CreditGrant")
+assert hasattr(models, "ConsumptionEvent")
+assert "site-packages" in module_path.parts
+"""
+    subprocess.run(
+        [str(python), "-I", "-c", code],
+        cwd=wheels["service"].parent,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
+    wheels: dict[str, Path],
+) -> None:
+    """Simulates the storefront Docker runtime stage's actual condition:
+    only the storefront's own src/ tree present (as ``COPY .../src ./src``
+    puts there) plus the installed wheels -- deliberately no raw
+    ``domains/`` source copy, unlike the Dockerfile's previous
+    (now-removed) ``COPY domains/ ./domains/`` step. Every
+    ``domains.apicredits.*`` module the storefront package's own code
+    actually imports must resolve from the installed
+    ``arkhai-apicredits-domain`` wheel with nothing else on the path to
+    fall back to.
+    """
+    venv = wheels["storefront"].parent / "venv-storefront-runtime"
+    subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True, text=True)
+    python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    subprocess.run(
+        [
+            "uv", "pip", "install",
+            "--python", str(python),
+            "--find-links", str(wheels["storefront"].parent),
+            str(wheels["domain"]), str(wheels["storefront"]),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    runtime_root = wheels["storefront"].parent / "simulated-runtime"
+    (runtime_root / "src").mkdir(parents=True)
+    for item in (APICREDITS / "storefront" / "src").iterdir():
+        dest = runtime_root / "src" / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest)
+        else:
+            shutil.copy2(item, dest)
+
+    code = """
+import importlib
+for name in (
+    "domains.apicredits.domain_runtime",
+    "domains.apicredits.negotiation.storefront_round",
+    "domains.apicredits.listings.models",
+    "domains.apicredits.listings.pricing",
+    "domains.apicredits.listings.reconciler",
+    "domains.apicredits.negotiation.terms",
+    "domains.apicredits.settlement",
+):
+    mod = importlib.import_module(name)
+    assert "site-packages" in mod.__file__, (name, mod.__file__)
+"""
+    subprocess.run(
+        [str(python), "-I", "-c", code],
+        cwd=runtime_root,
+        env={"PYTHONPATH": str(runtime_root / "src")},
         check=True,
         capture_output=True,
         text=True,
