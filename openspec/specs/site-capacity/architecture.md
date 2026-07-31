@@ -45,6 +45,24 @@ Revisions make missed events detectable. A consumer that sees a gap refreshes a 
 
 `site_id` is selected and trusted at the storefront aggregation boundary, where it is bound to a configured provisioning connection. Provisioning-local rows are already scoped by their database authority and do not encode routing endpoints or credentials into reservation identifiers.
 
+## Projected feasibility matching
+
+Ranking multiple sites for a claim (`most_available` placement) and
+authoritative admission at a single site use the same claim-matching
+semantics, but not the same code path by default. The core-layer
+aggregator's default matcher is deliberately coarse (pool/resource
+identity and quantitative dimensions only) — it cannot depend on any
+kit-layer package, so it cannot know a domain's categorical attributes
+(region, GPU model) the way the site's own admission path does. A
+domain composing the aggregator MAY inject an exact `ClaimMatcher` that
+delegates to its backing site's own authoritative matching function,
+so ranking and admission agree on every field the site actually checks,
+without moving site-specific matching logic into the core layer. This
+is composition, not a shared implementation: the aggregator's own
+default remains available to any domain whose backing site doesn't
+warrant the exact match, and the same package-layering rule that keeps
+core backend-agnostic still applies.
+
 ## Current limits
 
 The current ledger is not a distributed consensus system for active-active replicas. Generic deal-event ownership across arbitrary storefront topologies and universal aggregation across every physical resource type are not established by the capacity contract.

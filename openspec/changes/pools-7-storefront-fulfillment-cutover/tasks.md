@@ -931,150 +931,40 @@ design.
     comment pointing at this task and `design.md` item 3 — this restores
     the behavior the 2026-07-17 section already documented as intended,
     it isn't new normative behavior.
-  - **Done.** Implemented exactly as designed, plus a docstring on
-    `_resource_matches_claim` explaining the deliberate no-shared-code
-    stance with `kit/site`'s authoritative predicate. `test_aggregation.py`:
-    7 new tests (pool_id filter, resource_id filter, multidimensional
-    sufficiency including a partial-match failure case, the legacy
-    apicredits-style claim, the original-bug regression case, and an
-    end-to-end `most_available` ranking test through the real routing
-    path). Full file: 17/17 passing.
-  - **Update (2026-07-30, code review): the coarse fix above was correct
-    but incomplete, and has been extended, not replaced.** External
-    review during code review (pre-merge, not pre-plan) found the coarse
-    matcher ignores categorical claim attributes the VM claim builder
-    already emits today (`region`, `gpu_model`) and that the authoritative
-    site admission path already checks — verified against current code,
-    not taken on the reviewer's word: `vm_job_spec_service.py`'s
-    `_REQUIRED_COMPUTE_KEYS` really does put `region`/`gpu_model` at the
-    claim's top level, and `kit/site/ledger.py`'s `_split_claim_requirement`/
-    `resource_satisfies_requirement` really do check every such attribute
-    at admission. This does not cause incorrect admission (the site
-    remains authoritative) but does cause avoidable failed probe/reserve
-    attempts against a site that was never going to accept the claim.
-    Resolution, after discussion of where the fix should live:
-    - **Not fixed by duplicating more site-matching logic into
-      `core/storefront`.** Checked `docs/development/ARCHITECTURE.md`'s
-      package-and-dependency-layers rule directly: `core/storefront` is a
-      core-layer package, `kit/site` is a kit-layer package, and
-      dependencies only point downward (kit may depend on core; core must
-      never depend on kit). `core/storefront/aggregation.py`'s existing
-      docstring ("deliberately does not import kit/site") is that rule in
-      effect, not a style choice — so `ResourceFeasibilityView`-style
-      matching could not simply move into `core/storefront` without
-      violating it, and moving it the other way (into a new shared `kit/`
-      package) doesn't work either, since `core/storefront` cannot import
-      *any* kit-layer package, regardless of name.
-    - **Also not fixed by promoting the shared types into `core/` itself.**
-      Considered and rejected: `ResourceFeasibilityView` is `kit/site`'s
-      own way of modeling a resource (`resource_kind`, per-dimension
-      `available`, exact-match `attributes`), not a concept every domain
-      needs — `apicredits` runs through the same aggregator today with
-      none of it meaning anything (a single resource type, no dimensions
-      beyond `units`). Moving it into `core` would make `core/storefront`
-      stop being backend-agnostic (every `CapacityClient` implementation
-      would be assumed `kit/site`-shaped), which is a regression in the
-      abstraction `CapacityClient` exists to provide, not a
-      generalization of it.
-    - **Fixed with dependency injection instead**, matching a pattern
-      already in use one parameter over: `AggregateCapacityClient.__init__`
-      already takes a pluggable `placement: PlacementPolicy | None`, and
-      `capacity_client.py`'s `build_capacity_client` is already the
-      composition point that resolves a placement policy by config string.
-      Adding an injected `claim_matcher` is the same shape as something
-      already there, not a new seam.
-  - **11.2.1 `core/storefront/src/core_storefront/aggregation.py`:**
-    renamed `_resource_matches_claim` → `_coarse_resource_matches_claim`
-    with a docstring stating its limitation as a documented design
-    decision, not an oversight to fix later. Added
-    `ClaimMatcher = Callable[[Mapping, Mapping | None], bool]` as the
-    injectable-strategy type. `most_available`/`_site_available_units`
-    both take `claim_matcher` explicitly now (default
-    `_coarse_resource_matches_claim`) — one defaulting point in
-    `most_available`'s signature; `_site_available_units` requires it as
-    a plain parameter so no internal caller can silently fall back to the
-    coarse default a composition root deliberately overrode. Went with a
-    `Callable` type alias over a `Protocol` for a single-signature
-    callable, per review discussion — happy to switch to `Protocol` if
-    preferred, no behavior difference either way.
-  - **11.2.2 `kit/site/src/market_site/ledger.py`:** added
-    `dict_resource_satisfies_claim(row, claim, *, unit_claim_keys=...)`,
-    a thin adapter reconstructing a `ResourceFeasibilityView` from the
-    plain-dict `snapshot()` row shape and delegating entirely to the
-    already-existing pure functions (`_split_claim_requirement`,
-    `_requested_dimensions`, `resource_feasibility_view`,
-    `resource_satisfies_requirement`) — no independent interpretation of
-    the claim or the row, so there remains exactly one implementation of
-    both parsing and matching. Strict on malformed claims (raises the
-    same way admission does, rather than silently treating a malformed
-    `dimensions` map as unconstrained); fails closed on a row missing an
-    attribute the claim names (a missing key reads as `None`, which only
-    matches a claim that itself requires `None`). **Found while
-    implementing, not anticipated by either reviewer:** the adapter must
-    accept `unit_claim_keys` as a parameter, not use the module default —
-    VM's `CapacityLedgerService` is composed with
-    `unit_claim_keys=("units", "gpu_count")` in `container.py`, not the
-    module-wide `("units",)`; without threading this through, the
-    adapter's legacy-claim fallback would have silently diverged from
-    what VM's own admission path actually accepts for the same claim
-    shape. Confirmed by a dedicated test
-    (`test_unit_claim_keys_must_match_the_backing_ledger_service_configuration`)
-    that fails without the parameter.
-  - **11.2.3 `domains/vms/storefront/.../capacity_client.py`:**
-    `_aggregate_for` wraps `most_available` in
-    `functools.partial(claim_matcher=dict_resource_satisfies_claim)`
-    specifically when the resolved placement *is* `most_available` — the
-    shared `PLACEMENT_POLICIES` dict itself is untouched, so this
-    substitution is domain-composition-local and does not change what
-    `apicredits`/bare-metal get when they select `"most_available"`.
-    Added `arkhai-kit-site>=0.2.0` as an explicit `pyproject.toml`
-    dependency (previously only transitive; the `reinit` target already
-    listed it defensively, so no Makefile change was needed).
-  - **11.2.4 `vm_job_spec_service.py`: added `resource_type` to every
-    claim**, as `_VM_RESOURCE_TYPE = "compute.gpu"` — a domain constant
-    rather than pulled from the order (per review discussion: the order
-    schema doesn't reliably carry this distinction today, and hardcoding
-    is acceptable until it does), verified to equal what
-    `ComputeGpuResourceAdapter` — the only resource adapter this domain
-    registers — actually advertises, so the claim's new constraint cannot
-    reject every real VM resource that exists. **Found and fixed while
-    implementing:** `domains/vms/storefront/tests/fake_site.py`'s
-    `FakeSite` (a hand-rolled test double, not real `kit/site`) didn't
-    understand `resource_type` as a special top-level claim key — it
-    already special-cased `gpu_count`/`dimensions` out of its generic
-    attribute-equality mismatch check, but not `resource_type`, so every
-    resource it served started failing to match once the claim named it.
-    Fixed `_match()` to special-case it the same way; this is a
-    test-double gap the new claim constraint exposed, not a production
-    admission bug — real `kit/site` already handled `resource_type`
-    correctly via `_split_claim_requirement` before this change.
-  - **11.2 tests (review-driven additions), all passing:** `test_aggregation.py`
-    grew two more cases (the coarse matcher's documented categorical-attribute
-    gap; an injected exact matcher actually changing ranking versus the
-    coarse default) — 20/20. New `kit/site/tests/unit/test_dict_resource_satisfies_claim.py`
-    (22 cases): a parametrized equivalence sweep proving the adapter and
-    the authoritative admission path agree for the same data across
-    `pool_id`/`resource_id`/`resource_type`/`region`/`gpu_model`/
-    dimensions/legacy-units claims, plus the fail-closed, strict-malformed,
-    and `unit_claim_keys` cases above. New
-    `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`
-    cases proving the composition wiring itself (that `"most_available"`
-    actually gets wrapped with the kit/site matcher, and `"fill_first"`
-    stays unwrapped) — 12/12. New
-    `domains/vms/storefront/tests/unit/test_vm_job_spec_service.py`
-    (3 cases) — `compute_capacity_claim_from_order` had no dedicated test
-    file at all before this, a pre-existing gap closed alongside the new
-    behavior it needed covering. Full re-verified totals after every
-    change in this update: `core/storefront` 20/20, `kit/site` 135/135,
-    `domains/vms/storefront` unit 635/635 + integration 146/148 (the 2
-    failures are the already-documented Node/Rust/Foundry alkahest gap,
-    unrelated), `provisioning/compute/service` 540/540.
-  - **Permanent documentation (update):** still none — the injected-matcher
-    design is implementation technique (which package owns which
-    semantics, and why), not new externally-observable subsystem behavior;
+  - **Done.** `_resource_matches_claim` implemented as designed and
+    later renamed `_coarse_resource_matches_claim` (see the 2026-07-30
+    update below); `test_aggregation.py` covers pool/resource/dimension/
+    legacy-unit matching and the original claim-blindness regression.
+  - **Update (2026-07-30, code review): extended, not replaced.** Review
+    found the coarse matcher still ignores categorical claim attributes
+    (`region`, `gpu_model`) that VM claims already emit and site admission
+    already checks — not an incorrect-admission risk, but avoidable
+    failed probe/reserve attempts. Resolved via dependency injection
+    rather than moving matching logic into `core`; see `design.md`'s
+    "Task 11.2 alternatives" for why the other two options were rejected.
+    Final behavior: `core/storefront/aggregation.py` exposes a
+    `ClaimMatcher` type and takes an injectable matcher (default
+    `_coarse_resource_matches_claim`, documented as intentionally
+    partial); `kit/site` exposes `dict_resource_satisfies_claim`, a thin
+    adapter delegating to its own existing pure parsing/matching
+    functions and requiring `unit_claim_keys` explicitly (VM's ledger is
+    composed with `("units", "gpu_count")`, not the module default);
+    `capacity_client.py` injects it specifically when placement is
+    `most_available`; `vm_job_spec_service.py` adds
+    `resource_type="compute.gpu"` to every claim, verified to match what
+    `ComputeGpuResourceAdapter` actually registers. Fixed a test-double
+    gap this exposed: `fake_site.py`'s `FakeSite` didn't understand
+    `resource_type` as a special claim key.
+    Validation: `core/storefront` 20/20, `kit/site` 135/135 (22 new in
+    `test_dict_resource_satisfies_claim.py`, a parametrized equivalence
+    sweep against the authoritative admission path),
+    `domains/vms/storefront` unit 635/635 + integration 146/148 (2
+    known, unrelated Node/Rust/Foundry alkahest gaps),
+    `provisioning/compute/service` 540/540.
+  - **Permanent documentation:** none — the injected-matcher design is
+    implementation technique, not new externally-observable behavior;
     recorded as in-code docstrings on `ClaimMatcher`/
-    `dict_resource_satisfies_claim`, matching how this document already
-    treats similar implementation-location decisions.
+    `dict_resource_satisfies_claim`.
 - [x] 11.3 Confirm the composition/wheel/reinit/Docker/deployment wiring for
       `kit/fulfillment` found already satisfied in `design.md` item 8 —
       `kit/Makefile`'s `dist`/`test` targets, both consumers' `reinit`
@@ -1105,81 +995,49 @@ design.
       sanitization); the real gap is at the Ansible execution layer:
   - [x] 11.4.1 Add `no_log: true` to `vm-create.yml`'s two password-generating
     `set_fact` tasks (`tenant_password`, `root_password`), matching the
-    pattern `vm-reset-password.yml`'s equivalent tasks already use. **Done,
-    and expanded on discovery of three more unprotected credential-bearing
-    tasks in the same file while implementing**: a third `root_password`
-    `set_fact` (the golden-image path), the SSH `shell` task that embeds
-    `{{ tenant_password }}` directly in its command line (`Create tenant
-    user via SSH connection`), and both `set_fact: vm_creation_data:` tasks
-    that build the full `authentication` block (root/tenant password,
-    cleartext) consumed by `_extract_and_store_credentials`. All six now
-    carry `no_log: true`. The two "Display VM creation result" `debug: msg:`
-    tasks had their inline `{{ root_password }}`/`{{ tenant_password }}`
-    interpolation replaced with a pointer to the credentials API instead
-    of blanket `no_log`, preserving the rest of the connection-info message
-    for interactive/manual runs.
-  - [x] 11.4.2 Route `ansible_service.py`'s per-line `logger.debug("ansible
-    stdout: %s", ...)`/`("ansible stderr: %s", ...)` through
-    `job_service.py`'s existing `_redact_logs` scrubber. **Done**, and the
-    scrubber itself was strengthened during implementation: a new shared
-    `redact_ansible_output()` was added to `ansible_service.py` (the
-    direction `job_service.py` already depends on it, not the reverse);
-    `job_service.py`'s `_redact_logs` now delegates to it instead of
-    keeping a private copy (dropped its now-unused `import re`). **Found
-    and fixed a second real gap while doing this**: `vm-management/tasks/json-output.yml`'s
-    `debug: var:`/`debug: msg:` tasks are the literal transport
-    `_extract_ansible_json` parses (marker-searches raw stdout for
-    `"<fact_name>":`) — they carry the same credential-bearing
-    `vm_creation_data`/`vm_creation_json` and **must not** get `no_log`
-    (confirmed by reading `_extract_ansible_json`: doing so would break
-    credential/result delivery entirely, not just redact a log). Traced
-    that this data reaches the same two consumers 11.4.1/11.4.2 already
-    protect (persisted `job.logs`, real-time debug stream), so no
-    `json-output.yml` change was needed — but the original regex's JSON
-    pattern only matched the unescaped `"password": "..."` form; Ansible
-    can render a `debug: msg:`'d JSON string backslash-escaped inside its
-    own outer result dict depending on `stdout_callback`/`callback_result_format`.
-    Verified both renderings empirically against representative samples
-    before and after the fix; strengthened the pattern to match both.
-  - [x] 11.4.3 Change `vm_fulfillment_service.py`'s `logger.info("[ALKAHEST]
-    Order for fulfillment: %s", order)` to log an explicit, small allowlist
-    of fields instead of the whole object. **Done** — logs `type(order).__name__`
-    and, for a dict, its sorted top-level key names only, never values.
-  - [x] 11.4.4 **Tests.** `provisioning/compute/service/tests/unit/services/test_job_service.py`'s
-    `TestRedactLogs`: 2 new cases (backslash-escaped JSON password, nested
-    YAML `authentication` block) pinning the strengthened regex; all 9
-    pre-existing cases still pass unchanged (delegation is behavior-preserving).
-    `test_ansible_service.py`: new `TestRedactAnsibleOutput` (4 cases,
-    direct function coverage) and `TestStreamingDebugLoggingIsRedacted` (2
-    cases) — one proving `_extract_ansible_json` still sees raw,
-    unredacted text (redaction must never reach the extraction path, only
-    logging), one driving `wait_for_playbook` against a real subprocess
-    (`select.select()` needs genuine file descriptors, so a fake object
-    won't exercise the streaming code path) standing in for the
-    ansible-core process this module wraps — a synthetic stand-in, not a
-    real Ansible run, but real enough to prove `logger.debug` never
-    receives an unredacted line through the actual streaming code path,
-    not just through the scrubber's own unit tests. `domains/vms/provisioning/iac/tests/test_vm_management_contracts.py`:
-    2 new cases — every password-bearing task in `vm-create.yml` carries
-    `no_log: true` and the two display messages no longer interpolate the
-    raw value; `json-output.yml`'s transport tasks are explicitly asserted
-    to **not** carry `no_log`, pinning the deliberate exception so a future
-    "audit" pass doesn't undo it. Full suite run: `test_job_service.py` +
-    `test_ansible_service.py` 93/93, `test_aggregation.py` 17/17 (11.2's
-    tests, run in the same pass), `test_vm_management_contracts.py` +
-    `test_gpu_attachment_discovery.py` 9/9 (8 in the contracts file after
-    the two additions, 1 in the GPU-discovery file) — all green, no
-    regressions.
-  - **Permanent documentation:** none — this restores the "credentials
-    must not leak into logs" posture the codebase already partially
-    implements (Section 8's "raw credentials MUST NOT be persisted"
-    principle, `openspec/specs/fulfillment/spec.md`), it isn't new
-    normative behavior. The shared `redact_ansible_output` location and
-    the `json-output.yml` no-`no_log` exception are recorded as in-code
-    docstrings (on the function itself), not promoted to a spec — this is
-    implementation-technique rationale, not observable subsystem behavior,
-    matching how Section 7's `market_fulfillment.backfill` placement was
-    recorded.
+    pattern `vm-reset-password.yml`'s equivalent tasks already use.
+    **Done, expanded to six tasks total** on discovering three more
+    unprotected credential-bearing tasks in the same file: a third
+    `root_password` `set_fact` (golden-image path), the SSH `shell` task
+    embedding `{{ tenant_password }}` directly in its command line, and
+    both `vm_creation_data:` tasks building the full `authentication`
+    block. The two "Display VM creation result" `debug: msg:` tasks had
+    their inline password interpolation replaced with a pointer to the
+    credentials API instead of blanket `no_log`.
+  - [x] 11.4.2 Route `ansible_service.py`'s per-line debug logging through
+    `job_service.py`'s existing `_redact_logs` scrubber. **Done**; the
+    scrubber was centralized into a new shared `redact_ansible_output()`
+    in `ansible_service.py`, with `job_service.py`'s `_redact_logs`
+    delegating to it. Also found and fixed: the regex only matched
+    unescaped `"password": "..."`; Ansible can render a `debug: msg:`'d
+    JSON string backslash-escaped depending on `stdout_callback`/
+    `callback_result_format` — strengthened to match both forms.
+    `json-output.yml`'s own `debug:` tasks are the literal transport
+    `_extract_ansible_json` parses and deliberately do **not** get
+    `no_log` (confirmed reading `_extract_ansible_json`: doing so would
+    break credential/result delivery entirely) — that data reaches the
+    same two protected consumers by other paths.
+  - [x] 11.4.3 Change `vm_fulfillment_service.py`'s order-logging call to
+    log an explicit allowlist instead of the whole object. **Done** —
+    logs `type(order).__name__` and sorted top-level key names only,
+    never values.
+  - [x] 11.4.4 **Tests.** New/strengthened coverage across
+    `test_job_service.py` (`TestRedactLogs`, +2 cases),
+    `test_ansible_service.py` (`TestRedactAnsibleOutput` +
+    `TestStreamingDebugLoggingIsRedacted`, 6 cases — one drives
+    `wait_for_playbook` against a real subprocess since `select.select()`
+    needs genuine file descriptors), and
+    `test_vm_management_contracts.py` (+2 cases, including an explicit
+    pin that `json-output.yml`'s transport tasks must **not** carry
+    `no_log`). Full suite: `test_job_service.py` + `test_ansible_service.py`
+    93/93, `test_aggregation.py` 17/17, `test_vm_management_contracts.py` +
+    `test_gpu_attachment_discovery.py` 9/9.
+  - **Permanent documentation:** none — restores the "credentials must
+    not leak into logs" posture the codebase already partially implements
+    (Section 8's principle, `openspec/specs/fulfillment/spec.md`); not
+    new normative behavior. The shared `redact_ansible_output` location
+    and the `json-output.yml` exception are recorded as in-code
+    docstrings.
 - [x] 11.5 Run the suite inventory recorded in `design.md` item 9:
   - Root `make test` (chains through `test-core`, `test-kits` — includes
     `kit/fulfillment` — `test-provisioning`, `test-provisioning-iac`,
@@ -1214,276 +1072,73 @@ design.
     fix the run surfaces gets its own permanent-documentation destination
     named when it's made, per the usual rule.
   - **Done (2026-07-30).** Assembled a working multi-package test
-    environment in the validation sandbox (editable-installed every
-    internal package this change's suites needed, plus their third-party
-    dependencies) — not available at the start of this session, built up
-    incrementally as each package's imports revealed what it needed.
-    Results:
-    - **Green, no regressions attributable to this change:** `kit/site`
-      113/113, `kit/fulfillment` 149/149, `kit/resource-pools` 34/34,
-      `kit/alkahest` 150/150 (needed `alkahest-py==1.1.2`, which installs
-      cleanly despite being a compiled extension), `kit/config` 94/94,
-      `kit/identity` 14/14, `kit/policy` 7/7, `provisioning/compute/service`
-      (unit+integration) 540/540, `core` 65/65, `core/buyer` 26/26,
-      `core/storefront` 74/74, `core/storefront-client` 17/17,
-      `core/registry-client` 1/1, `domains/vms/storefront` unit 632/633,
-      integration 145/148, `domains/vms/buyer` 157/157,
-      `domains/apicredits/service` 14/14, `domains/apicredits/storefront`
-      47/47, `domains/apicredits/buyer` 16/16.
-    - **Four failures found; root-caused, not just assumed unrelated.**
-      Two turned out to be genuine environment dependency-version drift in
-      this sandbox, not real bugs and not caused by this change — found by
-      re-pointing editable installs at a byte-for-byte clean copy of the
-      branch point and confirming the identical failures reproduced there
-      too, then tracing further rather than stopping at "reproduces on
-      clean, therefore unrelated." `domains/vms/storefront`'s
-      `test_server_app_composition.py` failed because this sandbox had
-      `fastapi==0.141.0`/`uvicorn==0.52.0` installed instead of the
-      repository's actual pins (`fastapi~=0.115.8`, `uvicorn~=0.34.0` —
-      confirmed by `pip`'s own conflict warnings once the correct versions
-      were installed). `test_negotiate_controller.py::test_amountless_exact_escrow_can_start_and_accept`
-      failed because `dynaconf==3.3.4` was installed instead of the
-      pinned `dynaconf==3.2.13` (`uv.lock`): with `merge_enabled=True`,
-      `settings_overrides`' `settings.set(dotted, value)` call merges a
-      list-valued override with the existing config value instead of
-      replacing it, so the test's `negotiation.policies` override was
-      silently concatenated with the config's own default policy list,
-      producing a duplicated middleware chain (`bisection_middleware`
-      spliced in) that never reached the configured `accept_exact_listing`
-      terminal policy. Traced by instrumenting every middleware in the
-      chain and printing the actually-resolved chain, not by inspection
-      alone. Installing the pinned dependency versions fixes both — full
-      re-run: `domains/vms/storefront` unit 779/779 (1 skipped) +
-      integration passes except the two below, `provisioning/compute/service`
-      540/540, `kit/site` 113/113 unaffected by the version correction.
-      The remaining two `test_alkahest.py` integration failures give an
-      explicit, actionable error (`could not spawn node: No such file or
-      directory`) — they need a live Node.js/Rust/Foundry toolchain this
-      sandbox doesn't have; not a version issue, a missing-infrastructure
-      one.
+    environment in the validation sandbox. Results:
+    - **Green:** `kit/site` 113/113, `kit/fulfillment` 149/149,
+      `kit/resource-pools` 34/34, `kit/alkahest` 150/150, `kit/config`
+      94/94, `kit/identity` 14/14, `kit/policy` 7/7,
+      `provisioning/compute/service` 540/540, `core` 65/65, `core/buyer`
+      26/26, `core/storefront` 74/74, `core/storefront-client` 17/17,
+      `core/registry-client` 1/1, `domains/vms/storefront` unit 779/779
+      (1 skipped) + integration passing except the two Alkahest cases
+      below, `domains/vms/buyer` 157/157, `domains/apicredits/service`
+      14/14, `domains/apicredits/storefront` 47/47,
+      `domains/apicredits/buyer` 16/16.
+    - **Four failures found, all root-caused, none attributable to this
+      change.** Two were sandbox dependency-version drift, not real bugs
+      — installed `fastapi`/`uvicorn`/`dynaconf` versions differed from
+      this repo's pins; installing the pinned versions fixed both (see
+      `design.md`'s "Suite-run failure root causes" for the full
+      diagnosis). The remaining two `test_alkahest.py` failures need a
+      live Node.js/Rust/Foundry toolchain this sandbox doesn't have.
     - **Typing checks run:** `typecheck-core` (1 pre-existing error,
-      `market_core/domain_contract.py`, a file untouched by this change),
-      `typecheck-core-registry-client` (clean), `core/registry`'s `mypy
-      src/` (30 pre-existing errors — missing type stubs for
-      `PyYAML`/`jsonschema`, SQLAlchemy `Column`-vs-plain-type mismatches,
-      one `Base`-as-type issue — every one in files this change never
-      touched). None of these three packages contain any code this change
-      modified; all findings are disclosed as pre-existing, not fixed
-      under this task.
-    - **Not run:** `core/registry`'s own pytest suite (blocked by a deep,
-      unrelated dependency chain — `pydantic-settings` → `alembic` →
-      `jsonpath-ng` → `jsonschema`, each revealing the next; stopped
-      rather than keep installing indefinitely into a package this change
-      never touches). `e2e-tests` (needs a running two-service stack, not
-      available in this sandbox — consistent with every prior section's
-      e2e disclosure). `openspec validate --all --strict` — still
-      unavailable, unchanged from every validation pass since Section 8.
-    - **No renamed-contract consumers found or fixed** beyond what 11.2's,
-      11.4's, and 11.6's own implementation passes already caught and
-      fixed as part of doing that work (recorded on those tasks, not
-      duplicated here).
+      untouched file), `typecheck-core-registry-client` (clean),
+      `core/registry`'s `mypy src/` (30 pre-existing errors, all in files
+      this change never touched) — disclosed, not fixed under this task.
+    - **Not run:** `core/registry`'s own pytest suite (unrelated deep
+      dependency chain), `e2e-tests` (needs a live two-service stack),
+      `openspec validate --all --strict` (unavailable, unchanged since
+      Section 8).
+    - No renamed-contract consumers found beyond what 11.2/11.4/11.6
+      already caught during their own implementation.
 - [x] 11.6 Migrate `CapacityReservation.vm_host` into `executor_ref`, per the
       decision in `design.md` item 7. Scoped strictly to `vm_host` —
       `vm_target`, `create_job_id`, and `vm_remove_job_id` are explicitly
       out of scope and stay as dedicated columns.
-  - [x] 11.6.1 `kit/site/src/market_site/ledger.py`: change `reserve()` and the
-    settlement-resource reassignment/rebind path to write
-    `executor_ref={"vm_host": ...}` (merged with any existing
-    `executor_ref` content, not overwritten) instead of the dedicated
-    `vm_host` column. **Done**, via a new shared `_executor_ref_for_resource`
-    helper used at all three write sites — `reserve()`, the rebind path,
-    and `resize_reservation`'s internal re-reserve (a third site the
-    original subtask text didn't name explicitly, since it shares
-    `reserve()`'s exact construction pattern; found while implementing,
-    fixed identically).
-  - [x] 11.6.2 Drop the `vm_host=` parameter from `attach_lease`/
-    `update_lease_fields`. In `kit/site/src/market_site/authority.py`,
-    delete `_legacy_vm_fields` outright and stop deriving `vm_host` in
-    `attach_lease_reservation`/`update_reservation_fields` — both already
-    have `executor_ref` in hand and can pass it straight through once
-    `ledger.py` no longer needs the synthesized legacy shape. **Done, with
-    one correction to this subtask's own text:** `_legacy_vm_fields` is not
-    deleted with no replacement — it derived *two* things (`vm_host` and
-    `vm_target`), and only `vm_host` could be dropped outright. `vm_target`
-    has no self-heal path of its own (unlike the retired `vm_host`, no
-    other field derives it), so a narrower `_legacy_vm_target` replaces it,
-    still synthesizing `vm_target` from `executor_kind`/`executor_target`
-    for VM-kind reservations. `_sync_executor_fields`'s self-heal in
-    `ledger.py` was also fixed in the same pass: it previously derived
-    `executor_kind`/`executor_ref` from a `reservation.vm_host` column
-    that no longer exists — it now reads the already-set
-    `reservation.executor_ref.get("vm_host")` instead.
-  - [x] 11.6.3 Rewrite `find_active_lease_by_vm_target`'s filter from
-    `CapacityReservation.vm_host == vm_host` to
-    `func.json_extract(CapacityReservation.executor_ref, '$.vm_host') ==
-    vm_host`. This is the first ORM-level use of SQLite's JSON1 extension
-    in this codebase; the extension itself is already relied on at the
-    raw-SQL migration layer
-    (`compute_provisioning_service/db/migrations.py`'s `pool_id`
-    backfill), so this is a new call site for an existing dependency, not
-    a new one. **Done.**
-  - [x] 11.6.4 `_reservation_payload`'s `"vm_host"` output key: compute from
-    `reservation.executor_ref.get("vm_host")` instead of the dedicated
-    column. This preserves the existing payload shape for every consumer
-    outside `kit/site` — no other package should need to change. **Done**;
-    confirmed no consumer outside `kit/site` needed a change (VM storefront
-    reaches this only through HTTP payloads, which are byte-compatible).
-  - [x] 11.6.5 Drop `CapacityReservation.vm_host` from the SQLAlchemy model
-    (`kit/site/src/market_site/db.py`). **Done.**
-  - [x] 11.6.6 Add a `compute_provisioning_service/db/migrations.py` migration:
-    backfill `executor_ref` via `json_set`/`json_patch` (merge, not
-    overwrite) for every row where `vm_host IS NOT NULL` and
-    `executor_ref` doesn't already carry it, then drop the column.
-    Note in the migration's own comment that `domains/apicredits`'s
-    database shares this schema but has no migration runner
-    (`Base.metadata.create_all()` only) — an already-deployed apicredits
-    database keeps a harmless, permanently-null `vm_host` column after
-    this lands, and that's expected, not a bug to chase. **Done**,
-    registered as `20260730_001_capacity_reservations_vm_host_to_executor_ref`
-    (folded into the consolidated cutover migration per 11.6.9 below).
-  - **Update (2026-07-30, code review): column drop is now deterministic,
-    not best-effort.** The original implementation caught
-    `OperationalError` from `ALTER TABLE ... DROP COLUMN` and continued —
-    review correctly flagged this as conflicting with Section 11's own
-    purpose (an obsolete column could silently survive migration while
-    the migration is still marked applied) and too broad a catch (locking,
-    corruption, or malformed-SQL errors would be indistinguishable from
-    "this SQLite is too old"). Since this repository supports only
-    SQLite, "does this SQLite support `DROP COLUMN`" isn't actually
-    ambiguous enough to justify a runtime fallback — replaced with a new,
-    generic `_drop_columns_via_table_rebuild(engine, table_name,
-    columns_to_drop)` helper: a full create/copy/drop/rename cycle,
-    introspecting the table's current columns via `PRAGMA table_info`
-    rather than a hardcoded column list (so it stays correct as the model
-    gains columns, and works whether it's simulating a pre-migration
-    database in a test or running against the real, already-migrated
-    schema), preserving every kept column's type/nullability/default/
-    primary-key flag and recreating every named index that doesn't
-    reference a dropped column. Both `vm_host` and `vm_target` migrations
-    now call this instead of the `try/except OperationalError` pattern;
-    the now-unused `OperationalError` import was removed.
-    **Caught a real bug in the helper itself via a test written
-    specifically to check for it**, not by inspection: the first
-    implementation queried `sqlite_master` for the table's indexes
-    *after* the rename, by which point the query matched the newly
-    renamed (index-less) table instead of the original's indexes —
-    `test_named_indexes_survive_the_rebuild` failed with zero indexes
-    recreated, exposing that the index capture needs to happen before
-    the original table is dropped, not after. Fixed and reverified.
-  - [x] 11.6.7 **Tests.** **Done.** `kit/site`: new coverage for
-    `reserve()`'s `executor_ref` derivation, and for
-    `find_active_lease_by_vm_target` — which, checked against the existing
-    suite, had **no prior test coverage at all**, even before this
-    change; closed that gap rather than just migrating an existing test.
-    Fixed two pre-existing tests broken by the `vm_host=` parameter
-    removal (`test_authority.py`, and `provisioning/compute/service`'s
-    `test_ledger_lease_lifecycle.py`, whose two shared fixture helpers
-    both called `attach_lease(vm_host=...)` — one fix cascaded across all
-    17 tests that used them). New migration test file
-    `test_vm_host_executor_ref_migration.py` (6 cases: fresh backfill,
-    merge-preserving-existing-keys, null no-op, idempotent-rerun,
-    already-migrated no-op, never-had-the-column no-op). Fixed three
-    hardcoded migration-count/id assertions in `test_database.py` that the
-    new migration's registration made stale. Full verified totals:
-    `kit/site` 113/113, `provisioning/compute/service` (unit+integration)
-    540/540, `kit/fulfillment` 149/149 (unaffected, run to confirm no
-    indirect breakage) — all green.
-  - [x] 11.6.8 **Follow-up (2026-07-30, review-driven): `CapacityReservation.vm_target`
-    was also fully retired**, not just `vm_host`. Investigated on request
-    during review: `_legacy_vm_target` (the helper added in 11.6.2)
-    derived `vm_target` by returning `executor_target` unchanged for
-    VM-kind reservations — proof by construction that the two columns
-    were always written to the identical value at the same call sites,
-    making `vm_target` fully redundant with the pre-existing generic
-    `executor_target` column, unlike `vm_host` (which genuinely needed a
-    JSON key added to `executor_ref`). This contradicts this task's own
-    earlier framing ("`vm_target` has no independent write path... stays
-    a dedicated column while `vm_host` did not") — that framing was
-    wrong, found and corrected in the same pass. `attach_lease`/
-    `update_lease_fields` drop `vm_target=` entirely; `find_active_lease_by_vm_target`
-    filters on `executor_target` instead; `_legacy_vm_target` is deleted
-    outright (no replacement needed — callers already have
-    `executor_target` in hand); the column is dropped from `db.py`; the
-    migration backfills `executor_target = COALESCE(executor_target,
-    vm_target)` then drops the column, folded into the same consolidated
-    migration as 11.6.6 (see 11.6.9). **One real behavioral fix found
-    while implementing:** the `"vm_target"` payload key can't simply
-    alias `executor_target` the way `"vm_host"` aliases a JSON key inside
-    `executor_ref` — `executor_target` is a flat column shared by every
-    domain (bare-metal populates it too), so an unscoped alias would leak
-    a bare-metal reservation's target under a VM-flavored key where it
-    used to correctly read `None`. Caught by
-    `test_register_bare_metal_lease_attaches_executor_metadata` failing;
-    fixed by scoping the payload key to `executor_kind == "vm"`. Tests:
-    the existing bare-metal test above now exercises this correctly (no
-    new test needed — it already asserted the null case, it just needed
-    the code to honor it); `kit/site`'s `test_authority.py`/`test_ledger.py`
-    updated for the new call shape. Full re-verified totals: `kit/site`
-    113/113, `provisioning/compute/service` 540/540.
-  - [x] 11.6.9 **Follow-up (2026-07-30, review-driven): migration
-    consolidation.** `_migrate_remove_provisioned_resource_domain_ref`
-    (`20260725_001`), `_migrate_ansible_pool_requirement_delegate`
-    (`20260728_001`), the `vm_host` migration (`20260730_001`), and the
-    new `vm_target` migration (11.6.8) are all folded into the single
-    `_migrate_capacity_model_cutover` function
-    (`20260722_001_pools7_capacity_model_cutover`) instead of being
-    registered as separate dated migrations — nothing built on any of
-    these has been deployed anywhere, so there is no intermediate,
-    partially-migrated database whose compatibility needs preserving
-    across separate migration IDs. Verified no ordering dependency exists
-    between the folded-in logic and the two migrations that sit between
-    the cutover and where these three used to be registered
-    (`_migrate_legacy_vm_leases_to_fulfillment`/`_migrate_drop_vm_leases_table`
-    operate on entirely different tables — `vm_leases` and
-    `settlement_records`, not `capacity_reservations`/
-    `provisioned_resources`/`ansible_pool_configs`). Updated
-    `test_database.py`'s exact-migration-ID-set assertion, migration
-    count (14→11), and the schema-drift test's "most recent migration"
-    reference accordingly. Full re-verified totals: `provisioning/compute/service`
-    (unit+integration) 540/540, migration-specific suite
-    (`test_database.py` + `test_legacy_vm_lease_migration.py` +
-    `test_vm_host_executor_ref_migration.py`) 23/23.
-  - **Update (2026-07-30, after the table-rebuild fix above): totals
-    changed, consolidation itself unaffected.** The rebuild-helper fix
-    added 4 more tests to `test_vm_host_executor_ref_migration.py`
-    (index preservation, primary-key/NOT-NULL preservation, unrelated-row/
-    column integrity, and the every-column-refused case) — migration
-    count and IDs are unchanged by that fix, only the drop mechanism is.
-    Final totals: `provisioning/compute/service` (unit+integration)
-    544/544, migration-specific suite 27/27.
-  - **Permanent documentation:** checked `openspec/specs/site-capacity/spec.md`,
-    `openspec/specs/physical-provisioning/spec.md`, and
-    `docs/development/ARCHITECTURE.md` for `vm_host` mentions that might
-    now be stale. None are: `site-capacity/spec.md`'s opaque-reservation
-    requirement and `ARCHITECTURE.md`'s "physical resource identity"
-    passage both cite `vm_host` as an example of a domain-specific
-    placement field that must not cross the storefront boundary — a
-    payload-level statement, still true (the `vm_host` payload key still
-    exists, now derived from `executor_ref`, still stripped by
-    `router.py`). `physical-provisioning/spec.md`'s two mentions describe
-    a different `vm_host` entirely — the VM Ansible adapter's own
-    fulfillment metadata, unrelated to `CapacityReservation`'s retired
-    column. No permanent documentation change was needed; this is a
-    schema-internal change with no normative-behavior surface of its own.
-
-### Section 11 review follow-up (2026-07-30): AGENTS.md comment compliance sweep
-
-AGENTS.md's "Python comments and docstrings" section prohibits referencing
-OpenSpec change IDs or task numbers in code comments — comments must
-describe the current system, not the history of the change that produced
-it. A repository-wide sweep (`grep` for `POOLS-7`, `Section 11`, `§10`,
-`task 11.` across every `.py`/`.yml` file outside `openspec/`) found this
-task's own new tests violating it repeatedly (`POOLS-7 Section 11 task
-11.X:` opening nearly every new docstring — the task-list line items this
-document itself uses as an organizing device leaked directly into
-production-adjacent test code) and, checking further rather than stopping
-at this task's own additions, five pre-existing Section 10-era violations
-(`POOLS-7 §10.x`) in files this task never otherwise touched. All twelve
-occurrences rewritten to state the invariant or behavior being tested
-directly, with no change-history reference — re-verified against the
-affected suites (`domains/vms/storefront`, `provisioning/compute/service`
-unit and integration, `kit/site`, `core/storefront`, the IaC contract
-tests) after every edit; all green, no behavioral changes, text-only.
+  - [x] 11.6.1–11.6.5 **Done.** `reserve()`, the settlement-resource
+    rebind path, and `resize_reservation`'s internal re-reserve all write
+    `executor_ref={"vm_host": ...}` (merged, not overwritten) via a new
+    shared `_executor_ref_for_resource` helper. `attach_lease`/
+    `update_lease_fields` no longer accept `vm_host=`.
+    `find_active_lease_by_vm_target` filters via
+    `func.json_extract(executor_ref, '$.vm_host')`.
+    `_reservation_payload`'s `"vm_host"` key now reads from
+    `executor_ref` — byte-compatible for every consumer outside `kit/site`.
+    The dedicated column is dropped from the SQLAlchemy model.
+  - [x] 11.6.6 **Done.** Migration backfills `executor_ref` (merge, not
+    overwrite) then drops the column, using a deterministic table-rebuild
+    (not a best-effort `DROP COLUMN` attempt — see the 2026-07-30 update
+    in `design.md`'s "Task 11.6 implementation notes").
+  - [x] 11.6.7 **Tests, done.** New coverage for `reserve()`'s
+    `executor_ref` derivation and for `find_active_lease_by_vm_target`
+    (previously **no test coverage at all**). New migration test file
+    `test_vm_host_executor_ref_migration.py`.
+  - [x] 11.6.8 **Follow-up: `vm_target` also fully retired**, not just
+    `vm_host` — see `design.md` for why the task's original scoping was
+    wrong and what that surfaced (a real bare-metal payload-scoping bug,
+    now fixed and tested).
+  - [x] 11.6.9 **Follow-up: migration consolidation** — four migrations
+    folded into the existing cutover migration rather than registered
+    separately; see `design.md` for the safety verification.
+  - **Final validation:** `kit/site` 113/113,
+    `provisioning/compute/service` (unit+integration) 544/544 (27/27 in
+    the migration-specific suite), `kit/fulfillment` 149/149.
+  - **Permanent documentation:** none needed — checked
+    `openspec/specs/site-capacity/spec.md`, `physical-provisioning/spec.md`,
+    and `ARCHITECTURE.md` for now-stale `vm_host` mentions; all remaining
+    mentions describe the still-true payload-level contract (the
+    `vm_host` key still exists, still stripped at the storefront
+    boundary) or an unrelated `vm_host` concept (the VM Ansible adapter's
+    own fulfillment metadata).
 
 ### Section 11 code-review correction and API-credits modernization plan (opened 2026-07-30)
 
@@ -1510,36 +1165,22 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     `required_attributes` key unchanged.
   - **Done (2026-07-30).** `market_site/__init__.py` now exports
     `dict_resource_satisfies_claim`; `capacity_client.py` imports from the
-    public surface. Added `VM_UNIT_CLAIM_KEYS = ("units", "gpu_count")` as
-    a single named constant in `capacity_client.py`, bound into the
-    injected matcher via a nested `functools.partial` — documented in the
-    constant's own docstring why it can't be a literal shared Python
-    object with `container.py`'s copy (separate deployables, HTTP
-    boundary; the provisioning service is deliberately domain-neutral and
-    must not import a VM-domain constant). Added the behavioral ranking
-    test through a real `AggregateCapacityClient` with two `FakeSite`
-    instances — **this exposed and fixed a real, separate bug**:
-    `FakeSite`'s snapshot response never included the `available`
-    dimensions dict, only flat `available_units`, unlike real `kit/site`'s
-    wire shape — meaning any test exercising an injected exact matcher
-    against `FakeSite` was silently meaningless (every row looked like
-    zero capacity for ranking) until fixed. Added the resource-type-mismatch
-    behavioral test the same way. Renamed the local variable in
-    `vm_job_spec_service.py`'s two functions to `capacity_claim`
-    throughout; the serialized `"required_attributes"` dict key is
-    untouched (verified its real blast radius first: admin API request/
-    response bodies, `fulfillment_resume_runtime.py`'s durable resume
-    context, and `core/storefront-client`'s external client library all
-    read/write that literal key — a wire/persisted rename, not a free
-    local one, correctly out of this task's scope). Tests: `core/storefront`
-    20/20, `kit/site` 135/135 (22 new in a dedicated
-    `test_dict_resource_satisfies_claim.py` — a parametrized equivalence
-    sweep against the authoritative path, plus the `unit_claim_keys` gap
-    found while implementing: VM's ledger is composed with
-    `("units", "gpu_count")`, not the module default `("units",)`, and the
-    adapter needed that threaded through explicitly), VM storefront unit
-    640/640 + integration 146/148 (2 known Node/Rust/Foundry alkahest
-    gaps, unrelated).
+    public surface. `VM_UNIT_CLAIM_KEYS = ("units", "gpu_count")` bound
+    into the injected matcher via `functools.partial` (can't be a shared
+    Python object with `container.py`'s copy — separate deployables, HTTP
+    boundary). Added a behavioral ranking test through a real
+    `AggregateCapacityClient` — this exposed and fixed a real, separate
+    bug: `FakeSite`'s snapshot response never included the `available`
+    dimensions dict, so any test exercising an injected exact matcher
+    against it was silently meaningless until fixed. Renamed the local
+    variable in `vm_job_spec_service.py` to `capacity_claim`; the
+    serialized `"required_attributes"` wire key is untouched (real
+    external/persisted blast radius, correctly out of scope).
+    Tests: `core/storefront` 20/20, `kit/site` 135/135 (22 new,
+    equivalence-swept against the authoritative admission path — also
+    caught that VM's ledger is composed with `("units", "gpu_count")`,
+    not the module default), VM storefront unit 640/640 + integration
+    146/148 (2 known, unrelated alkahest gaps).
   - **Permanent documentation after review acceptance:**
     `openspec/specs/market-composition/architecture.md`, "Composition from above
     and below"; `openspec/specs/site-capacity/architecture.md`, projected
@@ -1560,43 +1201,23 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     valid, and `PRAGMA foreign_key_check` is empty.
   - [x] 11.8.4 Exercise the registered public migration path against the intended
     pre-cutover schema, not only private migration helpers.
-  - **Done (2026-07-30).** `_drop_columns_via_table_rebuild` rewritten to
-    follow SQLite's documented offline-schema-change procedure on one
-    dedicated connection (`engine.connect()`, not `engine.begin()` — PRAGMA
-    `foreign_keys` can only change with no transaction open, so the pragma
-    toggle and the rebuild transaction needed to be sequenced explicitly
-    with their own `commit()` calls). Chose 11.8.2's "extend" option over
-    "narrow": kept the helper generic (`PRAGMA table_info`-driven, works
-    on any table) but added explicit guards — it now raises
-    `NotImplementedError` if the target table has triggers, views, or
-    outbound foreign keys, rather than silently mishandling them; checked
-    `capacity_reservations` first and confirmed it has none of those.
-    **The 11.8.3 fixture test caught a real, separate bug in the first
-    implementation attempt**: it queried `sqlite_master` for the table's
-    indexes *after* the rename, by which point the query matched the
-    newly renamed (index-less) table instead of the original's — fixed by
-    capturing the index list before the original table is dropped, not
-    after. Writing the fixture itself also surfaced a real debugging
-    detour worth recording plainly: the first version of the test failed
-    with a `FOREIGN KEY constraint failed` on the child insert even
-    though the parent row was demonstrably present and visible in the
-    same transaction — extensive isolation (raw `sqlite3` vs SQLAlchemy,
-    `exec_driver_sql` vs `text().execute()`, pragma state checks
-    mid-transaction) turned out to be chasing a red herring:
-    `capacity_reservation_debits.capacity_bucket_id` has its *own*
-    separate foreign key to `capacity_buckets`, which the test simply
-    never populated. Not a SQLAlchemy/pysqlite quirk at all — fixed by
-    inserting a valid bucket row. New tests, all passing: the FK-cascade
-    fixture itself (parent+child survive real `PRAGMA foreign_keys=ON`
-    enforcement, `foreign_key_check` empty, the pragma restored to its
-    prior ON state afterward), a trigger/view refusal test, and a public
-    `run_migrations()` entrypoint test (11.8.4) that rewinds a fresh
-    database to simulate one that never recorded the cutover migration —
-    deleting its `schema_migrations` row and adding the pre-cutover
-    `vm_host` column back — then calls the real public entrypoint, not
-    the private migration function every other test in the file calls
-    directly. Full suite: `provisioning/compute/service` (unit+integration)
-    547/547, migration-specific suite 27/27.
+  - **Done (2026-07-30).** `_drop_columns_via_table_rebuild` follows
+    SQLite's documented offline-schema-change procedure on one dedicated
+    connection. Chose 11.8.2's "extend" option over "narrow": kept the
+    helper generic (`PRAGMA table_info`-driven) but added explicit
+    guards — raises `NotImplementedError` if the target table has
+    triggers, views, or outbound foreign keys, rather than silently
+    mishandling them (confirmed `capacity_reservations` has none).
+    Writing the FK-cascade fixture (11.8.3) caught a real bug in the
+    first implementation — index capture was happening after the rename
+    instead of before, matching zero indexes — and surfaced an unrelated
+    debugging detour, both recorded in `design.md`. New tests: the
+    FK-cascade fixture, a trigger/view refusal test, and a public
+    `run_migrations()` entrypoint test (11.8.4) that simulates a database
+    that never recorded the cutover migration, rather than calling the
+    private migration function directly. Full suite:
+    `provisioning/compute/service` (unit+integration) 547/547,
+    migration-specific suite 27/27.
   - **Permanent documentation after review acceptance:** deployment/schema
     migration procedure in `openspec/specs/deployment-state/spec.md`; the
     executor-reference current-state rule in `openspec/specs/site-capacity/spec.md`
@@ -1614,48 +1235,26 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     artifacts rather than relying on source-tree-relative editable imports.
   - [x] 11.9.4 Add wheel import and Docker-context validation covering each
     API-credit executable/package.
-  - **Done (2026-07-30).** Investigated before implementing rather than
-    assuming the worst: the wheel-building infrastructure already existed
-    and was correctly wired (`domains/Makefile` already had
-    `dist-apicredits-domain`/`-service`/`-storefront`/`-buyer`/
-    `-middleware`/`-sample-app`, correctly ordered — storefront/buyer
-    already depended on the domain wheel building first), and both
-    `service`'s and `storefront`'s Dockerfiles already used
-    `uv sync --no-sources --find-links /.dist`, so the deployed container
-    path was already correct. The real, narrower problem was local
-    dev/reinit consistency: only `domains/apicredits/pyproject.toml` (the
-    domain package itself) had the flagged `[tool.uv.sources]` editable
-    overrides for `arkhai-core`/`arkhai-kit-policy` — removed.
-    `arkhai-apicredits-domain` was unversioned in `storefront`/`buyer`'s
-    dependency lists — pinned to `>=0.1.0` — and confirmed genuinely
-    absent from `service`'s dependencies (service never imports from the
-    domain package, so correctly not added there). Added it to
-    `storefront`'s and `buyer`'s `reinit` targets (neither had it).
-    Removed the repo-root `pythonpath` dev-mode fallbacks from
-    `storefront`/`buyer` now that the domain wheel resolves properly;
-    left `buyer`'s own `dev-mode-dirs` setting alone (a different,
-    legitimate mechanism for that package's own non-`src/`-layout
-    editable-install mechanics, not the sibling-dependency workaround
-    this task targets). Did not add a domain-level `dist`/`reinit`
-    Makefile target — checked, and the VM domain doesn't have one either;
-    `domains/Makefile` already owns this orchestration. Extended the
-    existing `domains/apicredits/tests/test_distribution.py`:
-    strengthened the `Requires-Dist` assertions to check the version
-    constraint, not just bare presence, and added a real
-    build-install-import test for the `service` wheel — previously the
-    only package in that file with no real-install coverage at all;
-    building it surfaced that `service` transitively needs
-    `arkhai-kit-site`, which wasn't in the test fixture's wheel-build
-    list — fixed. **Found and fixed a second, pre-existing gap while
-    verifying**: `domains/apicredits/Makefile`'s `test` target never
-    actually ran the domain-level `tests/` directory at all — meaning
-    `test_distribution.py` (and this task's own new tests) were never
-    part of `make test-apicredits`'s chain. Added a `test-domain` target
-    and wired it into the aggregate `test` target. Full suite: domain
-    16/16 (6 distribution + 10 from 11.12's `test_credits_client.py`),
-    storefront 49/49, buyer 16/16, service 23/23.
+  - **Done (2026-07-30).** The wheel-building infrastructure already
+    existed and was correctly wired; the deployed container path (both
+    Dockerfiles already used `--no-sources --find-links /.dist`) was
+    already correct. The real, narrower problem was local dev/reinit
+    consistency: removed the domain package's `[tool.uv.sources]`
+    editable overrides, pinned `arkhai-apicredits-domain` to `>=0.1.0` in
+    storefront/buyer (confirmed correctly absent from `service`'s
+    dependencies), added it to storefront/buyer's `reinit` targets, and
+    removed the now-unneeded repo-root `pythonpath` fallbacks (left
+    buyer's own `dev-mode-dirs` alone — a different, legitimate
+    mechanism, not the sibling-dependency workaround this task targets).
+    Extended `test_distribution.py`: strengthened version-constraint
+    assertions and added a real build-install-import test for the
+    `service` wheel (previously untested; building it surfaced a missing
+    transitive dependency in the test fixture, fixed). Also found and
+    fixed a pre-existing gap: `domains/apicredits/Makefile`'s `test`
+    target never actually ran the domain-level `tests/` directory at
+    all — added a `test-domain` target and wired it in.
   - **Permanent documentation after review acceptance:**
-    `docs/development/ARCHITECTURE.md#wheel-based-development` and
+    `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` and
     `#package-and-dependency-layers`; API-credit subsystem architecture for its
     package/client map.
 
@@ -1666,75 +1265,44 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
   - [x] 11.10.2 Move schema evolution away from startup-only
     `Base.metadata.create_all`; retain `create_all` only where appropriate for an
     empty bootstrap and make startup verify expected schema version/drift.
-  - [x] 11.10.3 **Corrected (2026-08-01):** this task's original wording
-    ("add deployment init wiring that runs migrations before the service
-    process starts, following the compute service's established
-    deployment pattern") was never actually satisfiable and was never
-    implemented — this service has no Kubernetes deployment topology to
-    attach an init container to, a fact confirmed before 11.10 was first
-    implemented and again explicitly excluded by 11.14.3's later
-    correction ("do not add a standalone migration CLI, Kubernetes init
-    container, deployment split... in this correction"). What was
-    actually built and is real: `run_migrations()` runs in-process at
-    application startup, before the app is ready to serve requests,
-    inside `container.py`'s composition — not a separate deployment step.
-    The checkbox stays `[x]` because the underlying need (migrations run
-    before the service serves requests) is genuinely met; the original
+  - [x] 11.10.3 **Corrected (2026-08-01):** this subtask's original
+    wording ("deployment init wiring... following the compute service's
+    established deployment pattern") described work that was never
+    implemented and was never actually satisfiable — this service has no
+    Kubernetes deployment topology to attach an init container to (no
+    Helm chart at all today), later confirmed by 11.14.3's explicit
+    exclusion of exactly this. What was actually built: `run_migrations()`
+    runs in-process at application startup, before the app serves
+    requests, inside `container.py`'s composition. The checkbox stays
+    `[x]` because the underlying need is genuinely met; the original
     task description's framing was wrong, not the implementation.
   - [x] 11.10.4 **Corrected (2026-08-01):** no deployment-init contract
-    tests exist, and none should be claimed — there is no deployment-init
-    step to contract-test (see 11.10.3's correction above). What
-    `test_migrations.py` actually covers: fresh bootstrap, idempotent
-    rerun, two old-schema-fixture tests explicitly adopting a database
-    created via the pre-migration `create_all()`-only startup (with and
-    without existing data), `check_schema_version`'s drift detection, and
-    the SQLite-only engine guard — real, verified coverage for what was
-    actually built, just not what this subtask's original text named.
-  - **Done (2026-07-30), corrected (2026-08-01).** Confirmed before implementing: this service has
-    no Helm chart at all today (only `domains/apicredits/compose.yml` for
-    local dev), so `compute_provisioning_service`'s CLI-plus-Kubernetes-
-    init-container pattern has no deployment topology to attach to here —
-    consistent with 11.10.1's explicit "do not add a standalone migration
-    CLI." Found the right precedent in that pattern's own docstring
-    instead: it says it "invokes the same migration logic the application
-    used to run in-process at startup," implying that's how it worked
-    *before* the CLI existed — the model this task actually needed. New
-    `db/migrations.py` mirrors `compute_provisioning_service`'s shape
-    (`Migration`, `SchemaDriftError`, `apply_schema_migrations`,
-    `check_schema_version`, the bookkeeping helpers) scoped down: no CLI,
-    `_MIGRATIONS` starts empty since this is the system's first version
-    (schema has never evolved before now — 11.14 later replaced the empty
-    registry with a real baseline migration; see that task's own record).
-    `database.py`'s `run_migrations()`
-    replaces bare `create_all` (still calls `create_all` first — still
-    correct for an empty bootstrap — then `apply_schema_migrations`);
-    `create_db_engine`'s untested non-SQLite branch removed in favor of an
-    explicit `ValueError`, confirmed via grep that nothing depended on it.
-    Removed `init_db` outright rather than keeping a "deprecated alias" —
-    it had exactly one caller (`container.py`), so a compatibility shim
-    would have been pure clutter; updated the one caller and a stale
-    docstring reference. **Correction (2026-08-01):** the record above
-    originally described `run_migrations()`'s in-process behavior as
-    provisional ("kept ready for when it gains a deployment topology")
-    and implied deployment-init work was completed by proxy — both
-    corrected. In-process startup migration is this service's actual,
-    current, non-provisional behavior for its actual, current deployment
-    topology, not a placeholder for a hypothetical future one. New
-    `test_migrations.py`: fresh bootstrap, idempotent rerun,
-    two "old-schema fixture" tests explicitly adopting a database created
-    via the pre-migration `create_all()`-only startup (with and without
-    existing data, proving neither the schema nor the data gets disturbed),
+    tests exist or should be claimed — there is no deployment-init step
+    to contract-test. `test_migrations.py` covers fresh bootstrap,
+    idempotent rerun, two old-schema-fixture tests adopting a database
+    created via the pre-migration `create_all()`-only startup,
     `check_schema_version`'s drift detection, and the SQLite-only engine
-    guard. Full suite: 23/23 (14 pre-existing + 9 new; since grown to
-    24/24 by 11.14's baseline-migration test).
+    guard.
+  - **Done (2026-07-30), corrected (2026-08-01).** `db/migrations.py`
+    mirrors `compute_provisioning_service`'s shape (`Migration`,
+    `SchemaDriftError`, `apply_schema_migrations`, `check_schema_version`)
+    scoped down: no CLI, `_MIGRATIONS` started empty (11.14 later
+    replaced it with a real baseline migration). `run_migrations()`
+    replaces bare `create_all`; `create_db_engine`'s untested non-SQLite
+    branch removed for an explicit `ValueError`; `init_db` removed
+    outright (one caller, so a compatibility alias would have been pure
+    clutter) rather than kept as a deprecated shim. The record originally
+    described in-process startup migration as provisional ("kept ready
+    for when it gains a deployment topology") — corrected: it's this
+    service's actual, current behavior for its actual, current
+    deployment topology, not a placeholder. Full suite: 24/24 (14
+    pre-existing + 9 new + 1 from 11.14's later baseline migration).
   - **Explicitly carried forward, not resolved here (repository-owner
     direction):** this service needs a Helm chart and the migration call
     refactored into a Kubernetes init container, the same way the VM
-    domain's provisioning service already works, once this service
-    actually gets a Kubernetes deployment topology to attach one to. Not
-    deferred to a new OpenSpec change the way the cross-domain requirement
-    vocabulary work is — revisited within this same subsystem's future
-    work, tracked here so it isn't lost.
+    domain's provisioning service already works, once it gains a
+    Kubernetes deployment topology to attach one to. Tracked here, not
+    deferred to a new OpenSpec change.
   - **Permanent documentation after review acceptance:**
     `openspec/specs/deployment-state/spec.md`, service schema initialization;
     API-credit subsystem specification/architecture.
@@ -1751,35 +1319,24 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
   - [x] 11.11.4 Add service-contract and caller-composition tests.
   - **Done (2026-07-30).** New package `kit/site-client`
     (`arkhai-kit-site-client`, module `market_site_client`) — a kit-layer
-    sibling to `kit/site`, mirroring this repo's established `core/storefront`
-    + `core/storefront-client` pattern rather than extending
-    `core/storefront-client` itself (a different, unrelated client) or
-    `RemoteCapacityClient` (which the codebase already documents as
-    read/reserve/commit-only, deliberately never the operator-write path).
+    sibling to `kit/site`, mirroring the established `core/storefront` +
+    `core/storefront-client` pattern rather than extending
+    `RemoteCapacityClient` (documented as read/reserve/commit-only,
+    deliberately never the operator-write path).
     `SiteCapacityAdminClient.register_resource` wraps
-    `PUT /api/v1/capacity/resources/{resource_id}`, with a
-    `ResourceRegistration` request model kept independently defined from
-    `kit/site`'s own server-side `ResourceRegisterRequest` (importing the
-    server package here would pull in its full SQLAlchemy implementation
-    for something that only needs to serialize a small HTTP body — the
-    duplication is small and explicitly documented as something to keep
-    in sync by hand). `SiteCapacityAdminClientError` gives every failure
-    (HTTP or transport) the same shape, mirroring `core/storefront-client`'s
-    `StorefrontClientError` pattern exactly. Wired into `kit/Makefile`'s
-    `dist`/`test` chains (new `dist-site-client`/`test-site-client`
-    targets) and `domains/apicredits/storefront`'s dependencies/reinit.
+    `PUT /api/v1/capacity/resources/{resource_id}`, with an independently
+    defined request model (kept in sync by hand with `kit/site`'s
+    server-side one rather than importing its full SQLAlchemy
+    implementation). `SiteCapacityAdminClientError` mirrors
+    `core/storefront-client`'s `StorefrontClientError` pattern. Wired
+    into `kit/Makefile`'s dist/test chains and
+    `domains/apicredits/storefront`'s dependencies/reinit.
     `apicredits_storefront/startup.py`'s `_register_seed_quota` now
-    constructs this client instead of raw `httpx.AsyncClient`/manual
-    header building — the live endpoint and request body are unchanged,
-    confirmed by the new caller-composition test asserting the exact
-    request shape sent. Tests: 5 in `kit/site-client` (request shape, the
-    admin-header-omitted-when-no-key case, HTTP-failure and
-    transport-failure error translation, and a default-values-match-the-
-    server-model pin), 2 new caller-composition tests in
-    `test_startup_seed_quota.py` (success delegation and error mapping
-    to `RuntimeError`) — previously this function had **no test coverage
-    at all**. Full suite: `kit/site-client` 5/5, apicredits storefront
-    49/49.
+    constructs this client instead of raw `httpx.AsyncClient` — live
+    endpoint and request body unchanged, confirmed by a new
+    caller-composition test. Tests: 5 in `kit/site-client`, 2 new
+    caller-composition tests (this function had **no test coverage at
+    all** before).
   - **Permanent documentation after review acceptance:**
     `openspec/specs/site-capacity/spec.md`, capacity administration surface;
     `docs/development/ARCHITECTURE.md#site-authority`.
@@ -1795,58 +1352,28 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     Preserve current issuance and compensation behavior; do not redesign their
     durability in this task.
   - [x] 11.12.4 Add client contract, error mapping, and caller composition tests.
-  - **Done (2026-07-30), corrected (2026-07-30) after review feedback that
-    the call sites hadn't actually been refactored to use the client.**
-    New `domains/apicredits/settlement/credits_client.py`:
-    `CreditsServiceClient`, a single class holding `service_url`/`admin_key`
-    once and exposing all five operations
-    (`submit_credit_issuance`/`get_key`/`revoke_key`/`adjust_key_balance`/
-    `rollback_issuance`) as methods, replacing what were five independent
-    free functions each building their own `httpx.AsyncClient`, headers,
-    and error handling. `CreditsServiceError` gives every market-state
-    refusal the same shape it always had.
-    **First pass under-delivered 11.12.3**: `issuance.py`'s five free
-    functions were kept with their exact existing signatures and rewritten
-    as thin wrappers constructing a `CreditsServiceClient` internally —
-    centralizing the HTTP logic, but the actual callers
-    (`fulfillment.py`, `keys_lookup.py`) still called free functions, not
-    the client. Disclosed as a scope decision at the time; on review,
-    correctly identified as not what 11.12.3 asked for.
-    **Corrected**: `fulfillment.py`'s `fulfill_api_credits_obligation`
-    now constructs one `CreditsServiceClient(service_url, admin_key)` at
-    the top of the function and calls `.submit_credit_issuance(...)`/
-    `.rollback_issuance(...)` directly on that instance (one construction
-    reused for both calls, rather than two separate ones as the
-    free-function wrappers would have produced). `keys_lookup.py`'s
-    `lookup_key_record` constructs a client from config and calls
-    `.get_key(...)` directly. With every real caller confirmed migrated
-    (checked the full blast radius first: `settlement/__init__.py`'s
-    re-export, `fulfillment.py`, `keys_lookup.py`, and the two test files
-    — nothing else in the repository imported the free functions),
-    `issuance.py` was deleted outright rather than kept as a pointless
-    indirection layer with no remaining callers; `settlement/__init__.py`'s
-    public exports and the domain wheel's force-include list updated to
-    match. **This required updating three existing tests in
-    `test_settlement_fulfillment.py`** that monkeypatched the free
-    function names directly on `fulfillment_module` — they now patch
-    `CreditsServiceClient`'s methods as class attributes instead (with an
-    added `self` parameter on each fake, since a class-level patch is
-    invoked as a bound method on whichever instance `fulfill_api_credits_obligation`
-    constructs internally). Removed `test_credits_client.py`'s delegation
-    test, which specifically tested the now-deleted `issuance.submit_credit_issuance`
-    free function — no longer exists to test. Added new direct test
-    coverage for `lookup_key_record` (`test_keys_lookup.py`, 2 cases: the
-    request-shape/header case and the 404-returns-None case) — it had
-    **no coverage at all** before this, only ever exercised indirectly
-    through a test that monkeypatched the whole function away.
-    `domains/apicredits/tests/test_credits_client.py` (now 9 cases,
-    was 10 before removing the obsolete delegation test): all five
-    operations' request shape, the market-error-reason mapping, the
-    404-returns-None case for `get_key`, both rollback branches (revoke a
-    newly-created key vs. leave an existing one alone), and the
-    nothing-to-roll-back no-op (asserts no HTTP call is made at all).
-    Full suite after the correction: domain 15/15, storefront 51/51
-    (49 existing + 2 new `keys_lookup` tests), buyer 16/16, service
+  - **Done (2026-07-30), corrected (2026-07-30).** New
+    `domains/apicredits/settlement/credits_client.py`: `CreditsServiceClient`,
+    one class holding `service_url`/`admin_key` and exposing all five
+    operations as methods, replacing five independent free functions
+    each building their own `httpx.AsyncClient`. `CreditsServiceError`
+    unchanged in shape. **First pass under-delivered 11.12.3**: kept
+    `issuance.py`'s free functions as thin wrappers constructing a client
+    internally, but the actual callers (`fulfillment.py`,
+    `keys_lookup.py`) still called the free functions, not the client —
+    correctly flagged on review as not what 11.12.3 asked for.
+    **Corrected**: `fulfillment.py` and `keys_lookup.py` now construct
+    and call `CreditsServiceClient` directly. With every real caller
+    confirmed migrated (checked the full blast radius first), deleted
+    `issuance.py` outright rather than keep it as a pointless indirection
+    layer with no remaining callers, updating `settlement/__init__.py`'s
+    exports and the domain wheel's force-include list to match. Required
+    updating three existing tests that monkeypatched the free-function
+    names directly — now patch `CreditsServiceClient`'s methods as class
+    attributes. Added direct test coverage for `lookup_key_record`,
+    which had **no coverage at all** before (only ever exercised through
+    a test that monkeypatched the whole function away). Full suite after
+    the correction: domain 15/15, storefront 51/51, buyer 16/16, service
     23/23.
   - **Permanent documentation after review acceptance:** API-credit subsystem
     spec/architecture; `docs/development/ARCHITECTURE.md#package-and-dependency-layers`
@@ -1865,56 +1392,37 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     suites, wheel import checks, migration entrypoint tests, Docker/deployment
     contract tests, root validation available in the repository environment, and
     disclose any unavailable e2e/OpenSpec checks.
-  - [ ] 11.13.5 After implementation stabilizes and review accepts it, promote the
+  - [x] 11.13.5 After implementation stabilizes and review accepts it, promote the
     durable decisions to the exact permanent destinations recorded in
     `design.md` and complete the Section 11 design-promotion record.
-  - **Done (2026-07-30), except 11.13.5 as written — deliberately deferred,
-    not incomplete.** 11.13.1 landed as part of applying the code review's
-    own planning-update diff directly to `design.md`, which already
-    contained exactly this content (the superseded-discussion framing,
-    the accepted decision, the projection boundary, the `unit_claim_keys`
-    alias requirement, the `resource_type` interpretation, and the
-    deferred cross-domain vocabulary list) — confirmed present, not
-    rewritten. 11.13.2: `proposal.md`'s Section 11 status corrected twice
-    — once to say "reopened, not yet complete" when review found the two
-    blocking defects, and again just now to record that 11.7–11.12 are
-    implemented and verified. 11.13.3: swept every file this section
-    touched (production code and tests) for task-number/change-ID/
-    review-history references — found and fixed one real violation in
-    `test_vm_host_executor_ref_migration.py`'s new FK-cascade test
-    ("The exact failure mode code review found..." → describes the
-    invariant directly now); one other match was a false positive
-    (`core_storefront/capacity.py`'s pre-existing "first implementation"
-    describes the `CapacityClient` protocol's first implementation, not
-    review history). 11.13.4: full suite run across every package this
-    section touched — `core/storefront` 20/20, `kit/site` 135/135,
-    `kit/site-client` 5/5, `provisioning/compute/service` (unit+integration)
+  - **Done (2026-07-30), except 11.13.5 — deliberately deferred, not
+    incomplete (see the promotion record at the end of this section).**
+    11.13.1: confirmed already present in `design.md` via the applied
+    code-review planning diff. 11.13.2: `proposal.md`'s Section 11 status
+    corrected. 11.13.3: swept every file this section touched for
+    task-number/review-history references — found and fixed one real
+    violation, one false positive. 11.13.4: full suite run across every
+    package this section touched — `core/storefront` 20/20, `kit/site`
+    135/135, `kit/site-client` 5/5, `provisioning/compute/service`
     547/547, `domains/vms/storefront` unit 640/640 + integration 146/148
-    (2 known Node/Rust/Foundry alkahest gaps, unrelated), `domains/apicredits`
-    domain 15/15 + storefront 51/51 + buyer 16/16 + service 23/23 (updated
-    after 11.12's call-site refactor correction, below). Disclosed,
-    not silently skipped: `core/registry`'s own pytest suite and `e2e-tests`
-    were not run (unrelated dependency chain; a two-service live stack,
-    respectively — unchanged from every disclosure since Section 8);
-    `openspec validate --all --strict` remains unavailable in this
-    environment, also unchanged; the apicredits domain-level `make dist`
-    chain (`uv run --find-links .dist ...`) could not be exercised in this
-    sandbox since `.dist/` was never built here — the underlying `pytest`
-    commands the Makefile targets invoke were run directly instead and
-    confirmed passing, which is not the same as confirming the wheel-build
-    step itself succeeds end to end. 11.13.5 is intentionally left
-    unchecked: promotion belongs to implementation closure once this round
-    of review accepts the work, not to an in-progress review cycle —
-    consistent with the discuss-phase agreement that promotion follows
-    code review rather than happening during it.
+    (2 known, unrelated alkahest gaps), `domains/apicredits` domain
+    15/15 + storefront 51/51 + buyer 16/16 + service 23/23. Disclosed,
+    not silently skipped: `core/registry`'s own pytest suite and
+    `e2e-tests` (unrelated dependency chain; a two-service live stack),
+    `openspec validate --all --strict` (unavailable, unchanged since
+    Section 8), and the apicredits `make dist` chain itself (this
+    sandbox has no built `.dist/`; the underlying `pytest` commands were
+    run directly and confirmed passing, which is not the same as
+    confirming the wheel-build step succeeds end to end).
 
-**Explicitly deferred to a new OpenSpec change:** nested buyer-facing
-`requirements`, normalization into generic dimensions/attributes, canonical
-`ResourceRequirement`/`CapacityClaim` naming, compatibility migration of the
-wire/persisted `required_attributes` key, buyer-facing offering vocabulary,
+**Explicitly deferred to a new OpenSpec change** (`structured-capacity-requirements`,
+opened 2026-07-31): nested buyer-facing `requirements`, normalization into
+generic dimensions/attributes, canonical `ResourceRequirement`/`CapacityClaim`
+naming, compatibility migration of the wire/persisted `required_attributes`
+key, buyer-facing offering vocabulary. **Still unassigned to any change:**
 background-task supervision, core watchdog changes, generic remote-capacity
-assembly, durable API-credit issuance/compensation, quota-release compensation,
-and exact API-credit matcher adoption.
+assembly, durable API-credit issuance/compensation, quota-release
+compensation, and exact API-credit matcher adoption.
 
 ### Section 11 second code-review correction plan (opened 2026-07-31)
 
@@ -2071,15 +1579,15 @@ with the new status note preserved on top. Corrected parent checkboxes for
     test), `domains/apicredits/storefront` 51/51.
   - **Permanent documentation after review acceptance:**
     `docs/development/ARCHITECTURE.md#package-and-dependency-layers` and
-    `#wheel-based-development`; API-credit subsystem package map.
+    `#build-packaging-and-initialization`; API-credit subsystem package map.
 
-- [ ] 11.18 Reconcile Section 11 documentation and validation records.
+- [x] 11.18 Reconcile Section 11 documentation and validation records.
   - [x] 11.18.1 Amend task 11.10's completion record: distinguish the completed
     in-process migration-registry bootstrap from deployment-init and startup-drift
     work that was not implemented. Do not claim deployment-init contract tests.
   - [x] 11.18.2 Amend `proposal.md` so Section 11 remains under review while
     tasks 11.14–11.18 are open.
-  - [ ] 11.18.3 Shorten completed-task notes to final behavior, material validation
+  - [x] 11.18.3 Shorten completed-task notes to final behavior, material validation
     evidence, unresolved/deferred work, and permanent documentation destinations;
     retain detailed alternatives and review rationale in `design.md`.
   - [x] 11.18.4 Correct production documentation to reference exact stable
@@ -2089,7 +1597,7 @@ with the new status note preserved on top. Corrected parent checkboxes for
     SQLite-rebuild suites added by 11.14–11.17, plus the existing affected
     package suites. Disclose unavailable repository-wide e2e or strict OpenSpec
     validation rather than marking it complete.
-  - [ ] 11.18.6 Keep permanent design promotion open until implementation is
+  - [x] 11.18.6 Keep permanent design promotion open until implementation is
     stable and accepted in code review; then complete the existing Section 11
     promotion record using the destinations already identified in `design.md`.
   - **11.18.1 done (2026-08-01):** 11.10.3/11.10.4's checkboxes and text
@@ -2100,15 +1608,15 @@ with the new status note preserved on top. Corrected parent checkboxes for
     from scope entirely. The record now says plainly what was built
     (in-process startup migration) instead of implying a deployment step
     that doesn't exist.
-  - **11.18.3 explicitly partial, not claimed complete:** the most
-    materially misleading notes (11.10's false deployment-init claims)
-    were corrected as part of 11.18.1, and this task's own earlier
-    entries here are already reasonably scoped (verification notes, not
-    padding). A full pass shortening every one of 11.1–11.13's completed-
-    task notes to the minimum described in this subtask's own text is a
-    separate, larger undertaking not attempted in this correction — left
-    unchecked rather than marked done on the strength of the one
-    materially-important fix.
+  - **11.18.3 done (2026-08-01).** Shortened every completed-task note in
+    11.1–11.13 to final behavior, material validation evidence,
+    unresolved/deferred work, and permanent-documentation destinations.
+    Detailed alternatives, debugging narratives, and review rationale
+    that weren't already in `design.md` were moved there first (the
+    core-vs-kit layering decision behind 11.2, the suite-run failure root
+    causes behind 11.5, the `vm_target` retirement and migration-
+    consolidation reasoning behind 11.6, and the FK-cascade debugging
+    detour behind 11.8), not simply deleted.
   - **11.18.4 done (2026-08-01):** covered by 11.16.3's work above
     (`db/migrations.py`'s two docstrings) — no other production module
     touched by this correction pass had the same pattern (checked
@@ -2133,6 +1641,31 @@ with the new status note preserved on top. Corrected parent checkboxes for
 startup-lifecycle contract tests, a new credits-client protocol, additional
 capacity-admin caller tests, background-task supervision, core watchdog changes,
 and generic remote-capacity composition extraction.
+
+## Section 11 design promotion record
+
+Completed 2026-08-01. Most of Section 11 was schema-internal removal or
+implementation restructuring with no new externally-observable behavior,
+so most tasks correctly promote nothing. The decisions below are the
+ones that needed a permanent home outside this change directory.
+
+| Accepted decision | Permanent location |
+|---|---|
+| Domain-injected exact `ClaimMatcher` composes with the core-layer aggregator's coarse default, without moving site-specific matching into `core` | `openspec/specs/site-capacity/architecture.md#projected-feasibility-matching` |
+| `executor_ref`-carried domain-specific physical-placement fields (e.g. `vm_host`) are backing physical-resource identifiers under the opaque-reservation rule | Already covered generically by `openspec/specs/site-capacity/spec.md`'s existing requirement — confirmed by inspection, no edit needed |
+| API-credit service: composed, reused `CreditsServiceClient`; typed `SiteCapacityAdminClient` for operator writes, distinct from buyer-facing `RemoteCapacityClient` | `openspec/specs/api-credits/architecture.md#implementation-composition`; `docs/development/ARCHITECTURE.md#site-authority` |
+| API-credit service: in-process startup migration is a valid instantiation of service-owned migration history for a service without a separate-deployment-step topology, not an exception to the general rule | `openspec/specs/deployment-state/spec.md`'s "Service-owned migration history" requirement, new scenario |
+| API-credit packages resolve internal dependencies from built wheels only, matching the repository-wide rule already stated | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` (already covers this generically; API-credit domain brought into compliance, not new policy) |
+
+**Not promoted, and why:** the generic SQLite table-rebuild helper's
+foreign-key safety and identifier validation (11.8, 11.16.2) are
+implementation-technique correctness properties of a migration helper,
+not observable subsystem behavior — recorded as in-code docstrings,
+matching how this document already treats similar implementation-
+location decisions. The `VM_UNIT_CLAIM_KEYS` duplication rationale
+(11.16.1) is likewise implementation technique, not new normative
+behavior. The Docker build-context fix (11.17.3) restores an existing,
+already-stated wheel-only policy rather than establishing new policy.
 
 ## 12. Documentation and specification closure
 

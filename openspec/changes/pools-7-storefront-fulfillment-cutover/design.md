@@ -4518,6 +4518,153 @@ changelog-style prose. Completed task notes should retain final behavior, materi
 validation, deferred work, and permanent destinations; detailed review history
 belongs in this design record.
 
-Permanent promotion remains intentionally open until this correction pass is
-implemented and accepted.
+Permanent promotion is complete as of 2026-08-01 — see `tasks.md`'s "Section
+11 design promotion record" for the destinations and what was deliberately
+not promoted.
 
+## Task 11.2 alternatives: where the exact claim matcher lives (2026-07-30)
+
+The coarse `most_available` fix (task 11.2's original scope) ignores
+categorical claim attributes the VM claim builder already emits
+(`region`, `gpu_model`) that the authoritative site admission path
+already checks. This does not cause incorrect admission — the site
+remains authoritative — but causes avoidable failed probe/reserve
+attempts. Three placements for the fix were considered.
+
+**Rejected: duplicate more site-matching logic into `core/storefront`.**
+`docs/development/ARCHITECTURE.md`'s package-and-dependency-layers rule
+is direct: `core/storefront` is a core-layer package, `kit/site` is a
+kit-layer package, and dependencies only point downward (kit may depend
+on core; core must never depend on kit).
+`core/storefront/aggregation.py`'s own docstring ("deliberately does not
+import kit/site") is that rule in effect, not a style choice.
+
+**Rejected: promote `ResourceFeasibilityView`-style matching into `core`
+itself.** `ResourceFeasibilityView` is `kit/site`'s own way of modeling a
+resource (`resource_kind`, per-dimension `available`, exact-match
+`attributes`), not a concept every domain needs — `apicredits` runs
+through the same aggregator with none of it meaning anything (a single
+resource type, no dimensions beyond `units`). Moving it into `core` would
+make `core/storefront` stop being backend-agnostic (every `CapacityClient`
+implementation would be assumed `kit/site`-shaped) — a regression in the
+abstraction `CapacityClient` exists to provide, not a generalization of
+it.
+
+**Accepted: dependency injection**, matching a pattern already in use one
+parameter over — `AggregateCapacityClient.__init__` already takes a
+pluggable `placement: PlacementPolicy | None`, and
+`capacity_client.py`'s `build_capacity_client` is already the composition
+point that resolves a placement policy by config string. Adding an
+injected `claim_matcher` is the same shape as something already there,
+not a new seam. `kit/site` gained `dict_resource_satisfies_claim` (a thin
+adapter delegating entirely to its own existing pure functions, so there
+remains exactly one implementation of claim parsing and matching); VM's
+`capacity_client.py` injects it specifically when the resolved placement
+is `most_available`, leaving the shared `PLACEMENT_POLICIES` dict — and
+what `apicredits`/bare-metal get when they select `"most_available"` —
+untouched.
+
+`Callable` type alias vs. `Protocol` for `ClaimMatcher`: went with the
+type alias for a single-signature callable; no behavior difference either
+way, open to `Protocol` if preferred later.
+
+## Suite-run failure root causes (task 11.5, 2026-07-30)
+
+Two of the four suite-run failures were sandbox dependency-version drift,
+diagnosed rather than assumed: re-pointed editable installs at a
+byte-for-byte clean copy of the branch point and confirmed the identical
+failures reproduced there too, then traced further instead of stopping
+at "reproduces on clean, therefore unrelated."
+
+`domains/vms/storefront`'s `test_server_app_composition.py` failed
+because the validation sandbox had `fastapi==0.141.0`/`uvicorn==0.52.0`
+installed instead of the repository's actual pins (`fastapi~=0.115.8`,
+`uvicorn~=0.34.0` — confirmed by `pip`'s own conflict warnings once the
+correct versions were installed).
+
+`test_negotiate_controller.py::test_amountless_exact_escrow_can_start_and_accept`
+failed because `dynaconf==3.3.4` was installed instead of the pinned
+`dynaconf==3.2.13`: with `merge_enabled=True`, `settings_overrides`'
+`settings.set(dotted, value)` call merges a list-valued override with the
+existing config value instead of replacing it, so the test's
+`negotiation.policies` override was silently concatenated with the
+config's own default policy list, producing a duplicated middleware chain
+(`bisection_middleware` spliced in) that never reached the configured
+`accept_exact_listing` terminal policy. Traced by instrumenting every
+middleware in the chain and printing the actually-resolved chain.
+Installing the pinned dependency versions fixed both.
+
+## Task 11.6 implementation notes: vm_host/vm_target retirement (2026-07-30)
+
+**vm_target was also fully retired, not just vm_host, on the same
+finding that corrected this task's own original scoping.** `_legacy_vm_target`
+(the helper 11.6.2 introduced to replace `_legacy_vm_fields`) derived
+`vm_target` by returning `executor_target` unchanged for VM-kind
+reservations — proof by construction that the two columns were always
+written to the identical value at the same call sites, making
+`vm_target` fully redundant with the pre-existing generic
+`executor_target` column. This contradicted the task's original framing
+("`vm_target` has no independent write path... stays a dedicated column
+while `vm_host` did not") — wrong, and corrected in the same pass.
+`attach_lease`/`update_lease_fields` drop `vm_target=` entirely;
+`find_active_lease_by_vm_target` filters on `executor_target`;
+`_legacy_vm_target` is deleted outright; the migration backfills
+`executor_target = COALESCE(executor_target, vm_target)` before dropping
+the column. One real behavioral fix this surfaced: the `"vm_target"`
+payload key can't simply alias `executor_target` the way `"vm_host"`
+aliases a JSON key inside `executor_ref` — `executor_target` is a flat
+column shared by every domain (bare-metal populates it too), so an
+unscoped alias would leak a bare-metal reservation's target under a
+VM-flavored key where it used to correctly read `None`. Caught by
+`test_register_bare_metal_lease_attaches_executor_metadata` failing;
+fixed by scoping the payload key to `executor_kind == "vm"`.
+
+**Migration consolidation:** `_migrate_remove_provisioned_resource_domain_ref`,
+`_migrate_ansible_pool_requirement_delegate`, the `vm_host` migration, and
+the new `vm_target` migration were all folded into the single
+`_migrate_capacity_model_cutover` function instead of registering four
+separate dated migrations — nothing built on any of them has been
+deployed anywhere, so there is no intermediate, partially-migrated
+database whose compatibility needs preserving across separate migration
+IDs. Verified no ordering dependency exists between the folded-in logic
+and the migrations that sit between the cutover and where these used to
+be registered (they operate on entirely different tables).
+
+**Column-drop determinism:** the original implementation caught
+`OperationalError` from `ALTER TABLE ... DROP COLUMN` and continued —
+review flagged this as both conflicting with Section 11's own purpose
+(an obsolete column could silently survive migration while marked
+applied) and too broad a catch. Since this repository supports only
+SQLite, "does this SQLite support `DROP COLUMN`" isn't ambiguous enough
+to justify a runtime fallback — replaced with
+`_drop_columns_via_table_rebuild`, a full create/copy/drop/rename cycle
+introspecting columns via `PRAGMA table_info`. A test written
+specifically to check index preservation caught a real bug in the first
+implementation: it queried `sqlite_master` for the table's indexes
+*after* the rename, by which point the query matched the newly renamed
+(index-less) table instead of the original's — fixed by capturing the
+index list before the rename.
+
+## AGENTS.md comment compliance sweep (2026-07-30)
+
+A repository-wide sweep (`grep` for `POOLS-7`, `Section 11`, `§10`,
+`task 11.` across every `.py`/`.yml` file outside `openspec/`) found
+Section 11's own new tests violating AGENTS.md's "no OpenSpec change IDs
+or task numbers in code comments" rule repeatedly, plus five pre-existing
+Section 10-era violations in files this section never otherwise touched.
+All twelve occurrences rewritten to state the invariant or behavior
+being tested directly, with no change-history reference; re-verified
+against every affected suite afterward — all green, text-only changes.
+
+## Task 11.8 debugging note: a false lead while writing the FK-cascade fixture
+
+Writing the FK-cascade regression test (11.8.3) surfaced a real debugging
+detour worth recording: the first version of the test failed with a
+`FOREIGN KEY constraint failed` on the child insert even though the
+parent row was demonstrably present and visible in the same transaction.
+Extensive isolation (raw `sqlite3` vs SQLAlchemy, `exec_driver_sql` vs
+`text().execute()`, pragma state checks mid-transaction) turned out to
+be chasing a red herring: `capacity_reservation_debits.capacity_bucket_id`
+has its own separate foreign key to `capacity_buckets`, which the test
+simply never populated. Not a SQLAlchemy/pysqlite quirk at all — fixed
+by inserting a valid bucket row.

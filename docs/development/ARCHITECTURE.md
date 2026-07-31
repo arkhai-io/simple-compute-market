@@ -158,6 +158,8 @@ A site authority owns resources, allocations, reservation expiry, capacity versi
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
+A site authority's client-facing surface splits into two separately typed clients: a buyer-facing read/reserve/commit client (`RemoteCapacityClient`) never used for operator writes, and a typed capacity-administration client (`kit/site-client`'s `SiteCapacityAdminClient`) for operator resource registration and update. Neither client depends on the other's implementation.
+
 ### Resource pools
 
 Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
