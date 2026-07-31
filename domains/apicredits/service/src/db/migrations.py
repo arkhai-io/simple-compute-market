@@ -125,9 +125,25 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
     }
 
 
-# No schema changes have shipped yet -- this is the migration system's
-# first version, introduced against a schema that has only ever been
-# created via create_all(). Add entries here, in order, the same way
-# compute_provisioning_service/db/migrations.py does, the first time this
-# service's schema actually needs to evolve.
-_MIGRATIONS: tuple[Migration, ...] = ()
+def _adopt_baseline_schema(engine: Engine) -> None:
+    """Adopt the existing API-credit and capacity tables into versioning."""
+    required = {
+        "api_keys",
+        "credit_grants",
+        "consumption_events",
+        "capacity_buckets",
+        "capacity_reservations",
+    }
+    missing = required - set(inspect(engine).get_table_names())
+    if missing:
+        raise SchemaDriftError(
+            f"API-credits baseline schema is missing tables: {sorted(missing)}"
+        )
+
+
+_MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        "20260731_001_apicredits_schema_baseline",
+        _adopt_baseline_schema,
+    ),
+)

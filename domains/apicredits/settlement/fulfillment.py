@@ -83,8 +83,9 @@ async def fulfill_api_credits_obligation(
     key_id: str | None = None,
     buyer_wallet: str | None = None,
     listing_id: str | None = None,
-    service_url: str,
-    admin_key: str,
+    credits_client: CreditsServiceClient | None = None,
+    service_url: str | None = None,
+    admin_key: str | None = None,
     stage_event: StageEventFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
@@ -104,7 +105,12 @@ async def fulfill_api_credits_obligation(
         else None
     )
     resource_id = offer_resource.get("resource_id")
-    credits_client = CreditsServiceClient(service_url, admin_key)
+    if credits_client is None:
+        if service_url is None or admin_key is None:
+            raise ValueError(
+                "credits_client or service_url/admin_key is required"
+            )
+        credits_client = CreditsServiceClient(service_url, admin_key)
 
     async def _fail(reason: str, message: str) -> dict[str, Any]:
         if apply_failure_policy is not None:

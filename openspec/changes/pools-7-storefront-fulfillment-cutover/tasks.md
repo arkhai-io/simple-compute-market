@@ -1491,6 +1491,12 @@ The completed entries above are preserved as implementation history. Code review
 found two blocking defects and accepted a bounded Section 11 expansion. Section
 11 remains open until the tasks below are implemented and validated.
 
+### Section 11 code-review correction and API-credits modernization plan (opened 2026-07-30)
+
+The completed entries above are preserved as implementation history. Code review
+found two blocking defects and accepted a bounded Section 11 expansion. Section
+11 remains open until the tasks below are implemented and validated.
+
 - [x] 11.7 Correct VM exact-matcher composition and public kit API.
   - [x] 11.7.1 Export `dict_resource_satisfies_claim` from the public
     `market_site` package surface; VM composition must not import the adapter
@@ -2185,3 +2191,100 @@ must close before Section 11 begins.
 Full suite green together at the end, not just per-package: kit/fulfillment 148/148 (unchanged), `compute_provisioning` kit 33/33 (unchanged from the prior pass), compute-provisioning-service unit+integration 523/523 (13 net new: 4 failure-taxonomy tests, 2 replacing 1 for the client-contract rewrite, 1 backfill-integration test, plus 10.9-adjacent fixture rewiring already counted in the prior pass), VM storefront unit 629/629 (unaffected, not re-verified against these specific commits since none of them touch code the storefront depends on — `compute_provisioning`'s public contract shape is unchanged by this pass).
 
 Section 10 is complete under this record. Section 11 may begin. The one carried-forward obligation is 10.14, tracked explicitly rather than folded into "done," to be picked up in the final POOLS-7 review loop after Section 11.
+
+### Section 11 second code-review correction plan (opened 2026-07-31)
+
+The completed implementation entries above remain preserved as history. The
+second review accepted the following bounded corrections and explicitly skipped
+a deployment-topology redesign, startup-lifecycle tests, a new client protocol,
+capacity-admin caller expansion, and core-layer refactors. Section 11 remains
+open until the accepted corrections below are implemented and validated.
+
+- [x] 11.14 Make the API-credit migration registry exercise real ordered state.
+  - [x] 11.14.1 Register a durable API-credit baseline/adoption migration, or
+    rename and document the current mechanism as a migration-registry bootstrap.
+    The chosen design must give `check_schema_version()` a non-empty expected
+    version and must not imply schema-drift guarantees that an empty registry
+    cannot provide.
+  - [x] 11.14.2 Add ordered migration tests proving deterministic execution,
+    durable migration-ID recording, idempotent reruns, failed-migration
+    non-recording, preservation of earlier successful migrations, and
+    incomplete-sequence detection.
+  - [x] 11.14.3 Keep migrations in-process for the current API-credit deployment
+    topology. Do not add a standalone migration CLI, Kubernetes init container,
+    deployment split, or startup-lifecycle contract tests in this correction.
+  - **Permanent documentation after review acceptance:** API-credit subsystem
+    specification/architecture for schema ownership and current startup behavior;
+    `openspec/specs/deployment-state/spec.md` only for repository-wide SQLite
+    migration invariants that genuinely apply today.
+
+- [x] 11.15 Finish API-credit client composition and HTTP-contract validation.
+  - [x] 11.15.1 Construct `CreditsServiceClient` at the API-credit composition
+    boundary and inject/reuse it in settlement and key-lookup services rather
+    than constructing concrete clients inside operation functions. Preserve the
+    current concrete client type; do not introduce a new client `Protocol` in
+    this task.
+  - [x] 11.15.2 Add client-level HTTP contract tests for every supported
+    operation: URL/path, admin authentication header, timeout/configuration,
+    request body, successful response parsing, transport failures, HTTP failures,
+    not-found behavior where applicable, and rollback operation sequencing.
+  - [x] 11.15.3 Keep the typed capacity-administration caller behavior unchanged;
+    no additional startup caller-composition expansion is required by this
+    correction.
+  - **Permanent documentation after review acceptance:** API-credit subsystem
+    architecture for the domain-owned service-client boundary and composition
+    ownership.
+
+- [x] 11.16 Tighten production boundaries and comments.
+  - [x] 11.16.1 Replace the long `VM_UNIT_CLAIM_KEYS` implementation-history
+    commentary with a concise present-state invariant that it must match the VM
+    capacity authority's legacy aliases. Keep the full rationale in this change's
+    design record.
+  - [ ] 11.16.2 Validate every interpolated SQLite identifier used by the generic
+    table-rebuild helper against a strict identifier rule, or narrow the helper
+    to fixed reservation-table identifiers. Preserve the accepted foreign-key
+    safety and schema-feature guards.
+  - [x] 11.16.3 Remove future-oriented, migration-chronology, comparison, and
+    changelog-style prose from API-credit migration production modules.
+    Production documentation must describe current startup, versioning, and
+    failure invariants only.
+
+- [x] 11.17 Strengthen API-credit wheel and import isolation.
+  - [x] 11.17.1 Remove remaining repository-root `pythonpath`, `dev-mode-dirs`,
+    editable sibling sources, or equivalent source-tree fallbacks where wheel
+    installation now makes them unnecessary. Document any retained exception
+    with a current package-local reason.
+  - [x] 11.17.2 Add architecture/distribution tests that reject relative editable
+    internal dependencies and prove API-credit packages import in isolated
+    environments using only built internal wheels.
+  - [ ] 11.17.3 Validate the API-credit Docker build contexts or equivalent
+    packaging assembly so no hidden repository-relative dependency is required.
+  - **Permanent documentation after review acceptance:**
+    `docs/development/ARCHITECTURE.md#package-and-dependency-layers` and
+    `#wheel-based-development`; API-credit subsystem package map.
+
+- [x] 11.18 Reconcile Section 11 documentation and validation records.
+  - [x] 11.18.1 Amend task 11.10's completion record: distinguish the completed
+    in-process migration-registry bootstrap from deployment-init and startup-drift
+    work that was not implemented. Do not claim deployment-init contract tests.
+  - [x] 11.18.2 Amend `proposal.md` so Section 11 remains under review while
+    tasks 11.14–11.18 are open.
+  - [x] 11.18.3 Shorten completed-task notes to final behavior, material validation
+    evidence, unresolved/deferred work, and permanent documentation destinations;
+    retain detailed alternatives and review rationale in `design.md`.
+  - [x] 11.18.4 Correct production documentation to reference exact stable
+    permanent headings and remove speculative statements such as utilities being
+    kept ready for a hypothetical future deployment topology.
+  - [ ] 11.18.5 Run the focused migration, client, packaging, wheel-import, and
+    SQLite-rebuild suites added by 11.14–11.17, plus the existing affected
+    package suites. Disclose unavailable repository-wide e2e or strict OpenSpec
+    validation rather than marking it complete.
+  - [ ] 11.18.6 Keep permanent design promotion open until implementation is
+    stable and accepted in code review; then complete the existing Section 11
+    promotion record using the destinations already identified in `design.md`.
+
+**Explicitly skipped in this correction:** API-credit deployment-init/CLI work,
+startup-lifecycle contract tests, a new credits-client protocol, additional
+capacity-admin caller tests, background-task supervision, core watchdog changes,
+and generic remote-capacity composition extraction.
+

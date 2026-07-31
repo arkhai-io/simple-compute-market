@@ -5,12 +5,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from apicredits_storefront.services import keys_lookup
+from apicredits_storefront.services import credits_service_client, keys_lookup
 from domains.apicredits.settlement.credits_client import CreditsServiceClient
 
 
 @pytest.mark.asyncio
 async def test_lookup_key_record_uses_the_typed_client(monkeypatch):
+    monkeypatch.setattr(credits_service_client, "_client", None)
     captured = {}
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -39,6 +40,8 @@ async def test_lookup_key_record_uses_the_typed_client(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lookup_key_record_returns_none_for_unknown_key(monkeypatch):
+    monkeypatch.setattr(credits_service_client, "_client", None)
+
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404)
 

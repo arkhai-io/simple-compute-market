@@ -44,7 +44,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 only-include = ["__init__.py"]
-dev-mode-dirs = ["../../.."]
 
 # Shared schema, listing, negotiation, settlement, and contract modules are
 # owned by arkhai-apicredits-domain; this wheel owns only buyer-role modules.

@@ -4451,3 +4451,73 @@ planning identifies these exact destinations:
 | Operator capacity mutation uses a typed administration client, separate from buyer reservation use | `openspec/specs/site-capacity/spec.md`, capacity administration surface; `docs/development/ARCHITECTURE.md#site-authority` |
 | API-credit callers use a domain-owned client instead of constructing service URLs | API-credit subsystem spec/architecture; `docs/development/ARCHITECTURE.md#package-and-dependency-layers` only if the repository-wide client ownership rule needs clarification |
 
+## Section 11 second code-review decisions (2026-07-31)
+
+The second implementation review accepted a narrow correction pass and rejected
+expanding this section into deployment-topology or core-lifecycle redesign. The
+completed implementation history remains intact; the decisions below govern the
+new planning tasks 11.14–11.18.
+
+### API-credit migrations remain in-process for the current topology
+
+The API-credit service currently has no deployment topology that can own a
+separate migration job. Section 11 therefore does not add a migration CLI, Helm
+init container, or a startup process split. The current service may apply its
+owned migrations before constructing request-serving dependencies. Production
+documentation must describe that current behavior without comparing it to a
+hypothetical future deployment.
+
+The existing empty migration registry is insufficient evidence of ordered schema
+evolution or drift detection. The accepted correction is to register a durable
+baseline/adoption migration, or explicitly name the mechanism as registry
+bootstrap, and to test a non-empty ordered sequence. Tests must prove execution
+order, durable recording, rerun idempotency, failure non-recording, preservation
+of earlier successes, and incomplete-version detection.
+
+### API-credit clients are composed and reused, without a new protocol
+
+The domain-owned HTTP client remains the accepted boundary. Concrete
+`CreditsServiceClient` instances should be constructed in API-credit composition
+and injected or reused by settlement and key-lookup services. This avoids
+operation-local URL/client construction and permits connection reuse. A separate
+client `Protocol` is deliberately not introduced in this correction.
+
+Client validation must exercise the HTTP contract directly rather than only
+monkeypatching concrete methods at callers: paths, headers, payloads, successful
+responses, not-found semantics, HTTP/transport failures, and rollback sequencing.
+The existing typed capacity-administration caller is not expanded further in this
+pass.
+
+### Production helpers expose current invariants only
+
+`VM_UNIT_CLAIM_KEYS` remains necessary and must match the legacy aliases composed
+by the authoritative VM capacity ledger. Production commentary should state that
+invariant concisely; dependency alternatives and review chronology remain here.
+
+The SQLite table-rebuild helper may remain generic only if every interpolated
+identifier is validated as a safe SQLite identifier. Otherwise it should be
+narrowed to fixed reservation-table identifiers. Its accepted foreign-key-safe
+offline rebuild and refusal to silently discard unsupported schema features
+remain unchanged.
+
+### Wheel isolation remains an architectural requirement
+
+API-credit packages must install internal dependencies from built distributions,
+not repository-relative editable sources or root-level import fallbacks. Remaining
+`pythonpath`, `dev-mode-dirs`, or equivalent source-tree shortcuts must be removed
+where unnecessary and any retained package-local exception documented. Isolated
+wheel import and Docker/build-context validation are required evidence.
+
+### Documentation accuracy is part of completion
+
+Task 11.10's record currently conflates migration-registry bootstrap with
+deployment-init and startup-drift work that was not implemented. The record must
+be amended rather than preserving a checked acceptance criterion and explaining
+away its absence. Production migration modules must remove future-oriented and
+changelog-style prose. Completed task notes should retain final behavior, material
+validation, deferred work, and permanent destinations; detailed review history
+belongs in this design record.
+
+Permanent promotion remains intentionally open until this correction pass is
+implemented and accepted.
+

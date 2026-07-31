@@ -37,15 +37,15 @@ class TestRunMigrationsFreshBootstrap:
             "schema_migrations", "capacity_buckets", "capacity_reservations",
         } <= tables
 
-    def test_records_no_migrations_when_there_are_none_registered(self):
-        # _MIGRATIONS is empty today (this system's first version) -- a
-        # fresh bootstrap must not error or fabricate a migration id.
+    def test_records_baseline_migration(self):
+        # A fresh bootstrap adopts the existing create_all schema into
+        # durable migration versioning.
         engine = _sqlite_memory_engine()
         run_migrations(engine)
 
         with engine.begin() as connection:
             rows = connection.execute(text("SELECT id FROM schema_migrations")).fetchall()
-        assert rows == []
+        assert rows == [("20260731_001_apicredits_schema_baseline",)]
 
 
 class TestRunMigrationsIsIdempotent:
@@ -58,7 +58,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 0  # still nothing registered, still not an error
+        assert count == 1
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:
@@ -117,10 +117,13 @@ class TestCheckSchemaVersion:
     correct and ready for when one exists.
     """
 
-    def test_passes_trivially_when_no_migrations_are_registered(self):
+    def test_passes_after_baseline_is_applied(self):
         engine = _sqlite_memory_engine()
+        Base.metadata.create_all(bind=engine)
+        from market_site.db import Base as SiteBase
+        SiteBase.metadata.create_all(bind=engine)
         apply_schema_migrations(engine)
-        check_schema_version(engine)  # must not raise
+        check_schema_version(engine)
 
     def test_raises_when_schema_migrations_table_is_entirely_missing(self):
         engine = _sqlite_memory_engine()
@@ -148,3 +151,43 @@ class TestCreateDbEngineIsSqliteOnly:
     def test_accepts_a_sqlite_url(self):
         engine = create_db_engine("sqlite:///:memory:", is_sqlite=True)
         assert engine is not None
+
+
+def test_failed_migration_is_not_recorded_and_prior_success_is_preserved(monkeypatch):
+    import db.migrations as migrations_module
+
+    engine = _sqlite_memory_engine()
+    Base.metadata.create_all(bind=engine)
+    from market_site.db import Base as SiteBase
+    SiteBase.metadata.create_all(bind=engine)
+
+    calls: list[str] = []
+
+    def first(_engine):
+        calls.append("first")
+
+    def fail(_engine):
+        calls.append("fail")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        migrations_module,
+        "_MIGRATIONS",
+        (
+            migrations_module.Migration("001", first),
+            migrations_module.Migration("002", fail),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        migrations_module.apply_schema_migrations(engine)
+
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text("SELECT id FROM schema_migrations ORDER BY id")
+        ).fetchall()
+
+    assert rows == [("001",)]
+    with pytest.raises(SchemaDriftError):
+        migrations_module.check_schema_version(engine)
+    assert calls == ["first", "fail"]
