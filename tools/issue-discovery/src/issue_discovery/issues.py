@@ -9,6 +9,15 @@ from typing import Any
 from urllib.parse import urlparse
 
 from issue_discovery.redaction import Redactor
+from issue_discovery.publication import (
+    GitRunner,
+    ValidatedIssuePublicationAction,
+    ValidatedPublicationObservation,
+    ValidatedPublicationPreview,
+    load_issue_publication_preview,
+    observe_git_publication_authority,
+    select_issue_publication_action,
+)
 
 
 _CLASSIFIER_PATTERNS = {
@@ -712,6 +721,58 @@ class IssuePacketGenerator:
             run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
             destination_repo="simple-compute-market",
             lifecycle_state="detected",
+        )
+
+
+class GuardedIssuePublicationPlanner:
+    """Keep finding reads, Git/GitHub observations, and selection distinct."""
+
+    def __init__(
+        self,
+        run_dir: Path,
+        *,
+        destination_repo_root: Path,
+        policy_root: Path,
+    ) -> None:
+        self.run_dir = run_dir
+        # Preserve lexical path identity until the Git guard can reject a
+        # symlink rather than silently following it before validation.
+        self.destination_repo_root = destination_repo_root
+        self.policy_root = policy_root
+
+    def preview(
+        self,
+        finding_id: str,
+        *,
+        private_authorization_sha256: str,
+    ) -> ValidatedPublicationPreview:
+        return load_issue_publication_preview(
+            self.run_dir,
+            finding_id,
+            private_authorization_sha256=private_authorization_sha256,
+            repo_root=self.policy_root,
+        )
+
+    def select(
+        self,
+        preview: ValidatedPublicationPreview,
+        observation: ValidatedPublicationObservation,
+        *,
+        git_runner: GitRunner = subprocess.run,
+        remote_git_runner: GitRunner | None = None,
+    ) -> ValidatedIssuePublicationAction:
+        git_authority = observe_git_publication_authority(
+            preview,
+            self.destination_repo_root,
+            repo_root=self.policy_root,
+            git_runner=git_runner,
+            remote_git_runner=remote_git_runner,
+        )
+        return select_issue_publication_action(
+            preview,
+            observation,
+            git_authority,
+            repo_root=self.policy_root,
         )
 
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "destination_repository": "arkhai-io/simple-compute-market",
+  "issue_query": {
+    "repository": "arkhai-io/simple-compute-market",
+    "object_type": "ISSUE",
+    "states": [
+      "OPEN",
+      "CLOSED"
+    ]
+  },
+  "issue_pages": {
+    "complete": true,
+    "total_count": 0,
+    "pages": [
+      {
+        "request_cursor": null,
+        "end_cursor": null,
+        "has_next_page": false,
+        "node_ids": []
+      }
+    ]
+  },
+  "issues": [],
+  "direct_rereads": []
+}

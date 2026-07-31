@@ -1,6 +1,6 @@
 ## 1. Freeze publication models after finding v2
 
-- [ ] 1.1 Block implementation until `define-agent-driven-vm-capacity-contracts` has committed, validated, and pushed the final finding-v2 schema and SCM-owned fingerprint derivation; record the exact consumed public commit.
+- [x] 1.1 Block implementation until `define-agent-driven-vm-capacity-contracts` has committed, validated, and pushed the final finding-v2 schema and SCM-owned fingerprint derivation; record the exact consumed public commit (`5ece6f908605f58d7b1143c37316ef4aa9845508`).
 - [ ] 1.2 Add closed schemas under `tools/issue-discovery/schemas/` for publication authority, complete issue/comment/PR observations, issue actions, proposal-only fix packets, actual draft-PR actions, owner-only operation journals, terminal/no-op/outcome-unknown receipts, and truthful lifecycle events.
 - [ ] 1.3 Make every model bind the exact canonical repository, allowed working/upstream branches and SHAs, ancestry, reconciliation epoch, finding-v2 digest, stable fingerprint, immutable `finding_id`, scenario scope, rendered-body digest, action kind, and private authorization digest; reserve PR base/head fields for draft actions and reject finding v1, credentials, private evidence/identifiers, and executor-local paths.
 - [ ] 1.4 Add positive fixtures plus negative schema tests for missing authority, extra keys, default/upstream branch selection, unsafe fix refs, auto-closing text, non-draft PRs, changed digests, and secret/private fields.
@@ -11,11 +11,11 @@
 - [ ] 2.2 Implement the exact canonical `scm.finding-publication.scope.v1`, `.occurrence.v1`, and `.fix-pr.v1` HTML-comment JSON markers, field sets, character restrictions, and body/comment placement; define `occurrence_payload_sha256` over the normalized human payload excluding marker/framing and separately freeze the final rendered bytes; keep working SHA/run/time in occurrence authority and never trust titles/prose.
 - [ ] 2.3 Implement terminal cursor pagination for all open/closed issues, every comment on every scoped candidate, and every relevant PR; reject repeated cursors/object IDs, malformed/conflicting markers, reused finding IDs with changed digests, and ambiguous matches, then directly reread selected objects/comments/refs before mutation.
 - [ ] 2.4 Make dry-run and live mode consume the same current remote-ref and complete GitHub observations and emit the same deterministic action, with dry-run stopping only before credentialed mutation; keep offline packet preview separately labeled and incapable of selecting a live action.
-- [ ] 2.5 Add fake-observation tests for create, update, reopen, exact-occurrence no-op only when finding/payload digests both match, reused-ID digest conflict, new-SHA same issue, different destination/scenario scope, incomplete search, ambiguous matches, stale local/remote refs, and default-branch denial.
+- [x] 2.5 Add fake-observation tests for create, update, reopen, fresh exact-occurrence no-op (open or closed) only when finding/payload digests both match, reused-ID digest conflict, new-SHA same issue, different destination/scenario scope, incomplete search, ambiguous matches, stale local/remote refs, and default-branch denial.
 
 ## 3. Make issue publication occurrence-idempotent and recoverable
 
-- [ ] 3.1 Remove force bypass and require finding-v2 `ready_to_file`, exact canonical destination, clean working checkout, current remote working authority, pinned upstream context/ancestry, non-promotion issue text, and explicit repository arguments despite ambient defaults.
+- [x] 3.1 Remove force bypass and require finding-v2 `ready_to_file`, exact canonical destination, clean working checkout, current remote working authority, pinned upstream context/ancestry, non-promotion issue text, and explicit repository arguments despite ambient defaults.
 - [ ] 3.2 Implement the exact owner-only journal state machine: 0700 owned non-symlink directories; 0600 owned regular single-link lock/journal files; no-follow/create-exclusive creation; file/parent fsync; prior-digest CAS; same-directory atomic monotonic replacement; and the canonical destination/scope/operation-family lock key.
 - [ ] 3.3 Implement create/update/reopen/no-op execution so the exact `finding_id` plus canonical finding and occurrence-payload digests are recorded once and changed content under a reused ID fails closed; for a closed issue, verify the idempotent occurrence comment before requesting reopen, and require final state to be occurrence-complete and open.
 - [ ] 3.4 Read back direct GitHub state after mutation and emit a terminal success/no-op receipt only when it exactly satisfies the frozen action.
@@ -58,7 +58,7 @@
 
 ## 8. Traditional commit checkpoints
 
-- [ ] 8.1 Commit frozen actions, complete read-only observation, exact branch/ref guards, dry-run parity, and their tests as `feat(issue-discovery): validate guarded publication actions`.
+- [x] 8.1 Commit owner-replayed frozen actions, complete paginated observation, hermetic destination/policy-checkout Git authority, separate working/upstream/default refs, dry-run parity, and their tests as `feat(issue-discovery): validate guarded publication actions`.
 - [ ] 8.2 Commit versioned markers, owner-only operation journals, comment-before-reopen execution, post-state validation, reconciliation, and fake-GitHub recovery tests as `fix(issue-discovery): make issue publication occurrence-idempotent`.
 - [ ] 8.3 Commit proposal truth, private-pre-push/public-post-push remote-head validation, draft-only PR actions, lifecycle projection, and focused tests as `feat(issue-discovery): open guarded draft fix PRs`.
 - [ ] 8.4 Commit permanent specs/architecture, operator docs, completed promotion record, archived change, and full-suite evidence as `docs(issue-discovery): promote guarded finding publication`.

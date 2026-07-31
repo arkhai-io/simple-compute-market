@@ -12,7 +12,8 @@ campaign cannot safely prove the full issue-to-fix loop required after cleanup.
 - Define frozen portable publication actions that bind the sanitized finding,
   stable fingerprint, immutable `finding_id`, canonical destination, exact
   allowed working/upstream branches and SHAs, scenario scope, reconciliation
-  epoch, rendered body hash, and private authorization digest; draft actions
+  epoch, both candidate issue/comment rendered-body hashes, the selected
+  action's applicable hash, and private authorization digest; draft actions
   separately bind PR base/head authority, and finding v1 is a hard historical
   cutoff.
 - Preserve the authority split: SCM owns deterministic action selection,
@@ -21,8 +22,11 @@ campaign cannot safely prove the full issue-to-fix loop required after cleanup.
   authority, branch push, and credentialed mutation.
 - Require branch-scoped issue publication to use `ready_to_file` findings,
   complete pagination across open/closed issues and comments, versioned JSON
-  markers, exact clean checkout/ref/ancestry checks, and default branch denial.
-  The guarded live path has no force override.
+  markers, hermetic read-only Git, exact clean checkout/ref/ancestry checks,
+  separate remote default-HEAD observation, and default branch denial. For a
+  private destination, separately bind the clean SCM harness checkout that
+  supplies public schemas and policy. The guarded live path has no force
+  override.
 - Make create/update/reopen/no-op behavior idempotent for one exact occurrence,
   and reconcile ambiguous partial outcomes read-only before a retry.
 - Define mutation-intent, success, no-op, and `outcome_unknown` receipts with
@@ -40,7 +44,9 @@ campaign cannot safely prove the full issue-to-fix loop required after cleanup.
 - Require dry-run to execute the same schema, authority, readiness, redaction,
   remote-ref/GitHub observation, deduplication, and action-selection checks as
   live mode, stopping only before external mutation; offline rendering is
-  separately labeled preview-only.
+  separately labeled preview-only and cannot mint a publication capability.
+  Only owner-authenticated replay of an ingested finding-v2 record can mint the
+  validated preview accepted by the public selector.
 
 ## Capabilities
 
@@ -55,9 +61,10 @@ None.
 
 ## Dependencies and Related Changes
 
-- Implementation is blocked on the final finding-v2 and SCM-owned fingerprint
-  contract from `define-agent-driven-vm-capacity-contracts`; planning can
-  proceed in parallel, but code must consume the verified final v2 shape.
+- The final finding-v2 and SCM-owned fingerprint contract from
+  `define-agent-driven-vm-capacity-contracts` is consumed immutably at public
+  commit `5ece6f908605f58d7b1143c37316ef4aa9845508`; guarded-publication code must
+  not reinterpret finding v1 or silently retarget a later contract revision.
 - Private `compute-market-internal-infra` supplies the current GitHub identity,
   campaign generation, cleanup/baseline proof, single-writer branch mutation,
   and credentialed API calls at one exact public SCM commit.

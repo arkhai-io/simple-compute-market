@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkhai.io/schemas/scm/finding-publication-action.schema.json",
+  "title": "SCM deterministic guarded issue publication action",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action_id",
+    "schema_version",
+    "action_kind",
+    "authority",
+    "scope_sha256",
+    "observation_sha256",
+    "git_observation_sha256",
+    "issue_number",
+    "issue_url",
+    "title",
+    "rendered_body",
+    "rendered_body_sha256",
+    "rendered_body_source",
+    "mutation_steps"
+  ],
+  "properties": {
+    "action_id": {"type": "string", "pattern": "^issue-action-[0-9a-f]{64}$"},
+    "schema_version": {"const": 1},
+    "action_kind": {"enum": ["create", "comment", "comment_then_reopen", "no_op"]},
+    "authority": {"$ref": "#/$defs/authority"},
+    "scope_sha256": {"$ref": "#/$defs/digest"},
+    "observation_sha256": {"$ref": "#/$defs/digest"},
+    "git_observation_sha256": {"$ref": "#/$defs/digest"},
+    "issue_number": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]},
+    "issue_url": {"oneOf": [{"type": "null"}, {"type": "string", "format": "uri", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*$"}]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^[^\\r\\n]+$"},
+    "rendered_body": {"type": "string", "minLength": 1, "maxLength": 65536},
+    "rendered_body_sha256": {"$ref": "#/$defs/digest"},
+    "rendered_body_source": {"enum": ["issue_body", "occurrence_comment"]},
+    "mutation_steps": {
+      "oneOf": [
+        {"const": []},
+        {"const": ["create_issue"]},
+        {"const": ["comment_occurrence"]},
+        {"const": ["comment_occurrence", "reopen_issue"]}
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action_kind": {"const": "create"},
+        "issue_number": {"type": "null"},
+        "issue_url": {"type": "null"},
+        "rendered_body_source": {"const": "issue_body"},
+        "mutation_steps": {"const": ["create_issue"]}
+      }
+    },
+    {
+      "properties": {
+        "action_kind": {"const": "comment"},
+        "issue_number": {"type": "integer", "minimum": 1},
+        "issue_url": {"type": "string"},
+        "rendered_body_source": {"const": "occurrence_comment"},
+        "mutation_steps": {"const": ["comment_occurrence"]}
+      }
+    },
+    {
+      "properties": {
+        "action_kind": {"const": "comment_then_reopen"},
+        "issue_number": {"type": "integer", "minimum": 1},
+        "issue_url": {"type": "string"},
+        "rendered_body_source": {"const": "occurrence_comment"},
+        "mutation_steps": {"const": ["comment_occurrence", "reopen_issue"]}
+      }
+    },
+    {
+      "properties": {
+        "action_kind": {"const": "no_op"},
+        "issue_number": {"type": "integer", "minimum": 1},
+        "issue_url": {"type": "string"},
+        "mutation_steps": {"const": []}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "id": {"type": "string", "minLength": 3, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "destination_repo": {"const": "simple-compute-market"},
+            "destination_repository": {"const": "arkhai-io/simple-compute-market"},
+            "working_branch": {"const": "feat/issue-discovery-harness"},
+            "upstream_branch": {"const": "dev"},
+            "default_branch": {"const": "main"}
+          }
+        },
+        {
+          "properties": {
+            "destination_repo": {"const": "compute-market-internal-infra"},
+            "destination_repository": {"const": "arkhai-io/compute-market-internal-infra"},
+            "working_branch": {"const": "tools/agent-orchestration-scratch"},
+            "upstream_branch": {"const": "main"},
+            "default_branch": {"const": "main"}
+          }
+        }
+      ],
+      "required": [
+        "schema_version",
+        "operation_family",
+        "destination_repo",
+        "destination_repository",
+        "working_branch",
+        "working_ref",
+        "upstream_branch",
+        "upstream_ref",
+        "default_branch",
+        "inbound_merge_ref",
+        "reconciliation_epoch_id",
+        "finding_schema_version",
+        "finding_v2_contract_ref",
+        "scm_contract_ref",
+        "finding_id",
+        "finding_sha256",
+        "fingerprint",
+        "scenario_id",
+        "scenario_sha256",
+        "occurrence_payload_sha256",
+        "issue_body_sha256",
+        "occurrence_comment_sha256",
+        "private_authorization_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "operation_family": {"const": "issue"},
+        "destination_repo": {"enum": ["simple-compute-market", "compute-market-internal-infra"]},
+        "destination_repository": {"enum": ["arkhai-io/simple-compute-market", "arkhai-io/compute-market-internal-infra"]},
+        "working_branch": {"enum": ["feat/issue-discovery-harness", "tools/agent-orchestration-scratch"]},
+        "working_ref": {"$ref": "#/$defs/ref"},
+        "upstream_branch": {"enum": ["dev", "main"]},
+        "upstream_ref": {"$ref": "#/$defs/ref"},
+        "default_branch": {"const": "main"},
+        "inbound_merge_ref": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ref"}]},
+        "reconciliation_epoch_id": {"$ref": "#/$defs/id"},
+        "finding_schema_version": {"const": 2},
+        "finding_v2_contract_ref": {"const": "5ece6f908605f58d7b1143c37316ef4aa9845508"},
+        "scm_contract_ref": {"$ref": "#/$defs/ref"},
+        "finding_id": {"$ref": "#/$defs/id"},
+        "finding_sha256": {"$ref": "#/$defs/digest"},
+        "fingerprint": {"type": "string", "pattern": "^capacity-[0-9a-f]{64}$"},
+        "scenario_id": {"$ref": "#/$defs/id"},
+        "scenario_sha256": {"$ref": "#/$defs/digest"},
+        "occurrence_payload_sha256": {"$ref": "#/$defs/digest"},
+        "issue_body_sha256": {"$ref": "#/$defs/digest"},
+        "occurrence_comment_sha256": {"$ref": "#/$defs/digest"},
+        "private_authorization_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

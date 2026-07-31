@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkhai.io/schemas/scm/finding-publication-git-observation.schema.json",
+  "title": "SCM finding publication Git authority observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "publication_preview_sha256",
+    "destination_repository",
+    "checked_out_branch",
+    "checked_out_ref",
+    "remote_working_branch",
+    "remote_working_ref",
+    "remote_upstream_branch",
+    "remote_upstream_ref",
+    "pinned_upstream_ref",
+    "remote_upstream_drifted",
+    "remote_default_branch",
+    "remote_default_ref",
+    "clean",
+    "working_contains_pinned_upstream",
+    "pinned_inbound_merge_ref",
+    "working_contains_inbound_merge",
+    "finding_v2_contract_ref",
+    "scm_contract_ref",
+    "scm_contract_contains_finding_v2_contract",
+    "scm_policy_repository",
+    "scm_policy_checkout_branch",
+    "scm_policy_checkout_ref",
+    "scm_policy_checkout_clean",
+    "scm_policy_checkout_contains_contract",
+    "working_contains_scm_contract",
+    "working_contains_finding_v2_contract"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "publication_preview_sha256": {"$ref": "#/$defs/digest"},
+    "destination_repository": {"enum": ["arkhai-io/simple-compute-market", "arkhai-io/compute-market-internal-infra"]},
+    "checked_out_branch": {"enum": ["feat/issue-discovery-harness", "tools/agent-orchestration-scratch"]},
+    "checked_out_ref": {"$ref": "#/$defs/ref"},
+    "remote_working_branch": {"enum": ["feat/issue-discovery-harness", "tools/agent-orchestration-scratch"]},
+    "remote_working_ref": {"$ref": "#/$defs/ref"},
+    "remote_upstream_branch": {"enum": ["dev", "main"]},
+    "remote_upstream_ref": {"$ref": "#/$defs/ref"},
+    "pinned_upstream_ref": {"$ref": "#/$defs/ref"},
+    "remote_upstream_drifted": {"type": "boolean"},
+    "remote_default_branch": {"const": "main"},
+    "remote_default_ref": {"$ref": "#/$defs/ref"},
+    "clean": {"const": true},
+    "working_contains_pinned_upstream": {"const": true},
+    "pinned_inbound_merge_ref": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ref"}]},
+    "working_contains_inbound_merge": {"oneOf": [{"type": "null"}, {"const": true}]},
+    "finding_v2_contract_ref": {"const": "5ece6f908605f58d7b1143c37316ef4aa9845508"},
+    "scm_contract_ref": {"$ref": "#/$defs/ref"},
+    "scm_contract_contains_finding_v2_contract": {"const": true},
+    "scm_policy_repository": {"const": "arkhai-io/simple-compute-market"},
+    "scm_policy_checkout_branch": {"const": "feat/issue-discovery-harness"},
+    "scm_policy_checkout_ref": {"$ref": "#/$defs/ref"},
+    "scm_policy_checkout_clean": {"const": true},
+    "scm_policy_checkout_contains_contract": {"const": true},
+    "working_contains_scm_contract": {"oneOf": [{"type": "null"}, {"const": true}]},
+    "working_contains_finding_v2_contract": {"oneOf": [{"type": "null"}, {"const": true}]}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "destination_repository": {"const": "arkhai-io/simple-compute-market"},
+        "checked_out_branch": {"const": "feat/issue-discovery-harness"},
+        "remote_working_branch": {"const": "feat/issue-discovery-harness"},
+        "remote_upstream_branch": {"const": "dev"},
+        "remote_default_branch": {"const": "main"},
+        "working_contains_scm_contract": {"const": true},
+        "working_contains_finding_v2_contract": {"const": true}
+      }
+    },
+    {
+      "properties": {
+        "destination_repository": {"const": "arkhai-io/compute-market-internal-infra"},
+        "checked_out_branch": {"const": "tools/agent-orchestration-scratch"},
+        "remote_working_branch": {"const": "tools/agent-orchestration-scratch"},
+        "remote_upstream_branch": {"const": "main"},
+        "remote_default_branch": {"const": "main"},
+        "working_contains_scm_contract": {"type": "null"},
+        "working_contains_finding_v2_contract": {"type": "null"}
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"pinned_inbound_merge_ref": {"type": "null"}}
+      },
+      "then": {
+        "properties": {"working_contains_inbound_merge": {"type": "null"}}
+      },
+      "else": {
+        "properties": {"working_contains_inbound_merge": {"const": true}}
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ref": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

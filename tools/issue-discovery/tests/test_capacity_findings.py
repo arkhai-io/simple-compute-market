@@ -46,6 +46,14 @@ from issue_discovery.capacity_outcomes import (
     _VALIDATED_CAPACITY_RESULT_TOKEN,
 )
 from issue_discovery.issues import IssuePacketGenerator
+from issue_discovery.publication import (
+    FINDING_V2_CONSUMED_REF,
+    ValidatedPublicationPreview,
+    load_issue_publication_preview,
+    observe_git_publication_authority,
+    select_issue_publication_action,
+    validate_publication_observation,
+)
 from issue_discovery.runner import DiscoveryRunner
 
 
@@ -118,6 +126,17 @@ def finding_authority(tmp_path: Path) -> dict[str, Any]:
         / "capacity-finding.schema.json",
         schema_destination,
     )
+    for publication_schema in (
+        "finding-publication-action.schema.json",
+        "finding-publication-authority.schema.json",
+        "finding-publication-git-observation.schema.json",
+        "finding-publication-observation.schema.json",
+        "finding-publication-preview.schema.json",
+    ):
+        shutil.copyfile(
+            repo_root() / "tools" / "issue-discovery" / "schemas" / publication_schema,
+            schema_destination.parent / publication_schema,
+        )
     redaction_destination = (
         authority / "tools" / "issue-discovery" / "config" / "redactions.yaml"
     )
@@ -2162,6 +2181,122 @@ def test_packet_generation_replays_real_ingested_finding(
     assert candidate.body_file.read_bytes() == ingested.index_record[
         "occurrence_body"
     ].encode("utf-8")
+
+
+def test_publication_preview_replays_real_ingested_finding_and_rejects_tamper(
+    finding_authority: dict[str, Any],
+) -> None:
+    result = _validated_result(finding_authority)
+    value = _finding(finding_authority, result)
+    ingested = ingest_capacity_finding(
+        value,
+        result,
+        authority_repo_root=finding_authority["repo"],
+        run_dir=finding_authority["run_dir"],
+    )
+
+    authenticated_preview = load_issue_publication_preview(
+        finding_authority["run_dir"],
+        value["finding_id"],
+        private_authorization_sha256="d" * 64,
+        repo_root=finding_authority["repo"],
+    )
+    preview = authenticated_preview.value
+
+    assert isinstance(authenticated_preview, ValidatedPublicationPreview)
+    assert preview["authority"]["finding_id"] == value["finding_id"]
+    assert (
+        preview["authority"]["finding_sha256"]
+        == ingested.index_record["finding_sha256"]
+    )
+    assert preview["occurrence_comment"].endswith(
+        ingested.index_record["occurrence_body"]
+    )
+    assert (
+        preview["authority"]["occurrence_comment_sha256"]
+        == preview["occurrence_comment_sha256"]
+    )
+
+    def guarded_git_read(
+        command: list[str],
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        arguments = tuple(command[1:])
+        if arguments == (
+            "ls-remote",
+            "--exit-code",
+            "https://github.com/arkhai-io/simple-compute-market.git",
+            "refs/heads/feat/issue-discovery-harness",
+        ):
+            output = (
+                f"{finding_authority['working_ref']}\t"
+                "refs/heads/feat/issue-discovery-harness\n"
+            )
+            return subprocess.CompletedProcess(command, 0, output, "")
+        if arguments == (
+            "ls-remote",
+            "--exit-code",
+            "https://github.com/arkhai-io/simple-compute-market.git",
+            "refs/heads/dev",
+        ):
+            output = f"{finding_authority['upstream_ref']}\trefs/heads/dev\n"
+            return subprocess.CompletedProcess(command, 0, output, "")
+        if arguments == (
+            "ls-remote",
+            "--symref",
+            "https://github.com/arkhai-io/simple-compute-market.git",
+            "HEAD",
+        ):
+            output = (
+                "ref: refs/heads/main\tHEAD\n"
+                f"{finding_authority['upstream_ref']}\tHEAD\n"
+            )
+            return subprocess.CompletedProcess(command, 0, output, "")
+        if arguments[:2] == ("merge-base", "--is-ancestor") and (
+            FINDING_V2_CONSUMED_REF in arguments
+        ):
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.run(command, **kwargs)
+
+    git_authority = observe_git_publication_authority(
+        authenticated_preview,
+        finding_authority["repo"],
+        repo_root=finding_authority["repo"],
+        git_runner=guarded_git_read,
+        remote_git_runner=guarded_git_read,
+    )
+    empty_observation = json.loads(
+        (
+            repo_root()
+            / "tools/issue-discovery/tests/fixtures/publication/empty-observation.json"
+        ).read_text(encoding="utf-8")
+    )
+    observed = validate_publication_observation(
+        empty_observation,
+        repo_root=finding_authority["repo"],
+    )
+    action = select_issue_publication_action(
+        authenticated_preview,
+        observed,
+        git_authority,
+        repo_root=finding_authority["repo"],
+    ).value
+
+    assert action["action_kind"] == "create"
+    assert action["authority"]["finding_id"] == value["finding_id"]
+
+    body_path = (
+        finding_authority["run_dir"] / ingested.index_record["occurrence_body_path"]
+    )
+    body_path.write_text("tampered after authenticated ingest\n", encoding="utf-8")
+
+    with pytest.raises(CapacityValidationError):
+        load_issue_publication_preview(
+            finding_authority["run_dir"],
+            value["finding_id"],
+            private_authorization_sha256="d" * 64,
+            repo_root=finding_authority["repo"],
+        )
 
 
 def test_runner_issue_surfaces_preserve_symlinked_run_root_identity(

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arkhai.io/schemas/scm/finding-publication-observation.schema.json",
+  "title": "Complete read-only GitHub issue observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "destination_repository", "issue_query", "issue_pages", "issues", "direct_rereads"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "destination_repository": {"enum": ["arkhai-io/simple-compute-market", "arkhai-io/compute-market-internal-infra"]},
+    "issue_query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "object_type", "states"],
+      "properties": {
+        "repository": {"enum": ["arkhai-io/simple-compute-market", "arkhai-io/compute-market-internal-infra"]},
+        "object_type": {"const": "ISSUE"},
+        "states": {"const": ["OPEN", "CLOSED"]}
+      }
+    },
+    "issue_pages": {"$ref": "#/$defs/pages"},
+    "issues": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/issue"}},
+    "direct_rereads": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/issue"}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "node_id": {"type": "string", "minLength": 3, "maxLength": 160, "pattern": "^[A-Za-z0-9_=-]+$"},
+    "cursor": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 512}]},
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_cursor", "end_cursor", "has_next_page", "node_ids"],
+      "properties": {
+        "request_cursor": {"$ref": "#/$defs/cursor"},
+        "end_cursor": {"$ref": "#/$defs/cursor"},
+        "has_next_page": {"type": "boolean"},
+        "node_ids": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/node_id"}}
+      }
+    },
+    "pages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "total_count", "pages"],
+      "properties": {
+        "complete": {"const": true},
+        "total_count": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "pages": {"type": "array", "minItems": 1, "maxItems": 100000, "items": {"$ref": "#/$defs/page"}}
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "url", "body", "body_sha256"],
+      "properties": {
+        "node_id": {"$ref": "#/$defs/node_id"},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*#issuecomment-[1-9][0-9]*$"},
+        "body": {"type": "string", "maxLength": 65536},
+        "body_sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "number", "url", "state", "title", "body", "body_sha256", "comment_pages", "comments"],
+      "properties": {
+        "node_id": {"$ref": "#/$defs/node_id"},
+        "number": {"type": "integer", "minimum": 1},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[1-9][0-9]*$"},
+        "state": {"enum": ["OPEN", "CLOSED"]},
+        "title": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$"},
+        "body": {"type": "string", "maxLength": 65536},
+        "body_sha256": {"$ref": "#/$defs/digest"},
+        "comment_pages": {"$ref": "#/$defs/pages"},
+        "comments": {"type": "array", "maxItems": 100000, "items": {"$ref": "#/$defs/comment"}}
+      }
+    }
+  }
+}

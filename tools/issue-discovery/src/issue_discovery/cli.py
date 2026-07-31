@@ -398,6 +398,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     issue_create.set_defaults(handler=_issue_create)
 
+    issue_preview = issue_subparsers.add_parser(
+        "publish-preview",
+        help=(
+            "Render a finding-v2 publication packet without remote observation; "
+            "the output is preview-only."
+        ),
+    )
+    issue_preview.add_argument("run_dir", type=Path)
+    issue_preview.add_argument("finding_id")
+    issue_preview.add_argument(
+        "--private-authorization-sha256",
+        required=True,
+        help=(
+            "Digest of private campaign authority; the public command never reads "
+            "the underlying private proof."
+        ),
+    )
+    issue_preview.set_defaults(handler=_issue_publish_preview)
+
+    issue_publish = issue_subparsers.add_parser(
+        "publish",
+        help="Select a guarded finding-v2 issue action from complete read-only observations.",
+    )
+    issue_publish.add_argument("run_dir", type=Path)
+    issue_publish.add_argument("finding_id")
+    issue_publish.add_argument(
+        "--mode",
+        choices=["dry-run", "live"],
+        required=True,
+        help=(
+            "Both modes run identical validation and selection. Live mutation "
+            "requires a private credentialed executor, which this public planner "
+            "does not own."
+        ),
+    )
+    issue_publish.add_argument(
+        "--observation",
+        type=Path,
+        required=True,
+        help="Complete, directly reread GitHub issue/comment observation JSON.",
+    )
+    issue_publish.add_argument(
+        "--destination-repo-root",
+        type=Path,
+        required=True,
+        help="Exact clean checkout used for working/upstream remote-ref guards.",
+    )
+    issue_publish.add_argument("--private-authorization-sha256", required=True)
+    issue_publish.set_defaults(handler=_issue_publish)
+
     issue_propose = issue_subparsers.add_parser(
         "propose-fix",
         help="Write a proposal-only child fix PR packet for a capacity finding.",
@@ -923,6 +973,25 @@ def _issue_create(args: argparse.Namespace) -> int:
             if args.destination_repo_root is not None
             else None
         ),
+    )
+
+
+def _issue_publish_preview(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).issue_publish_preview(
+        _run_dir(args),
+        args.finding_id,
+        private_authorization_sha256=args.private_authorization_sha256,
+    )
+
+
+def _issue_publish(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).issue_publish_plan(
+        _run_dir(args),
+        args.finding_id,
+        destination_repo_root=_repo_path(args, args.destination_repo_root),
+        observation_path=_repo_path(args, args.observation),
+        private_authorization_sha256=args.private_authorization_sha256,
+        mode=args.mode,
     )
 
 

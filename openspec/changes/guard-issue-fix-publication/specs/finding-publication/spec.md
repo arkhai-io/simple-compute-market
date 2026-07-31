@@ -11,11 +11,21 @@ Every issue or draft-PR publication action MUST be a closed, immutable packet
 that binds the destination repository, applicable working branch and exact
 working SHA, default/upstream branch and pinned upstream SHA, reconciliation
 epoch, finding schema and digest, SCM-derived stable fingerprint, exact
-`finding_id`, rendered body digest, requested action, and a digest of the
-private live authorization. Public validation MUST reproduce those values and
-MUST NOT itself grant live mutation authority. Live publication MUST accept
-finding schema v2 only; a v1 finding remains historical evidence at its pinned
-SCM ref and MUST NOT be adapted or published by this path.
+`finding_id`, applicable rendered body digest(s), requested action, and a
+digest of the private live authorization. Issue authority MUST freeze both the
+candidate initial-issue and occurrence-comment rendered-body digests, and the
+selected action MUST bind its rendered body to the applicable candidate
+digest. Public validation MUST reproduce those values and MUST NOT itself
+grant live mutation authority. Live publication MUST accept finding schema v2
+only; a v1 finding remains historical evidence at its pinned SCM ref and MUST
+NOT be adapted or published by this path.
+
+Rendering a caller-supplied mapping MUST produce only a preview-only,
+non-capability value. Only an owner-authenticated replay of the immutable
+ingested finding-v2 source/index/body artifacts MAY mint the validated preview
+accepted by Git observation or action selection. A selected action MUST record
+whether its exact rendered bytes came from the initial issue body or an
+occurrence comment and bind the corresponding frozen digest.
 
 #### Scenario: Frozen action is valid
 - **WHEN** a publication packet reproduces the validated finding, occurrence, branch/upstream authority, reconciliation context, rendered bytes, and private authorization digest
@@ -28,6 +38,10 @@ SCM ref and MUST NOT be adapted or published by this path.
 #### Scenario: Historical finding cannot enter live publication
 - **WHEN** a schema-v1 finding or an in-memory v1-to-v2 adaptation is presented
 - **THEN** the guarded path rejects it before observation or mutation
+
+#### Scenario: Raw rendering cannot mint publication authority
+- **WHEN** a caller renders an otherwise schema-valid mapping without owner-authenticated replay of the ingested finding-v2 record
+- **THEN** it receives only an offline preview, and Git observation and action selection reject that value
 
 ### Requirement: Private mutation boundary
 SCM MUST own portable publication schemas, deterministic action selection,
@@ -73,8 +87,57 @@ publication MUST map canonical repository
 `arkhai-io/compute-market-internal-infra`,
 `tools/agent-orchestration-scratch`, and upstream `main`. The remote working
 SHA MUST equal the finding's working ref and contain its pinned upstream ref.
-Every Git and GitHub read/write MUST name the canonical repository explicitly
-and MUST ignore or reject conflicting ambient repository/base defaults.
+The Git observation MUST record the finding's pinned upstream ref, the current
+remote upstream ref, and whether those refs differ. An upstream branch advance
+after the finding was frozen MUST NOT retarget or invalidate that frozen
+series; the exact remote working ref and its ancestry over the pinned upstream
+ref remain authoritative. The live executor MUST compare current upstream refs
+between its before/after observations and fail closed if the tip moves during
+one operation.
+The reader MUST separately observe the remote default `HEAD` symbolic branch
+and exact commit. SCM default `main` remains distinct from upstream `dev`; for
+private infrastructure, independently observed default `main` and upstream
+`main` commits MUST agree. Every Git and GitHub read/write MUST name the
+canonical repository explicitly and MUST ignore or reject conflicting ambient
+repository/base defaults.
+
+Every local Git authority read MUST use a sealed read-only environment and
+MUST disable ambient fsmonitor, untracked-cache, hook, attribute, file-mode,
+case, and symlink interpretation that could change the result. It MUST reject
+system/global or repository URL rewriting, graft files, replacement refs,
+hidden/nonordinary index flags, dirty tracked, nonignored untracked, or dirty
+submodule state, noncanonical origins, and non-exact Git roots. It MUST
+explicitly enumerate ignored files and reject every ignored artifact within
+the tracked implementation/config/schema roots, plus source-like, importable
+Python-archive, or executable artifacts elsewhere under `tools/issue-discovery`.
+Ignored files inside `tools/issue-discovery/.venv/` are the sole exclusion and
+MUST be treated as separately sealed executor/toolchain authority rather than
+Git policy authority. The lexical absolute root MUST equal its strict canonical
+resolution; final/ancestor symlinks and `..` aliases are invalid, while an
+ordinary relative `.` is normalized to the current absolute root.
+
+The configured origin MAY use canonical GitHub SSH syntax only to establish
+local repository identity. Every remote read MUST discard the configured URL
+bytes and use the constructed exact
+`https://github.com/<owner>/<repo>.git` URL outside repository-local
+configuration; explicit ports, userinfo, and local origins are invalid, and no
+SSH transport may be invoked. A private executor MAY supply a credentialed
+read-only transport for that canonical private URL, but credentials MUST NOT
+enter a public observation or action.
+
+When the destination checkout is private infrastructure, the separate SCM
+policy checkout supplying schemas, redaction, and publication code MUST also
+be an exact clean Git root with no hidden index state. It MUST be on
+`feat/issue-discovery-harness`, its exact HEAD MUST contain the frozen
+`scm_contract_ref`, and the policy repository, branch, HEAD, clean bit, and
+containment result MUST be included in the Git-observation digest bound by the
+action.
+
+The Git observation MUST additionally bind the canonical SHA-256 of the entire
+validated preview and the exact nullable inbound-merge ref with its containment
+result. Action selection MUST reject a Git observation whose preview digest is
+not byte-exact for the selected preview, even if every currently compared Git
+field happens to match.
 
 #### Scenario: Ready branch-scoped issue can publish
 - **WHEN** a `ready_to_file` finding and frozen action match the clean exact working checkout, current remote authority, supported repository, and non-default working branch
@@ -87,6 +150,14 @@ and MUST ignore or reject conflicting ambient repository/base defaults.
 #### Scenario: Default branch is denied
 - **WHEN** the action selects `dev`, `main`, or another repository default/upstream branch as the campaign issue/fix working base
 - **THEN** validation fails before mutation
+
+#### Scenario: Upstream advances after the series was frozen
+- **WHEN** the current remote upstream tip differs from the finding's pinned upstream ref while the exact remote working ref is unchanged and still contains that pin
+- **THEN** the observation records upstream drift and action selection preserves the frozen authority without retargeting or rejection
+
+#### Scenario: Private destination has an untrusted SCM policy checkout
+- **WHEN** the SCM policy checkout is dirty, has hidden index flags, is off the canonical harness branch, or its HEAD does not contain the frozen contract ref
+- **THEN** publication fails before selecting an action for the private destination
 
 ### Requirement: Occurrence-idempotent deduplication
 Issue discovery MUST search the complete eligible destination issue set or fail
@@ -119,11 +190,29 @@ The occurrence JSON MUST contain exactly `finding_id`, `finding_sha256`, and
 bytes of the sanitized human occurrence payload, normalized to exactly one
 trailing newline, excluding the machine marker, its HTML-comment framing, and
 any separator blank lines. It therefore is not self-referential. The frozen
-rendered-body digest separately covers the complete final issue-body or comment
-bytes after marker insertion. Marker JSON uses the public canonical JSON
-algorithm without its trailing newline inside the comment; values MUST reject
-`--`, `<`, and `>` so the comment cannot terminate early. Titles and human
-prose MUST NOT be identity authority.
+candidate rendered-body digests separately cover the complete final issue-body
+and comment bytes after marker insertion. Those digests are not
+self-referential because neither rendered digest is included in a machine
+marker. Marker JSON uses the public canonical JSON algorithm without its
+trailing newline inside the comment; values MUST reject `--`, `<`, and `>` so
+the comment cannot terminate early. Titles and human prose MUST NOT be identity
+authority.
+
+The entire case-sensitive `<!-- scm.finding-publication.` prefix MUST be
+reserved for machine authority. A sanitized human occurrence payload
+containing that prefix anywhere, including a valid extra marker, malformed
+marker, indented marker, or inline prose, MUST be rejected before rendering.
+Before minting any preview, the renderer MUST parse its final issue body back
+to exactly one scope and one initial occurrence and its final occurrence
+comment back to exactly one occurrence and no scope.
+
+An occurrence marker in an unscoped issue or comment MUST NOT provide
+authority. For an exact no-op, the selected action MUST preserve whether the
+matching occurrence came from the initial issue body or a later comment and
+MUST bind the corresponding exact bytes. Title sources MUST reject all Unicode
+control/format/private-use/surrogate/unassigned categories as well as Unicode
+line and paragraph separators, in addition to ASCII line breaks and
+auto-closing issue text.
 
 Discovery MUST terminally paginate every comment on every candidate carrying
 the exact scope marker, reject duplicate object IDs/cursors and non-terminating
@@ -143,7 +232,11 @@ fail closed.
 
 #### Scenario: Exact occurrence is a no-op
 - **WHEN** the matching issue already contains the exact `finding_id`, canonical finding digest, and occurrence-payload digest
-- **THEN** action selection is no-op and creates no duplicate comment or issue
+- **THEN** fresh action selection is no-op and creates no duplicate comment or issue, even if a human subsequently closed that already-recorded issue
+
+#### Scenario: Persisted partial reopen intent is not inferred from issue state
+- **WHEN** a journaled `comment_then_reopen` action stopped after its exact occurrence comment but before its reopen step
+- **THEN** recovery uses that persisted action and per-step state to continue only the never-attempted reopen; stateless selection does not synthesize reopen authority from a closed exact occurrence
 
 #### Scenario: Finding identity is reused with changed content
 - **WHEN** an observed `finding_id` is paired with a canonical finding digest or occurrence-payload digest different from the immutable occurrence already recorded
@@ -317,7 +410,8 @@ observed state. Consequently, dry-run MUST perform the same read-only remote
 ref and completely paginated GitHub observations as live mode. A separate
 offline packet-preview command MAY render and validate frozen bytes, but MUST
 label its output `preview_only` and MUST NOT claim which live action would be
-selected. Dry-run MUST NOT create an operation journal, append a lifecycle
+selected or satisfy the validated-preview capability required by the
+selector. Dry-run MUST NOT create an operation journal, append a lifecycle
 event, mutate a local/remote ref, or claim a distributed write lease. No
 credential, private evidence content, private identifier, or executor-local
 path MAY enter a public action or receipt.
@@ -332,4 +426,4 @@ path MAY enter a public action or receipt.
 
 #### Scenario: Offline preview has no remote observation
 - **WHEN** the operator renders a packet without current remote refs and complete GitHub observations
-- **THEN** output is explicitly preview-only and cannot be used as a dry-run or live mutation action
+- **THEN** output is explicitly preview-only, cannot mint a validated publication preview, and cannot be used as a dry-run or live mutation action

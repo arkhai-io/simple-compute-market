@@ -20,6 +20,13 @@ finding v1 because upstream/reconciliation authority, evidence hashes, and the
 SCM-owned fingerprint are part of every publication idempotency key.
 There is no v1-to-v2 live adapter: v1 remains historical at its pinned ref.
 
+The implementation dependency was discharged at public commit
+`5ece6f908605f58d7b1143c37316ef4aa9845508`. That immutable commit is the
+consumed finding-v2 schema, fingerprint, and g1-v2 contract authority for this
+change. Later guarded-publication commits may advance the working branch, but
+they do not retarget the consumed finding contract or its scenario/profile
+hashes.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -75,10 +82,12 @@ post-validation untestable.
 
 Publication authority contains the finding digest, stable fingerprint,
 immutable `finding_id`, canonical destination, remote working branch/SHA,
-pinned upstream branch/SHA, reconciliation epoch, rendered body digest,
-requested operation family, and a private authorization digest. “PR base” is
-reserved for the working branch targeted by a draft PR; issue authority calls
-these values working and upstream refs.
+pinned upstream branch/SHA, reconciliation epoch, both candidate rendered
+digests (`issue_body_sha256` and `occurrence_comment_sha256`), requested
+operation family, and a private authorization digest. A selected issue action
+binds its `rendered_body_sha256` to the applicable frozen candidate digest.
+“PR base” is reserved for the working branch targeted by a draft PR; issue
+authority calls these values working and upstream refs.
 
 The public validator knows only the digest and allowed branch policy. The
 private executor verifies the underlying generation/proofs immediately before
@@ -92,6 +101,56 @@ the canonical destination/scope/operation-family key; live private execution
 holds one distributed generation/single-writer lease continuously from
 observation through verified post-read. Lease loss after an attempted step is
 an unknown outcome.
+
+The current remote working tip must remain byte-exact to the frozen working
+ref. The current remote upstream tip is observed separately from the finding's
+pinned upstream ref. Upstream movement after the frozen series began is normal:
+the Git observation records both refs plus a derived drift bit, while action
+selection continues to require that the frozen working ref contains the pinned
+upstream ref. It does not silently retarget or reject the frozen series merely
+because `dev` or `main` advanced. A live executor compares its before/after
+remote-upstream observations and fails closed on movement during one operation.
+
+Remote default authority is a third observation, not an alias for upstream:
+the reader requires one symbolic `HEAD` and its exact commit. SCM therefore
+records default `main` separately from upstream `dev`; private infrastructure
+records both names as `main` and requires their independently read commits to
+agree. Neither default nor upstream may become the working branch.
+
+All local Git reads run with a sealed environment that disables system/global
+configuration, replacement objects, fsmonitor, untracked-cache shortcuts,
+hooks, optional locks, paging, and prompting while fixing file-mode, case, and
+symlink interpretation. Each supplied root is converted to a lexical absolute
+path without resolving its components; it must then equal its strict canonical
+resolution, so final/ancestor symlinks and `..` aliases fail closed. The exact
+Git roots reject graft files, replacement refs, URL rewrites, hidden index
+flags, dirty/nonignored-untracked/submodule state, and noncanonical origins.
+They also enumerate ignored files and reject every ignored artifact under the
+tool's source/config/schema roots plus source-like, importable Python-archive, or
+executable artifacts elsewhere under `tools/issue-discovery`. The repo-local
+`.venv` is the sole explicit exclusion: it is external executor/toolchain
+authority, not Git policy authority, and private live execution must supply it
+as a separately sealed environment. Configured SSH origins may establish local
+repository identity, but remote reads discard those bytes and use only a
+constructed `https://github.com/<owner>/<repo>.git`; explicit ports, userinfo,
+and local origins are invalid. Remote reads execute outside destination-local
+repository config. Private infrastructure may inject a credentialed read-only
+transport for that exact canonical URL, but credential material cannot cross
+into an observation or action.
+
+When the destination is private, its checkout is not the checkout supplying
+SCM schemas, redaction, and publication policy. The reader therefore observes
+that SCM policy checkout separately: it must be a clean exact Git root on
+`feat/issue-discovery-harness`, its exact HEAD must contain the frozen
+`scm_contract_ref`, and its branch, HEAD, cleanliness, and containment proof
+are hashed into the Git observation. The selected action binds that entire
+observation digest.
+
+The Git observation also binds the canonical SHA-256 of the complete validated
+preview, plus the exact nullable inbound-merge ref and its containment result.
+The selector requires that preview digest to match before field-level checks,
+so a valid Git token cannot be reused with a different preview when a future
+authority field is added or accidentally omitted from a comparison.
 
 **Rejected alternative:** bind only local HEAD and destination. A stale remote
 base or changed upstream context would let a locally valid packet mutate the
@@ -114,8 +173,10 @@ scenario authority receives a different scope and does not deduplicate.
 
 The occurrence-payload digest covers exact sanitized human payload bytes with
 one trailing newline, excluding the marker and separator framing, so it is not
-self-referential. A separate frozen rendered-body digest covers final bytes
-after marker insertion. The exact occurrence marker is the idempotency key for
+self-referential. The two frozen candidate rendered-body digests cover exact
+final issue-body and occurrence-comment bytes after marker insertion. They are
+also non-self-referential because the machine markers deliberately omit both
+rendered digest fields. The exact occurrence marker is the idempotency key for
 comments/updates only when finding and payload digests also match; a reused ID
 with either digest changed is an identity conflict. Scope JSON lives in the
 initial issue-body marker; the initial occurrence is also in that body, and
@@ -123,6 +184,12 @@ later occurrences each use one marked comment. Draft PRs carry their own exact
 base/head/SHA/diff marker. The normative spec fixes the namespaces, fields,
 canonical encoding, and comment-safety rules; titles and prose are never
 identity authority.
+
+The entire case-sensitive `<!-- scm.finding-publication.` namespace is
+reserved. Sanitized human payloads containing that prefix anywhere are
+rejected before rendering, and the renderer parses its own output back to
+exactly one scope plus one initial occurrence (or exactly one comment
+occurrence) before it can mint a preview.
 
 **Rejected alternative:** include observed SHA/run/time in issue identity. That
 creates a duplicate issue for every reproduction instead of maintaining one
@@ -165,6 +232,14 @@ comment before requesting reopen. Any timeout,
 non-parseable response, process interruption, or partial state yields
 `outcome_unknown`.
 
+A fresh selection for an exact occurrence is a no-op even if the issue is now
+closed. The selector cannot safely infer whether a human closed an already
+terminal occurrence or a prior operation stopped after commenting. The
+mandatory journal makes those cases distinguishable: recovery of a persisted
+`comment_then_reopen` action may verify its attempted comment and continue its
+never-attempted reopen step, while missing or corrupt intent fails closed
+instead of synthesizing a reopen from GitHub state alone.
+
 A recovery first repeats complete ref/GitHub reads:
 
 - if an attempted effect exists exactly, it marks it applied and may continue
@@ -188,9 +263,12 @@ Dry-run constructs the same remote-ref and completely paginated GitHub
 observation and passes through the same action selector and validators. Its
 sole difference is that it serializes the selected action instead of handing
 it to the mutating adapter. Offline packet preview is a different command and
-is labeled preview-only because it cannot claim a live action. Neither dry-run
-nor preview creates a journal/lifecycle event or claims a distributed write
-lease.
+is labeled preview-only because it cannot claim a live action. Rendering an
+arbitrary mapping produces only this non-capability value. The validated
+preview required by Git observation and action selection is minted only after
+owner-authenticated replay of the immutable finding-v2 ingest artifacts.
+Neither dry-run nor preview creates a journal/lifecycle event or claims a
+distributed write lease.
 
 **Rejected alternative:** skip remote/ref/dedup checks in dry-run. That makes
 the preview materially different from the action the campaign later performs.

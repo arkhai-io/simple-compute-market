@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -24,7 +25,11 @@ from issue_discovery.capacity import (
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
 from issue_discovery.config import ToolPaths, load_yaml
-from issue_discovery.issues import IssuePacketGenerator, IssueRepository
+from issue_discovery.issues import (
+    GuardedIssuePublicationPlanner,
+    IssuePacketGenerator,
+    IssueRepository,
+)
 from issue_discovery.phases import CommandSpec, PhaseFile, PhaseSpec, load_phase_file
 from issue_discovery.redaction import Redactor
 from issue_discovery.workarounds import WorkaroundSpec, load_workarounds
@@ -951,6 +956,12 @@ class DiscoveryRunner:
     def __init__(
         self, repo_root: Path, output_dir: Path | None = None, dry_run: bool = False
     ) -> None:
+        expanded_repo_root = repo_root.expanduser()
+        self._publication_policy_root = (
+            expanded_repo_root
+            if expanded_repo_root.is_absolute()
+            else Path.cwd() / expanded_repo_root
+        )
         self.repo_root = repo_root.resolve()
         self.output_dir = output_dir.resolve() if output_dir is not None else None
         self.dry_run = dry_run
@@ -1065,6 +1076,79 @@ class DiscoveryRunner:
             policy_root=self.repo_root,
         )
         return repository.create(fingerprint, dry_run=dry_run, force=force)
+
+    def issue_publish_preview(
+        self,
+        run_dir: Path,
+        finding_id: str,
+        *,
+        private_authorization_sha256: str,
+    ) -> int:
+        from issue_discovery.publication import publication_preview_json
+
+        planner = GuardedIssuePublicationPlanner(
+            run_dir,
+            destination_repo_root=self.repo_root,
+            policy_root=self._publication_policy_root,
+        )
+        try:
+            preview = planner.preview(
+                finding_id,
+                private_authorization_sha256=private_authorization_sha256,
+            )
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
+            return _capacity_failure("finding-publication-preview", exc)
+        print(publication_preview_json(preview), end="")
+        return 0
+
+    def issue_publish_plan(
+        self,
+        run_dir: Path,
+        finding_id: str,
+        *,
+        destination_repo_root: Path,
+        observation_path: Path,
+        private_authorization_sha256: str,
+        mode: str,
+    ) -> int:
+        from issue_discovery.publication import (
+            load_publication_observation,
+            publication_action_json,
+        )
+
+        if mode not in {"dry-run", "live"}:
+            return _capacity_failure(
+                "finding-publication-action",
+                CapacityValidationError("publication mode must be dry-run or live"),
+            )
+        planner = GuardedIssuePublicationPlanner(
+            run_dir,
+            destination_repo_root=destination_repo_root,
+            policy_root=self._publication_policy_root,
+        )
+        try:
+            preview = planner.preview(
+                finding_id,
+                private_authorization_sha256=private_authorization_sha256,
+            )
+            observation = load_publication_observation(
+                observation_path,
+                repo_root=self.repo_root,
+            )
+            action = planner.select(preview, observation)
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
+            return _capacity_failure("finding-publication-action", exc)
+        print(publication_action_json(action), end="")
+        if mode == "live":
+            # This public seam validates and selects only. Credentialed mutation
+            # requires a separately authorized private executor.
+            print(
+                "live guarded issue mutation requires a private credentialed "
+                "executor; none is configured at this public planning seam",
+                file=sys.stderr,
+            )
+            return 2
+        return 0
 
     def issue_propose_fix(
         self, run_dir: Path, fingerprint: str, head_branch: str
