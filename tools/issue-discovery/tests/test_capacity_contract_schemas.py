@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -12,8 +13,10 @@ import pytest
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_ROOT = PACKAGE_ROOT / "schemas"
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "capacity" / "v2"
+FINDING_V2_CONTRACT_REF = "94dd6b636fcaf8fe9ae1bb350b708a33d28d2258"
 DELETE = object()
 
 
@@ -81,6 +84,39 @@ def test_capacity_v2_positive_contract_fixtures(
     assert values
     for item in values:
         contract.validate(item)
+
+
+def test_public_finding_example_is_pinned_to_committed_v2_authority() -> None:
+    schema_path = Path("tools/issue-discovery/schemas/capacity-finding.schema.json")
+    example_path = PACKAGE_ROOT / "config" / "capacity" / "findings" / "example.json"
+    pinned_schema = subprocess.run(
+        [
+            "git",
+            "show",
+            f"{FINDING_V2_CONTRACT_REF}:{schema_path.as_posix()}",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout
+    current_schema = (REPO_ROOT / schema_path).read_bytes()
+    schema = json.loads(pinned_schema.decode("utf-8"))
+    example = load_json(example_path)
+
+    assert current_schema == pinned_schema
+    assert schema["properties"]["schema_version"]["const"] == 2
+    assert example["schema_version"] == 2
+    assert example["scm_contract_ref"] == FINDING_V2_CONTRACT_REF
+    assert example["observed_authority"]["working_ref"] == FINDING_V2_CONTRACT_REF
+    evidence = FIXTURE_ROOT / example["evidence"][0]["path"]
+    assert (
+        hashlib.sha256(evidence.read_bytes()).hexdigest()
+        == (example["evidence"][0]["sha256"])
+    )
+    Draft202012Validator(
+        schema,
+        format_checker=FormatChecker(),
+    ).validate(example)
 
 
 def test_all_json_schemas_are_valid_draft_2020_12_contracts() -> None:

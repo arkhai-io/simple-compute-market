@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "finding_id": "capacity-occurrence-example-001",
+  "destination_repo": "simple-compute-market",
+  "classification": "public-product",
+  "frontier": "provisioning",
+  "scenario_id": "b1-s1-g1",
+  "scenario_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "profile_stage_id": "q0-b1-s1-g1-measured",
+  "profile_stage_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "result_id": "q0-b1-s1-g1-measured-result",
+  "result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "scm_contract_ref": "94dd6b636fcaf8fe9ae1bb350b708a33d28d2258",
+  "defect_semantics": {
+    "expected_outcome_kind": "vm-succeeded",
+    "actual_fault_category": "provisioning-error",
+    "failure_code": "seller-provisioning-error",
+    "stable_signature": "seller provisioning terminated before vm output",
+    "lifecycle_phase": "provisioning"
+  },
+  "summary": "Seller provisioning terminated before VM output",
+  "expected": "The selected listing produces one real KVM/Ansible whole-GPU VM.",
+  "actual": "Provisioning reached a terminal error before a VM output was observed.",
+  "observed_outcome": {
+    "request_ids": [
+      "request-1"
+    ],
+    "outcome_kind": "fault",
+    "diagnostic_code": "seller-provisioning-error"
+  },
+  "durable_correlations": [
+    {
+      "request_id": "request-1",
+      "outcome_kind": "fault",
+      "deal_reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "capacity_reservation_id": null,
+      "fulfillment_id": null,
+      "settlement_record_sha256": null,
+      "provisioned_resource_id": null,
+      "allocation_id": null,
+      "provisioning_job_id": null,
+      "commercial_resolution_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "request_cleanup_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+    }
+  ],
+  "observed_authority": {
+    "run_id": "capacity-run-example-001",
+    "stage_id": "q0-b1-s1-g1-measured",
+    "working_branch": "feat/issue-discovery-harness",
+    "working_ref": "94dd6b636fcaf8fe9ae1bb350b708a33d28d2258",
+    "upstream_branch": "dev",
+    "upstream_ref": "0f0126574222ffd09ab148ebc26aecb5d88ed0ea",
+    "inbound_merge_ref": "7b114f199440ea94c4dc192385a5cf83d6dd0420",
+    "reconciliation_epoch_id": "dev-reconciliation-20260730",
+    "observed_at": "2026-07-30T10:00:13.000000Z"
+  },
+  "evidence": [
+    {
+      "path": "evidence/provisioning-error.json",
+      "sha256": "313ff7f421dd5558088cdef33d2a177aa26f5806739232896e0afcc67710517a"
+    }
+  ],
+  "filing_readiness": {
+    "terminal_correlations_complete": true,
+    "teardown_complete": true,
+    "zero_active_residue": true,
+    "baseline_equivalent": true,
+    "ready_to_file": true
+  }
+}
