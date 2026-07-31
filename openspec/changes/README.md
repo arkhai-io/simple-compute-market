@@ -91,7 +91,7 @@ wheel-only internal dependencies
 reconciled feat/issue-discovery-harness + pinned dev
                          │
                          ▼
-agent-driven VM capacity contracts
+archived agent-driven VM capacity contracts
                          │
                          ▼
 guarded issue/fix publication
@@ -102,8 +102,8 @@ private executor adoption, qualification, and measurement
 
 | Order | Change | Status | Acceptance boundary |
 |---|---|---|---|
-| 1 | [`define-agent-driven-vm-capacity-contracts`](define-agent-driven-vm-capacity-contracts/) | active | Mode-neutral pinned G1 VM scenarios, exact qualification/measured profile stages, substantive Codex-owned buyer/seller actions, independent durable fulfillment/frontier/cleanup oracles, and sanitized finding v2 |
-| 2 | [`guard-issue-fix-publication`](guard-issue-fix-publication/) | blocked on the final pushed finding-v2 contract from step 1 | Complete GitHub observation, occurrence-idempotent branch-scoped issues, crash-recoverable mutation journals, truthful proposals/lifecycle, and separately authorized draft fix PRs |
+| 1 | [`define-agent-driven-vm-capacity-contracts`](archive/2026-07-31-define-agent-driven-vm-capacity-contracts/) | archived; finding-v2 implementation and pinned example published through `128a6eaff24f629efec8228ed0efc0f6a85725f7` | Mode-neutral pinned G1 VM scenarios, exact qualification/measured profile stages, substantive Codex-owned buyer/seller actions, independent durable fulfillment/frontier/cleanup oracles, and sanitized finding v2 |
+| 2 | [`guard-issue-fix-publication`](guard-issue-fix-publication/) | active; first implementation task must record its exact published finding-v2 ref | Complete GitHub observation, occurrence-idempotent branch-scoped issues, crash-recoverable mutation journals, truthful proposals/lifecycle, and separately authorized draft fix PRs |
 
 The public campaign defines portable contracts and validators only. The private
 `compute-market-internal-infra` runner owns Codex identities, GitHub/gcloud

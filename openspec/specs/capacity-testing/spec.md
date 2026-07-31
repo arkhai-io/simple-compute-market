@@ -1,10 +1,12 @@
+# Capacity Testing Specification
+
 ## Purpose
 
 Define portable, privacy-safe contracts for agent-driven VM capacity
 qualification and measurement, including scenario authority, substantive role
 evidence, frozen actions, independent oracles, and immutable findings.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Pinned portable scenario authority
 Every capacity scenario used by a current run MUST resolve through its known
@@ -105,9 +107,10 @@ provisioning, GPU, fulfillment, or cleanup oracle ran.
 A capacity result MUST be emitted only for `real-reference`,
 `real-qualification`, or `real-measured`. Readiness/probe observations and
 mock captures are evidence artifacts, not capacity results, and MUST NOT use a
-capacity-result schema or enter any capacity frontier. A controller process
-that exits after release invalidates its row rather than converting the row
-into a readiness, mock, or partial capacity result.
+capacity-result schema or enter any capacity frontier. An initiating actor
+process that exits before invoking its frozen action invalidates the attempted
+agent-triggered row rather than converting the row into a readiness, mock, or
+partial capacity result.
 
 #### Scenario: One shape is reused without relabeling
 - **WHEN** mock preparation, the deterministic reference, and Q0 each use the same pinned B1/S1/G1 scenario
@@ -1510,7 +1513,7 @@ precompute, imitate, or claim any of those authorities.
 - **THEN** it fails before a `gh` command, subprocess, external access, or mutation while non-capacity legacy behavior remains unchanged
 
 ### Requirement: Public contract preparation has no live side effects
-The executable scope of this change MUST remain preparatory. Pinned validation,
+The executable public capacity-testing scope MUST remain preparatory. Pinned validation,
 capture-only mock composition, finding ingest, packet generation/replay,
 strict validation, and documentation promotion MUST NOT fund or use wallets,
 start a live buyer or seller action, publish a listing, emit a purchase,
@@ -1528,3 +1531,24 @@ pins the pushed public contract.
 #### Scenario: Capture-only composition remains resource-empty
 - **WHEN** the public mock composition path rehearses portable buyer and seller actions
 - **THEN** it targets only the capture boundary, retains an empty live-resource ledger, and grants no authority for a live qualification or measured campaign
+
+## Evidence
+
+- Scenario authority, canonicalization, schema validation, and profile resolution:
+  `tools/issue-discovery/src/issue_discovery/capacity.py`,
+  `tools/issue-discovery/config/capacity/`, and
+  `tools/issue-discovery/schemas/capacity-*.schema.json`
+- Actor planning, frozen-action receipts, and substantive-role validation:
+  `tools/issue-discovery/src/issue_discovery/capacity_roles.py` and
+  `tools/issue-discovery/tests/test_capacity_roles.py`
+- Independent outcome evaluation and frontier accounting:
+  `tools/issue-discovery/src/issue_discovery/capacity_outcomes.py` and
+  `tools/issue-discovery/tests/test_capacity_outcomes.py`
+- Immutable finding ingest, lifecycle projection, and local publication packets:
+  `tools/issue-discovery/src/issue_discovery/capacity_findings.py`,
+  `tools/issue-discovery/src/issue_discovery/issues.py`, and their capacity
+  finding tests
+- Stable CLI and runner integration:
+  `tools/issue-discovery/src/issue_discovery/cli.py`,
+  `tools/issue-discovery/src/issue_discovery/runner.py`, and
+  `tools/issue-discovery/tests/test_capacity_cli_runner_interfaces.py`

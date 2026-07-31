@@ -15,7 +15,7 @@
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
-| [Testing strategy](#testing-strategy) | Test levels and boundary validation |
+| [Testing strategy](#testing-strategy) | Test levels, evidence authority, executor seams, and boundary validation |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
 ## System overview
@@ -342,6 +342,62 @@ Boundary changes require more than moved unit tests. Validation should cover:
 - observable lifecycle events without arbitrary sleeps.
 
 The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
+
+### Agent-driven capacity experiments
+
+Capacity-test evidence has two orthogonal authorities:
+`execution_boundary` records what ran (`readiness`, `mock`,
+`real-reference`, `real-qualification`, or `real-measured`), while
+`actor_trigger` records how a request-bearing stage or action was initiated
+(`none`, `controller-driven`, or `agent-triggered`); `none` is reserved for
+no-request readiness. The valid meanings are exact:
+readiness/none is a no-request probe; mock/agent-triggered is capture-only
+preparation; real-reference/controller-driven is a deterministic real control;
+and real-qualification or real-measured requires agent-triggered execution.
+Only the last two are agent-capacity evidence, and only a measured row whose
+load generator passed is eligible for frontier evaluation. Cleanup and
+correctness remain separate observations and gate frontier-receipt progression.
+
+Substantive agent provenance requires every role to perform its pinned
+preparation and remain alive through its barrier. Action-owning buyers and
+sellers also invoke their own pinned one-shot wrappers; the independent
+observer and host operator instead remain live through their observation and
+cleanup barriers. A controller may freeze bytes and coordinate release, but an
+action it emits after the agent exits is not agent-triggered. The independent
+observer is distinct from the controller and owns the canonical SHA-256 seals
+for every exact request-outcome object and the complete cleanup object.
+Negative agent observations remain evidence when an action is rejected or the
+load generator queues, throttles, misses overlap, or exceeds skew; they do not
+become product-capacity claims.
+
+The public/private authority boundary is deliberate:
+
+| Public SCM authority | Private orchestration authority |
+| --- | --- |
+| Portable scenarios, profiles, role/action/result/finding schemas, canonical hashes, Git-pinned validation, evidence labels, oracle semantics, and cleanup/frontier rules | Executor selection; live Codex session and release-channel authentication; wallets and credentials; cloud-project, host, GPU, topology, and generation fences; native evidence; cost admission; watchdogs, cancellation, live teardown, and credentialed GitHub mutation |
+
+A conforming private adapter consumes profile registries and stages through
+SCM's deterministic Git-pinned CLI/runner semantic projections at one exact
+public commit and with the applicable expected canonical and raw-byte digests.
+It must not import public Python across the repository boundary, reread
+unvalidated worktree bytes, or reproduce public policy. The portable contract
+preserves the same repository-relative commands and inputs/results for the
+current local-Codex execution strategy and a future cloud or Tekton executor;
+executor-local paths, credentials, scheduler objects, and private resource
+identities never enter portable authority.
+
+Real capacity truth comes from independent durable correlation and cleanup,
+not an actor success flag. A request-bearing real stage cannot authorize
+progression until terminal request correlations, teardown, zero active
+residue, exact reversible-baseline restoration, reconciled
+append-only/accounting deltas, the observer's exact outcome/cleanup seals, and
+the host operator's evidence agree. The later of the observer and host-operator
+completion times fences the next request-bearing stage. Mock captures and
+public validation/hashing are preparation-only and have no live market,
+wallet, cloud, VM, KVM, Ansible, GPU, cleanup, or GitHub side effects.
+
+Detailed capacity-test behavior lives in the
+[capacity-testing specification](../../openspec/specs/capacity-testing/spec.md).
 
 Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, retains marker-specific locked dependencies needed for offline universal resolution, copies the current tracked repository into a clean verification tree, removes selected project environments, and runs each selected project's actual `make test` target with network and Python downloads disabled before packaging the artifact. Project Makefiles must keep interpreter selection configurable so the review environment can use the wheelhouse's declared Python version.
 

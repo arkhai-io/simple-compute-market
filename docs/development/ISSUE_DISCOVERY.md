@@ -114,6 +114,11 @@ The create command only files candidates marked `ready_to_file` unless `--force`
 
 The create command uses `gh issue create` from the repository root selected by the wrapper or `--repo-root`, so it requires the GitHub CLI to be installed and authenticated for that repository.
 
+These commands retain the legacy phase/command candidate workflow. A
+schema-v2 capacity finding has a separate immutable ingest and replay path and
+is deliberately rejected by `issue create`, `issue transition`, and
+`issue propose-fix`; see [Capacity Finding Handoff](#capacity-finding-handoff).
+
 ## Marker Suites And Full Sweep
 
 Marker suites are useful because they isolate roles and scenarios quickly. Marker deselection is expected in those runs because each marker intentionally selects only part of the integration suite.
@@ -168,56 +173,166 @@ SCM_MULTIPASS_TRANSFER_DIR=scm-clean-room-transfer \
 
 Use `./scripts/clean-room/multipass-run.sh --dry-run` before launching the VM. It prints the VM settings and the exact clean-room sequence that will run, without requiring Multipass to be installed.
 
-## Public Capacity Scenario Authority
+## Public VM Capacity Authority
 
-Tracked files under `tools/issue-discovery/config/capacity/` define the public,
-portable test contract: VM-only deals, real KVM/Ansible provisioning,
-whole-device GPU passthrough, buyer and seller role counts, request load,
-per-seller listing distribution, and expected success/scarcity outcomes. The
-buyer-scaling scenarios run before the two-seller scenarios. These files do not
-own runtime listing fingerprints or listing IDs; the private controller binds
-those deployment-specific values to the validated public shape.
+The public capacity contract is under
+`tools/issue-discovery/config/capacity/`:
 
-The controller should pin the SCM ref and scenario path, validate that exact
-file, and record its canonical digest:
+- `scenarios/` contains mode-neutral schema-v2 VM shapes;
+- `profiles/g1-v2.json` freezes qualification and measured progression;
+- `profile-stages/b1-s1-g1-mock.json` is a standalone preparatory mock stage;
+- `findings/example.json` is sanitized illustrative finding-v2 data.
+
+Current scenarios are VM-only, use real KVM and Ansible, require whole-device
+GPU passthrough, and give every request a retry budget of zero. The current
+profile admits exactly one independently assignable GPU. Offered listings are
+market choices, not additional physical GPUs. G2 is not current authority.
+
+The seven pre-Q0 profile stages are, in order:
+
+1. `observer-probe`;
+2. `b1-s1-g1-reference`;
+3. `b1-s1-g1-qualification`;
+4. `b2-s1-g1-qualification`;
+5. `serialized-reuse-a-qualification`;
+6. `serialized-reuse-b-qualification`;
+7. `b2-s2-g1-qualification`.
+
+The probe is `readiness`/`none`; the deterministic reference is
+`real-reference`/`controller-driven`; the five qualification rows are
+`real-qualification`/`agent-triggered`. The separate standalone mock is
+`mock`/`agent-triggered` and cannot claim real provisioning or capacity.
+
+Resolve authority from an exact 40-character SCM commit and a known
+repository-relative path. Hash operations discover the validated authority;
+validation operations require the caller to repeat the expected values:
 
 ```bash
-./scripts/issue-discovery capacity scenario-validate \
-  tools/issue-discovery/config/capacity/b2-g1-contention.json
+SCM_REF="$(git rev-parse HEAD)"
+SCENARIO=tools/issue-discovery/config/capacity/scenarios/b2-s1-g1.json
+PROFILE=tools/issue-discovery/config/capacity/profiles/g1-v2.json
+
 ./scripts/issue-discovery capacity scenario-sha256 \
-  tools/issue-discovery/config/capacity/b2-g1-contention.json
+  "$SCENARIO" --scm-ref "$SCM_REF"
+./scripts/issue-discovery capacity scenario-validate \
+  "$SCENARIO" --scm-ref "$SCM_REF" --expected-sha256 <scenario-sha256>
+
+./scripts/issue-discovery capacity profile-sha256 \
+  "$PROFILE" --scm-ref "$SCM_REF"
+./scripts/issue-discovery capacity profile-validate \
+  "$PROFILE" --scm-ref "$SCM_REF" \
+  --expected-sha256 <profile-canonical-sha256> \
+  --expected-raw-sha256 <profile-raw-sha256>
+
+./scripts/issue-discovery capacity profile-stage-sha256 \
+  b2-s1-g1-qualification --scm-ref "$SCM_REF"
+./scripts/issue-discovery capacity profile-stage-validate \
+  b2-s1-g1-qualification --scm-ref "$SCM_REF" \
+  --expected-sha256 <profile-stage-sha256> \
+  --expected-registry-sha256 <profile-canonical-sha256> \
+  --expected-registry-raw-sha256 <profile-raw-sha256>
 ```
 
-`scenario-sha256` validates before hashing and prints only a lowercase
-64-character digest. It hashes UTF-8 canonical JSON with recursively sorted
-object keys, compact separators, and one trailing newline, so whitespace and
-object-key ordering do not change the scenario identity.
+Scenario hash output is the canonical digest. Profile and stage operations
+return deterministic one-line JSON containing their complete validated public
+semantics, pinned path/ref, and applicable canonical/raw digests. A stage
+response also contains the resolved scenario or explicit null. Private
+orchestration consumes these outputs; it does not import the public Python
+package or copy the public validation policy.
 
-## Capacity Finding Lifecycle
+Canonical SHA-256 uses UTF-8 JSON with recursively sorted keys, compact
+separators, non-finite values rejected, and exactly one trailing newline.
+Pinned resolution also rejects traversal, symlinks, non-regular or untracked
+paths, wrong Git object modes, and worktree bytes that differ from the selected
+commit.
 
-The same harness accepts sanitized VM-capacity findings from the private
-orchestrator. The public schemas and example scenarios intentionally contain no
-project, wallet, host, GPU UUID, private URL, or credential material.
+## Portable Role, Action, and Outcome Evidence
 
-Each occurrence records its exact destination repository, run, stage, scenario
-id/fingerprint, working branch, and observed commit. Its lifecycle is appended to `issue-lifecycle.jsonl` as it
-moves through detection, filing or exact-issue update/reopen, proposal-only fix
-work, and later verification. Issue bodies state that fixes must target the
-recorded working branch and cannot promote the campaign branch to `dev` or
-`main`.
+The remaining `capacity` subcommands validate and canonical-hash the portable
+evaluation policy, reference policy, role plans and receipts, concurrency
+policy, oracle authority, frozen actions, action results, actor set, mock
+capture, independently observed capacity results, serialized reuse, and buyer
+frontier. Run:
 
-The defect fingerprint itself remains the stable, sanitized value supplied by
-the private orchestrator; SCM does not append branch or scenario context to it.
-For duplicate detection, an explicit
-`--repo github.com/arkhai-io/<repository>` scopes the
-GitHub search and the issue body must contain the exact repository/working-
-branch/scenario scope marker. A second marker records the occurrence's full
-SHA/run/stage metadata. Reproducing the same defect fingerprint in another
-repository, working branch, or scenario therefore creates a distinct issue
-context instead of updating the wrong one; a later run in the same scope still
-updates or reopens the existing issue.
+```bash
+./scripts/issue-discovery capacity --help
+./scripts/issue-discovery capacity <subcommand> --help
+```
 
-Publication is branch-scoped and redaction-gated. Teardown and evidence freeze
-must happen before live issue mutation. The destination checkout must have the
-exact official GitHub origin, authorized non-default branch, observed HEAD, and
-clean worktree; publication is never allowed to extend a VM lease.
+for each exact path-only dependency list.
+
+A buyer, seller, host operator, or independent observer counts only from a
+substantive receipt bound to its pinned instructions, prepared authority, and
+action/result evidence. The deterministic controller is not a counted
+observer. `action-capture` is a preparation-only, one-shot mock adapter; real
+actions are authenticated and invoked by private infrastructure. Offered buyer
+count is reported separately from request-processing, simultaneous
+fulfillment, provisioning queue/service, correctness, and load-generator
+frontiers.
+
+## Capacity Finding Handoff
+
+Private orchestration exports one sanitized finding-v2 occurrence only after it
+can reconstruct the exact validated capacity result, verify terminal
+correlations, complete teardown, prove zero active residue, and restore the
+baseline. The producer supplies a unique `finding_id`; SCM derives the stable
+`capacity-<sha256>` defect fingerprint from closed public defect semantics.
+Result, occurrence, ref, evidence, prose, cleanup, and readiness values do not
+alter that stable identity.
+
+The only classification/destination mappings are:
+
+| Classification | Destination | Working branch | Upstream |
+| --- | --- | --- | --- |
+| `public-product` | `simple-compute-market` | `feat/issue-discovery-harness` | `dev` |
+| `public-harness` | `simple-compute-market` | `feat/issue-discovery-harness` | `dev` |
+| `private-orchestration` | `compute-market-internal-infra` | `tools/agent-orchestration-scratch` | `main` |
+| `environment-provider` | `compute-market-internal-infra` | `tools/agent-orchestration-scratch` | `main` |
+
+Evidence paths are UTF-8 regular files strictly below one explicit immutable
+`evidence/` root. Each file is at most 1 MiB and the occurrence total is at
+most 4 MiB. Public validation rejects credential signatures, prohibited
+private field names and portable patterns, project/wallet/host/GPU identity
+patterns, traversal or symlinks, byte drift, JSON/YAML/CommonMark encoding
+evasions, unsafe Unicode, and evidence that names harness-managed outputs.
+Private infrastructure must additionally reject its runtime exact private
+values before export; public SCM does not claim that environment-specific
+denylist.
+
+Validate or ingest using the exact context required to rebuild the result:
+
+```bash
+./scripts/issue-discovery capacity finding-validate \
+  <finding.json> <result-context.json> \
+  --evaluation-policy <evaluation-policy.json> \
+  --expected-scm-ref <40-character-scm-ref> \
+  --destination-repo-root <exact-destination-worktree> \
+  --evidence-root <immutable-evidence-root>
+
+./scripts/issue-discovery capacity finding-ingest \
+  <run-dir> <finding.json> <result-context.json> \
+  --evaluation-policy <evaluation-policy.json> \
+  --expected-scm-ref <40-character-scm-ref> \
+  --destination-repo-root <exact-destination-worktree>
+```
+
+Reuse and seller findings also pass the applicable predecessor, reuse-baseline,
+buyer-frontier, ordered buyer-result, and ordered prior-seller contexts shown
+by `finding-ingest --help`.
+
+Ingest is local and preparation-only. It uses the run directory as both the
+explicit evidence root and immutable occurrence store, with current-user-owned
+0700 directories, 0600 files, descriptor-rooted reads/writes, two
+compliant-writer locks, append-only source/index/lifecycle ledgers,
+authenticated crash recovery, and one final replay snapshot. Identical reingest
+is a no-op; changed bytes or authority under the same ID fail.
+
+`issue list` and `issue show` may inspect the generated capacity-v2 candidate.
+The legacy `issue create`, `issue transition`, and `issue propose-fix` commands
+reject capacity v2 before any write, subprocess, or GitHub access. Credentialed
+issue/update/reopen and fix-PR mutation belongs to the separate guarded
+publication capability; local readiness or a marker-free payload does not
+grant it.
+
+Historical finding/scenario schema v1 remains interpretable only at the exact
+Git commit that defined it. Current validators never reinterpret v1 as v2.

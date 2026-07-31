@@ -51,20 +51,20 @@
 
 ## 6. Promote permanent behavior and operational truth
 
-- [ ] 6.1 Create `openspec/specs/capacity-testing/spec.md` with the verified normative contract and `openspec/specs/capacity-testing/architecture.md` with the scenario/topology, actor/action, oracle, evidence, public/private ownership, and compatibility models.
-- [ ] 6.2 Synchronize exact execution-boundary/actor-trigger requirements into `openspec/specs/test-compatibility/spec.md` and add the durable rationale to its architecture.
-- [ ] 6.3 Preserve the executor seam by proving local Codex and future cloud/Tekton execution consume the same repository-relative commands and portable inputs/results while credentials, cancellation, native evidence, and cleanup stay private.
-- [ ] 6.4 Update `docs/development/ARCHITECTURE.md#testing-strategy` with present-tense public/private test authority, evidence vocabulary, and agent-triggered boundary, and add `capacity-testing` to `openspec/specs/README.md`.
-- [ ] 6.5 Update `docs/development/ISSUE_DISCOVERY.md` and `tools/issue-discovery/README.md` only after the implementation passes, using the exact v2 commands, profiles, compatibility limits, and publication boundary.
-- [ ] 6.6 Complete the design-promotion record with final stable headings and verify production code/docs do not depend on or cite `openspec/changes/define-agent-driven-vm-capacity-contracts`.
+- [x] 6.1 Create `openspec/specs/capacity-testing/spec.md` with the verified normative contract and `openspec/specs/capacity-testing/architecture.md` with the scenario/topology, actor/action, oracle, evidence, public/private ownership, and compatibility models.
+- [x] 6.2 Synchronize exact execution-boundary/actor-trigger requirements into `openspec/specs/test-compatibility/spec.md` and add the durable rationale to its architecture.
+- [x] 6.3 Preserve the executor seam by proving local Codex and future cloud/Tekton execution consume the same repository-relative commands and portable inputs/results while credentials, cancellation, native evidence, and cleanup stay private.
+- [x] 6.4 Update `docs/development/ARCHITECTURE.md#testing-strategy` with present-tense public/private test authority, evidence vocabulary, and agent-triggered boundary, and add `capacity-testing` to `openspec/specs/README.md`.
+- [x] 6.5 Update `docs/development/ISSUE_DISCOVERY.md` and `tools/issue-discovery/README.md` only after the implementation passes, using the exact v2 commands, profiles, compatibility limits, and publication boundary.
+- [x] 6.6 Complete the design-promotion record with final stable headings and verify production code/docs do not depend on or cite `openspec/changes/define-agent-driven-vm-capacity-contracts`.
 
 ## 7. Validate, synchronize, and archive
 
-- [ ] 7.1 Run focused scenario, role/action, oracle, finding, CLI, runner, and issue tests, then the complete `tools/issue-discovery` package suite under the supported Python environment.
-- [ ] 7.2 Validate every tracked scenario/profile and reproduce every canonical digest; run a capture-only mock artifact chain with an empty live-resource ledger.
-- [ ] 7.3 Run strict OpenSpec validation for this change and disclose unrelated inherited global validation failures rather than editing them in this scope.
-- [ ] 7.4 Run staged whitespace, secret/credential signature, artifact-path, symlink/mode, and owner-only personal-host denylist scans; inspect exact staged paths and the final diff.
-- [ ] 7.5 Synchronize the verified delta into permanent specifications, mark only actually completed tasks, archive the change, rerun strict validation, and commit/push each bounded implementation outcome through the guarded one-ref procedure.
+- [x] 7.1 Run focused scenario, role/action, oracle, finding, CLI, runner, and issue tests, then the complete `tools/issue-discovery` package suite under the supported Python environment.
+- [x] 7.2 Validate every tracked scenario/profile and reproduce every canonical digest; run a capture-only mock artifact chain with an empty live-resource ledger.
+- [x] 7.3 Run strict OpenSpec validation for this change and disclose unrelated inherited global validation failures rather than editing them in this scope.
+- [x] 7.4 Run staged whitespace, secret/credential signature, artifact-path, symlink/mode, and owner-only personal-host denylist scans; inspect exact staged paths and the final diff.
+- [x] 7.5 Synchronize the verified delta into permanent specifications, mark only actually completed tasks, archive the change, rerun strict validation, and commit/push each bounded implementation outcome through the guarded one-ref procedure.
 
 ## 8. Traditional commit checkpoints
 
@@ -73,5 +73,5 @@
 - [x] 8.3 Commit evaluation/reference policies, durable oracles and atomic truth table, request/cleanup/clock seals, mode-specific reuse, `progression_ready_at`, H1 seller admission, frontier lineage, closed runner contexts, and focused tests as `feat(issue-discovery): evaluate VM capacity outcomes`.
 - [x] 8.4 Commit finding v2, stable/occurrence identity separation, ingestion/rendering, redaction, and focused tests as `fix(issue-discovery): bind findings to durable VM fulfillment`.
 - [x] 8.4a Restore the sanitized public finding-v2 example only after the validator commit exists, pin the example and its schema test to that exact commit, and commit the checkpoint as `test(issue-discovery): pin VM finding example authority`.
-- [ ] 8.5 Commit permanent specs/architecture, operational docs, completed promotion record, archived change, and complete-suite evidence as `docs(issue-discovery): promote VM capacity testing contracts`.
-- [ ] 8.6 For every checkpoint, stage only exact reviewed paths; use the repository-traditional body sections in this order: `Plain-language summary`, `Architectural summary`, `Change groups`, `Boundary decisions and deferrals`, `Issue tracking` when applicable, `Validation`, and `Result`. Run staged whitespace, secret, artifact-path, symlink/mode, and owner-only host scans plus the tests proportional to that commit. Then guarded-push only `feat/issue-discovery-harness`, persist the push receipt, and prove remote `dev` and private-infra `main`/scratch refs did not move.
+- [x] 8.5 Commit permanent specs/architecture, operational docs, completed promotion record, archived change, and complete-suite evidence as `docs(issue-discovery): promote VM capacity testing contracts`.
+- [x] 8.6 For every checkpoint, stage only exact reviewed paths; use the repository-traditional body sections in this order: `Plain-language summary`, `Architectural summary`, `Change groups`, `Boundary decisions and deferrals`, `Issue tracking` when applicable, `Validation`, and `Result`. Run staged whitespace, secret, artifact-path, symlink/mode, and owner-only host scans plus the tests proportional to that commit. Then guarded-push only `feat/issue-discovery-harness`, persist the push receipt, and prove remote `dev` and private-infra `main`/scratch refs did not move.
