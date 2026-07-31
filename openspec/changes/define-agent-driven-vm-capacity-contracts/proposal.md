@@ -17,6 +17,10 @@ qualification or capacity claims.
 - Keep scenario shapes mode-neutral: mock, reference, qualification, and
   measured authority lives in pinned profile-stage/result records, so the same
   B1/S1/G1 bytes can be reused without relabeling the boundary exercised.
+- Expose the validated profile registry and profile-stage semantic projections,
+  canonical and raw authority digests, pinned paths, and resolved scenario
+  through stable CLI/runner entry points so private orchestration can consume
+  public policy without importing SCM internals or reimplementing it.
 - Define the exact one-GPU qualification profile: B1/S1/G1, B2/S1/G1,
   serialized reuse A and B, then B2/S2/G1. The observer probe remains a private
   no-request stage rather than a fabricated public request scenario.
@@ -58,10 +62,55 @@ qualification or capacity claims.
   request outcome and cleanup object, retain typed negative agent observations,
   and preserve independently derived double allocation as actionable fault
   evidence rather than discarding the result.
-- Introduce finding v2 with exact working/upstream authority, reconciliation
-  context, immutable `finding_id`, scenario/profile/result hashes, structured
-  durable correlations, evidence path/hash objects, public redaction, and an
-  SCM-derived stable defect fingerprint.
+- Introduce finding v2 with exact destination, working/upstream/inbound
+  first-parent authority, reconciliation context, immutable occurrence
+  `finding_id`, scenario/profile/result hashes, structured durable
+  correlations projected from one fully validated result, and evidence
+  `{path, sha256}` objects verified as raw bytes below exact immutable
+  `evidence/` within one explicit evidence root.
+- Make SCM derive defect identity as `capacity-<lowercase sha256>` over the
+  domain prefix `scm.capacity.finding-fingerprint.v1\0` and one closed
+  normalized semantic object. Keep occurrence, result, ref, evidence, durable
+  identity, prose, cleanup, and readiness fields outside that identity. Reject
+  rather than rewrite any value matched by the pinned portable public policy;
+  require private infrastructure to reject its exact private values before
+  export.
+- Make public privacy validation representation-aware: inspect structured JSON
+  keys/strings, decoded JSON/YAML scalar spellings, and CommonMark-visible text
+  after HTML-entity and backslash-escape projection; traverse composed
+  encodings to a bounded fixed point; repeat matching over Unicode NFKC and
+  mark-stripped NFKD projections; and reject Unicode default-ignorable,
+  `Cf` format/bidirectional, and disallowed `Cc` controls rather than permitting
+  invisible evasion.
+- Bound one finding to at most 1 MiB of raw UTF-8 bytes per evidence artifact
+  and 4 MiB in aggregate, and render agent-controlled summary, stable
+  signature, expected, and actual prose only as literal indented CommonMark
+  blocks.
+- Admit findings only for one of the ten request failure categories or the
+  stage-derived `double-allocation` and `unexpected-outcome` categories.
+  Expected proven capacity refusal and a frontier stop without an underlying
+  fault remain results, not findings.
+- End this change at immutable local occurrence storage, an authority-checked
+  run-manifest projection, one idempotent locally proven `detected` event in
+  the separate lifecycle ledger, and a marker-free human occurrence payload
+  with exact SHA-256. Make legacy issue creation (including force), lifecycle
+  transition, and fix-proposal surfaces reject finding v2 before subprocess or
+  GitHub access.
+- Root all private finding reads and writes in one current-user-owned mode-0700
+  run-directory descriptor held for the complete ingest/replay critical
+  section. Serialize compliant writers on both that directory descriptor and
+  the authenticated persistent mode-0600 lock file, revalidate every
+  descriptor-relative ancestor and destination, and recover only authenticated
+  owner-only temporary peers for exact managed destinations from interrupted
+  create-once or replacement publication. Decide legacy versus finding-v2 state
+  once under the held root lock; a lock file alone is reusable crash residue,
+  while substantive v2 state requires that pre-existing lock for replay.
+- Scope those filesystem guarantees to crash recovery, non-malicious drift, and
+  concurrent writers that honor both advisory locks. Reject every observed
+  identity or content mismatch before success, while explicitly excluding a
+  same-effective-user process that bypasses the locks and substitutes a leaf
+  inside the unavoidably pathname-based `linkat`, `unlinkat`, or `renameat2` syscall
+  window.
 - Require every stage to bind complete terminal evidence, zero residue, and its
   exact restored baseline before another stage can start.
 - Record orthogonal exact execution-boundary and actor-trigger authority
@@ -102,8 +151,10 @@ qualification or capacity claims.
   `dev@0f0126574222ffd09ab148ebc26aecb5d88ed0ea` outside the reviewed portable
   harness roots.
 - The separate `guard-issue-fix-publication` change will consume the final
-  finding-v2 contract. Credentialed GitHub mutation, outcome reconciliation,
-  and draft-PR opening are outside this change.
+  finding-v2 contract. It exclusively owns publication scope/occurrence/fix-PR
+  markers, final rendered-body authority, GitHub occurrence reconciliation,
+  credentialed mutation, post-mutation lifecycle facts, and draft-PR opening.
+  None of those authorities are produced by this change.
 - Private infrastructure will implement Codex execution, credentials, cloud and
   host topology, unredacted evidence, generation fencing, and cleanup only
   after the final public contract SHA is pushed.
@@ -115,6 +166,10 @@ qualification or capacity claims.
 - Do not provision a real VM, detach or assign a GPU, deploy GKE, fund a wallet,
   publish a listing, emit a live purchase, or file a live issue or PR while
   implementing this portable contract.
+- Do not let validation, capture-only mock composition, finding ingest, packet
+  replay, or documentation promotion trigger a live market, cloud, host, GPU,
+  wallet, GitHub, or cleanup side effect. Those operations remain future
+  private campaign/execution work behind the portable contracts.
 - Do not restore removed provisioning services, direct legacy clients,
   `provisioning_job_id` as a universal identity, or buyer-visible
   `resource_id`/`vm_host`.

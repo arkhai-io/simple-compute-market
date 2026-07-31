@@ -37,17 +37,84 @@ def test_redacts_bearer_tokens() -> None:
     assert redacted == "Authorization: Bearer <redacted-token>"
 
 
-def test_redacts_home_path_usernames() -> None:
-    redacted = tracked_redactor().redact("/home/levi/project/.ssh/id_ed25519")
+def test_redacts_generic_secret_assignments_and_private_key_markers() -> None:
+    redactor = tracked_redactor()
 
-    assert "levi" not in redacted
+    assert redactor.redact('{"client_secret":"live-secret"}') == (
+        '{"client_secret":"<redacted-secret>"}'
+    )
+    assert redactor.redact("-----BEGIN OPENSSH PRIVATE KEY-----") == (
+        "-----BEGIN <redacted-private-key>-----"
+    )
+    assert redactor.redact('{"private key":"alpha beta gamma"}') == (
+        '{"private key":"<redacted-secret>"}'
+    )
+    assert redactor.redact('{"ssh_private_key":"alpha beta"}') == (
+        '{"ssh_private_key":"<redacted-secret>"}'
+    )
+    assert redactor.redact('{"seed_phrase":"alpha beta gamma"}') == (
+        '{"seed_phrase":"<redacted-secret>"}'
+    )
+
+
+def test_redacts_wallet_and_email_account_identities() -> None:
+    redactor = tracked_redactor()
+    wallet = "0x" + "a1" * 20
+
+    assert redactor.redact(f"wallet={wallet}") == "wallet=<redacted-account>"
+    assert redactor.redact("operator@example.test") == "<redacted-account>"
+
+
+def test_redacts_cloud_project_and_host_identities() -> None:
+    redactor = tracked_redactor()
+
+    assert redactor.redact('{"project_id":"scratch-project-123"}') == (
+        '{"project_id":"<redacted-project>"}'
+    )
+    assert redactor.redact("projects/scratch-project-123") == (
+        "projects/<redacted-project>"
+    )
+    assert redactor.redact('{"hostname":"private-tower"}') == (
+        '{"hostname":"<redacted-host>"}'
+    )
+
+
+def test_redacts_gpu_pci_and_private_network_identities() -> None:
+    redactor = tracked_redactor()
+    gpu_uuid = "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    assert redactor.redact(gpu_uuid) == "<redacted-gpu>"
+    assert redactor.redact("0000:01:00.0") == "<redacted-pci-bdf>"
+    assert redactor.redact("https://192.168.50.4:8443/status") == (
+        "https://<redacted-private-ip>:8443/status"
+    )
+    assert redactor.redact("http://127.0.0.1:8080/status") == (
+        "http://<redacted-private-ip>:8080/status"
+    )
+    assert redactor.redact("http://[::1]:8080/status") == (
+        "http://[<redacted-private-ip>]:8080/status"
+    )
+    assert redactor.redact("ssh://[fd12:3456::1]:22") == (
+        "ssh://[<redacted-private-ip>]:22"
+    )
+    assert redactor.redact("https://tower.localhost/status") == (
+        "https://<redacted-private-host>/status"
+    )
+
+
+def test_redacts_home_path_usernames() -> None:
+    redacted = tracked_redactor().redact("/home/example-user/project/.ssh/id_ed25519")
+
+    assert "example-user" not in redacted
     assert redacted == "/home/<user>/project/.ssh/id_ed25519"
 
 
 def test_redacts_macos_home_path_usernames() -> None:
-    redacted = tracked_redactor().redact("/Users/levi/project/.ssh/id_ed25519")
+    redacted = tracked_redactor().redact(
+        "/Users/example-user/project/.ssh/id_ed25519"
+    )
 
-    assert "levi" not in redacted
+    assert "example-user" not in redacted
     assert redacted == "/Users/<user>/project/.ssh/id_ed25519"
 
 

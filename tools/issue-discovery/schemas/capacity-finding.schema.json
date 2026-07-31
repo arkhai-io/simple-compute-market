@@ -1,65 +1,470 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://simple-compute-market.dev/schemas/capacity-finding-v1.json",
-  "title": "SCM capacity finding",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-finding-v2.json",
+  "title": "SCM sanitized immutable VM capacity finding",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "finding_id",
-    "fingerprint",
-    "scenario_id",
-    "scenario_fingerprint",
-    "frontier",
-    "classification",
     "destination_repo",
+    "classification",
+    "frontier",
+    "scenario_id",
+    "scenario_sha256",
+    "profile_stage_id",
+    "profile_stage_sha256",
+    "result_id",
+    "result_sha256",
+    "scm_contract_ref",
+    "defect_semantics",
     "summary",
     "expected",
     "actual",
+    "observed_outcome",
+    "durable_correlations",
+    "observed_authority",
     "evidence",
-    "observed",
     "filing_readiness"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "finding_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$" },
-    "fingerprint": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
-    "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
-    "scenario_fingerprint": { "type": "string", "minLength": 1 },
-    "frontier": {
-      "enum": ["request-processing", "simultaneous-fulfillment", "provisioning", "correctness", "load-generator", "cleanup"]
+    "schema_version": {
+      "const": 2
     },
-    "classification": { "enum": ["public-product", "public-harness", "private-infra"] },
-    "destination_repo": { "enum": ["simple-compute-market", "compute-market-internal-infra"] },
-    "summary": { "type": "string", "minLength": 1, "maxLength": 240 },
-    "expected": { "type": "string", "minLength": 1 },
-    "actual": { "type": "string", "minLength": 1 },
+    "finding_id": {
+      "$ref": "#/$defs/id"
+    },
+    "destination_repo": {
+      "enum": [
+        "simple-compute-market",
+        "compute-market-internal-infra"
+      ]
+    },
+    "classification": {
+      "enum": [
+        "public-product",
+        "public-harness",
+        "private-orchestration",
+        "environment-provider"
+      ]
+    },
+    "frontier": {
+      "enum": [
+        "request-processing",
+        "simultaneous-fulfillment",
+        "provisioning",
+        "correctness",
+        "load-generator",
+        "cleanup"
+      ]
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/scenario_id"
+    },
+    "scenario_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "profile_stage_id": {
+      "$ref": "#/$defs/id"
+    },
+    "profile_stage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "result_id": {
+      "$ref": "#/$defs/id"
+    },
+    "result_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "scm_contract_ref": {
+      "$ref": "#/$defs/ref"
+    },
+    "defect_semantics": {
+      "$ref": "#/$defs/defect_semantics"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "expected": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "actual": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "observed_outcome": {
+      "$ref": "#/$defs/observed_outcome"
+    },
+    "durable_correlations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/durable_correlation"
+      }
+    },
+    "observed_authority": {
+      "$ref": "#/$defs/observed_authority"
+    },
     "evidence": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "pattern": "^[^/].*" }
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
     },
-    "observed": {
+    "filing_readiness": {
+      "$ref": "#/$defs/filing_readiness"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "public-product",
+              "public-harness"
+            ]
+          }
+        },
+        "required": [
+          "classification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "destination_repo": {
+            "const": "simple-compute-market"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "destination_repo": {
+            "const": "compute-market-internal-infra"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:(?:[0-5][0-9]|60)(?:\\.[0-9]+)?Z$"
+    },
+    "nullable_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/id"
+        }
+      ]
+    },
+    "nullable_digest": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "defect_semantics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["run_id", "stage", "working_branch", "observed_ref"],
+      "required": [
+        "expected_outcome_kind",
+        "actual_fault_category",
+        "failure_code",
+        "stable_signature",
+        "lifecycle_phase"
+      ],
       "properties": {
-        "run_id": { "type": "string", "minLength": 1 },
-        "stage": { "type": "string", "minLength": 1 },
-        "working_branch": {
-          "enum": ["feat/issue-discovery-harness", "tools/agent-orchestration-scratch"]
+        "expected_outcome_kind": {
+          "enum": [
+            "vm-succeeded",
+            "capacity-refused"
+          ]
         },
-        "observed_ref": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        "actual_fault_category": {
+          "enum": [
+            "generic-failure",
+            "provisioning-error",
+            "policy-denial",
+            "unknown-reason",
+            "uncompensated",
+            "atomic-refusal-incomplete",
+            "timeout",
+            "missing-durable-correlation",
+            "cleanup-incomplete",
+            "generator-failure",
+            "double-allocation",
+            "unexpected-outcome"
+          ]
+        },
+        "failure_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "stable_signature": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 240,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        "lifecycle_phase": {
+          "enum": [
+            "pre-emission",
+            "negotiation",
+            "escrow",
+            "reservation",
+            "settlement",
+            "provisioning",
+            "guest-verification",
+            "teardown",
+            "cleanup",
+            "load-generation"
+          ]
+        }
+      }
+    },
+    "observed_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_ids",
+        "outcome_kind",
+        "diagnostic_code"
+      ],
+      "properties": {
+        "request_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/request_id"
+          }
+        },
+        "outcome_kind": {
+          "enum": [
+            "vm-succeeded",
+            "capacity-refused",
+            "fault"
+          ]
+        },
+        "diagnostic_code": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/id"
+            }
+          ]
+        }
+      }
+    },
+    "durable_correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "outcome_kind",
+        "deal_reference_sha256",
+        "capacity_reservation_id",
+        "fulfillment_id",
+        "settlement_record_sha256",
+        "provisioned_resource_id",
+        "allocation_id",
+        "provisioning_job_id",
+        "commercial_resolution_sha256",
+        "request_cleanup_sha256"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/request_id"
+        },
+        "outcome_kind": {
+          "enum": [
+            "vm-succeeded",
+            "capacity-refused",
+            "fault"
+          ]
+        },
+        "deal_reference_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "capacity_reservation_id": {
+          "$ref": "#/$defs/nullable_id"
+        },
+        "fulfillment_id": {
+          "$ref": "#/$defs/nullable_id"
+        },
+        "settlement_record_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "provisioned_resource_id": {
+          "$ref": "#/$defs/nullable_id"
+        },
+        "allocation_id": {
+          "$ref": "#/$defs/nullable_id"
+        },
+        "provisioning_job_id": {
+          "$ref": "#/$defs/nullable_id"
+        },
+        "commercial_resolution_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "request_cleanup_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "observed_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "stage_id",
+        "working_branch",
+        "working_ref",
+        "upstream_branch",
+        "upstream_ref",
+        "inbound_merge_ref",
+        "reconciliation_epoch_id",
+        "observed_at"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/id"
+        },
+        "stage_id": {
+          "$ref": "#/$defs/id"
+        },
+        "working_branch": {
+          "enum": [
+            "feat/issue-discovery-harness",
+            "tools/agent-orchestration-scratch"
+          ]
+        },
+        "working_ref": {
+          "$ref": "#/$defs/ref"
+        },
+        "upstream_branch": {
+          "enum": [
+            "dev",
+            "main"
+          ]
+        },
+        "upstream_ref": {
+          "$ref": "#/$defs/ref"
+        },
+        "inbound_merge_ref": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/ref"
+            }
+          ]
+        },
+        "reconciliation_epoch_id": {
+          "$ref": "#/$defs/id"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^evidence/(?!\\.\\.?(?:/|$))(?!.*(?:/\\.\\.?(?:/|$)))(?!.*\\\\)[^/\\u0000][^\\u0000]*$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "filing_readiness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "confidence", "reason"],
+      "required": [
+        "terminal_correlations_complete",
+        "teardown_complete",
+        "zero_active_residue",
+        "baseline_equivalent",
+        "ready_to_file"
+      ],
       "properties": {
-        "state": { "enum": ["needs_targeted_repro", "ready_to_file", "environment_only", "harness_gap"] },
-        "confidence": { "enum": ["low", "medium", "high"] },
-        "reason": { "type": "string", "minLength": 1 }
+        "terminal_correlations_complete": {
+          "type": "boolean"
+        },
+        "teardown_complete": {
+          "type": "boolean"
+        },
+        "zero_active_residue": {
+          "type": "boolean"
+        },
+        "baseline_equivalent": {
+          "type": "boolean"
+        },
+        "ready_to_file": {
+          "type": "boolean"
+        }
       }
     }
   }

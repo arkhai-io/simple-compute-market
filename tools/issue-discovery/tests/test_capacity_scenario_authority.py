@@ -16,9 +16,7 @@ from issue_discovery.capacity import (
 )
 
 
-SCENARIO_PATH = Path(
-    "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json"
-)
+SCENARIO_PATH = Path("tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json")
 SCENARIO_SCHEMA_PATH = Path(
     "tools/issue-discovery/schemas/capacity-scenario.schema.json"
 )
@@ -182,6 +180,54 @@ def test_resolved_scenario_returns_an_immutable_snapshot(
     assert canonical_sha256(resolved.scenario) == resolved.scenario_sha256
 
 
+def test_resolver_rejects_local_git_replace_authority(
+    pinned_repo: tuple[Path, str, dict[str, Any]],
+) -> None:
+    repo, pinned_ref, scenario = pinned_repo
+    scenario_path = repo / SCENARIO_PATH
+    substituted = dict(scenario)
+    substituted["retry_budget"] = 1
+    scenario_path.write_text(
+        json.dumps(substituted, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    replacement_ref = commit_all(repo, "create substituted authority")
+    git(repo, "replace", pinned_ref, replacement_ref)
+    scenario_path.write_text(
+        json.dumps(scenario, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    ordinary_git_value = json.loads(
+        git(repo, "show", f"{pinned_ref}:{SCENARIO_PATH.as_posix()}")
+    )
+    assert ordinary_git_value["retry_budget"] == 1
+
+    with pytest.raises(CapacityValidationError, match="history rewrite refs"):
+        resolve_pinned_scenario(
+            repo,
+            pinned_ref,
+            SCENARIO_PATH.as_posix(),
+        )
+
+
+def test_resolver_rejects_local_git_graft_authority(
+    pinned_repo: tuple[Path, str, dict[str, Any]],
+) -> None:
+    repo, pinned_ref, _scenario = pinned_repo
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir"))
+    grafts = git_dir / "info" / "grafts"
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text(f"{pinned_ref}\n", encoding="utf-8")
+
+    with pytest.raises(CapacityValidationError, match="history grafts"):
+        resolve_pinned_scenario(
+            repo,
+            pinned_ref,
+            SCENARIO_PATH.as_posix(),
+        )
+
+
 @pytest.mark.parametrize(
     "selected_path",
     [
@@ -321,7 +367,9 @@ def test_resolver_detects_pinned_schema_drift_hidden_by_assume_unchanged(
         schema_path.read_text(encoding="utf-8") + "\n",
         encoding="utf-8",
     )
-    assert git(repo, "status", "--porcelain", "--", SCENARIO_SCHEMA_PATH.as_posix()) == ""
+    assert (
+        git(repo, "status", "--porcelain", "--", SCENARIO_SCHEMA_PATH.as_posix()) == ""
+    )
 
     with pytest.raises(CapacityValidationError, match="worktree bytes differ"):
         resolve_pinned_scenario(repo, ref, SCENARIO_PATH.as_posix())

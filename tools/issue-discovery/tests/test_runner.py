@@ -22,6 +22,52 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def test_runner_passes_public_repo_root_to_issue_packet_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_file = tmp_path / "phases.yaml"
+    phase_file.write_text(
+        """
+schema_version: 1
+name: packet-root
+phases:
+  - id: pass
+    name: Pass
+    category: test
+    blocking: false
+    commands:
+      - id: true
+        run: "true"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    observed_roots: list[Path | None] = []
+
+    def fake_generate(generator: object) -> list[object]:
+        observed_roots.append(getattr(generator, "repo_root"))
+        return []
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.IssuePacketGenerator.generate",
+        fake_generate,
+    )
+    root = repo_root()
+
+    code = DiscoveryRunner(
+        repo_root=root,
+        output_dir=tmp_path / "run",
+    )._run_phase_file(
+        mode="test",
+        phase_path=phase_file,
+        selected_phase_ids=None,
+        workaround=None,
+    )
+
+    assert code == 0
+    assert observed_roots == [root.resolve()]
+
+
 def test_shell_command_writes_logs_and_metadata(tmp_path: Path) -> None:
     result = run_shell_command(
         command_id="hello",
@@ -197,7 +243,9 @@ phases:
     ]
     assert records[1]["reason"] == "blocked"
     assert [item["id"] for item in records[0]["commands"]] == ["fail"]
-    body = (run_dir / "issue-candidates" / "fail-fast-fail.md").read_text(encoding="utf-8")
+    body = (run_dir / "issue-candidates" / "fail-fast-fail.md").read_text(
+        encoding="utf-8"
+    )
     assert "Run `./scripts/issue-discovery test`." in body
 
 

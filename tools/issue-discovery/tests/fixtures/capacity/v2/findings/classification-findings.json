@@ -1,0 +1,274 @@
+[
+  {
+    "schema_version": 2,
+    "finding_id": "public-product-occurrence",
+    "destination_repo": "simple-compute-market",
+    "classification": "public-product",
+    "frontier": "provisioning",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "profile_stage_id": "q0-b1-s1-g1-measured",
+    "profile_stage_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "result_id": "q0-b1-s1-g1-measured-result",
+    "result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "scm_contract_ref": "1111111111111111111111111111111111111111",
+    "defect_semantics": {
+      "expected_outcome_kind": "vm-succeeded",
+      "actual_fault_category": "provisioning-error",
+      "failure_code": "seller-provisioning-error",
+      "stable_signature": "seller provisioning terminated before vm output",
+      "lifecycle_phase": "provisioning"
+    },
+    "summary": "Public product provisioning error",
+    "expected": "One real VM reaches guest output.",
+    "actual": "Provisioning terminated before VM output.",
+    "observed_outcome": {
+      "request_ids": ["request-1"],
+      "outcome_kind": "fault",
+      "diagnostic_code": "seller-provisioning-error"
+    },
+    "durable_correlations": [
+      {
+        "request_id": "request-1",
+        "outcome_kind": "fault",
+        "deal_reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capacity_reservation_id": null,
+        "fulfillment_id": null,
+        "settlement_record_sha256": null,
+        "provisioned_resource_id": null,
+        "allocation_id": null,
+        "provisioning_job_id": null,
+        "commercial_resolution_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "request_cleanup_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ],
+    "observed_authority": {
+      "run_id": "public-product-run",
+      "stage_id": "q0-b1-s1-g1-measured",
+      "working_branch": "feat/issue-discovery-harness",
+      "working_ref": "1111111111111111111111111111111111111111",
+      "upstream_branch": "dev",
+      "upstream_ref": "2222222222222222222222222222222222222222",
+      "inbound_merge_ref": "3333333333333333333333333333333333333333",
+      "reconciliation_epoch_id": "public-product-epoch",
+      "observed_at": "2026-07-30T10:00:13.000000Z"
+    },
+    "evidence": [
+      {
+        "path": "evidence/provisioning-error.json",
+        "sha256": "313ff7f421dd5558088cdef33d2a177aa26f5806739232896e0afcc67710517a"
+      }
+    ],
+    "filing_readiness": {
+      "terminal_correlations_complete": true,
+      "teardown_complete": true,
+      "zero_active_residue": true,
+      "baseline_equivalent": true,
+      "ready_to_file": true
+    }
+  },
+  {
+    "schema_version": 2,
+    "finding_id": "public-harness-occurrence",
+    "destination_repo": "simple-compute-market",
+    "classification": "public-harness",
+    "frontier": "load-generator",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "profile_stage_id": "q0-b1-s1-g1-measured",
+    "profile_stage_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "result_id": "q0-b1-s1-g1-measured-result",
+    "result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "scm_contract_ref": "1111111111111111111111111111111111111111",
+    "defect_semantics": {
+      "expected_outcome_kind": "vm-succeeded",
+      "actual_fault_category": "generator-failure",
+      "failure_code": "emission-failed",
+      "stable_signature": "buyer action failed before request emission",
+      "lifecycle_phase": "pre-emission"
+    },
+    "summary": "Public harness request emission error",
+    "expected": "The buyer emits one frozen request.",
+    "actual": "The frozen request was not emitted.",
+    "observed_outcome": {
+      "request_ids": ["request-1"],
+      "outcome_kind": "fault",
+      "diagnostic_code": "emission-failed"
+    },
+    "durable_correlations": [
+      {
+        "request_id": "request-1",
+        "outcome_kind": "fault",
+        "deal_reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capacity_reservation_id": null,
+        "fulfillment_id": null,
+        "settlement_record_sha256": null,
+        "provisioned_resource_id": null,
+        "allocation_id": null,
+        "provisioning_job_id": null,
+        "commercial_resolution_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "request_cleanup_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ],
+    "observed_authority": {
+      "run_id": "public-harness-run",
+      "stage_id": "q0-b1-s1-g1-measured",
+      "working_branch": "feat/issue-discovery-harness",
+      "working_ref": "1111111111111111111111111111111111111111",
+      "upstream_branch": "dev",
+      "upstream_ref": "2222222222222222222222222222222222222222",
+      "inbound_merge_ref": "3333333333333333333333333333333333333333",
+      "reconciliation_epoch_id": "public-harness-epoch",
+      "observed_at": "2026-07-30T10:00:13.000000Z"
+    },
+    "evidence": [
+      {
+        "path": "evidence/provisioning-error.json",
+        "sha256": "313ff7f421dd5558088cdef33d2a177aa26f5806739232896e0afcc67710517a"
+      }
+    ],
+    "filing_readiness": {
+      "terminal_correlations_complete": true,
+      "teardown_complete": true,
+      "zero_active_residue": true,
+      "baseline_equivalent": true,
+      "ready_to_file": true
+    }
+  },
+  {
+    "schema_version": 2,
+    "finding_id": "private-orchestration-occurrence",
+    "destination_repo": "compute-market-internal-infra",
+    "classification": "private-orchestration",
+    "frontier": "request-processing",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "profile_stage_id": "q0-b1-s1-g1-measured",
+    "profile_stage_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "result_id": "q0-b1-s1-g1-measured-result",
+    "result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "scm_contract_ref": "1111111111111111111111111111111111111111",
+    "defect_semantics": {
+      "expected_outcome_kind": "vm-succeeded",
+      "actual_fault_category": "generic-failure",
+      "failure_code": "agent-action-failed",
+      "stable_signature": "private actor action terminated before request completion",
+      "lifecycle_phase": "negotiation"
+    },
+    "summary": "Private orchestration actor error",
+    "expected": "The isolated actor completes its frozen action.",
+    "actual": "The isolated actor terminated before request completion.",
+    "observed_outcome": {
+      "request_ids": ["request-1"],
+      "outcome_kind": "fault",
+      "diagnostic_code": "agent-action-failed"
+    },
+    "durable_correlations": [
+      {
+        "request_id": "request-1",
+        "outcome_kind": "fault",
+        "deal_reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capacity_reservation_id": null,
+        "fulfillment_id": null,
+        "settlement_record_sha256": null,
+        "provisioned_resource_id": null,
+        "allocation_id": null,
+        "provisioning_job_id": null,
+        "commercial_resolution_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "request_cleanup_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ],
+    "observed_authority": {
+      "run_id": "private-orchestration-run",
+      "stage_id": "q0-b1-s1-g1-measured",
+      "working_branch": "tools/agent-orchestration-scratch",
+      "working_ref": "1111111111111111111111111111111111111111",
+      "upstream_branch": "main",
+      "upstream_ref": "2222222222222222222222222222222222222222",
+      "inbound_merge_ref": "3333333333333333333333333333333333333333",
+      "reconciliation_epoch_id": "private-orchestration-epoch",
+      "observed_at": "2026-07-30T10:00:13.000000Z"
+    },
+    "evidence": [
+      {
+        "path": "evidence/provisioning-error.json",
+        "sha256": "313ff7f421dd5558088cdef33d2a177aa26f5806739232896e0afcc67710517a"
+      }
+    ],
+    "filing_readiness": {
+      "terminal_correlations_complete": true,
+      "teardown_complete": true,
+      "zero_active_residue": true,
+      "baseline_equivalent": true,
+      "ready_to_file": true
+    }
+  },
+  {
+    "schema_version": 2,
+    "finding_id": "environment-provider-occurrence",
+    "destination_repo": "compute-market-internal-infra",
+    "classification": "environment-provider",
+    "frontier": "provisioning",
+    "scenario_id": "b1-s1-g1",
+    "scenario_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "profile_stage_id": "q0-b1-s1-g1-measured",
+    "profile_stage_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "result_id": "q0-b1-s1-g1-measured-result",
+    "result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "scm_contract_ref": "1111111111111111111111111111111111111111",
+    "defect_semantics": {
+      "expected_outcome_kind": "vm-succeeded",
+      "actual_fault_category": "provisioning-error",
+      "failure_code": "provider-provisioning-error",
+      "stable_signature": "environment provider rejected provisioning action",
+      "lifecycle_phase": "provisioning"
+    },
+    "summary": "Environment provider provisioning error",
+    "expected": "The provider accepts the frozen provisioning action.",
+    "actual": "The provider rejected the provisioning action.",
+    "observed_outcome": {
+      "request_ids": ["request-1"],
+      "outcome_kind": "fault",
+      "diagnostic_code": "provider-provisioning-error"
+    },
+    "durable_correlations": [
+      {
+        "request_id": "request-1",
+        "outcome_kind": "fault",
+        "deal_reference_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "capacity_reservation_id": null,
+        "fulfillment_id": null,
+        "settlement_record_sha256": null,
+        "provisioned_resource_id": null,
+        "allocation_id": null,
+        "provisioning_job_id": null,
+        "commercial_resolution_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "request_cleanup_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+      }
+    ],
+    "observed_authority": {
+      "run_id": "environment-provider-run",
+      "stage_id": "q0-b1-s1-g1-measured",
+      "working_branch": "tools/agent-orchestration-scratch",
+      "working_ref": "1111111111111111111111111111111111111111",
+      "upstream_branch": "main",
+      "upstream_ref": "2222222222222222222222222222222222222222",
+      "inbound_merge_ref": "3333333333333333333333333333333333333333",
+      "reconciliation_epoch_id": "environment-provider-epoch",
+      "observed_at": "2026-07-30T10:00:13.000000Z"
+    },
+    "evidence": [
+      {
+        "path": "evidence/provisioning-error.json",
+        "sha256": "313ff7f421dd5558088cdef33d2a177aa26f5806739232896e0afcc67710517a"
+      }
+    ],
+    "filing_readiness": {
+      "terminal_correlations_complete": true,
+      "teardown_complete": true,
+      "zero_active_residue": true,
+      "baseline_equivalent": true,
+      "ready_to_file": true
+    }
+  }
+]

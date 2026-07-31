@@ -34,6 +34,34 @@ exactly one trailing newline before SHA-256 is calculated.
 - **WHEN** a scenario contains NaN, positive infinity, or negative infinity
 - **THEN** canonicalization fails rather than producing an implementation-dependent digest
 
+### Requirement: Pinned profile authority is consumable across repositories
+SCM MUST expose CLI and runner operations that resolve the exact public profile
+registry and any registered or standalone profile stage through the same
+Git-pinned validators used internally. A successful operation MUST return one
+closed deterministic JSON object containing the exact validated registry or
+stage semantic object, its canonical digest, the exact pinned SCM ref and
+repository-relative path, every applicable registry canonical and raw-byte
+digest, and the resolved validated scenario semantic object and authority or
+null. Validation operations MUST require the caller's expected canonical
+digest; profile-registry validation MUST also require its expected raw-byte
+digest. Profile-stage validation MUST additionally require both expected
+registry digests for a registry-backed stage and MUST reject either registry
+digest for a standalone stage. This interface MUST NOT require private
+orchestration to import SCM Python modules, reread unvalidated worktree bytes,
+or reproduce public profile policy.
+
+#### Scenario: Private orchestration resolves one registered stage
+- **WHEN** a caller supplies the exact SCM ref and expected stage, registry-canonical, and registry-raw digests for a registered profile stage
+- **THEN** the operation returns the validated stage and resolved scenario semantics with the matching pinned authority in one deterministic JSON object
+
+#### Scenario: Standalone mock remains outside registry authority
+- **WHEN** a caller resolves the standalone mock stage without registry digests
+- **THEN** the operation returns its validated stage and scenario semantics with null registry path and digests
+
+#### Scenario: Cross-repository authority mismatch fails closed
+- **WHEN** the expected profile, stage, registry-raw, or registry-canonical digest differs from the pinned public authority, or registry digests are omitted or supplied for the wrong stage class
+- **THEN** validation fails instead of returning a semantic projection
+
 ### Requirement: VM-only real-provisioning scope
 Current capacity scenarios MUST use schema version 2 and MUST describe only VM
 deals provisioned through real KVM and Ansible with whole-device GPU
@@ -950,66 +978,553 @@ MUST be reported only as a validated lower bound.
 - **WHEN** qualification reuse B binds a topology authority different from qualification reuse A
 - **THEN** reuse validation fails even though both stages correctly carry null buyer-frontier authority
 
-### Requirement: Sanitized immutable capacity findings
-A current capacity finding MUST use schema version 2 and bind its canonical
-scenario ID and SHA-256, profile-stage ID and SHA-256, result ID and SHA-256,
-destination, classification, frontier, structured durable lifecycle
-correlation, observed outcome, and filing readiness. `finding_id` MUST be the
-immutable identity of this one observed occurrence. SCM MUST derive and
-validate the stable defect fingerprint from normalized defect semantics; a
-producer-supplied fingerprint MUST NOT be authoritative. Finding ID, run,
-branch, and timestamp metadata MUST NOT change defect identity.
+### Requirement: Finding occurrences bind one validated VM result
+A current capacity finding MUST use schema version 2. `finding_id` MUST be the
+immutable identity of one observed occurrence. The producer schema MUST NOT
+contain `fingerprint`; SCM derives defect identity only after the occurrence
+validates.
 
-The stable fingerprint input MUST contain only destination, classification,
-canonical scenario ID/hash, affected frontier, normalized failure code and
-signature, expected outcome kind, actual fault category, and normalized
-lifecycle phase. It MUST exclude `finding_id`, profile-stage/result IDs and
-hashes, run/stage/ref/epoch/time authority, evidence paths/hashes, and concrete
-per-request commercial, reservation, fulfillment, or provisioned-resource
-correlations. Those excluded values remain immutable occurrence evidence.
+The closed top-level object MUST contain exactly `schema_version`,
+`finding_id`, `destination_repo`, `classification`, `frontier`, `scenario_id`,
+`scenario_sha256`, `profile_stage_id`, `profile_stage_sha256`, `result_id`,
+`result_sha256`, `scm_contract_ref`, `defect_semantics`, `summary`, `expected`,
+`actual`, `observed_outcome`, `durable_correlations`, `observed_authority`,
+`evidence`, and `filing_readiness`.
 
-The `observed` authority MUST contain bounded `run_id` and `stage_id`, exact
-`working_branch`, `working_ref`, `upstream_branch`, `upstream_ref`, nullable
-`inbound_merge_ref`, reconciliation-epoch ID, and observation timestamp. A
-finding for SCM MUST map working authority to
-`feat/issue-discovery-harness` and upstream authority to `dev`; a finding for
-internal infrastructure MUST map working authority to
-`tools/agent-orchestration-scratch` and upstream authority to `main`. All refs
-MUST be exact 40-character commits and the working ref MUST contain the pinned
-upstream ref, directly or through the recorded inbound merge.
+Validation MUST consume an already fully validated capacity-result context and
+the exact result artifact. The finding's `scenario_id`/`scenario_sha256`,
+`profile_stage_id`/`profile_stage_sha256`, and
+`result_id`/`result_sha256`, plus `scm_contract_ref`, MUST equal that context.
+Schema-only result validation or a result with merely equivalent prose MUST
+NOT grant finding authority.
 
-Classification MUST be exactly one of `public-product`, `public-harness`,
-`private-orchestration`, or `environment-provider`. An expected, independently
-proven `capacity-refused` outcome is a result, never a finding; a missing
-terminal compensation or cleanup proof is instead an actionable fault. A
-finding MUST NOT become `ready_to_file` until its stage has complete teardown,
-zero-active-residue proof, and baseline equivalence. In this campaign,
-`public-product` and `public-harness` target SCM;
-`private-orchestration` and `environment-provider` target internal
-infrastructure. Any additional destination requires a reviewed contract.
+Validation MUST load the finding schema blob from the exact
+`scm_contract_ref`, which MUST equal the validated result's SCM ref and identify
+a commit in the result's exact SCM repository. An ambient or uncommitted
+schema file MUST NOT grant finding authority.
 
-Public findings MUST reject credentials, wallet or account identities, cloud
-project or host identities, GPU identifiers, private endpoints, absolute or
-escaping evidence paths, and evidence references whose bytes do not match their
-declared digest. Every evidence reference MUST be an object containing exactly
-one repository- or run-relative `path` and its lowercase `sha256`.
+`observed_outcome` MUST contain exactly unique `request_ids`, one result
+`outcome_kind`, and a normalized `diagnostic_code` ID or null.
+`durable_correlations` MUST contain one entry per selected request in the same
+deterministic order. Each entry MUST contain exactly `request_id`,
+`outcome_kind`, `deal_reference_sha256`, nullable
+`capacity_reservation_id`, nullable `fulfillment_id`, nullable
+`settlement_record_sha256`, nullable `provisioned_resource_id`, nullable
+`allocation_id`, nullable `provisioning_job_id`,
+`commercial_resolution_sha256`, and `request_cleanup_sha256`. Every object
+hash MUST be recomputed over that exact closed subobject in the result and
+every nullable identity MUST repeat the result exactly. The producer MUST NOT
+add, omit, reorder, or rewrite a correlation.
 
-#### Scenario: Finding v2 is accepted
-- **WHEN** a sanitized finding binds exact scenario/profile/result and branch authority, immutable finding occurrence, durable VM correlation, cleanup-complete evidence hashes, a valid destination, and a fingerprint reproduced by SCM
-- **THEN** it may enter the branch-scoped finding lifecycle
+A `double-allocation` occurrence MUST recompute the deterministic witness from
+the validated successful half-open active intervals: visit unique interval
+start offsets in ascending order, select the first offset with more than one
+active G1 VM, and bind every request active at that offset in lexicographic
+request ID order. A producer-selected witness or a derived result fault without
+this reproducible witness MUST fail.
+
+#### Scenario: Finding v2 binds the exact result
+- **WHEN** a sanitized occurrence repeats exact scenario/profile/result authority and exact affected-request correlation from one fully validated result
+- **THEN** the finding is eligible for fingerprint derivation
+
+#### Scenario: Plausible but unbound correlation is rejected
+- **WHEN** a finding changes an identity or subobject hash, omits a null field, adds or reorders a request, or points to a different result with similar output
+- **THEN** validation fails before fingerprinting or ingest
+
+#### Scenario: Double allocation comes from the independent oracle
+- **WHEN** the validated result independently derives a half-open overlap witness above the one-GPU authority
+- **THEN** a `double-allocation` finding binds that exact witness rather than an actor-reported capacity claim
+
+### Requirement: SCM derives stable defect identity
+SCM MUST form one closed normalized fingerprint object containing exactly
+`destination_repo`, `classification`, `scenario_id`, `scenario_sha256`,
+`frontier`, `failure_code`, `stable_signature`, `expected_outcome_kind`,
+`actual_fault_category`, and `lifecycle_phase`. SCM MUST hash the exact byte
+domain prefix `scm.capacity.finding-fingerprint.v1\0` followed by the existing
+canonical JSON bytes for that object, where `\0` is one terminal NUL byte and
+not two printable characters. The externally visible fingerprint MUST be
+`capacity-` followed by the full lowercase 64-hex SHA-256.
+
+`failure_code` MUST already be a lowercase normalized code matching the closed
+schema. `stable_signature` MUST already equal its Unicode NFKC, Unicode
+case-folded, trimmed, Unicode-whitespace-collapsed form. SCM MUST recompute
+that form and reject a mismatch before canonicalizing the fingerprint object.
+SCM MUST NOT apply that normalization to human occurrence prose.
+
+SCM MUST exclude `finding_id`, `scm_contract_ref`, profile-stage and result
+IDs/hashes, `observed_outcome` request/diagnostic facts, every
+`observed_authority` run/stage/ref/epoch/time field, evidence paths and
+raw-byte hashes, concrete durable correlations, human summary/expected/actual
+prose, cleanup, readiness, and lifecycle facts from the fingerprint preimage.
+Those values remain immutable occurrence evidence.
 
 #### Scenario: New occurrence keeps defect identity
-- **WHEN** the same normalized defect occurs in another run or at another working-branch commit
-- **THEN** SCM derives the same stable defect fingerprint while preserving a new immutable `finding_id` and occurrence authority separately
+- **WHEN** the same normalized defect occurs in another run, result, profile stage, or working-branch commit
+- **THEN** SCM derives the same stable defect fingerprint while preserving a new immutable `finding_id` and occurrence authority
+
+#### Scenario: Defect semantics change identity
+- **WHEN** destination, classification, scenario identity, frontier, normalized failure code/signature, expected kind, actual fault category, or lifecycle phase changes
+- **THEN** SCM derives a different stable fingerprint
+
+#### Scenario: Producer supplies a fingerprint
+- **WHEN** a finding input contains a producer-selected fingerprint even if its syntax or value appears correct
+- **THEN** the closed schema rejects it
+
+### Requirement: Finding eligibility is closed and cleanup-gated
+Classification MUST be exactly one of `public-product`, `public-harness`,
+`private-orchestration`, or `environment-provider`. Actual fault category MUST
+be exactly one of the ten request categories `generic-failure`,
+`provisioning-error`, `policy-denial`, `unknown-reason`, `uncompensated`,
+`atomic-refusal-incomplete`, `timeout`, `missing-durable-correlation`,
+`cleanup-incomplete`, and `generator-failure`, or the stage-derived categories
+`double-allocation` and `unexpected-outcome`.
+
+`expected_outcome_kind` MUST be exactly `vm-succeeded` or
+`capacity-refused`; a frozen scenario cannot expect a fault.
+`lifecycle_phase` MUST be exactly one result phase:
+`pre-emission`, `negotiation`, `escrow`, `reservation`, `settlement`,
+`provisioning`, `guest-verification`, `teardown`, `cleanup`, or
+`load-generation`.
+
+The affected `frontier` MUST be exactly `request-processing`,
+`simultaneous-fulfillment`, `provisioning`, `correctness`, `load-generator`, or
+`cleanup`. For a request-fault finding, `failure_code`,
+`lifecycle_phase`, `observed_outcome.outcome_kind`, and
+`observed_outcome.diagnostic_code` MUST exactly equal the selected result
+fault.
+
+`unexpected-outcome` MUST identify an independently valid terminal
+`vm-succeeded` or `capacity-refused` kind whose observed cardinality exceeds
+its frozen scenario cardinality. Its `request_ids` and durable correlations
+MUST include every result request of that surplus kind in lexicographic request
+ID order; they MUST NOT select an arbitrary surplus-sized subset because only
+the aggregate proves `observed[kind] > expected[kind]`. Typed request faults
+MUST retain their exact failure category. Independently derived
+`double-allocation` MUST take precedence over `unexpected-outcome` for
+overlapping surplus successes.
+
+Double allocation MUST use frontier `simultaneous-fulfillment`, failure code
+`double-allocation`, phase `provisioning`, successful observed kind, and null
+diagnostic. An unexpected success MUST use expected kind
+`capacity-refused`, failure code `unexpected-vm-succeeded`, phase
+`guest-verification`, and null diagnostic. An unexpected refusal MUST use
+expected kind `vm-succeeded`, failure code `unexpected-capacity-refused`, phase
+`reservation`, and null diagnostic.
+
+An expected, independently proven `capacity-refused` outcome MUST remain a
+result and MUST NOT be represented as a finding. A bounded frontier stop,
+lower-bound conclusion, or no-clean-frontier conclusion MUST NOT be represented
+as its own finding; an actual underlying normalized fault MAY be represented
+separately.
+
+`filing_readiness` MUST be a closed derived proof with exactly
+`terminal_correlations_complete`, `teardown_complete`,
+`zero_active_residue`, `baseline_equivalent`, and `ready_to_file`. A finding
+MUST NOT set `ready_to_file` until the other result-derived proof fields, exact
+O1 cleanup/lifecycle sealing, and complete result progression permit it. An
+occurrence whose cleanup is incomplete MAY be retained, but
+`ready_to_file` MUST remain false.
 
 #### Scenario: Expected capacity refusal is not fileable
 - **WHEN** a request produces the expected independently proven `capacity-refused` result with terminal compensation and complete cleanup
 - **THEN** it remains capacity evidence and cannot be represented as a finding
 
+#### Scenario: Unexpected complete refusal is a normalized fault
+- **WHEN** independently valid and fully compensated `capacity-refused` outcomes exceed the frozen refusal count
+- **THEN** one `unexpected-outcome` occurrence binds every refusal request in lexicographic order rather than misclassifying the refusals themselves as invalid
+
+#### Scenario: Overlapping surplus successes use the correctness fault
+- **WHEN** successful outcomes exceed the frozen success count and the independent oracle also derives `double-allocation`
+- **THEN** the occurrence uses the deterministic double-allocation witness instead of an `unexpected-outcome` success set
+
+#### Scenario: Frontier completion is not a meta-defect
+- **WHEN** a validated result stops at an exact frontier, a lower bound, or no clean shape without a new underlying fault observation
+- **THEN** the harness emits no frontier-stop finding
+
 #### Scenario: Cleanup-incomplete occurrence is not ready
-- **WHEN** an actionable defect is observed but teardown, zero-active-residue, or baseline equivalence is incomplete
-- **THEN** the immutable finding may be retained for reconciliation but `ready_to_file` is false
+- **WHEN** an actionable defect is observed but teardown, zero-active residue or locks, O1 sealing, or baseline equivalence is incomplete
+- **THEN** the immutable occurrence may be retained but `ready_to_file` is false
+
+### Requirement: Evidence uses one explicit root and raw-byte authority
+Every evidence reference MUST be a closed object containing exactly one
+canonical relative `path` and its lowercase `sha256`. That digest MUST be over
+the file's raw bytes and MUST remain distinct from canonical JSON digests for
+results, findings, payloads, and candidates.
+
+Validation MUST receive exactly one explicit evidence root and MUST resolve
+every evidence path below only that root. Ingest MUST use the explicit run
+directory as its evidence root. The finding MUST NOT store the absolute root,
+and the validator MUST NOT guess or fall back among a repository root, run
+directory, process current directory, or any second root.
+
+Every evidence path MUST begin with exact `evidence/` and contain at least one
+component after it; the bare path `evidence` MUST fail. That subtree MUST be
+immutable input and the harness MUST NOT write there. Harness-managed
+manifests, ledgers, per-finding sources/indexes/bodies, candidates, locks, and
+lifecycle outputs MUST remain outside it.
+
+The explicit root MUST itself be a non-symlink directory. The validator MUST
+reject absolute, empty, escaping, non-canonical-POSIX, duplicate, symlinked,
+missing, non-regular, non-UTF-8, or mutated evidence; any artifact larger than
+1 MiB (1,048,576 bytes); more than 4 MiB (4,194,304 bytes) across one finding;
+and any raw-byte digest mismatch. Public sanitization MUST be rejection rather
+than byte replacement: secret-bearing fields, credentials, wallet/account
+values, cloud project, host, GPU or private-endpoint identities, values matched
+by the pinned portable redaction policy, and unresolved placeholders in the
+finding or evidence MUST fail before canonical hashing, ingest, or payload
+rendering.
+
+Privacy validation MUST be representation-aware. It MUST recursively inspect
+every structured finding JSON key and string and MUST inspect raw UTF-8
+evidence and rendered occurrence text in all of these representations:
+
+- the exact source text;
+- decoded JSON/YAML scalar spellings, including quoted escapes, aliases, and
+  recoverable YAML fragments;
+- the CommonMark-visible projection after repeated HTML-character-reference
+  and Markdown punctuation-backslash-escape decoding; and
+- the Unicode NFKC and combining-mark-stripped NFKD projections of each
+  preceding representation.
+
+Semantic scalar and CommonMark decoders MUST be composed to a fixed point under
+closed visited-set, depth, projection-count, and byte-work limits. Exceeding a
+limit MUST fail closed rather than accepting an additional uninspected layer.
+Unicode Default_Ignorable code points, category `Cf` format and bidirectional
+controls MUST be rejected outright. Privacy matching MUST also inspect the
+corresponding `Cf`-stripped NFKC projection so an invisible control cannot
+split a sensitive token. Unicode category `Cc` controls other than tab,
+newline, and carriage return MUST be rejected. These projections MUST be used
+only for rejection; validation MUST NOT normalize, decode, redact, or otherwise
+replace the authoritative finding, evidence, or rendered bytes.
+
+The case-insensitive unresolved-sentinel vocabulary MUST be exactly
+whole-token `TODO`, `TBD`, `FIXME`, `XXX`, `CHANGEME`, `CHANGE_ME`,
+`REPLACEME`, `REPLACE_ME`, and any `YOUR_*`; `<placeholder...>`, `{{...}}`,
+and `${...}` forms; plus `example-`/`example_` followed by `id`, `sha`, `hash`,
+`ref`, or `value`. The validator MUST apply it recursively to keys and string
+values and to raw UTF-8 evidence and body text.
+
+The configured redaction rules MUST be loaded from the exact pinned
+`scm_contract_ref` and applied as reject-if-transform to finding, evidence, and
+rendered occurrence bytes. Before building an index or payload from a validated
+finding, the harness MUST re-read every evidence file and reverify its path,
+raw-byte digest, mutation identity, and redaction rejection.
+
+Public SCM MUST NOT claim a runtime exact-value denylist for bare private
+projects, hosts, accounts, or endpoints. Private infrastructure MUST apply that
+denylist and reject or sanitize before public validation/export. If its adapter
+passes a known exact private value that does not match a portable public rule,
+that is a `private-orchestration` defect; values matching portable public
+field, pattern, or sentinel rules still fail public validation.
+
+#### Scenario: Evidence validates below the one root
+- **WHEN** every canonical relative evidence path identifies one unchanged regular file below the explicit evidence root and every raw-byte digest matches
+- **THEN** the evidence may contribute occurrence authority without exposing the local root
+
+#### Scenario: A second implicit root would make a path succeed
+- **WHEN** an evidence path is absent below the explicit root but exists below the repository, current directory, or another caller-known root
+- **THEN** validation fails rather than guessing a source
+
+#### Scenario: Harness output cannot become finding evidence
+- **WHEN** an evidence path names a manifest, ledger, source, index, body, candidate, lock, lifecycle output, or any path outside exact `evidence/`
+- **THEN** validation fails before ingest can mutate the cited bytes
 
 #### Scenario: Sensitive or mutable evidence is rejected
-- **WHEN** a finding contains a forbidden private identifier, an unsafe evidence path, a missing digest, or evidence bytes that no longer match the digest
-- **THEN** validation fails before issue-packet rendering
+- **WHEN** a finding or referenced evidence contains a forbidden private value, uses a symlink or unsafe path, is not regular, changes during validation, or no longer matches its raw-byte digest
+- **THEN** validation fails without producing sanitized replacement bytes
+
+#### Scenario: Encoded private data cannot evade validation
+- **WHEN** a private field or value is hidden by composed JSON/YAML scalar escapes, a YAML alias or fragment, nested CommonMark HTML entities or backslash escapes, a compatibility or combining-mark spelling, or a Unicode default-ignorable/`Cf` control
+- **THEN** validation rejects the exact source bytes before hashing, ingest, or rendering rather than decoding or redacting them into a public artifact
+
+### Requirement: Destination authority follows the reconciled first parent
+Destination aliases MUST be exactly `simple-compute-market` and
+`compute-market-internal-infra`, resolving respectively to
+`arkhai-io/simple-compute-market` and
+`arkhai-io/compute-market-internal-infra`. `public-product` and
+`public-harness` MUST map only to SCM working branch
+`feat/issue-discovery-harness` and upstream `dev`.
+`private-orchestration` and `environment-provider` MUST map only to internal
+infrastructure working branch `tools/agent-orchestration-scratch` and upstream
+`main`.
+
+The closed `observed_authority` object MUST contain exactly `run_id`,
+`stage_id`, `working_branch`, `working_ref`, `upstream_branch`, `upstream_ref`,
+nullable `inbound_merge_ref`, `reconciliation_epoch_id`, and `observed_at`.
+Commit values MUST be exact lowercase 40-character SHAs. With a null inbound
+merge, the exact upstream commit MUST occur on the working commit's
+first-parent chain. With a non-null inbound merge, the merge MUST occur on the
+working commit's first-parent chain, MUST have exactly two parents, and MUST
+have the exact upstream commit as its second parent. General reachability or
+ancestry through an unrecorded side parent MUST NOT satisfy the contract.
+
+`observed_at` MUST be an exact UTC timestamp no earlier than the validated
+result's `progression_ready_at`. For an SCM-destination finding, the working
+ref's first-parent chain MUST additionally contain `scm_contract_ref`. A
+private-destination finding MUST carry the same public contract ref but MUST
+NOT claim cross-repository ancestry.
+
+Every authority-bearing Git read MUST use an ambient-`GIT_*`-free local
+environment, disable replacement objects, reject any nonempty graft namespace
+or replace ref, and derive ancestry and parent order from raw commit-object
+headers rather than a replace/graft-aware revision walker. Local history
+overlays MUST fail closed before schema, redaction-policy, ancestry, or merge
+authority is accepted.
+
+#### Scenario: Direct first-parent authority is accepted
+- **WHEN** the inbound merge is null and the exact upstream commit occurs on the exact working commit's first-parent chain
+- **THEN** the destination authority may validate
+
+#### Scenario: Recorded inbound merge is accepted
+- **WHEN** the exact recorded two-parent merge occurs on the working first-parent chain and its second parent is the exact upstream commit
+- **THEN** the destination authority proves upstream-into-working reconciliation
+
+#### Scenario: Incidental ancestry is rejected
+- **WHEN** the upstream or merge is only generally reachable, the merge has the wrong parent count or second parent, or branch/classification/destination mapping drifts
+- **THEN** validation fails without treating incidental ancestry as reconciliation authority
+
+#### Scenario: Local Git history rewriting cannot forge authority
+- **WHEN** a replace ref, nonempty graft file, ambient Git object override, or rewritten revision walk would substitute a schema, policy, parent, or first-parent chain
+- **THEN** validation fails rather than accepting locally rewritten Git authority
+
+### Requirement: Local finding handoff cannot mutate GitHub
+Ingest and packet replay MUST authenticate the explicit run root as one
+current-user-owned, mode-0700 non-symlink directory and MUST hold its exact
+open descriptor across the complete private-artifact critical section. They
+MUST acquire exclusive locks on both that root-directory descriptor and the
+persistent `.capacity-finding-ingest.lock` descriptor. The persistent lock
+MUST retain one current-user-owned, non-symlink regular-file, single-link,
+mode-0600 identity before and after the critical section. Every private path
+operation MUST be descriptor-relative to the held root, and MUST reauthenticate
+the root, every traversed ancestor, and the relevant destination against its
+held device/inode, owner, type, link, and mode authority around each path
+operation or publication. The root and persistent lock MUST be reauthenticated
+before lock release. A replaced run-root pathname MUST be treated as a
+different authority and MUST make the operation holding the prior inode fail
+closed rather than redirecting its reads or writes.
+
+These guarantees cover crash recovery, non-malicious filesystem drift, and
+concurrent harness writers that honor both advisory locks. A mismatch observed
+before a pathname mutation MUST prevent that mutation, and any mismatch
+observed afterward MUST prevent the operation from reporting success. A process
+running as the same effective user can bypass advisory locks and substitute a
+leaf name inside a `linkat`, `unlinkat`, or `renameat2` syscall window. Because
+those operations cannot be conditioned on a previously opened inode, adversarial
+same-user interposition is outside this owner-only handoff boundary; the harness
+does not claim that no intermediate filesystem mutation occurred in that case.
+
+Under that held authority, ingest MUST create mode-0700 private directories and
+mode-0600 create-once source, derived-index, and occurrence-body files keyed
+by `finding_id`, and MUST NOT overwrite them. It MUST also preserve the
+mode-0600 deterministic append-only `capacity-findings.jsonl` and
+`capacity-finding-index.jsonl` ledgers. The same ID with the same canonical
+source/index/body bytes MUST be an idempotent no-op; the same ID with changed
+bytes MUST fail; the same derived fingerprint with a new ID MUST remain a
+distinct occurrence.
+
+`finding_sha256` MUST be SHA-256 over the source finding's canonical JSON
+bytes, not the stable fingerprint or the input file's incidental whitespace.
+
+Under that lock, ingest MUST semantically preserve unrelated fields in an
+existing `manifest.json` and atomically maintain its capacity-finding
+projection. If absent, the manifest MUST begin with schema version 2 and the
+occurrence's `run_id`. Its `capacity_finding_authority` MUST contain exactly
+`run_id`, `working_branch`, `working_ref`, `upstream_branch`, `upstream_ref`,
+`inbound_merge_ref`, and `reconciliation_epoch_id`. Every occurrence ingested
+into that run directory MUST have the same projection. Any existing direct
+manifest `working_branch`, `working_ref` or `observed_ref`, `upstream_branch`,
+`upstream_ref`, `inbound_merge_ref`, and `reconciliation_epoch_id` MUST agree
+with their corresponding projected field.
+
+The manifest's `capacity_findings` entries MUST be deterministically ordered by
+`finding_id`. The entry produced for one occurrence MUST contain exactly
+`finding_id`, `finding_sha256`, `fingerprint`, `destination_repo`,
+`classification`, `scenario_id`, `scenario_sha256`, `profile_stage_id`,
+`profile_stage_sha256`, `result_id`, `result_sha256`, `stage_id`, and
+`observed_at`. The same occurrence projection MUST be a no-op and a changed
+projection under the same ID MUST fail.
+Only an absent projection key is a recoverable crash prefix. An explicitly
+present null, non-object `capacity_finding_authority`, or non-array
+`capacity_findings` value MUST be treated as malformed existing state and MUST
+NOT be replaced.
+
+Ingest MUST maintain `issue-lifecycle.jsonl` as a separate canonical,
+append-only, mode-0600 ledger. This capability MAY append exactly one event per
+occurrence, containing exactly `schema_version: 2`,
+`candidate_kind: capacity-finding-v2`, `finding_id`, `finding_sha256`,
+`fingerprint`, `state: detected`, `recorded_at`, `destination_repo`,
+`classification`, `frontier`, `scenario_id`, `scenario_sha256`,
+`profile_stage_id`, `profile_stage_sha256`, `result_id`, `result_sha256`,
+`scm_contract_ref`, `observed_authority`, and `filing_readiness`.
+`recorded_at` MUST equal the occurrence's `observed_authority.observed_at`; all
+other values MUST be exact projections of the validated occurrence and derived
+index. Reingest MUST treat one identical detected event as a no-op, reject a
+duplicate or changed detected event, and reject any same-ID lifecycle suffix
+that lacks its detected prefix. It MUST NOT append or claim a later
+publication lifecycle state.
+
+Every private directory MUST be a non-symlink directory owned by the effective
+user with mode 0700. Every lock, source, index, body, manifest, and
+ledger—including the lifecycle ledger—MUST be a non-symlink regular file owned
+by the effective user, have link count one, and have mode 0600. Existing state
+that violates any owner/type/link/mode invariant MUST fail closed. Atomic
+create-once or replacement publication MUST make the new file durable and
+fsync its containing directory before success. Newly created objects MUST
+reach those exact modes regardless of the invoking process's umask; this MUST
+NOT authorize repairing an unsafe pre-existing object.
+
+Every create-once and replacement write MUST use a uniquely named mode-0600
+temporary peer opened below the authenticated parent descriptor. The writer
+MUST fsync the complete temporary file before publication. Create-once
+publication MUST hard-link the temporary inode to the absent destination,
+authenticate that exact destination inode and content, remove the temporary
+under the supported concurrency boundary, and fsync the directory. Replacement
+publication requires Linux `renameat2(RENAME_EXCHANGE)` support. It MUST
+authenticate the expected destination immediately before atomically exchanging
+it with the fsynced temporary, verify both exchanged identities and the
+installed content, exchange back and fail on mismatch, then remove the
+exchanged old destination and fsync the directory. No publication may report
+success unless the final destination still matches the held temporary after
+directory fsync.
+
+While holding both locks and the run-root authority, ingest MUST recover
+interrupted writer temporaries before read-only preflight and before another
+write. Recovery MAY unlink only a temporary matching the harness's exact
+managed name whose inode is a current-user-owned regular mode-0600 file with
+link count one, or with link count two only when the other name is the exact
+same-inode destination from the create-once post-link crash window. Recovery
+MUST authenticate the pathname and held descriptor again immediately before
+unlink and MUST fsync every directory it changes. Under the supported
+compliant-writer model, this removes only the authenticated managed peer. A
+symlink, wrong owner/type/mode/link count, unmatched destination, or otherwise
+ambiguous temporary observed before unlink MUST remain untouched and fail
+closed; an inconsistency observed afterward MUST prevent success. A shaped peer
+whose destination is not one of the exact managed root names or the closed
+per-finding JSON/body filename grammar MUST remain untouched.
+
+If a crash leaves a valid durable prefix, the next identical ingest MUST verify
+every existing create-once file and ledger line and append/create only the
+missing exact source/index ledger, manifest projection, or detected-event
+suffix. A mismatch MUST fail rather than be overwritten or silently repaired.
+
+The generated human occurrence payload MUST be marker-free UTF-8 normalized to
+exactly one trailing newline and MUST bind SHA-256 over those exact bytes. Its
+create-once owner-only filename MUST be keyed by `finding_id`, not by the
+stable fingerprint. A capacity-v2 candidate MUST identify itself as
+`capacity-finding-v2`, bind the finding ID and canonical finding SHA-256,
+SCM-derived fingerprint, exact destination/branch authority, payload path and
+SHA-256, and `guard-issue-fix-publication` as the required publication
+capability. Readiness MAY be carried as derived local state, but MUST NOT claim
+a filed, updated, reopened, fixed, verified, or closed lifecycle state.
+Agent-controlled `summary`, `defect_semantics.stable_signature`, `expected`,
+and `actual` prose MUST appear only beneath fixed harness headings as
+four-space-indented literal CommonMark blocks. The renderer MUST NOT interpret
+those strings as headings, lists, links, HTML, fenced-block delimiters, or any
+other active Markdown syntax, and MUST apply the same representation-aware
+privacy rejection to the completed payload bytes before accepting their
+digest.
+
+Before emitting or regenerating any capacity-v2 candidate, packet replay MUST
+hold the same validated lock and reauthenticate the explicit non-symlink run
+root, source/index/body artifacts and ledgers, manifest projection, immutable
+evidence, and one exact detected lifecycle prefix for every persisted index.
+The exact file and directory identities, metadata, and bytes used for final
+candidate derivation MUST form one replay snapshot that remains unchanged
+through the final pre-output boundary. Any missing, duplicate, changed, unsafe,
+or non-canonical component MUST fail before the candidate directory or file is
+created.
+
+Issue surfaces MUST select legacy or finding-v2 handling once while holding the
+run-root descriptor lock. The persistent lock file by itself MUST NOT select
+finding v2, because it may be durable residue from a preflight failure before
+any occurrence state was published. A v2 index or per-finding artifact
+directory MUST select finding v2 and MUST require the already-existing
+authenticated persistent lock; replay MUST NOT create a missing lock. A
+marker-free mode-0700 legacy run MUST publish any regenerated candidate
+directory/file at mode 0700/0600 while holding that root lock. In a selected v2
+run, a non-capacity failed-phase candidate MAY retain legacy behavior, but its
+body read MUST use the held private authority. A selector matching any durable
+v2 finding ID or fingerprint MUST be rejected by legacy mutation methods from
+the canonical index before packet regeneration or output writes.
+
+Legacy issue creation, including its `force` and dry-run paths, MUST reject a
+capacity-v2 candidate before constructing or executing `gh`. Legacy lifecycle
+transition and fix-proposal surfaces MUST reject it before any file write,
+subprocess, or external access. Legacy non-capacity candidates retain their
+existing behavior.
+
+The separate `guard-issue-fix-publication` capability exclusively owns
+`scm.finding-publication.scope.v1`,
+`scm.finding-publication.occurrence.v1`, and
+`scm.finding-publication.fix-pr.v1` markers, final rendered-body digest,
+paginated GitHub reconciliation, mutation journals, credentialed issue/PR
+actions, and verified post-mutation lifecycle facts. This capability MUST NOT
+precompute, imitate, or claim any of those authorities.
+
+#### Scenario: Immutable ingest is idempotent
+- **WHEN** identical canonical finding bytes with an existing `finding_id` are ingested again
+- **THEN** no second occurrence or lifecycle fact is appended
+
+#### Scenario: Crash-prefix recovery preserves exact bytes
+- **WHEN** ingest resumes after only a valid create-once file, source/index ledger prefix, manifest projection, or detected-event prefix became durable
+- **THEN** it verifies all existing authority and bytes, writes only the missing exact suffix under the lock, and refuses any mismatch
+
+#### Scenario: Writer temporary crash windows are authenticated
+- **WHEN** a prior writer stopped before publication or after linking a create-once destination but before removing its temporary name
+- **THEN** under the compliant-writer model the next locked ingest removes and directory-fsyncs only the authenticated one-link temporary or exact same-inode two-link peer, while any unsafe or ambiguous state observed before unlink remains untouched and fails closed
+
+#### Scenario: Run-root or lock identity cannot be swapped
+- **WHEN** the run-root pathname, an ancestor, a leaf destination, or the persistent lock pathname changes while ingest or packet replay holds its descriptors
+- **THEN** root or ancestor replacement cannot redirect descriptor-rooted operations, every observable leaf drift is rejected before success, writers honoring the locks remain serialized, and a replacement root is rejected as different authority
+
+#### Scenario: Same-user syscall interposition is outside the handoff boundary
+- **WHEN** a same-effective-user process bypasses both advisory locks and substitutes a leaf inside a `linkat`, `unlinkat`, or `renameat2` syscall window
+- **THEN** any detected mismatch prevents success, but the harness does not claim zero intermediate mutation because the pathname syscall cannot be conditioned on the previously held inode
+
+#### Scenario: Run-manifest authority cannot drift
+- **WHEN** a new occurrence's run, branch, ref, inbound-merge, or reconciliation-epoch authority conflicts with the run manifest's direct or projected authority
+- **THEN** ingest fails without overwriting the manifest or appending source, index, or lifecycle history for the conflicting occurrence
+
+#### Scenario: Detected lifecycle is separate and idempotent
+- **WHEN** an identical occurrence is reingested after its exact detected event exists in `issue-lifecycle.jsonl`
+- **THEN** no lifecycle line is added, while a duplicate, changed, or suffix-without-detection history fails closed
+
+#### Scenario: Same defect is a new occurrence
+- **WHEN** a different `finding_id` has the same SCM-derived fingerprint and valid distinct occurrence evidence
+- **THEN** ingest retains it separately rather than collapsing occurrence identity
+
+#### Scenario: Local packet remains marker-free
+- **WHEN** a validated occurrence produces its human payload and capacity-v2 candidate
+- **THEN** the payload SHA is exact but no publication, occurrence, fix-PR, final-body, issue, or PR marker is minted
+
+#### Scenario: Agent prose remains literal
+- **WHEN** summary, stable-signature, expected, or actual prose contains text that would otherwise be parsed as a CommonMark heading, list, link, HTML block, or fenced-block delimiter
+- **THEN** the payload represents the text only inside an indented literal block beneath a fixed harness heading
+
+#### Scenario: Packet replay requires detected lifecycle authority
+- **WHEN** the lifecycle ledger is missing, unsafe, non-canonical, duplicated, or no longer exactly projects every persisted finding index
+- **THEN** packet replay fails before creating or replacing candidate output
+
+#### Scenario: Legacy mutation rejects capacity v2
+- **WHEN** create with or without force/dry-run, lifecycle transition, or fix proposal receives a capacity-v2 candidate
+- **THEN** it fails before a `gh` command, subprocess, external access, or mutation while non-capacity legacy behavior remains unchanged
+
+### Requirement: Public contract preparation has no live side effects
+The executable scope of this change MUST remain preparatory. Pinned validation,
+capture-only mock composition, finding ingest, packet generation/replay,
+strict validation, and documentation promotion MUST NOT fund or use wallets,
+start a live buyer or seller action, publish a listing, emit a purchase,
+provision or destroy a VM, access KVM/Ansible/GPU resources, create cloud
+resources, execute cleanup against live state, or mutate GitHub. Mock
+composition MUST retain an empty live-resource ledger. The portable schemas MAY
+describe later real qualification and measured evidence, but only separately
+authorized private campaign infrastructure MAY perform those effects after it
+pins the pushed public contract.
+
+#### Scenario: Preparatory validation cannot become a live run
+- **WHEN** an operator validates, hashes, ingests, renders, or replays a capacity artifact while preparing this contract
+- **THEN** the command may read pinned/local artifacts and write owner-only local handoff state but performs no market, cloud, host, GPU, wallet, GitHub, or live cleanup action
+
+#### Scenario: Capture-only composition remains resource-empty
+- **WHEN** the public mock composition path rehearses portable buyer and seller actions
+- **THEN** it targets only the capture boundary, retains an empty live-resource ledger, and grants no authority for a live qualification or measured campaign

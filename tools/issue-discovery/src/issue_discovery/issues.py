@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from dataclasses import dataclass, replace
@@ -46,9 +47,7 @@ _CLASSIFIER_PATTERNS = {
         "expected at least one registered agent",
         "agents_in_page=0",
     ),
-    "stale-seller-layer-route": (
-        'status=404 body={"detail":"not found"}',
-    ),
+    "stale-seller-layer-route": ('status=404 body={"detail":"not found"}',),
     "zerotier-build-path": (
         "zerotier",
         "install.zerotier.com",
@@ -67,6 +66,7 @@ _CAPACITY_REPOSITORIES = {
     ),
 }
 _FORBIDDEN_BASE_BRANCHES = {"dev", "main"}
+_CAPACITY_V2_CANDIDATE_KIND = "capacity-finding-v2"
 
 
 @dataclass(frozen=True)
@@ -84,20 +84,41 @@ class IssueCandidate:
     classification: str
     phase: str
     body_file: Path
-    evidence: tuple[str, ...]
+    evidence: tuple[Any, ...]
     state: str
     confidence: str
     state_reason: str
+    candidate_kind: str = "legacy-issue-candidate"
+    candidate_id: str | None = None
+    finding_id: str | None = None
+    finding_sha256: str | None = None
     working_branch: str | None = None
     observed_ref: str | None = None
+    upstream_branch: str | None = None
+    upstream_ref: str | None = None
+    inbound_merge_ref: str | None = None
+    reconciliation_epoch_id: str | None = None
+    observed_at: str | None = None
     scenario_id: str | None = None
     scenario_fingerprint: str | None = None
+    scenario_sha256: str | None = None
+    profile_stage_id: str | None = None
+    profile_stage_sha256: str | None = None
+    result_id: str | None = None
+    result_sha256: str | None = None
+    scm_contract_ref: str | None = None
     run_id: str | None = None
     destination_repo: str | None = None
     lifecycle_state: str | None = None
+    defect_semantics: dict[str, Any] | None = None
+    observed_outcome: dict[str, Any] | None = None
+    durable_correlations: tuple[dict[str, Any], ...] = ()
+    filing_readiness: dict[str, bool] | None = None
+    occurrence_payload_sha256: str | None = None
+    publication_capability: str | None = None
 
     def to_json(self, run_dir: Path) -> dict[str, Any]:
-        return {
+        legacy = {
             "fingerprint": self.fingerprint,
             "title": self.title,
             "labels": list(self.labels),
@@ -116,6 +137,32 @@ class IssueCandidate:
             "destination_repo": self.destination_repo,
             "lifecycle_state": self.lifecycle_state,
         }
+        if self.candidate_kind == "legacy-issue-candidate":
+            return legacy
+        return {
+            "candidate_kind": self.candidate_kind,
+            "candidate_id": self.candidate_id,
+            "finding_id": self.finding_id,
+            "finding_sha256": self.finding_sha256,
+            **legacy,
+            "upstream_branch": self.upstream_branch,
+            "upstream_ref": self.upstream_ref,
+            "inbound_merge_ref": self.inbound_merge_ref,
+            "reconciliation_epoch_id": self.reconciliation_epoch_id,
+            "observed_at": self.observed_at,
+            "scenario_sha256": self.scenario_sha256,
+            "profile_stage_id": self.profile_stage_id,
+            "profile_stage_sha256": self.profile_stage_sha256,
+            "result_id": self.result_id,
+            "result_sha256": self.result_sha256,
+            "scm_contract_ref": self.scm_contract_ref,
+            "defect_semantics": self.defect_semantics,
+            "observed_outcome": self.observed_outcome,
+            "durable_correlations": list(self.durable_correlations),
+            "filing_readiness": self.filing_readiness,
+            "occurrence_payload_sha256": self.occurrence_payload_sha256,
+            "publication_capability": self.publication_capability,
+        }
 
 
 class IssuePacketGenerator:
@@ -123,80 +170,416 @@ class IssuePacketGenerator:
         self.run_dir = run_dir
         self.repo_root = repo_root.resolve() if repo_root is not None else None
         self.issue_dir = run_dir / "issue-candidates"
+        self._private_output = False
+        self._capacity_authority: Any | None = None
+        self._pending_private_bodies: dict[Path, str] | None = None
 
     def generate(self) -> list[IssueCandidate]:
-        self.issue_dir.mkdir(parents=True, exist_ok=True)
-        manifest = _read_json(self.run_dir / "manifest.json")
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            return self._generate(
+                secure_capacity=selection.is_capacity_v2,
+                authority=selection.authority,
+            )
+
+    def _generate(
+        self,
+        *,
+        secure_capacity: bool,
+        authority: Any | None = None,
+    ) -> list[IssueCandidate]:
+        private_output = authority is not None
+        self._private_output = private_output
+        self._capacity_authority = authority
+        self._pending_private_bodies = {} if secure_capacity else None
+        replay_snapshot: Any | None = None
+        replay_finding_ids: tuple[str, ...] = ()
+        replay_evidence_paths: tuple[str, ...] = ()
+        if secure_capacity:
+            manifest = _read_capacity_json(
+                self.run_dir / "manifest.json",
+                root=self.run_dir,
+                authority=authority,
+            )
+            findings = _read_capacity_jsonl(
+                self.run_dir / "capacity-findings.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            indexes = _read_capacity_jsonl(
+                self.run_dir / "capacity-finding-index.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            lifecycle = _read_capacity_jsonl(
+                self.run_dir / "issue-lifecycle.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            for directory_name in (
+                "capacity-findings",
+                "capacity-finding-index",
+                "capacity-finding-bodies",
+            ):
+                _validate_capacity_directory_under_run(
+                    self.run_dir,
+                    directory_name,
+                    authority=authority,
+                )
+        else:
+            if private_output:
+                from issue_discovery.capacity_findings import (
+                    ensure_capacity_finding_private_directory,
+                )
+
+                ensure_capacity_finding_private_directory(
+                    self.issue_dir,
+                    root=self.run_dir,
+                    authority=authority,
+                )
+            else:
+                self.issue_dir.mkdir(parents=True, exist_ok=True)
+            manifest = _read_json(self.run_dir / "manifest.json")
+            findings = _read_jsonl(self.run_dir / "capacity-findings.jsonl")
+            indexes = _read_jsonl(self.run_dir / "capacity-finding-index.jsonl")
         phases = _read_jsonl(self.run_dir / "phases.jsonl")
         collectors = _read_jsonl(self.run_dir / "collectors.jsonl")
-        candidates = self._from_failed_phases(manifest, phases, collectors)
-        candidates.extend(
-            self._from_capacity_findings(
-                manifest,
-                _read_jsonl(self.run_dir / "capacity-findings.jsonl"),
-            )
+        capacity_candidates = self._from_capacity_findings(
+            findings,
+            indexes,
         )
+        if secure_capacity:
+            from issue_discovery.capacity_findings import (
+                ensure_capacity_finding_private_directory,
+                snapshot_capacity_finding_replay_authority,
+                validate_capacity_finding_lifecycle,
+                validate_capacity_finding_manifest,
+                validate_capacity_finding_replay_snapshot,
+            )
+
+            validate_capacity_finding_manifest(manifest, indexes)
+            validate_capacity_finding_lifecycle(lifecycle, indexes)
+            replay_finding_ids = tuple(
+                sorted(str(finding["finding_id"]) for finding in findings)
+            )
+            replay_evidence_paths = tuple(
+                sorted(
+                    {
+                        str(evidence["path"])
+                        for index in indexes
+                        for evidence in index["evidence"]
+                    }
+                )
+            )
+            replay_snapshot = snapshot_capacity_finding_replay_authority(
+                replay_finding_ids,
+                replay_evidence_paths,
+                evidence_root=self.run_dir,
+                authority=authority,
+            )
+            final_manifest = _read_capacity_json(
+                self.run_dir / "manifest.json",
+                root=self.run_dir,
+                authority=authority,
+            )
+            final_findings = _read_capacity_jsonl(
+                self.run_dir / "capacity-findings.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            final_indexes = _read_capacity_jsonl(
+                self.run_dir / "capacity-finding-index.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            final_lifecycle = _read_capacity_jsonl(
+                self.run_dir / "issue-lifecycle.jsonl",
+                required=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            validate_capacity_finding_manifest(final_manifest, final_indexes)
+            validate_capacity_finding_lifecycle(final_lifecycle, final_indexes)
+            final_capacity_candidates = self._from_capacity_findings(
+                final_findings,
+                final_indexes,
+            )
+            validate_capacity_finding_replay_snapshot(
+                replay_snapshot,
+                replay_finding_ids,
+                replay_evidence_paths,
+                evidence_root=self.run_dir,
+                authority=authority,
+            )
+            if (
+                final_manifest != manifest
+                or final_findings != findings
+                or final_indexes != indexes
+                or final_lifecycle != lifecycle
+                or final_capacity_candidates != capacity_candidates
+            ):
+                raise ValueError(
+                    "capacity-finding replay authority changed before output"
+                )
+        candidates = self._from_failed_phases(manifest, phases, collectors)
+        candidates.extend(capacity_candidates)
         blocking_failure = manifest.get("blocking_failure") or ""
         if not candidates and str(blocking_failure).startswith("workaround:"):
             candidates = [self._from_workaround_failure(manifest)]
 
+        if secure_capacity:
+            from issue_discovery.capacity_findings import (
+                validate_capacity_finding_replay_snapshot,
+            )
+
+            assert replay_snapshot is not None
+            validate_capacity_finding_replay_snapshot(
+                replay_snapshot,
+                replay_finding_ids,
+                replay_evidence_paths,
+                evidence_root=self.run_dir,
+                authority=authority,
+            )
+            ensure_capacity_finding_private_directory(
+                self.issue_dir,
+                root=self.run_dir,
+                authority=authority,
+            )
+            pending_bodies = self._pending_private_bodies
+            assert pending_bodies is not None
+            self._pending_private_bodies = None
+            for body_path, body in sorted(
+                pending_bodies.items(),
+                key=lambda item: str(item[0]),
+            ):
+                self._publish_candidate_body(body_path, body)
+
         jsonl_path = self.issue_dir / "candidates.jsonl"
-        with jsonl_path.open("w", encoding="utf-8") as handle:
-            for candidate in candidates:
-                handle.write(json.dumps(candidate.to_json(self.run_dir), sort_keys=True) + "\n")
+        if private_output:
+            content = b"".join(
+                _canonical_json_bytes(candidate.to_json(self.run_dir))
+                for candidate in candidates
+            )
+            existing_output = _validate_existing_capacity_output(
+                jsonl_path,
+                jsonl=True,
+                root=self.run_dir,
+                authority=authority,
+            )
+            from issue_discovery.capacity_findings import (
+                replace_capacity_finding_private_file,
+            )
+
+            replace_capacity_finding_private_file(
+                jsonl_path,
+                content,
+                root=self.run_dir,
+                authority=authority,
+                expected_existing=existing_output,
+            )
+        else:
+            with jsonl_path.open("w", encoding="utf-8") as handle:
+                for candidate in candidates:
+                    handle.write(
+                        json.dumps(candidate.to_json(self.run_dir), sort_keys=True)
+                        + "\n"
+                    )
         return candidates
+
+    def _write_candidate_body(self, path: Path, body: str) -> None:
+        if self._pending_private_bodies is not None:
+            self._pending_private_bodies[path] = body
+            return
+        self._publish_candidate_body(path, body)
+
+    def _publish_candidate_body(self, path: Path, body: str) -> None:
+        if self._private_output:
+            existing_output = _validate_existing_capacity_output(
+                path,
+                jsonl=False,
+                root=self.run_dir,
+                authority=self._capacity_authority,
+            )
+            from issue_discovery.capacity_findings import (
+                replace_capacity_finding_private_file,
+            )
+
+            replace_capacity_finding_private_file(
+                path,
+                body.encode("utf-8"),
+                root=self.run_dir,
+                authority=self._capacity_authority,
+                expected_existing=existing_output,
+            )
+        else:
+            path.write_text(
+                body,
+                encoding="utf-8",
+            )
 
     def _from_capacity_findings(
         self,
-        manifest: dict[str, Any],
         findings: list[dict[str, Any]],
+        indexes: list[dict[str, Any]],
     ) -> list[IssueCandidate]:
-        if not findings:
+        if not findings and not indexes:
             return []
+        if len(findings) != len(indexes):
+            raise ValueError(
+                "capacity finding source and derived index ledgers are incomplete"
+            )
         repo_root = self.repo_root
         if repo_root is None:
-            configured = manifest.get("repo_root")
-            repo_root = Path(str(configured)).resolve() if configured else Path.cwd().resolve()
-        from issue_discovery.capacity import validate_finding
+            raise ValueError(
+                "capacity finding packet generation requires the public SCM root"
+            )
+        from issue_discovery.capacity_findings import (
+            load_capacity_finding_index_artifacts,
+            validate_capacity_finding_artifact_inventory,
+            validate_capacity_finding_index_record,
+        )
+
+        findings_by_id: dict[str, dict[str, Any]] = {}
+        for finding in findings:
+            finding_id = finding.get("finding_id")
+            if not isinstance(finding_id, str) or finding_id in findings_by_id:
+                raise ValueError(
+                    "capacity finding source ledger has duplicate or missing IDs"
+                )
+            findings_by_id[finding_id] = finding
+        indexes_by_id: dict[str, dict[str, Any]] = {}
+        for index in indexes:
+            finding_id = index.get("finding_id")
+            if not isinstance(finding_id, str) or finding_id in indexes_by_id:
+                raise ValueError(
+                    "capacity finding index ledger has duplicate or missing IDs"
+                )
+            indexes_by_id[finding_id] = index
+        if set(findings_by_id) != set(indexes_by_id):
+            raise ValueError(
+                "capacity finding source and index ledgers identify different occurrences"
+            )
+        if self._capacity_authority is not None:
+            validate_capacity_finding_artifact_inventory(
+                findings_by_id,
+                evidence_root=self.run_dir,
+                authority=self._capacity_authority,
+            )
 
         candidates = []
-        for finding in findings:
-            validate_finding(finding, repo_root)
-            readiness_data = finding["filing_readiness"]
-            readiness = CandidateReadiness(
-                state=readiness_data["state"],
-                confidence=readiness_data["confidence"],
-                reason=readiness_data["reason"],
+        for finding_id in sorted(findings_by_id):
+            finding = findings_by_id[finding_id]
+            source_file = self.run_dir / "capacity-findings" / f"{finding_id}.json"
+            index_file = self.run_dir / "capacity-finding-index" / f"{finding_id}.json"
+            body_file = self.run_dir / "capacity-finding-bodies" / f"{finding_id}.md"
+            index = load_capacity_finding_index_artifacts(
+                source_file,
+                index_file,
+                body_file,
+                repo_root=repo_root,
+                evidence_root=self.run_dir,
+                authority=self._capacity_authority,
             )
-            fingerprint = _capacity_fingerprint(finding)
-            body_file = self.issue_dir / f"{fingerprint}.md"
-            body = _render_capacity_body(finding=finding, fingerprint=fingerprint)
-            redactions_path = repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
-            if not redactions_path.is_file():
-                raise ValueError("capacity issue generation requires the SCM redaction policy")
-            body_file.write_text(
-                Redactor.from_file(redactions_path).redact(body), encoding="utf-8"
-            )
+            if index != validate_capacity_finding_index_record(
+                indexes_by_id[finding_id],
+                finding,
+                repo_root=repo_root,
+            ):
+                raise ValueError(
+                    "capacity finding index changed during packet generation"
+                )
+            body = index["occurrence_body"]
+            if not isinstance(body, str):
+                raise ValueError("capacity occurrence body must be text")
+            body_relative = index.get("occurrence_body_path")
+            expected_body_relative = f"capacity-finding-bodies/{finding_id}.md"
+            if body_relative != expected_body_relative:
+                raise ValueError(
+                    "capacity occurrence body path is not keyed by finding_id"
+                )
+            readiness_data = index["filing_readiness"]
+            if not isinstance(readiness_data, dict):
+                raise ValueError("capacity filing readiness must be an object")
+            ready_to_file = readiness_data.get("ready_to_file") is True
+            observed = index["observed_authority"]
+            if not isinstance(observed, dict):
+                raise ValueError("capacity observed authority must be an object")
+            semantics = index["defect_semantics"]
+            if not isinstance(semantics, dict):
+                raise ValueError("capacity defect semantics must be an object")
+            evidence = index["evidence"]
+            correlations = index["durable_correlations"]
+            observed_outcome = index["observed_outcome"]
+            if (
+                not isinstance(evidence, list)
+                or not isinstance(correlations, list)
+                or not isinstance(observed_outcome, dict)
+            ):
+                raise ValueError(
+                    "capacity candidate evidence and outcome authority are malformed"
+                )
+            publication_capability = index["publication_capability"]
+            if publication_capability != "guard-issue-fix-publication":
+                raise ValueError(
+                    "capacity candidate lacks the guarded publication capability"
+                )
             candidates.append(
                 IssueCandidate(
-                    fingerprint=fingerprint,
-                    title=f"{finding['summary']} ({fingerprint})",
+                    candidate_kind="capacity-finding-v2",
+                    candidate_id=finding_id,
+                    finding_id=finding_id,
+                    finding_sha256=index["finding_sha256"],
+                    fingerprint=index["fingerprint"],
+                    title=f"{finding['summary']} ({index['fingerprint']})",
                     labels=("bug",),
-                    classification=finding["classification"],
-                    phase=finding["observed"]["stage"],
+                    classification=index["classification"],
+                    phase=semantics["lifecycle_phase"],
                     body_file=body_file,
-                    evidence=tuple(finding["evidence"]),
-                    state=readiness.state,
-                    confidence=readiness.confidence,
-                    state_reason=readiness.reason,
-                    working_branch=finding["observed"]["working_branch"],
-                    observed_ref=finding["observed"]["observed_ref"],
-                    scenario_id=finding["scenario_id"],
-                    scenario_fingerprint=finding["scenario_fingerprint"],
-                    run_id=finding["observed"]["run_id"],
-                    destination_repo=finding["destination_repo"],
+                    evidence=tuple(evidence),
+                    state=("ready_to_file" if ready_to_file else "detected_not_ready"),
+                    confidence="derived",
+                    state_reason=(
+                        "Filing readiness is an exact projection of the bound "
+                        "validated VM result."
+                    ),
+                    working_branch=observed["working_branch"],
+                    observed_ref=observed["working_ref"],
+                    upstream_branch=observed["upstream_branch"],
+                    upstream_ref=observed["upstream_ref"],
+                    inbound_merge_ref=observed["inbound_merge_ref"],
+                    reconciliation_epoch_id=observed["reconciliation_epoch_id"],
+                    observed_at=observed["observed_at"],
+                    scenario_id=index["scenario_id"],
+                    scenario_sha256=index["scenario_sha256"],
+                    profile_stage_id=index["profile_stage_id"],
+                    profile_stage_sha256=index["profile_stage_sha256"],
+                    result_id=index["result_id"],
+                    result_sha256=index["result_sha256"],
+                    scm_contract_ref=index["scm_contract_ref"],
+                    run_id=observed["run_id"],
+                    destination_repo=index["destination_repo"],
                     lifecycle_state="detected",
+                    defect_semantics=dict(semantics),
+                    observed_outcome=dict(observed_outcome),
+                    durable_correlations=tuple(dict(item) for item in correlations),
+                    filing_readiness=dict(readiness_data),
+                    occurrence_payload_sha256=index["occurrence_body_sha256"],
+                    publication_capability=publication_capability,
                 )
+            )
+        if self._capacity_authority is not None:
+            validate_capacity_finding_artifact_inventory(
+                findings_by_id,
+                evidence_root=self.run_dir,
+                authority=self._capacity_authority,
             )
         return candidates
 
@@ -220,7 +603,8 @@ class IssuePacketGenerator:
                     index = candidate_indexes[fingerprint]
                     existing = candidates[index]
                     merged_evidence = _merge_evidence(existing.evidence, evidence)
-                    existing.body_file.write_text(
+                    self._write_candidate_body(
+                        existing.body_file,
                         _render_body(
                             manifest=manifest,
                             phase=primary_phases[fingerprint],
@@ -228,12 +612,12 @@ class IssuePacketGenerator:
                             evidence=list(merged_evidence),
                             readiness=readiness,
                         ),
-                        encoding="utf-8",
                     )
                     candidates[index] = replace(existing, evidence=merged_evidence)
                     continue
                 body_file = self.issue_dir / f"{fingerprint}.md"
-                body_file.write_text(
+                self._write_candidate_body(
+                    body_file,
                     _render_body(
                         manifest=manifest,
                         phase=phase,
@@ -241,7 +625,6 @@ class IssuePacketGenerator:
                         evidence=evidence,
                         readiness=readiness,
                     ),
-                    encoding="utf-8",
                 )
                 candidates.append(
                     IssueCandidate(
@@ -255,9 +638,15 @@ class IssuePacketGenerator:
                         state=readiness.state,
                         confidence=readiness.confidence,
                         state_reason=readiness.reason,
-                        working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
-                        observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
-                        run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
+                        working_branch=str(manifest.get("working_branch"))
+                        if manifest.get("working_branch")
+                        else None,
+                        observed_ref=str(manifest.get("observed_ref"))
+                        if manifest.get("observed_ref")
+                        else None,
+                        run_id=str(manifest.get("run_id"))
+                        if manifest.get("run_id")
+                        else None,
                         destination_repo="simple-compute-market",
                         lifecycle_state="detected",
                     )
@@ -275,7 +664,8 @@ class IssuePacketGenerator:
             reason="The issue-discovery workaround failed before product/runtime evidence could be gathered.",
         )
         body_file = self.issue_dir / f"{fingerprint}.md"
-        body_file.write_text(
+        self._write_candidate_body(
+            body_file,
             "\n".join(
                 [
                     f"# Explicit workaround failed: `{raw}`",
@@ -292,7 +682,7 @@ class IssuePacketGenerator:
                     f"Run `{_reproduction_command(manifest)}`.",
                     "",
                     "## Evidence",
-                    f"- Run manifest: `{_rel(manifest_path := self.run_dir / 'manifest.json', self.run_dir)}`",
+                    f"- Run manifest: `{_rel(self.run_dir / 'manifest.json', self.run_dir)}`",
                     f"- Workaround records: `{_rel(self.run_dir / 'workarounds.jsonl', self.run_dir)}`",
                     "",
                     "## Run Context",
@@ -301,7 +691,6 @@ class IssuePacketGenerator:
                 ]
             )
             + "\n",
-            encoding="utf-8",
         )
         return IssueCandidate(
             fingerprint=fingerprint,
@@ -314,8 +703,12 @@ class IssuePacketGenerator:
             state=readiness.state,
             confidence=readiness.confidence,
             state_reason=readiness.reason,
-            working_branch=str(manifest.get("working_branch")) if manifest.get("working_branch") else None,
-            observed_ref=str(manifest.get("observed_ref")) if manifest.get("observed_ref") else None,
+            working_branch=str(manifest.get("working_branch"))
+            if manifest.get("working_branch")
+            else None,
+            observed_ref=str(manifest.get("observed_ref"))
+            if manifest.get("observed_ref")
+            else None,
             run_id=str(manifest.get("run_id")) if manifest.get("run_id") else None,
             destination_repo="simple-compute-market",
             lifecycle_state="detected",
@@ -330,29 +723,199 @@ class IssueRepository:
         policy_root: Path | None = None,
     ) -> None:
         self.run_dir = run_dir
-        self.repo_root = repo_root.resolve() if repo_root is not None else Path.cwd().resolve()
+        self.repo_root = (
+            repo_root.resolve() if repo_root is not None else Path.cwd().resolve()
+        )
         self.policy_root = (
             policy_root.resolve() if policy_root is not None else self.repo_root
         )
         self.candidates_path = run_dir / "issue-candidates" / "candidates.jsonl"
 
-    def list(self) -> list[dict[str, Any]]:
+    def _list_under_selection(
+        self,
+        selection: Any,
+    ) -> list[dict[str, Any]]:
+        if selection.is_capacity_v2:
+            return [
+                candidate.to_json(self.run_dir)
+                for candidate in IssuePacketGenerator(
+                    self.run_dir,
+                    repo_root=self.repo_root,
+                )._generate(
+                    secure_capacity=True,
+                    authority=selection.authority,
+                )
+            ]
         if not self.candidates_path.exists():
-            IssuePacketGenerator(self.run_dir).generate()
+            return [
+                candidate.to_json(self.run_dir)
+                for candidate in IssuePacketGenerator(
+                    self.run_dir,
+                    repo_root=self.repo_root,
+                )._generate(
+                    secure_capacity=False,
+                    authority=selection.authority,
+                )
+            ]
         return _read_jsonl(self.candidates_path)
 
-    def get(self, fingerprint: str) -> dict[str, Any]:
-        for candidate in self.list():
-            if candidate["fingerprint"] == fingerprint:
+    def list(self) -> list[dict[str, Any]]:
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            return self._list_under_selection(selection)
+
+    def _get_under_selection(
+        self,
+        selector: str,
+        selection: Any,
+    ) -> dict[str, Any]:
+        candidates = self._list_under_selection(selection)
+        for candidate in candidates:
+            if selector in {
+                candidate.get("candidate_id"),
+                candidate.get("finding_id"),
+            }:
                 return candidate
-        raise KeyError(fingerprint)
+        matches = [
+            candidate
+            for candidate in candidates
+            if candidate.get("fingerprint") == selector
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"candidate selector {selector!r} is ambiguous; use finding_id"
+            )
+        raise KeyError(selector)
+
+    def get(self, selector: str) -> dict[str, Any]:
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            return self._get_under_selection(selector, selection)
+
+    def _selector_targets_capacity_v2(
+        self,
+        selector: str,
+        selection: Any,
+    ) -> bool:
+        """Reject an indexed v2 selector without regenerating packet outputs."""
+        if not selection.is_capacity_v2:
+            return False
+        from issue_discovery.capacity_findings import (
+            read_capacity_finding_canonical_jsonl,
+        )
+
+        indexes = read_capacity_finding_canonical_jsonl(
+            self.run_dir / "capacity-finding-index.jsonl",
+            root=self.run_dir,
+            authority=selection.authority,
+        )
+        return any(
+            selector
+            in {
+                index.get("finding_id"),
+                index.get("fingerprint"),
+            }
+            for index in indexes
+        )
 
     def body_path(self, fingerprint: str) -> Path:
-        candidate = self.get(fingerprint)
-        return self.run_dir / str(candidate["body_file"])
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            candidate = self._get_under_selection(fingerprint, selection)
+            if candidate.get("candidate_kind") == _CAPACITY_V2_CANDIDATE_KIND:
+                raise ValueError(
+                    "capacity finding v2 bodies require authenticated snapshot reads"
+                )
+            return self.run_dir / str(candidate["body_file"])
+
+    def read_body(self, selector: str) -> str:
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+            read_capacity_finding_private_file,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            candidate = self._get_under_selection(selector, selection)
+            path = self.run_dir / str(candidate["body_file"])
+            if not selection.is_capacity_v2:
+                return path.read_text(encoding="utf-8")
+            content = read_capacity_finding_private_file(
+                path,
+                root=self.run_dir,
+                authority=selection.authority,
+            )
+            if candidate.get("candidate_kind") == _CAPACITY_V2_CANDIDATE_KIND:
+                expected_sha256 = candidate.get("occurrence_payload_sha256")
+                if (
+                    not isinstance(expected_sha256, str)
+                    or hashlib.sha256(content).hexdigest() != expected_sha256
+                ):
+                    raise ValueError(
+                        "capacity finding body snapshot does not match its candidate"
+                    )
+            try:
+                return content.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ValueError(
+                    "capacity finding body snapshot must be UTF-8"
+                ) from error
 
     def create(self, fingerprint: str, dry_run: bool, force: bool = False) -> int:
-        candidate = self.get(fingerprint)
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        try:
+            with capacity_finding_run_selection(self.run_dir) as selection:
+                if self._selector_targets_capacity_v2(fingerprint, selection):
+                    print(
+                        "capacity finding v2 requires the guarded publication "
+                        "capability; legacy issue creation is disabled"
+                    )
+                    return 2
+                candidate = self._get_under_selection(fingerprint, selection)
+                return self._create_legacy_under_selection(
+                    fingerprint,
+                    candidate,
+                    dry_run=dry_run,
+                    force=force,
+                    authority=(
+                        selection.authority
+                        if selection.is_capacity_v2
+                        else None
+                    ),
+                )
+        except (KeyError, RuntimeError, ValueError) as error:
+            print(str(error))
+            return 2
+
+    def _create_legacy_under_selection(
+        self,
+        fingerprint: str,
+        candidate: dict[str, Any],
+        *,
+        dry_run: bool,
+        force: bool,
+        authority: Any | None,
+    ) -> int:
+        if candidate.get("candidate_kind") == _CAPACITY_V2_CANDIDATE_KIND:
+            # Defense in depth for a malformed or changed candidate store.
+            print(
+                "capacity finding v2 requires the guarded publication capability; "
+                "legacy issue creation is disabled"
+            )
+            return 2
         state = str(candidate.get("state", "unknown"))
         if state != "ready_to_file" and not force:
             print(
@@ -362,6 +925,29 @@ class IssueRepository:
             return 2
 
         body_path = self.run_dir / str(candidate["body_file"])
+        if authority is not None:
+            from issue_discovery.capacity_findings import (
+                read_capacity_finding_private_file,
+            )
+
+            body_bytes = read_capacity_finding_private_file(
+                body_path,
+                root=self.run_dir,
+                authority=authority,
+            )
+            try:
+                body = body_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                print("issue body is not UTF-8; refusing to create issue")
+                return 2
+            body_argument = "-"
+        else:
+            try:
+                body = body_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as error:
+                print(f"cannot read issue body: {error}")
+                return 2
+            body_argument = str(body_path)
         command = [
             "gh",
             "issue",
@@ -369,7 +955,7 @@ class IssueRepository:
             "--title",
             str(candidate["title"]),
             "--body-file",
-            str(body_path),
+            body_argument,
         ]
         destination = _candidate_repository(candidate)
         if destination is not None:
@@ -385,7 +971,7 @@ class IssueRepository:
             )
             return 0
 
-        if not self._body_is_redacted(body_path):
+        if not self._body_is_redacted(body):
             return 2
 
         duplicate = self._find_duplicate(candidate)
@@ -393,23 +979,44 @@ class IssueRepository:
             return 2
         if duplicate:
             if candidate.get("lifecycle_state") == "detected":
-                return self._record_capacity_occurrence(candidate, duplicate, body_path)
-            print(f"duplicate issue exists: {duplicate.get('url') or duplicate.get('title')}")
+                return self._record_capacity_occurrence(
+                    candidate,
+                    duplicate,
+                    body,
+                    body_argument == "-",
+                )
+            print(
+                f"duplicate issue exists: {duplicate.get('url') or duplicate.get('title')}"
+            )
             return 0
 
-        completed = subprocess.run(
-            command,
-            check=False,
-            text=True,
-            cwd=self.repo_root,
-            capture_output=True,
-        )
+        if body_argument == "-":
+            completed = subprocess.run(
+                command,
+                check=False,
+                text=True,
+                cwd=self.repo_root,
+                capture_output=True,
+                input=body,
+            )
+        else:
+            completed = subprocess.run(
+                command,
+                check=False,
+                text=True,
+                cwd=self.repo_root,
+                capture_output=True,
+            )
         if completed.stdout:
             print(completed.stdout.strip())
         if completed.stderr:
             print(completed.stderr.strip())
         if completed.returncode == 0 and candidate.get("lifecycle_state") == "detected":
-            issue_url = completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else None
+            issue_url = (
+                completed.stdout.strip().splitlines()[-1]
+                if completed.stdout.strip()
+                else None
+            )
             self._append_capacity_lifecycle(
                 candidate,
                 state="filed",
@@ -419,24 +1026,57 @@ class IssueRepository:
         return completed.returncode
 
     def propose_fix(self, fingerprint: str, head_branch: str) -> Path:
-        candidate = self.get(fingerprint)
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            if self._selector_targets_capacity_v2(fingerprint, selection):
+                raise ValueError(
+                    "capacity finding v2 requires the guarded publication "
+                    "capability; legacy fix proposals are disabled"
+                )
+            candidate = self._get_under_selection(fingerprint, selection)
+            return self._propose_legacy_fix_under_selection(
+                fingerprint,
+                candidate,
+                head_branch,
+            )
+
+    def _propose_legacy_fix_under_selection(
+        self,
+        fingerprint: str,
+        candidate: dict[str, Any],
+        head_branch: str,
+    ) -> Path:
+        if candidate.get("candidate_kind") == _CAPACITY_V2_CANDIDATE_KIND:
+            raise ValueError(
+                "capacity finding v2 requires the guarded publication capability; "
+                "legacy fix proposals are disabled"
+            )
         if (
             candidate.get("lifecycle_state") != "detected"
             or not candidate.get("scenario_id")
             or not candidate.get("scenario_fingerprint")
             or not candidate.get("run_id")
         ):
-            raise ValueError("fix proposals require a capacity finding with branch authority")
+            raise ValueError(
+                "fix proposals require a capacity finding with branch authority"
+            )
         destination, base_branch, observed_ref = _capacity_target(candidate)
         if base_branch in _FORBIDDEN_BASE_BRANCHES:
             raise ValueError(f"unauthorized fix PR base: {base_branch}")
         allowed_prefix = f"fix/{fingerprint}"
         if head_branch in _FORBIDDEN_BASE_BRANCHES:
             raise ValueError("fix PR head cannot be dev or main")
-        if head_branch != allowed_prefix and not head_branch.startswith(f"{allowed_prefix}-"):
+        if head_branch != allowed_prefix and not head_branch.startswith(
+            f"{allowed_prefix}-"
+        ):
             raise ValueError(f"fix PR head must begin with {allowed_prefix}")
         if head_branch == base_branch:
-            raise ValueError("fix PR head and base must preserve inbound-only branch authority")
+            raise ValueError(
+                "fix PR head and base must preserve inbound-only branch authority"
+            )
         proposal = {
             "schema_version": 1,
             "status": "proposal-only",
@@ -452,7 +1092,9 @@ class IssueRepository:
             "auto_merge": False,
         }
         path = self.run_dir / "issue-candidates" / f"{fingerprint}.fix-pr.json"
-        path.write_text(json.dumps(proposal, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(proposal, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         self._append_capacity_lifecycle(
             candidate,
             state="fix_in_progress",
@@ -461,14 +1103,44 @@ class IssueRepository:
         return path
 
     def transition(self, fingerprint: str, state: str, detail: str) -> None:
-        candidate = self.get(fingerprint)
+        from issue_discovery.capacity_findings import (
+            capacity_finding_run_selection,
+        )
+
+        with capacity_finding_run_selection(self.run_dir) as selection:
+            if self._selector_targets_capacity_v2(fingerprint, selection):
+                raise ValueError(
+                    "capacity finding v2 lifecycle is owned by guarded publication"
+                )
+            candidate = self._get_under_selection(fingerprint, selection)
+            self._transition_legacy_under_selection(
+                fingerprint,
+                candidate,
+                state,
+                detail,
+            )
+
+    def _transition_legacy_under_selection(
+        self,
+        fingerprint: str,
+        candidate: dict[str, Any],
+        state: str,
+        detail: str,
+    ) -> None:
+        if candidate.get("candidate_kind") == _CAPACITY_V2_CANDIDATE_KIND:
+            raise ValueError(
+                "capacity finding v2 lifecycle is owned by guarded publication"
+            )
         if candidate.get("lifecycle_state") != "detected":
-            raise ValueError("lifecycle transitions require a capacity or branch-scoped finding")
+            raise ValueError(
+                "lifecycle transitions require a capacity or branch-scoped finding"
+            )
         finding = next(
             (
                 item
                 for item in _read_jsonl(self.run_dir / "capacity-findings.jsonl")
-                if _capacity_fingerprint(item) == candidate["fingerprint"]
+                if _is_legacy_capacity_finding(item)
+                and _capacity_fingerprint(item) == candidate["fingerprint"]
             ),
             None,
         )
@@ -477,7 +1149,8 @@ class IssueRepository:
         events = [
             item
             for item in _read_jsonl(self.run_dir / "issue-lifecycle.jsonl")
-            if item.get("finding_id") == finding["finding_id"]
+            if item.get("schema_version") in {None, 1}
+            and item.get("finding_id") == finding["finding_id"]
         ]
         current = str(events[-1]["state"]) if events else "detected"
         allowed = {
@@ -502,7 +1175,9 @@ class IssueRepository:
             detail=detail,
         )
 
-    def _find_duplicate(self, candidate: dict[str, Any]) -> dict[str, Any] | bool | None:
+    def _find_duplicate(
+        self, candidate: dict[str, Any]
+    ) -> dict[str, Any] | bool | None:
         capacity_candidate = candidate.get("lifecycle_state") == "detected"
         command = [
             "gh",
@@ -545,7 +1220,9 @@ class IssueRepository:
                 return issue
         return False
 
-    def _duplicate_matches(self, candidate: dict[str, Any], issue: dict[str, Any]) -> bool:
+    def _duplicate_matches(
+        self, candidate: dict[str, Any], issue: dict[str, Any]
+    ) -> bool:
         working_branch = candidate.get("working_branch")
         destination_repo = candidate.get("destination_repo")
         scenario_id = candidate.get("scenario_id")
@@ -612,7 +1289,9 @@ class IssueRepository:
             print(f"issue publication from default branch is forbidden: {actual}")
             return False
         if actual != expected:
-            print(f"issue branch mismatch: expected {expected}, found {actual or 'unknown'}")
+            print(
+                f"issue branch mismatch: expected {expected}, found {actual or 'unknown'}"
+            )
             return False
         head = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -644,7 +1323,8 @@ class IssueRepository:
         self,
         candidate: dict[str, Any],
         issue: dict[str, Any],
-        body_path: Path,
+        body: str,
+        body_from_stdin: bool,
     ) -> int:
         number = issue.get("number")
         if not isinstance(number, int):
@@ -673,7 +1353,9 @@ class IssueRepository:
             detail = "Reopened an exact branch-and-scenario capacity finding."
         else:
             lifecycle_state = "updated"
-            detail = "Attached a new occurrence to an exact open branch-and-scenario issue."
+            detail = (
+                "Attached a new occurrence to an exact open branch-and-scenario issue."
+            )
         commented = subprocess.run(
             [
                 "gh",
@@ -681,7 +1363,9 @@ class IssueRepository:
                 "comment",
                 str(number),
                 "--body-file",
-                str(body_path),
+                "-" if body_from_stdin else str(
+                    self.run_dir / str(candidate["body_file"])
+                ),
                 "--repo",
                 _candidate_repository(candidate, required=True),
             ],
@@ -689,6 +1373,7 @@ class IssueRepository:
             text=True,
             cwd=self.repo_root,
             capture_output=True,
+            input=body if body_from_stdin else None,
         )
         if commented.returncode != 0:
             print("failed to attach the capacity occurrence")
@@ -716,7 +1401,8 @@ class IssueRepository:
             (
                 item
                 for item in _read_jsonl(self.run_dir / "capacity-findings.jsonl")
-                if _capacity_fingerprint(item) == candidate["fingerprint"]
+                if _is_legacy_capacity_finding(item)
+                and _capacity_fingerprint(item) == candidate["fingerprint"]
             ),
             None,
         )
@@ -733,12 +1419,17 @@ class IssueRepository:
             issue_url=issue_url,
         )
 
-    def _body_is_redacted(self, body_path: Path) -> bool:
-        redactions_path = self.policy_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
+    def _body_is_redacted(self, body: str) -> bool:
+        redactions_path = (
+            self.policy_root
+            / "tools"
+            / "issue-discovery"
+            / "config"
+            / "redactions.yaml"
+        )
         if not redactions_path.is_file():
             print("SCM redaction policy is unavailable; refusing to create issue")
             return False
-        body = body_path.read_text(encoding="utf-8")
         if Redactor.from_file(redactions_path).redact(body) == body:
             return True
         print("issue body still contains unredacted data; refusing to create issue")
@@ -912,6 +1603,30 @@ def _capacity_fingerprint(finding: dict[str, Any]) -> str:
     # to the authorized destination repository and checks the exact context
     # marker in the issue body instead of mutating the defect identity.
     return str(finding["fingerprint"])
+
+
+def _is_legacy_capacity_finding(finding: dict[str, Any]) -> bool:
+    """Identify only the historical v1 shape before invoking v1 helpers."""
+    if finding.get("schema_version") not in {None, 1}:
+        return False
+    observed = finding.get("observed")
+    return (
+        isinstance(finding.get("finding_id"), str)
+        and isinstance(finding.get("fingerprint"), str)
+        and isinstance(finding.get("destination_repo"), str)
+        and isinstance(finding.get("scenario_id"), str)
+        and isinstance(finding.get("scenario_fingerprint"), str)
+        and isinstance(observed, dict)
+        and all(
+            isinstance(observed.get(key), str)
+            for key in (
+                "run_id",
+                "stage",
+                "working_branch",
+                "observed_ref",
+            )
+        )
+    )
 
 
 def _context_marker(
@@ -1127,7 +1842,9 @@ def _readiness_for(
     )
 
 
-def _fingerprints_for_phase(run_dir: Path, phase: dict[str, Any], evidence: list[str]) -> list[str]:
+def _fingerprints_for_phase(
+    run_dir: Path, phase: dict[str, Any], evidence: list[str]
+) -> list[str]:
     evidence_text = _evidence_text(run_dir, evidence)
     fingerprints = []
     for classifier in phase.get("classifiers") or []:
@@ -1241,6 +1958,178 @@ def _slug(value: str) -> str:
     return "".join(allowed).strip("-") or "failure"
 
 
+def _path_present(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    from issue_discovery.capacity import canonical_json_bytes
+
+    return canonical_json_bytes(value)
+
+
+def _strict_json_value(content: bytes, *, source: Path) -> Any:
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-finite number {value!r} is not valid")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate object key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(f"invalid canonical JSON at {source}: {error}") from error
+
+
+def _read_capacity_json(
+    path: Path,
+    *,
+    root: Path,
+    authority: Any | None = None,
+) -> dict[str, Any]:
+    from issue_discovery.capacity_findings import (
+        read_capacity_finding_private_file,
+    )
+
+    content = read_capacity_finding_private_file(
+        path,
+        root=root,
+        authority=authority,
+    )
+    value = _strict_json_value(content, source=path)
+    if not isinstance(value, dict):
+        raise ValueError(f"capacity artifact must be a JSON object: {path}")
+    if _canonical_json_bytes(value) != content:
+        raise ValueError(f"capacity artifact must use canonical JSON: {path}")
+    return value
+
+
+def _read_capacity_jsonl(
+    path: Path,
+    *,
+    required: bool,
+    root: Path,
+    authority: Any | None = None,
+) -> list[dict[str, Any]]:
+    if not _path_present(path):
+        if required:
+            raise ValueError(f"required capacity ledger is missing: {path}")
+        return []
+    from issue_discovery.capacity_findings import (
+        read_capacity_finding_private_file,
+    )
+
+    content = read_capacity_finding_private_file(
+        path,
+        root=root,
+        authority=authority,
+    )
+    return _parse_capacity_jsonl_content(content, path=path, required=required)
+
+
+def _parse_capacity_jsonl_content(
+    content: bytes,
+    *,
+    path: Path,
+    required: bool,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if content:
+        for line_number, line in enumerate(content.splitlines(keepends=True), start=1):
+            if not line.endswith(b"\n") or line == b"\n":
+                raise ValueError(
+                    f"capacity ledger has an incomplete or empty line at "
+                    f"{path}:{line_number}"
+                )
+            value = _strict_json_value(line, source=path)
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"capacity ledger line must be an object at {path}:{line_number}"
+                )
+            if _canonical_json_bytes(value) != line:
+                raise ValueError(
+                    f"capacity ledger must use canonical JSON lines: "
+                    f"{path}:{line_number}"
+                )
+            records.append(value)
+    if required and not records:
+        raise ValueError(f"required capacity ledger is empty: {path}")
+    return records
+
+
+def _validate_capacity_directory_under_run(
+    run_dir: Path,
+    directory_name: str,
+    *,
+    authority: Any | None = None,
+) -> Path:
+    from issue_discovery.capacity_findings import (
+        validate_capacity_finding_private_directory,
+    )
+
+    directory = run_dir / directory_name
+    validate_capacity_finding_private_directory(
+        directory,
+        root=run_dir,
+        authority=authority,
+    )
+    root = run_dir.expanduser().absolute()
+    resolved = directory.expanduser().absolute()
+    if resolved != root / directory_name:
+        raise ValueError(
+            f"capacity artifact directory is not exact under run root: {directory}"
+        )
+    return resolved
+
+
+def _validate_existing_capacity_output(
+    path: Path,
+    *,
+    jsonl: bool,
+    root: Path,
+    authority: Any | None = None,
+) -> Any | None:
+    if authority is not None:
+        from issue_discovery.capacity_findings import (
+            recover_capacity_finding_private_file_publication,
+        )
+
+        recover_capacity_finding_private_file_publication(
+            path,
+            root=root,
+            authority=authority,
+        )
+    if not _path_present(path):
+        return None
+    from issue_discovery.capacity_findings import (
+        snapshot_capacity_finding_private_file,
+    )
+
+    snapshot = snapshot_capacity_finding_private_file(
+        path,
+        root=root,
+        authority=authority,
+    )
+    content = snapshot.content
+    if jsonl:
+        _parse_capacity_jsonl_content(content, path=path, required=False)
+        return snapshot
+    try:
+        content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"capacity candidate body is not UTF-8: {path}") from error
+    return snapshot
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -1248,7 +2137,11 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _rel(path: Path, root: Path) -> str:
@@ -1256,6 +2149,12 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def _shell_quote(value: str) -> str:
-    if value.replace("-", "").replace("_", "").replace("/", "").replace(".", "").isalnum():
+    if (
+        value.replace("-", "")
+        .replace("_", "")
+        .replace("/", "")
+        .replace(".", "")
+        .isalnum()
+    ):
         return value
     return "'" + value.replace("'", "'\"'\"'") + "'"

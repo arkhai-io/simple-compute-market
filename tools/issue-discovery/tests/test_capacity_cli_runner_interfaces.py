@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from issue_discovery import capacity_outcomes, capacity_roles
+from issue_discovery import capacity_findings, capacity_outcomes, capacity_roles
 from issue_discovery.capacity import CapacityValidationError
 from issue_discovery.cli import main
 from issue_discovery.runner import (
@@ -21,6 +23,49 @@ from issue_discovery.runner import (
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(scope="module")
+def pinned_profile_repo(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, str]:
+    source_root = repo_root()
+    selected_root = tmp_path_factory.mktemp("profile-cli") / "repository"
+    capacity_root = selected_root / "tools/issue-discovery/config/capacity"
+    schemas_root = selected_root / "tools/issue-discovery/schemas"
+    capacity_root.parent.mkdir(parents=True)
+    shutil.copytree(
+        source_root / "tools/issue-discovery/config/capacity",
+        capacity_root,
+    )
+    schemas_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source_root / "tools/issue-discovery/schemas",
+        schemas_root,
+    )
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=selected_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "fixture")
+    git("add", "-A")
+    git(
+        "-c",
+        "user.name=Capacity CLI Test",
+        "-c",
+        "user.email=capacity-cli@example.invalid",
+        "commit",
+        "-q",
+        "-m",
+        "add pinned capacity authority",
+    )
+    return selected_root, git("rev-parse", "HEAD")
 
 
 def capacity_result_context_value(
@@ -46,6 +91,56 @@ def capacity_result_context_value(
 @pytest.mark.parametrize(
     ("command", "arguments", "method_name", "operation"),
     [
+        (
+            "profile-validate",
+            [
+                "tools/issue-discovery/config/capacity/profiles/g1-v2.json",
+                "--scm-ref",
+                "a" * 40,
+                "--expected-sha256",
+                "b" * 64,
+                "--expected-raw-sha256",
+                "c" * 64,
+            ],
+            "capacity_profile",
+            "validate",
+        ),
+        (
+            "profile-sha256",
+            [
+                "tools/issue-discovery/config/capacity/profiles/g1-v2.json",
+                "--scm-ref",
+                "a" * 40,
+            ],
+            "capacity_profile",
+            "sha256",
+        ),
+        (
+            "profile-stage-validate",
+            [
+                "b2-s1-g1-qualification",
+                "--scm-ref",
+                "a" * 40,
+                "--expected-sha256",
+                "b" * 64,
+                "--expected-registry-sha256",
+                "c" * 64,
+                "--expected-registry-raw-sha256",
+                "d" * 64,
+            ],
+            "capacity_profile_stage",
+            "validate",
+        ),
+        (
+            "profile-stage-sha256",
+            [
+                "b2-s1-g1-qualification",
+                "--scm-ref",
+                "a" * 40,
+            ],
+            "capacity_profile_stage",
+            "sha256",
+        ),
         (
             "evaluation-policy-validate",
             [
@@ -133,6 +228,56 @@ def capacity_result_context_value(
             ],
             "capacity_result",
             "sha256",
+        ),
+        (
+            "finding-validate",
+            [
+                "finding.json",
+                "result-context.json",
+                "--evaluation-policy",
+                "evaluation-policy.json",
+                "--destination-repo-root",
+                "destination-repo",
+                "--evidence-root",
+                "evidence-root",
+                "--expected-scm-ref",
+                "b" * 40,
+            ],
+            "capacity_finding",
+            "validate",
+        ),
+        (
+            "finding-sha256",
+            [
+                "finding.json",
+                "result-context.json",
+                "--evaluation-policy",
+                "evaluation-policy.json",
+                "--destination-repo-root",
+                "destination-repo",
+                "--evidence-root",
+                "evidence-root",
+                "--expected-scm-ref",
+                "b" * 40,
+            ],
+            "capacity_finding",
+            "sha256",
+        ),
+        (
+            "finding-ingest",
+            [
+                "capacity-run",
+                "finding.json",
+                "result-context.json",
+                "--evaluation-policy",
+                "evaluation-policy.json",
+                "--destination-repo-root",
+                "destination-repo",
+                "--expected-scm-ref",
+                "b" * 40,
+            ],
+            "capacity_finding",
+            "ingest",
         ),
         (
             "serialized-reuse-validate",
@@ -448,9 +593,599 @@ def test_capacity_artifact_commands_use_explicit_paths_and_operation(
         "buyer-frontier.json",
         "b1-context.json",
         "b2-context.json",
+        "finding.json",
+        "destination-repo",
+        "evidence-root",
+        "capacity-run",
     ):
         if name in arguments:
             assert str(root / name) in rendered
+
+
+def test_profile_runner_emits_exact_validated_registry_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    profile_path = "tools/issue-discovery/config/capacity/profiles/g1-v2.json"
+    scm_ref = "a" * 40
+    canonical_sha256 = "b" * 64
+    raw_sha256 = "c" * 64
+    registry_value = {
+        "schema_version": 2,
+        "profile_id": "g1-v2",
+        "qualification_order": ["observer-probe", "b1-s1-g1-reference"],
+        "measured_progression": {
+            "initial_buyer_order": ["q0-b1-s1-g1-measured"],
+        },
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_resolve(
+        selected_repo_root: Path,
+        selected_ref: str,
+        relative_path: str,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        calls.append(
+            {
+                "repo_root": selected_repo_root,
+                "scm_ref": selected_ref,
+                "relative_path": relative_path,
+                "expected_sha256": expected_sha256,
+            }
+        )
+        return SimpleNamespace(
+            canonical_sha256=canonical_sha256,
+            profile_id="g1-v2",
+            raw_sha256=raw_sha256,
+            registry=registry_value,
+            relative_path=relative_path,
+            scm_ref=selected_ref,
+        )
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        fake_resolve,
+    )
+    runner = DiscoveryRunner(repo_root())
+
+    assert (
+        runner.capacity_profile_validate(
+            profile_path,
+            scm_ref=scm_ref,
+            expected_sha256=canonical_sha256,
+            expected_raw_sha256=raw_sha256,
+        )
+        == 0
+    )
+    validate_output = json.loads(capsys.readouterr().out)
+    assert validate_output == {
+        "artifact_kind": "capacity-profile-registry",
+        "operation": "validate",
+        "profile_id": "g1-v2",
+        "profile_registry": registry_value,
+        "raw_sha256": raw_sha256,
+        "relative_path": profile_path,
+        "scm_ref": scm_ref,
+        "sha256": canonical_sha256,
+        "status": "valid",
+    }
+
+    assert runner.capacity_profile_sha256(profile_path, scm_ref=scm_ref) == 0
+    hash_output = json.loads(capsys.readouterr().out)
+    assert hash_output == {
+        **validate_output,
+        "operation": "sha256",
+    }
+    assert calls == [
+        {
+            "repo_root": repo_root(),
+            "scm_ref": scm_ref,
+            "relative_path": profile_path,
+            "expected_sha256": canonical_sha256,
+        },
+        {
+            "repo_root": repo_root(),
+            "scm_ref": scm_ref,
+            "relative_path": profile_path,
+            "expected_sha256": None,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("expected_sha256", "expected_raw_sha256", "error"),
+    [
+        ("d" * 64, "c" * 64, "canonical registry"),
+        ("b" * 64, "d" * 64, "raw SHA-256"),
+    ],
+)
+def test_profile_runner_rejects_canonical_and_raw_digest_mismatch(
+    expected_sha256: str,
+    expected_raw_sha256: str,
+    error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canonical_sha256 = "b" * 64
+
+    def fake_resolve(*args, **kwargs):
+        if kwargs["expected_sha256"] != canonical_sha256:
+            raise CapacityValidationError(
+                "declared profile SHA-256 does not match the canonical registry"
+            )
+        return SimpleNamespace(
+            canonical_sha256=canonical_sha256,
+            profile_id="g1-v2",
+            raw_sha256="c" * 64,
+            registry={"profile_id": "g1-v2"},
+            relative_path="tools/issue-discovery/config/capacity/profiles/g1-v2.json",
+            scm_ref="a" * 40,
+        )
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        fake_resolve,
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile_validate(
+        "tools/issue-discovery/config/capacity/profiles/g1-v2.json",
+        scm_ref="a" * 40,
+        expected_sha256=expected_sha256,
+        expected_raw_sha256=expected_raw_sha256,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-registry"
+    assert error in output["error"]
+    assert output["status"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    ("expected_sha256", "expected_raw_sha256", "error"),
+    [
+        (None, "c" * 64, "declared profile SHA-256 must be"),
+        ("b" * 64, None, "declared profile raw SHA-256 must be"),
+        ("not-a-digest", "c" * 64, "declared profile SHA-256 must be"),
+        ("b" * 64, "not-a-digest", "declared profile raw SHA-256 must be"),
+    ],
+)
+def test_profile_runner_requires_well_formed_validation_pins(
+    expected_sha256: str | None,
+    expected_raw_sha256: str | None,
+    error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        lambda *args, **kwargs: pytest.fail(
+            "invalid profile pins reached the resolver"
+        ),
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile(
+        "tools/issue-discovery/config/capacity/profiles/g1-v2.json",
+        scm_ref="a" * 40,
+        operation="validate",
+        expected_sha256=expected_sha256,
+        expected_raw_sha256=expected_raw_sha256,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-registry"
+    assert error in output["error"]
+    assert output["status"] == "invalid"
+
+
+def test_profile_stage_runner_emits_exact_validated_semantic_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    scm_ref = "a" * 40
+    profile_path = "tools/issue-discovery/config/capacity/profiles/g1-v2.json"
+    scenario_path = "tools/issue-discovery/config/capacity/scenarios/b2-s1-g1.json"
+    stage_sha256 = "b" * 64
+    registry_sha256 = "c" * 64
+    registry_raw_sha256 = "d" * 64
+    scenario_sha256 = "e" * 64
+    stage_value = {
+        "stage_id": "b2-s1-g1-qualification",
+        "stage_class": "qualification",
+        "execution_boundary": "real-qualification",
+        "actor_trigger": "agent-triggered",
+        "actor_counts": {
+            "observers": 1,
+            "buyers": 2,
+            "sellers": 1,
+            "host_operators": 1,
+        },
+        "load_counts": {"selected_listings": 1, "requests": 2},
+        "expected_outcomes": {
+            "vm-succeeded": 1,
+            "capacity-refused": 1,
+            "fault": 0,
+        },
+    }
+    scenario_value = {
+        "scenario_id": "b2-s1-g1",
+        "listing_topology": {
+            "capacity_authority_mode": "single-seller",
+        },
+        "requests": [
+            {"request_id": "request-1"},
+            {"request_id": "request-2"},
+        ],
+    }
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_stage(
+        selected_repo_root: Path,
+        selected_ref: str,
+        stage_id: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        assert selected_repo_root == repo_root()
+        assert selected_ref == scm_ref
+        assert stage_id == "b2-s1-g1-qualification"
+        calls.append(("stage", expected_sha256))
+        return SimpleNamespace(
+            canonical_sha256=stage_sha256,
+            registry_sha256=registry_sha256,
+            relative_path=profile_path,
+            scenario=SimpleNamespace(
+                relative_path=scenario_path,
+                scenario=scenario_value,
+                scenario_id="b2-s1-g1",
+                scenario_sha256=scenario_sha256,
+            ),
+            scm_ref=scm_ref,
+            stage=stage_value,
+            stage_id=stage_id,
+        )
+
+    def fake_registry(
+        selected_repo_root: Path,
+        selected_ref: str,
+        relative_path: str = profile_path,
+        expected_sha256: str | None = None,
+    ) -> SimpleNamespace:
+        assert selected_repo_root == repo_root()
+        assert selected_ref == scm_ref
+        assert relative_path == profile_path
+        calls.append(("registry", expected_sha256))
+        return SimpleNamespace(
+            canonical_sha256=registry_sha256,
+            raw_sha256=registry_raw_sha256,
+            relative_path=profile_path,
+        )
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_stage",
+        fake_stage,
+    )
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        fake_registry,
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile_stage_validate(
+        "b2-s1-g1-qualification",
+        scm_ref=scm_ref,
+        expected_sha256=stage_sha256,
+        expected_registry_sha256=registry_sha256,
+        expected_registry_raw_sha256=registry_raw_sha256,
+    )
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "artifact_kind": "capacity-profile-stage",
+        "operation": "validate",
+        "profile_registry_path": profile_path,
+        "profile_registry_raw_sha256": registry_raw_sha256,
+        "profile_registry_sha256": registry_sha256,
+        "profile_stage": stage_value,
+        "profile_stage_id": "b2-s1-g1-qualification",
+        "relative_path": profile_path,
+        "scenario": scenario_value,
+        "scenario_id": "b2-s1-g1",
+        "scenario_path": scenario_path,
+        "scenario_sha256": scenario_sha256,
+        "scm_ref": scm_ref,
+        "sha256": stage_sha256,
+        "status": "valid",
+    }
+    assert calls == [
+        ("stage", stage_sha256),
+        ("registry", registry_sha256),
+    ]
+
+
+def test_profile_stage_hash_emits_explicit_null_scenario_context(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    scm_ref = "a" * 40
+    profile_path = "tools/issue-discovery/config/capacity/profiles/g1-v2.json"
+    stage_value = {
+        "stage_id": "observer-probe",
+        "stage_class": "observer-probe",
+        "scenario_binding": None,
+    }
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_stage",
+        lambda *args, **kwargs: SimpleNamespace(
+            canonical_sha256="b" * 64,
+            registry_sha256="c" * 64,
+            relative_path=profile_path,
+            scenario=None,
+            scm_ref=scm_ref,
+            stage=stage_value,
+            stage_id="observer-probe",
+        ),
+    )
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        lambda *args, **kwargs: SimpleNamespace(
+            canonical_sha256="c" * 64,
+            raw_sha256="d" * 64,
+            relative_path=profile_path,
+        ),
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile_stage_sha256(
+        "observer-probe",
+        scm_ref=scm_ref,
+    )
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "artifact_kind": "capacity-profile-stage",
+        "operation": "sha256",
+        "profile_registry_path": profile_path,
+        "profile_registry_raw_sha256": "d" * 64,
+        "profile_registry_sha256": "c" * 64,
+        "profile_stage": stage_value,
+        "profile_stage_id": "observer-probe",
+        "relative_path": profile_path,
+        "scenario": None,
+        "scenario_id": None,
+        "scenario_path": None,
+        "scenario_sha256": None,
+        "scm_ref": scm_ref,
+        "sha256": "b" * 64,
+        "status": "valid",
+    }
+
+
+def test_standalone_profile_stage_has_null_registry_and_rejects_registry_pins(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    scm_ref = "a" * 40
+    stage_path = (
+        "tools/issue-discovery/config/capacity/profile-stages/b1-s1-g1-mock.json"
+    )
+    scenario_path = "tools/issue-discovery/config/capacity/scenarios/b1-s1-g1.json"
+    stage_value = {
+        "stage_id": "b1-s1-g1-mock",
+        "stage_class": "qualification",
+        "execution_boundary": "mock",
+        "actor_trigger": "agent-triggered",
+    }
+    scenario_value = {
+        "scenario_id": "b1-s1-g1",
+        "actor_counts": {
+            "observers": 1,
+            "buyers": 1,
+            "sellers": 1,
+            "host_operators": 1,
+        },
+    }
+    stage_sha256 = "b" * 64
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_stage",
+        lambda *args, **kwargs: SimpleNamespace(
+            canonical_sha256=stage_sha256,
+            registry_sha256=None,
+            relative_path=stage_path,
+            scenario=SimpleNamespace(
+                relative_path=scenario_path,
+                scenario=scenario_value,
+                scenario_id="b1-s1-g1",
+                scenario_sha256="c" * 64,
+            ),
+            scm_ref=scm_ref,
+            stage=stage_value,
+            stage_id="b1-s1-g1-mock",
+        ),
+    )
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        lambda *args, **kwargs: pytest.fail(
+            "standalone stage reached the profile registry resolver"
+        ),
+    )
+    runner = DiscoveryRunner(repo_root())
+
+    assert (
+        runner.capacity_profile_stage_validate(
+            "b1-s1-g1-mock",
+            scm_ref=scm_ref,
+            expected_sha256=stage_sha256,
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {
+        "artifact_kind": "capacity-profile-stage",
+        "operation": "validate",
+        "profile_registry_path": None,
+        "profile_registry_raw_sha256": None,
+        "profile_registry_sha256": None,
+        "profile_stage": stage_value,
+        "profile_stage_id": "b1-s1-g1-mock",
+        "relative_path": stage_path,
+        "scenario": scenario_value,
+        "scenario_id": "b1-s1-g1",
+        "scenario_path": scenario_path,
+        "scenario_sha256": "c" * 64,
+        "scm_ref": scm_ref,
+        "sha256": stage_sha256,
+        "status": "valid",
+    }
+
+    assert (
+        runner.capacity_profile_stage_validate(
+            "b1-s1-g1-mock",
+            scm_ref=scm_ref,
+            expected_sha256=stage_sha256,
+            expected_registry_sha256="d" * 64,
+            expected_registry_raw_sha256="e" * 64,
+        )
+        == 1
+    )
+    rejected = json.loads(capsys.readouterr().out)
+    assert rejected["artifact_kind"] == "capacity-profile-stage"
+    assert "standalone" in rejected["error"]
+
+
+@pytest.mark.parametrize(
+    "expected_sha256",
+    [None, "not-a-digest"],
+)
+def test_profile_stage_runner_requires_well_formed_stage_pin(
+    expected_sha256: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_stage",
+        lambda *args, **kwargs: pytest.fail(
+            "invalid profile-stage pin reached the resolver"
+        ),
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile_stage(
+        "b1-s1-g1-mock",
+        scm_ref="a" * 40,
+        operation="validate",
+        expected_sha256=expected_sha256,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-stage"
+    assert "declared profile-stage SHA-256 must be" in output["error"]
+    assert output["status"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    ("registry_sha256", "registry_raw_sha256", "error"),
+    [
+        (None, None, "requires exact canonical and raw"),
+        ("c" * 64, None, "requires exact canonical and raw"),
+        ("not-a-digest", "d" * 64, "registry SHA-256 must be"),
+        ("c" * 64, "not-a-digest", "registry raw SHA-256 must be"),
+        ("f" * 64, "d" * 64, "canonical registry"),
+        ("c" * 64, "f" * 64, "raw SHA-256"),
+    ],
+)
+def test_registry_backed_profile_stage_requires_exact_registry_pins(
+    registry_sha256: str | None,
+    registry_raw_sha256: str | None,
+    error: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    canonical_registry_sha256 = "c" * 64
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_stage",
+        lambda *args, **kwargs: SimpleNamespace(
+            canonical_sha256="b" * 64,
+            registry_sha256=canonical_registry_sha256,
+            relative_path=("tools/issue-discovery/config/capacity/profiles/g1-v2.json"),
+            scenario=None,
+            scm_ref="a" * 40,
+            stage={"stage_id": "observer-probe"},
+            stage_id="observer-probe",
+        ),
+    )
+
+    def fake_registry(*args, **kwargs):
+        if kwargs["expected_sha256"] != canonical_registry_sha256:
+            raise CapacityValidationError(
+                "declared profile SHA-256 does not match the canonical registry"
+            )
+        return SimpleNamespace(
+            canonical_sha256=canonical_registry_sha256,
+            raw_sha256="d" * 64,
+            relative_path=("tools/issue-discovery/config/capacity/profiles/g1-v2.json"),
+        )
+
+    monkeypatch.setattr(
+        "issue_discovery.runner.resolve_pinned_profile_registry",
+        fake_registry,
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_profile_stage_validate(
+        "observer-probe",
+        scm_ref="a" * 40,
+        expected_sha256="b" * 64,
+        expected_registry_sha256=registry_sha256,
+        expected_registry_raw_sha256=registry_raw_sha256,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-stage"
+    assert error in output["error"]
+    assert output["status"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    "stage_id",
+    ["b2-s1-g2-qualification", "unknown-stage"],
+)
+def test_profile_stage_runner_rejects_g2_and_unknown_stage_ids(
+    stage_id: str,
+    pinned_profile_repo: tuple[Path, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selected_root, scm_ref = pinned_profile_repo
+
+    code = DiscoveryRunner(selected_root).capacity_profile_stage_sha256(
+        stage_id,
+        scm_ref=scm_ref,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-stage"
+    assert "pinned G1 registry" in output["error"]
+    assert output["status"] == "invalid"
+
+
+def test_profile_stage_runner_rejects_expected_stage_digest_mismatch(
+    pinned_profile_repo: tuple[Path, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selected_root, scm_ref = pinned_profile_repo
+
+    code = DiscoveryRunner(selected_root).capacity_profile_stage_validate(
+        "b2-s1-g1-qualification",
+        scm_ref=scm_ref,
+        expected_sha256="f" * 64,
+    )
+
+    assert code == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-profile-stage"
+    assert "profile-stage SHA-256 does not match" in output["error"]
+    assert output["status"] == "invalid"
 
 
 def test_capacity_result_cli_forwards_complete_progression_paths(
@@ -516,6 +1251,171 @@ def test_capacity_result_cli_forwards_complete_progression_paths(
         root / "seller-1.json",
         root / "seller-2.json",
     )
+
+
+def _validated_finding_stub() -> SimpleNamespace:
+    return SimpleNamespace(
+        canonical_sha256="c" * 64,
+        destination_repo="simple-compute-market",
+        finding_id="finding-001",
+        fingerprint="capacity-" + "d" * 64,
+        profile_stage_id="b2-s1-g1-measured",
+        ready_to_file=True,
+        result_id="result-001",
+        result_sha256="e" * 64,
+        scenario_id="b2-s1-g1",
+        scm_contract_ref="f" * 40,
+    )
+
+
+def test_finding_runner_reconstructs_the_complete_result_dependency_chain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    finding_path = tmp_path / "finding.json"
+    finding_path.write_text("{}\n", encoding="utf-8")
+    result = object()
+    reconstruction: dict[str, object] = {}
+
+    def fake_reconstruct(context_manifest, selected_repo_root, **kwargs):
+        reconstruction.update(
+            {
+                "context_manifest": context_manifest,
+                "repo_root": selected_repo_root,
+                **kwargs,
+            }
+        )
+        return SimpleNamespace(result=result)
+
+    validation: dict[str, object] = {}
+
+    def fake_validate(value, selected_result, **kwargs):
+        validation.update(
+            {
+                "value": value,
+                "result": selected_result,
+                **kwargs,
+            }
+        )
+        return _validated_finding_stub()
+
+    monkeypatch.setattr(
+        "issue_discovery.runner._validated_capacity_result_with_dependencies",
+        fake_reconstruct,
+    )
+    monkeypatch.setattr(
+        capacity_findings,
+        "validate_capacity_finding",
+        fake_validate,
+    )
+    runner = DiscoveryRunner(repo_root())
+    code = runner.capacity_finding_validate(
+        finding_path,
+        tmp_path / "current-context.json",
+        destination_repo_root=tmp_path / "destination",
+        evidence_root=tmp_path / "evidence",
+        evaluation_policy=tmp_path / "evaluation-policy.json",
+        predecessor_context=tmp_path / "reuse-a.json",
+        reuse_baseline_context=tmp_path / "reuse-b.json",
+        buyer_frontier=tmp_path / "buyer-frontier.json",
+        buyer_result_contexts=(
+            tmp_path / "b1.json",
+            tmp_path / "b2.json",
+        ),
+        prior_seller_contexts=(
+            tmp_path / "seller-1.json",
+            tmp_path / "seller-2.json",
+        ),
+        expected_scm_ref="f" * 40,
+    )
+
+    assert code == 0
+    assert reconstruction == {
+        "context_manifest": tmp_path / "current-context.json",
+        "repo_root": repo_root(),
+        "evaluation_policy": tmp_path / "evaluation-policy.json",
+        "predecessor_context": tmp_path / "reuse-a.json",
+        "reuse_baseline_context": tmp_path / "reuse-b.json",
+        "buyer_frontier": tmp_path / "buyer-frontier.json",
+        "buyer_result_contexts": (
+            tmp_path / "b1.json",
+            tmp_path / "b2.json",
+        ),
+        "prior_seller_contexts": (
+            tmp_path / "seller-1.json",
+            tmp_path / "seller-2.json",
+        ),
+        "expected_scm_ref": "f" * 40,
+    }
+    assert validation == {
+        "value": {},
+        "result": result,
+        "authority_repo_root": tmp_path / "destination",
+        "evidence_root": tmp_path / "evidence",
+    }
+    output = json.loads(capsys.readouterr().out)
+    assert output["artifact_kind"] == "capacity-finding"
+    assert output["operation"] == "validate"
+    assert output["finding_id"] == "finding-001"
+    assert output["fingerprint"] == "capacity-" + "d" * 64
+
+
+def test_finding_ingest_uses_run_directory_as_the_only_evidence_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    finding_path = tmp_path / "finding.json"
+    finding_path.write_text("{}\n", encoding="utf-8")
+    run_dir = tmp_path / "run"
+    result = object()
+    monkeypatch.setattr(
+        "issue_discovery.runner._validated_capacity_result_with_dependencies",
+        lambda *args, **kwargs: SimpleNamespace(result=result),
+    )
+    ingest_call: dict[str, object] = {}
+
+    def fake_ingest(value, selected_result, **kwargs):
+        ingest_call.update(
+            {
+                "value": value,
+                "result": selected_result,
+                **kwargs,
+            }
+        )
+        return SimpleNamespace(finding=_validated_finding_stub())
+
+    monkeypatch.setattr(
+        capacity_findings,
+        "ingest_capacity_finding",
+        fake_ingest,
+    )
+    packet_calls: list[tuple[Path, Path | None]] = []
+    monkeypatch.setattr(
+        "issue_discovery.runner.IssuePacketGenerator.generate",
+        lambda self: packet_calls.append((self.run_dir, self.repo_root)) or [],
+    )
+
+    code = DiscoveryRunner(repo_root()).capacity_finding_ingest(
+        run_dir,
+        finding_path,
+        tmp_path / "current-context.json",
+        destination_repo_root=tmp_path / "destination",
+        evaluation_policy=tmp_path / "evaluation-policy.json",
+        expected_scm_ref="f" * 40,
+    )
+
+    assert code == 0
+    assert ingest_call == {
+        "value": {},
+        "result": result,
+        "authority_repo_root": tmp_path / "destination",
+        "run_dir": run_dir,
+    }
+    assert packet_calls == [(run_dir, repo_root())]
+    output = json.loads(capsys.readouterr().out)
+    assert output["operation"] == "ingest"
 
 
 def test_serialized_reuse_cli_allows_qualification_without_frontier(

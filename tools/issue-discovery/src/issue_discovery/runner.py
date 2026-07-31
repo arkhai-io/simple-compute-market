@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
-from issue_discovery import capacity_outcomes, capacity_roles
+from issue_discovery import capacity_findings, capacity_outcomes, capacity_roles
 from issue_discovery.artifacts import ArtifactStore, utc_now_iso
 from issue_discovery.clean_room import (
     CleanRoomSequence,
@@ -17,7 +17,8 @@ from issue_discovery.clean_room import (
 )
 from issue_discovery.capacity import (
     CapacityValidationError,
-    ingest_finding,
+    resolve_pinned_profile_registry,
+    resolve_pinned_profile_stage,
     resolve_pinned_scenario,
 )
 from issue_discovery.collectors import CollectorRunner, load_collectors
@@ -113,6 +114,18 @@ def _require_expected_scm_ref(
         raise CapacityValidationError(
             f"{label} SCM ref does not match the selected campaign ref"
         )
+
+
+def _require_sha256(value: object, *, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise CapacityValidationError(
+            f"{label} must be 64 lowercase hexadecimal characters"
+        )
+    return value
 
 
 def _validated_role_plan(
@@ -825,6 +838,103 @@ def _validated_capacity_result_context(
     )
 
 
+def _validated_capacity_result_with_dependencies(
+    context_manifest: Path,
+    repo_root: Path,
+    *,
+    evaluation_policy: Path,
+    predecessor_context: Path | None = None,
+    reuse_baseline_context: Path | None = None,
+    buyer_frontier: Path | None = None,
+    buyer_result_contexts: Sequence[Path] = (),
+    prior_seller_contexts: Sequence[Path] = (),
+    expected_scm_ref: str,
+) -> _ValidatedCapacityResultContext:
+    """Reconstruct one result and every progression authority it depends on."""
+    policy = _validated_evaluation_policy(
+        evaluation_policy,
+        repo_root,
+        expected_scm_ref=expected_scm_ref,
+    )
+    if buyer_frontier is None and (
+        buyer_result_contexts
+        or reuse_baseline_context is not None
+        or prior_seller_contexts
+    ):
+        raise CapacityValidationError(
+            "progression contexts require a buyer-frontier artifact"
+        )
+    if buyer_frontier is not None:
+        buyer_results = tuple(
+            _validated_capacity_result_context(
+                buyer_context,
+                repo_root,
+                evaluation_policy=policy,
+                expected_scm_ref=expected_scm_ref,
+            ).result
+            for buyer_context in buyer_result_contexts
+        )
+        frontier = capacity_outcomes.validate_buyer_frontier_receipt(
+            _strict_capacity_object(
+                buyer_frontier,
+                label="buyer frontier",
+            ),
+            repo_root,
+            evaluation_policy=policy,
+            results=buyer_results,
+            expected_scm_ref=expected_scm_ref,
+        )
+    else:
+        frontier = None
+    predecessor = (
+        _validated_capacity_result_context(
+            predecessor_context,
+            repo_root,
+            evaluation_policy=policy,
+            expected_scm_ref=expected_scm_ref,
+            buyer_frontier=frontier,
+        ).result
+        if predecessor_context is not None
+        else None
+    )
+    reuse_baseline = (
+        _validated_capacity_result_context(
+            reuse_baseline_context,
+            repo_root,
+            evaluation_policy=policy,
+            expected_scm_ref=expected_scm_ref,
+            predecessor=predecessor,
+        ).result
+        if reuse_baseline_context is not None
+        else None
+    )
+    prior_seller_results: list[capacity_outcomes.ValidatedCapacityResult] = []
+    for seller_context in prior_seller_contexts:
+        prior_seller_results.append(
+            _validated_capacity_result_context(
+                seller_context,
+                repo_root,
+                evaluation_policy=policy,
+                expected_scm_ref=expected_scm_ref,
+                buyer_frontier=frontier,
+                reuse_baseline=reuse_baseline,
+                prior_seller_results=tuple(prior_seller_results),
+            ).result
+        )
+    return _validated_capacity_result_context(
+        context_manifest,
+        repo_root,
+        evaluation_policy=policy,
+        expected_scm_ref=expected_scm_ref,
+        predecessor=(predecessor if reuse_baseline is None else None),
+        buyer_frontier=(
+            frontier if predecessor is None or reuse_baseline is not None else None
+        ),
+        reuse_baseline=reuse_baseline,
+        prior_seller_results=tuple(prior_seller_results),
+    )
+
+
 @dataclass
 class RunState:
     phase_status: dict[str, str] = field(default_factory=dict)
@@ -905,20 +1015,40 @@ class DiscoveryRunner:
         )
 
     def issue_list(self, run_dir: Path) -> int:
-        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
-        for candidate in repository.list():
-            labels = ",".join(candidate.get("labels", []))
-            print(
-                f"{candidate['fingerprint']}\t{candidate.get('state', 'unknown')}\t"
-                f"{candidate['classification']}\t"
-                f"{candidate['phase']}\t{labels}\t{candidate['title']}"
-            )
+        repository = IssueRepository(run_dir, repo_root=self.repo_root)
+        try:
+            candidates = repository.list()
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
+            print(str(exc))
+            return 2
+        for candidate in candidates:
+            try:
+                labels = ",".join(candidate.get("labels", []))
+                fingerprint = str(candidate["fingerprint"])
+                candidate_id = str(candidate.get("candidate_id") or fingerprint)
+                identity = (
+                    fingerprint
+                    if candidate_id == fingerprint
+                    else f"{candidate_id}\t{fingerprint}"
+                )
+                print(
+                    f"{identity}\t{candidate.get('state', 'unknown')}\t"
+                    f"{candidate['classification']}\t"
+                    f"{candidate['phase']}\t{labels}\t{candidate['title']}"
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                print(f"invalid issue candidate: {exc}")
+                return 2
         return 0
 
     def issue_show(self, run_dir: Path, fingerprint: str) -> int:
-        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
-        body_path = repository.body_path(fingerprint)
-        print(body_path.read_text(encoding="utf-8"), end="")
+        repository = IssueRepository(run_dir, repo_root=self.repo_root)
+        try:
+            body = repository.read_body(fingerprint)
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
+            print(str(exc))
+            return 2
+        print(body, end="")
         return 0
 
     def issue_create(
@@ -930,7 +1060,7 @@ class DiscoveryRunner:
         destination_repo_root: Path | None = None,
     ) -> int:
         repository = IssueRepository(
-            run_dir.resolve(),
+            run_dir,
             repo_root=(destination_repo_root or self.repo_root),
             policy_root=self.repo_root,
         )
@@ -939,10 +1069,10 @@ class DiscoveryRunner:
     def issue_propose_fix(
         self, run_dir: Path, fingerprint: str, head_branch: str
     ) -> int:
-        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
+        repository = IssueRepository(run_dir, repo_root=self.repo_root)
         try:
             path = repository.propose_fix(fingerprint, head_branch)
-        except (KeyError, ValueError) as exc:
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
             print(str(exc))
             return 2
         print(path)
@@ -951,10 +1081,10 @@ class DiscoveryRunner:
     def issue_transition(
         self, run_dir: Path, fingerprint: str, state: str, detail: str
     ) -> int:
-        repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
+        repository = IssueRepository(run_dir, repo_root=self.repo_root)
         try:
             repository.transition(fingerprint, state, detail)
-        except (KeyError, ValueError) as exc:
+        except (CapacityValidationError, KeyError, OSError, ValueError) as exc:
             print(str(exc))
             return 2
         print(f"capacity finding lifecycle: {fingerprint} -> {state}")
@@ -1004,18 +1134,371 @@ class DiscoveryRunner:
         print(resolved.scenario_sha256)
         return 0
 
-    def capacity_finding_ingest(self, run_dir: Path, finding: Path) -> int:
+    def capacity_profile_validate(
+        self,
+        profile: str,
+        *,
+        scm_ref: str,
+        expected_sha256: str,
+        expected_raw_sha256: str,
+    ) -> int:
+        return self.capacity_profile(
+            profile,
+            scm_ref=scm_ref,
+            expected_sha256=expected_sha256,
+            expected_raw_sha256=expected_raw_sha256,
+            operation="validate",
+        )
+
+    def capacity_profile_sha256(self, profile: str, *, scm_ref: str) -> int:
+        return self.capacity_profile(
+            profile,
+            scm_ref=scm_ref,
+            operation="sha256",
+        )
+
+    def capacity_profile(
+        self,
+        profile: str,
+        *,
+        scm_ref: str,
+        operation: str,
+        expected_sha256: str | None = None,
+        expected_raw_sha256: str | None = None,
+    ) -> int:
         try:
-            ingested = ingest_finding(
-                run_dir.resolve(),
-                finding.resolve(),
+            if operation == "validate":
+                _require_sha256(
+                    expected_sha256,
+                    label="declared profile SHA-256",
+                )
+                _require_sha256(
+                    expected_raw_sha256,
+                    label="declared profile raw SHA-256",
+                )
+            resolved = resolve_pinned_profile_registry(
                 self.repo_root,
+                scm_ref,
+                profile,
+                expected_sha256=expected_sha256,
             )
+            if (
+                expected_raw_sha256 is not None
+                and resolved.raw_sha256 != expected_raw_sha256
+            ):
+                raise CapacityValidationError(
+                    "declared profile raw SHA-256 does not match pinned registry bytes"
+                )
         except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
-            print(f"capacity finding invalid: {exc}")
-            return 1
-        print(f"capacity finding ingested: {ingested['finding_id']}")
-        return 0
+            return _capacity_failure("capacity-profile-registry", exc)
+        return _capacity_success(
+            artifact_kind="capacity-profile-registry",
+            operation=operation,
+            sha256=resolved.canonical_sha256,
+            identity={
+                "profile_id": resolved.profile_id,
+                "profile_registry": resolved.registry,
+                "raw_sha256": resolved.raw_sha256,
+                "relative_path": resolved.relative_path,
+                "scm_ref": resolved.scm_ref,
+            },
+        )
+
+    def capacity_profile_stage_validate(
+        self,
+        stage_id: str,
+        *,
+        scm_ref: str,
+        expected_sha256: str,
+        expected_registry_sha256: str | None = None,
+        expected_registry_raw_sha256: str | None = None,
+    ) -> int:
+        return self.capacity_profile_stage(
+            stage_id,
+            scm_ref=scm_ref,
+            expected_sha256=expected_sha256,
+            expected_registry_sha256=expected_registry_sha256,
+            expected_registry_raw_sha256=expected_registry_raw_sha256,
+            operation="validate",
+        )
+
+    def capacity_profile_stage_sha256(
+        self,
+        stage_id: str,
+        *,
+        scm_ref: str,
+    ) -> int:
+        return self.capacity_profile_stage(
+            stage_id,
+            scm_ref=scm_ref,
+            operation="sha256",
+        )
+
+    def capacity_profile_stage(
+        self,
+        stage_id: str,
+        *,
+        scm_ref: str,
+        operation: str,
+        expected_sha256: str | None = None,
+        expected_registry_sha256: str | None = None,
+        expected_registry_raw_sha256: str | None = None,
+    ) -> int:
+        try:
+            if operation == "validate":
+                _require_sha256(
+                    expected_sha256,
+                    label="declared profile-stage SHA-256",
+                )
+            stage = resolve_pinned_profile_stage(
+                self.repo_root,
+                scm_ref,
+                stage_id,
+                expected_sha256=expected_sha256,
+            )
+            registry = None
+            expected_registry = (
+                expected_registry_sha256,
+                expected_registry_raw_sha256,
+            )
+            if stage.registry_sha256 is None:
+                if any(value is not None for value in expected_registry):
+                    raise CapacityValidationError(
+                        "standalone profile-stage has no registry digest authority"
+                    )
+            else:
+                if operation == "validate" and any(
+                    value is None for value in expected_registry
+                ):
+                    raise CapacityValidationError(
+                        "registry-backed profile-stage validation requires exact "
+                        "canonical and raw registry SHA-256 values"
+                    )
+                if operation == "validate":
+                    _require_sha256(
+                        expected_registry_sha256,
+                        label="declared profile registry SHA-256",
+                    )
+                    _require_sha256(
+                        expected_registry_raw_sha256,
+                        label="declared profile registry raw SHA-256",
+                    )
+                registry = resolve_pinned_profile_registry(
+                    self.repo_root,
+                    scm_ref,
+                    expected_sha256=expected_registry_sha256,
+                )
+                if registry.canonical_sha256 != stage.registry_sha256:
+                    raise CapacityValidationError(
+                        "profile-stage registry digest does not match pinned registry"
+                    )
+                if (
+                    expected_registry_raw_sha256 is not None
+                    and registry.raw_sha256 != expected_registry_raw_sha256
+                ):
+                    raise CapacityValidationError(
+                        "declared profile registry raw SHA-256 does not match "
+                        "pinned registry bytes"
+                    )
+        except (CapacityValidationError, json.JSONDecodeError, OSError) as exc:
+            return _capacity_failure("capacity-profile-stage", exc)
+
+        scenario = stage.scenario
+        return _capacity_success(
+            artifact_kind="capacity-profile-stage",
+            operation=operation,
+            sha256=stage.canonical_sha256,
+            identity={
+                "profile_registry_path": (
+                    registry.relative_path if registry is not None else None
+                ),
+                "profile_registry_raw_sha256": (
+                    registry.raw_sha256 if registry is not None else None
+                ),
+                "profile_registry_sha256": (
+                    registry.canonical_sha256 if registry is not None else None
+                ),
+                "profile_stage": stage.stage,
+                "profile_stage_id": stage.stage_id,
+                "relative_path": stage.relative_path,
+                "scenario": scenario.scenario if scenario is not None else None,
+                "scenario_id": (scenario.scenario_id if scenario is not None else None),
+                "scenario_path": (
+                    scenario.relative_path if scenario is not None else None
+                ),
+                "scenario_sha256": (
+                    scenario.scenario_sha256 if scenario is not None else None
+                ),
+                "scm_ref": stage.scm_ref,
+            },
+        )
+
+    def capacity_finding_validate(
+        self,
+        finding: Path,
+        context_manifest: Path,
+        *,
+        destination_repo_root: Path,
+        evidence_root: Path,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_finding(
+            finding,
+            context_manifest,
+            destination_repo_root=destination_repo_root,
+            evidence_root=evidence_root,
+            evaluation_policy=evaluation_policy,
+            predecessor_context=predecessor_context,
+            reuse_baseline_context=reuse_baseline_context,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            prior_seller_contexts=prior_seller_contexts,
+            expected_scm_ref=expected_scm_ref,
+            operation="validate",
+        )
+
+    def capacity_finding_sha256(
+        self,
+        finding: Path,
+        context_manifest: Path,
+        *,
+        destination_repo_root: Path,
+        evidence_root: Path,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        return self.capacity_finding(
+            finding,
+            context_manifest,
+            destination_repo_root=destination_repo_root,
+            evidence_root=evidence_root,
+            evaluation_policy=evaluation_policy,
+            predecessor_context=predecessor_context,
+            reuse_baseline_context=reuse_baseline_context,
+            buyer_frontier=buyer_frontier,
+            buyer_result_contexts=buyer_result_contexts,
+            prior_seller_contexts=prior_seller_contexts,
+            expected_scm_ref=expected_scm_ref,
+            operation="sha256",
+        )
+
+    def capacity_finding(
+        self,
+        finding: Path,
+        context_manifest: Path,
+        *,
+        destination_repo_root: Path,
+        evidence_root: Path,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+        operation: str,
+    ) -> int:
+        try:
+            result_context = _validated_capacity_result_with_dependencies(
+                context_manifest,
+                self.repo_root,
+                evaluation_policy=evaluation_policy,
+                predecessor_context=predecessor_context,
+                reuse_baseline_context=reuse_baseline_context,
+                buyer_frontier=buyer_frontier,
+                buyer_result_contexts=buyer_result_contexts,
+                prior_seller_contexts=prior_seller_contexts,
+                expected_scm_ref=expected_scm_ref,
+            )
+            validated = capacity_findings.validate_capacity_finding(
+                _strict_capacity_object(finding, label="capacity finding"),
+                result_context.result,
+                authority_repo_root=destination_repo_root,
+                evidence_root=evidence_root,
+            )
+        except (CapacityValidationError, OSError) as exc:
+            return _capacity_failure("capacity-finding", exc)
+        return _capacity_success(
+            artifact_kind="capacity-finding",
+            operation=operation,
+            sha256=validated.canonical_sha256,
+            identity={
+                "destination_repo": validated.destination_repo,
+                "finding_id": validated.finding_id,
+                "fingerprint": validated.fingerprint,
+                "profile_stage_id": validated.profile_stage_id,
+                "ready_to_file": validated.ready_to_file,
+                "result_id": validated.result_id,
+                "result_sha256": validated.result_sha256,
+                "scenario_id": validated.scenario_id,
+                "scm_contract_ref": validated.scm_contract_ref,
+            },
+        )
+
+    def capacity_finding_ingest(
+        self,
+        run_dir: Path,
+        finding: Path,
+        context_manifest: Path,
+        *,
+        destination_repo_root: Path,
+        evaluation_policy: Path,
+        predecessor_context: Path | None = None,
+        reuse_baseline_context: Path | None = None,
+        buyer_frontier: Path | None = None,
+        buyer_result_contexts: Sequence[Path] = (),
+        prior_seller_contexts: Sequence[Path] = (),
+        expected_scm_ref: str,
+    ) -> int:
+        try:
+            result_context = _validated_capacity_result_with_dependencies(
+                context_manifest,
+                self.repo_root,
+                evaluation_policy=evaluation_policy,
+                predecessor_context=predecessor_context,
+                reuse_baseline_context=reuse_baseline_context,
+                buyer_frontier=buyer_frontier,
+                buyer_result_contexts=buyer_result_contexts,
+                prior_seller_contexts=prior_seller_contexts,
+                expected_scm_ref=expected_scm_ref,
+            )
+            ingested = capacity_findings.ingest_capacity_finding(
+                _strict_capacity_object(finding, label="capacity finding"),
+                result_context.result,
+                authority_repo_root=destination_repo_root,
+                run_dir=run_dir,
+            )
+            IssuePacketGenerator(run_dir, repo_root=self.repo_root).generate()
+        except (CapacityValidationError, OSError, ValueError) as exc:
+            return _capacity_failure("capacity-finding", exc)
+        validated = ingested.finding
+        return _capacity_success(
+            artifact_kind="capacity-finding",
+            operation="ingest",
+            sha256=validated.canonical_sha256,
+            identity={
+                "destination_repo": validated.destination_repo,
+                "finding_id": validated.finding_id,
+                "fingerprint": validated.fingerprint,
+                "profile_stage_id": validated.profile_stage_id,
+                "ready_to_file": validated.ready_to_file,
+                "result_id": validated.result_id,
+                "result_sha256": validated.result_sha256,
+                "scenario_id": validated.scenario_id,
+                "scm_contract_ref": validated.scm_contract_ref,
+            },
+        )
 
     def capacity_evaluation_policy_validate(
         self,
@@ -1216,89 +1699,16 @@ class DiscoveryRunner:
         expected_scm_ref: str,
     ) -> int:
         try:
-            policy = _validated_evaluation_policy(
-                evaluation_policy,
-                self.repo_root,
-                expected_scm_ref=expected_scm_ref,
-            )
-            if buyer_frontier is None and (
-                buyer_result_contexts
-                or reuse_baseline_context is not None
-                or prior_seller_contexts
-            ):
-                raise CapacityValidationError(
-                    "progression contexts require a buyer-frontier artifact"
-                )
-            if buyer_frontier is not None:
-                buyer_results = tuple(
-                    _validated_capacity_result_context(
-                        buyer_context,
-                        self.repo_root,
-                        evaluation_policy=policy,
-                        expected_scm_ref=expected_scm_ref,
-                    ).result
-                    for buyer_context in buyer_result_contexts
-                )
-                frontier = capacity_outcomes.validate_buyer_frontier_receipt(
-                    _strict_capacity_object(
-                        buyer_frontier,
-                        label="buyer frontier",
-                    ),
-                    self.repo_root,
-                    evaluation_policy=policy,
-                    results=buyer_results,
-                    expected_scm_ref=expected_scm_ref,
-                )
-            else:
-                frontier = None
-            predecessor = (
-                _validated_capacity_result_context(
-                    predecessor_context,
-                    self.repo_root,
-                    evaluation_policy=policy,
-                    expected_scm_ref=expected_scm_ref,
-                    buyer_frontier=frontier,
-                ).result
-                if predecessor_context is not None
-                else None
-            )
-            reuse_baseline = (
-                _validated_capacity_result_context(
-                    reuse_baseline_context,
-                    self.repo_root,
-                    evaluation_policy=policy,
-                    expected_scm_ref=expected_scm_ref,
-                    predecessor=predecessor,
-                ).result
-                if reuse_baseline_context is not None
-                else None
-            )
-            prior_seller_results: list[capacity_outcomes.ValidatedCapacityResult] = []
-            for seller_context in prior_seller_contexts:
-                prior_seller_results.append(
-                    _validated_capacity_result_context(
-                        seller_context,
-                        self.repo_root,
-                        evaluation_policy=policy,
-                        expected_scm_ref=expected_scm_ref,
-                        buyer_frontier=frontier,
-                        reuse_baseline=reuse_baseline,
-                        prior_seller_results=tuple(prior_seller_results),
-                    ).result
-                )
-            context = _validated_capacity_result_context(
+            context = _validated_capacity_result_with_dependencies(
                 context_manifest,
                 self.repo_root,
-                evaluation_policy=policy,
+                evaluation_policy=evaluation_policy,
+                predecessor_context=predecessor_context,
+                reuse_baseline_context=reuse_baseline_context,
+                buyer_frontier=buyer_frontier,
+                buyer_result_contexts=buyer_result_contexts,
+                prior_seller_contexts=prior_seller_contexts,
                 expected_scm_ref=expected_scm_ref,
-                predecessor=(predecessor if reuse_baseline is None else None),
-                buyer_frontier=(
-                    frontier
-                    if predecessor is None or reuse_baseline is not None
-                    else None
-                ),
-                reuse_baseline=reuse_baseline,
-                prior_seller_results=tuple(prior_seller_results),
             )
         except CapacityValidationError as exc:
             return _capacity_failure("capacity-result", exc)
@@ -2261,7 +2671,10 @@ class DiscoveryRunner:
             }
         )
         store.write_json("manifest.json", redactor.redact_mapping(manifest))
-        candidates = IssuePacketGenerator(store.run_dir).generate()
+        candidates = IssuePacketGenerator(
+            store.run_dir,
+            repo_root=self.repo_root,
+        ).generate()
         print(f"issue candidates: {len(candidates)}")
         print(f"status: {status}")
         return 1 if state.failed else 0

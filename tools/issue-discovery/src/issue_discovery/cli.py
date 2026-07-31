@@ -236,6 +236,40 @@ def _add_capacity_result_artifact_args(
     parser.add_argument("--expected-scm-ref", required=True)
 
 
+def _add_capacity_finding_artifact_args(
+    parser: argparse.ArgumentParser,
+    *,
+    ingest: bool,
+) -> None:
+    if ingest:
+        parser.add_argument(
+            "run_dir",
+            type=Path,
+            help=(
+                "Run directory used as the one evidence root and immutable "
+                "occurrence store."
+            ),
+        )
+    parser.add_argument("finding", type=Path)
+    _add_capacity_result_artifact_args(parser)
+    parser.add_argument(
+        "--destination-repo-root",
+        type=Path,
+        required=True,
+        help=(
+            "Exact destination Git worktree used to verify repository, branch, "
+            "upstream, and inbound first-parent authority."
+        ),
+    )
+    if not ingest:
+        parser.add_argument(
+            "--evidence-root",
+            type=Path,
+            required=True,
+            help="The one explicit root below which finding evidence is resolved.",
+        )
+
+
 def _add_serialized_reuse_artifact_args(
     parser: argparse.ArgumentParser,
 ) -> None:
@@ -437,12 +471,123 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scenario_hash.set_defaults(handler=_capacity_scenario_sha256)
 
+    profile_validate = capacity_subparsers.add_parser(
+        "profile-validate",
+        help="Validate the exact pinned public VM capacity profile registry.",
+    )
+    profile_validate.add_argument(
+        "profile",
+        help="Known repository-relative capacity-profile registry path.",
+    )
+    profile_validate.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the profile registry.",
+    )
+    profile_validate.add_argument(
+        "--expected-sha256",
+        required=True,
+        help="Expected canonical SHA-256 of the pinned profile registry.",
+    )
+    profile_validate.add_argument(
+        "--expected-raw-sha256",
+        required=True,
+        help="Expected SHA-256 of the exact pinned profile-registry bytes.",
+    )
+    profile_validate.set_defaults(handler=_capacity_profile_validate)
+
+    profile_hash = capacity_subparsers.add_parser(
+        "profile-sha256",
+        help=(
+            "Validate a pinned public VM capacity profile registry and print "
+            "its canonical and raw SHA-256 authority."
+        ),
+    )
+    profile_hash.add_argument(
+        "profile",
+        help="Known repository-relative capacity-profile registry path.",
+    )
+    profile_hash.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the profile registry.",
+    )
+    profile_hash.set_defaults(handler=_capacity_profile_sha256)
+
+    profile_stage_validate = capacity_subparsers.add_parser(
+        "profile-stage-validate",
+        help="Validate one exact pinned public VM capacity profile stage.",
+    )
+    profile_stage_validate.add_argument("stage_id")
+    profile_stage_validate.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the profile stage.",
+    )
+    profile_stage_validate.add_argument(
+        "--expected-sha256",
+        required=True,
+        help="Expected canonical SHA-256 of the pinned profile stage.",
+    )
+    profile_stage_validate.add_argument(
+        "--expected-registry-sha256",
+        help=(
+            "Expected canonical profile-registry SHA-256. Required with the raw "
+            "digest for registry-backed stages and omitted for the standalone mock."
+        ),
+    )
+    profile_stage_validate.add_argument(
+        "--expected-registry-raw-sha256",
+        help=(
+            "Expected raw profile-registry SHA-256. Required with the canonical "
+            "digest for registry-backed stages and omitted for the standalone mock."
+        ),
+    )
+    profile_stage_validate.set_defaults(handler=_capacity_profile_stage_validate)
+
+    profile_stage_hash = capacity_subparsers.add_parser(
+        "profile-stage-sha256",
+        help=(
+            "Validate one pinned public VM capacity profile stage and print its "
+            "stage, registry, and scenario hash context."
+        ),
+    )
+    profile_stage_hash.add_argument("stage_id")
+    profile_stage_hash.add_argument(
+        "--scm-ref",
+        required=True,
+        help="Exact 40-character SCM commit containing the profile stage.",
+    )
+    profile_stage_hash.set_defaults(handler=_capacity_profile_stage_sha256)
+
+    finding_validate = capacity_subparsers.add_parser(
+        "finding-validate",
+        help=(
+            "Reconstruct a VM result and validate one sanitized finding "
+            "occurrence without mutation."
+        ),
+    )
+    _add_capacity_finding_artifact_args(finding_validate, ingest=False)
+    finding_validate.set_defaults(handler=_capacity_finding_validate)
+
+    finding_hash = capacity_subparsers.add_parser(
+        "finding-sha256",
+        help=(
+            "Reconstruct a VM result, validate one finding, and print its "
+            "canonical SHA-256 authority."
+        ),
+    )
+    _add_capacity_finding_artifact_args(finding_hash, ingest=False)
+    finding_hash.set_defaults(handler=_capacity_finding_sha256)
+
     finding_ingest = capacity_subparsers.add_parser(
         "finding-ingest",
-        help="Validate and ingest a sanitized capacity finding occurrence.",
+        help=(
+            "Validate and create-once ingest a sanitized capacity finding "
+            "occurrence without publishing it."
+        ),
     )
-    finding_ingest.add_argument("run_dir", type=Path)
-    finding_ingest.add_argument("finding", type=Path)
+    _add_capacity_finding_artifact_args(finding_ingest, ingest=True)
     finding_ingest.set_defaults(handler=_capacity_finding_ingest)
 
     evaluation_policy_validate = capacity_subparsers.add_parser(
@@ -813,10 +958,76 @@ def _capacity_scenario_sha256(args: argparse.Namespace) -> int:
     )
 
 
+def _capacity_profile_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_profile_validate(
+        args.profile,
+        scm_ref=args.scm_ref,
+        expected_sha256=args.expected_sha256,
+        expected_raw_sha256=args.expected_raw_sha256,
+    )
+
+
+def _capacity_profile_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_profile_sha256(
+        args.profile,
+        scm_ref=args.scm_ref,
+    )
+
+
+def _capacity_profile_stage_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_profile_stage_validate(
+        args.stage_id,
+        scm_ref=args.scm_ref,
+        expected_sha256=args.expected_sha256,
+        expected_registry_sha256=args.expected_registry_sha256,
+        expected_registry_raw_sha256=args.expected_registry_raw_sha256,
+    )
+
+
+def _capacity_profile_stage_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_profile_stage_sha256(
+        args.stage_id,
+        scm_ref=args.scm_ref,
+    )
+
+
+def _capacity_finding_paths(
+    args: argparse.Namespace,
+    *,
+    include_evidence_root: bool,
+) -> dict[str, object]:
+    paths = _capacity_result_paths(args)
+    paths["destination_repo_root"] = _repo_path(
+        args,
+        args.destination_repo_root,
+    )
+    if include_evidence_root:
+        paths["evidence_root"] = _repo_path(args, args.evidence_root)
+    return paths
+
+
+def _capacity_finding_validate(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_finding_validate(
+        _repo_path(args, args.finding),
+        _repo_path(args, args.context_manifest),
+        **_capacity_finding_paths(args, include_evidence_root=True),
+    )
+
+
+def _capacity_finding_sha256(args: argparse.Namespace) -> int:
+    return DiscoveryRunner(repo_root=args.repo_root).capacity_finding_sha256(
+        _repo_path(args, args.finding),
+        _repo_path(args, args.context_manifest),
+        **_capacity_finding_paths(args, include_evidence_root=True),
+    )
+
+
 def _capacity_finding_ingest(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).capacity_finding_ingest(
         _run_dir(args),
         _repo_path(args, args.finding),
+        _repo_path(args, args.context_manifest),
+        **_capacity_finding_paths(args, include_evidence_root=False),
     )
 
 
