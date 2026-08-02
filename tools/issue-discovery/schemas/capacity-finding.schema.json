@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-finding-v1.json",
+  "title": "Sanitized SCM VM/G1 capacity finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fingerprint",
+    "classification",
+    "summary",
+    "public_context",
+    "scenario",
+    "occurrence",
+    "failure",
+    "correlations",
+    "cancellation",
+    "cleanup",
+    "evidence",
+    "publication"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "classification": {
+      "enum": [
+        "harness-defect",
+        "possible-product-defect",
+        "environment-provider-issue",
+        "cleanup-failure"
+      ]
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "public_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "branch", "sha"],
+      "properties": {
+        "repository": { "const": "arkhai-io/simple-compute-market" },
+        "branch": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sha256"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "occurrence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "observed_at",
+        "termination",
+        "timeout_seconds",
+        "request_ordinal"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "termination": {
+          "enum": [
+            "completed",
+            "timeout",
+            "cancelled",
+            "partial-launch",
+            "role-failure",
+            "controller-failure"
+          ]
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "request_ordinal": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 8
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "location", "stable_evidence_summary"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$",
+          "maxLength": 100
+        },
+        "location": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "maxLength": 120
+        },
+        "stable_evidence_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 480
+        }
+      }
+    },
+    "correlations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservation_fulfillment",
+        "terminal_status",
+        "executor_ref_target",
+        "versioned_result",
+        "fulfillment_teardown"
+      ],
+      "properties": {
+        "reservation_fulfillment": {
+          "enum": ["satisfied", "failed", "not-observed", "not-applicable"]
+        },
+        "terminal_status": {
+          "enum": ["satisfied", "failed", "not-observed", "not-applicable"]
+        },
+        "executor_ref_target": {
+          "enum": ["satisfied", "failed", "not-observed", "not-applicable"]
+        },
+        "versioned_result": {
+          "enum": ["satisfied", "failed", "not-observed", "not-applicable"]
+        },
+        "fulfillment_teardown": {
+          "enum": ["satisfied", "failed", "not-observed", "not-applicable"]
+        }
+      }
+    },
+    "cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "status"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "status": { "enum": ["not-required", "succeeded", "failed"] }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "status", "zero_residue"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "status": { "enum": ["succeeded", "failed", "not-attempted"] },
+        "zero_residue": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "summary"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*$",
+            "maxLength": 80
+          },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 240 }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "reason"],
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "reason": { "enum": ["cleanup-proven", "cleanup-failed"] }
+      }
+    }
+  }
+}

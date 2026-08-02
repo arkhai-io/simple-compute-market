@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "fingerprint": "68636663a02c82f0a0ea0a55580c96cee270853221e7d68f4a732b2b2bb5f3b3",
+  "classification": "possible-product-defect",
+  "summary": "Observed 2 successful durable fulfillments where the finite scenario permits 1.",
+  "public_context": {
+    "repository": "arkhai-io/simple-compute-market",
+    "branch": "feat/issue-discovery-harness-post-pools",
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "scenario": {
+    "id": "q2-b2-s1-g1",
+    "sha256": "77aed0729971232f19814af79084895196f42c681c6e52db46445b355bfbaa42"
+  },
+  "occurrence": {
+    "run_id": "example-run-001",
+    "observed_at": "2026-08-02T00:00:00Z",
+    "termination": "completed",
+    "timeout_seconds": 900,
+    "request_ordinal": null
+  },
+  "failure": {
+    "code": "unexpected-success-count",
+    "location": "observations",
+    "stable_evidence_summary": "observed 2 successful durable fulfillments where the finite scenario permits 1."
+  },
+  "correlations": {
+    "reservation_fulfillment": "satisfied",
+    "terminal_status": "satisfied",
+    "executor_ref_target": "satisfied",
+    "versioned_result": "satisfied",
+    "fulfillment_teardown": "satisfied"
+  },
+  "cancellation": {
+    "attempted": true,
+    "status": "succeeded"
+  },
+  "cleanup": {
+    "attempted": true,
+    "status": "succeeded",
+    "zero_residue": true
+  },
+  "evidence": [
+    {
+      "kind": "sanitized-assertion",
+      "summary": "Sanitized assertions for unexpected-success-count."
+    }
+  ],
+  "publication": {
+    "eligible": true,
+    "reason": "cleanup-proven"
+  }
+}

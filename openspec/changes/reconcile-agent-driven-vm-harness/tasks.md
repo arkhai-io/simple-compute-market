@@ -28,14 +28,14 @@
 
 ## 3. Current lifecycle and finding contract
 
-- [ ] 3.1 Add `capacity-finding.schema.json` and a sanitized example using only
+- [x] 3.1 Add `capacity-finding.schema.json` and a sanitized example using only
   public branch/SHA/scenario/run metadata and correlation assertions.
-- [ ] 3.2 Evaluate opaque reservation/fulfillment correlation, status/result,
+- [x] 3.2 Evaluate opaque reservation/fulfillment correlation, status/result,
   executor assertion, teardown, cancellation, cleanup, and exact expected
   scarcity without embedding product/provider internals.
-- [ ] 3.3 Implement stable sanitized fingerprinting that excludes occurrence
+- [x] 3.3 Implement stable sanitized fingerprinting that excludes occurrence
   metadata, private identity, credentials, paths, and raw logs.
-- [ ] 3.4 Test success, exact scarcity suppression, other-409 classification,
+- [x] 3.4 Test success, exact scarcity suppression, other-409 classification,
   product/harness/environment classification, cleanup failure retention, and
   negative privacy scans.
 
