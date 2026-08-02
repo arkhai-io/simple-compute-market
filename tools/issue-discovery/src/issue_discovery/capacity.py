@@ -46,6 +46,7 @@ _AGENT_RECEIPTS = frozenset(
         "buyer.demand-frozen",
         "buyer.demand-invoked",
         "buyer.quickstart-read",
+        "buyer.same-session-invocation",
         "cleanup.recorded",
         "controller.authority-checked",
         "controller.observation-recorded",
@@ -65,7 +66,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "host-agent",
         "arrival": "none",
         "barrier": 0,
-        "persistent": False,
+        "listing_assignment": "none",
+        "request_assignment": "none",
+        "same_session": False,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (0, 0),
         "receipts": _HOST_RECEIPTS,
@@ -75,7 +79,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "controller-reference",
         "arrival": "none",
         "barrier": 0,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "controller-reference",
+        "same_session": False,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 0),
         "receipts": _REFERENCE_RECEIPTS,
@@ -85,7 +92,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 1,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 0),
         "receipts": _AGENT_RECEIPTS,
@@ -95,7 +105,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 2,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 1),
         "receipts": _AGENT_RECEIPTS,
@@ -105,7 +118,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 4,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 3),
         "receipts": _AGENT_RECEIPTS,
@@ -115,7 +131,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 8,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 7),
         "receipts": _AGENT_RECEIPTS,
@@ -125,7 +144,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "serialized-reuse",
         "barrier": 0,
-        "persistent": True,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "single-persistent-buyer",
+        "same_session": True,
+        "persistent_across_requests": True,
         "teardown_between": True,
         "outcomes": (2, 0),
         "receipts": _AGENT_RECEIPTS,
@@ -135,7 +157,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 2,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 1),
         "receipts": _AGENT_RECEIPTS,
@@ -145,7 +170,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 4,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 3),
         "receipts": _AGENT_RECEIPTS,
@@ -155,7 +183,10 @@ _STAGE_CONTRACTS: dict[str, dict[str, Any]] = {
         "ownership": "substantive-agents",
         "arrival": "release-barrier",
         "barrier": 4,
-        "persistent": False,
+        "listing_assignment": "seller-ordinal",
+        "request_assignment": "buyer-ordinal",
+        "same_session": True,
+        "persistent_across_requests": False,
         "teardown_between": False,
         "outcomes": (1, 3),
         "receipts": _AGENT_RECEIPTS,
@@ -171,6 +202,28 @@ _COUNT_KEYS = (
     "requests",
     "physical_gpus",
 )
+
+_Q0_LIFECYCLE = {
+    "applicability": "not-applicable",
+    "reservation_identity": "not-applicable",
+    "fulfillment_identity": "not-applicable",
+    "reservation_fulfillment_correlation_required": False,
+    "terminal_status_required": False,
+    "versioned_result_required": False,
+    "executor_ref_target_correlation": "not-applicable",
+    "fulfillment_teardown_required": False,
+}
+
+_MARKET_LIFECYCLE = {
+    "applicability": "market-request",
+    "reservation_identity": "capacity_reservation_id",
+    "fulfillment_identity": "fulfillment_id",
+    "reservation_fulfillment_correlation_required": True,
+    "terminal_status_required": True,
+    "versioned_result_required": True,
+    "executor_ref_target_correlation": "sanitized-assertion",
+    "fulfillment_teardown_required": True,
+}
 
 
 def _schema_path(repo_root: Path, name: str) -> Path:
@@ -214,12 +267,39 @@ def validate_scenario(scenario: dict[str, Any], repo_root: Path) -> None:
     if sum(distribution) != counts["listings"]:
         errors.append("listings.seller_distribution must sum to counts.listings")
 
+    bindings = scenario["bindings"]
+    if bindings["listing_assignment"] != expected["listing_assignment"]:
+        errors.append(
+            f"{stage} bindings.listing_assignment must be {expected['listing_assignment']}"
+        )
+    if bindings["request_assignment"] != expected["request_assignment"]:
+        errors.append(
+            f"{stage} bindings.request_assignment must be {expected['request_assignment']}"
+        )
+    if (bindings["listing_set_sha256"] is None) is not (counts["listings"] == 0):
+        errors.append(
+            "bindings.listing_set_sha256 must be null exactly when no listings exist"
+        )
+    if (bindings["demand_set_sha256"] is None) is not (counts["requests"] == 0):
+        errors.append(
+            "bindings.demand_set_sha256 must be null exactly when no requests exist"
+        )
+
     role_contract = scenario["role_contract"]
     if role_contract["ownership"] != expected["ownership"]:
         errors.append(f"{stage} role_contract.ownership must be {expected['ownership']}")
-    if role_contract["persistent_buyer_session"] is not expected["persistent"]:
+    if role_contract["same_session_prepare_wait_invoke"] is not expected["same_session"]:
         errors.append(
-            f"{stage} persistent_buyer_session must be {str(expected['persistent']).lower()}"
+            f"{stage} same_session_prepare_wait_invoke must be "
+            f"{str(expected['same_session']).lower()}"
+        )
+    if (
+        role_contract["persistent_across_requests"]
+        is not expected["persistent_across_requests"]
+    ):
+        errors.append(
+            f"{stage} persistent_across_requests must be "
+            f"{str(expected['persistent_across_requests']).lower()}"
         )
     receipts = frozenset(role_contract["required_receipts"])
     if receipts != expected["receipts"]:
@@ -248,6 +328,22 @@ def validate_scenario(scenario: dict[str, Any], repo_root: Path) -> None:
     if sum(outcomes) != counts["requests"]:
         errors.append("expectation outcomes must sum to counts.requests")
 
+    expected_lifecycle = (
+        _Q0_LIFECYCLE if stage == "q0-host-capability" else _MARKET_LIFECYCLE
+    )
+    if scenario["lifecycle"] != expected_lifecycle:
+        errors.append(f"{stage} lifecycle does not match its request applicability")
+    expected_vm_teardown = (
+        "not-applicable" if stage == "q0-host-capability" else "immediate"
+    )
+    if scenario["cleanup"]["vm_teardown"] != expected_vm_teardown:
+        errors.append(f"{stage} cleanup.vm_teardown must be {expected_vm_teardown}")
+    expected_lease = (
+        "not-applicable" if stage == "q0-host-capability" else "backstop-only"
+    )
+    if scenario["cleanup"]["lease"] != expected_lease:
+        errors.append(f"{stage} cleanup.lease must be {expected_lease}")
+
     if scenario["scenario_id"] != stage:
         errors.append("scenario_id must equal the finite stage identifier")
 
@@ -264,5 +360,9 @@ def validate_scenario_file(path: Path, repo_root: Path) -> dict[str, Any]:
 def scenario_sha256(scenario: dict[str, Any]) -> str:
     """Return the SHA-256 of canonical, semantic scenario JSON."""
 
-    canonical = json.dumps(scenario, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    semantic = json.loads(json.dumps(scenario))
+    semantic["role_contract"]["required_receipts"] = sorted(
+        semantic["role_contract"]["required_receipts"]
+    )
+    canonical = json.dumps(semantic, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()

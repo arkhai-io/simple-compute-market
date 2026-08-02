@@ -21,11 +21,19 @@
     "frozen_within_series": true,
     "global_physical_gpu_fence": true
   },
+  "bindings": {
+    "role_id_scheme": "ordinal-v1",
+    "listing_assignment": "seller-ordinal",
+    "request_assignment": "controller-reference",
+    "listing_set_sha256": "7107a400a8dad3664a78b948aaf8d58d0304f21badcc28e116f3b136202f6643",
+    "demand_set_sha256": "7f489c89edbafc5705d5315902a33cf511b23abea94a94c2771022c03640ee7e"
+  },
   "role_contract": {
     "ownership": "controller-reference",
     "buyer_quickstart": "docs/buyer-quickstart.md",
     "seller_quickstart": "docs/seller-quickstart.md",
-    "persistent_buyer_session": false,
+    "same_session_prepare_wait_invoke": false,
+    "persistent_across_requests": false,
     "required_receipts": [
       "cleanup.recorded",
       "controller.authority-checked",
@@ -50,12 +58,14 @@
     }
   },
   "lifecycle": {
+    "applicability": "market-request",
     "reservation_identity": "capacity_reservation_id",
     "fulfillment_identity": "fulfillment_id",
-    "status_required": true,
-    "result_required": true,
-    "executor_correlation": "sanitized-presence-only",
-    "teardown": "fulfillment-driven"
+    "reservation_fulfillment_correlation_required": true,
+    "terminal_status_required": true,
+    "versioned_result_required": true,
+    "executor_ref_target_correlation": "sanitized-assertion",
+    "fulfillment_teardown_required": true
   },
   "cleanup": {
     "required": true,

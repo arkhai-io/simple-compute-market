@@ -14,6 +14,7 @@
     "gpu_assignment",
     "counts",
     "listings",
+    "bindings",
     "role_contract",
     "arrival",
     "expectations",
@@ -83,6 +84,37 @@
         "global_physical_gpu_fence": { "const": true }
       }
     },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role_id_scheme",
+        "listing_assignment",
+        "request_assignment",
+        "listing_set_sha256",
+        "demand_set_sha256"
+      ],
+      "properties": {
+        "role_id_scheme": { "const": "ordinal-v1" },
+        "listing_assignment": { "enum": ["none", "seller-ordinal"] },
+        "request_assignment": {
+          "enum": [
+            "none",
+            "controller-reference",
+            "buyer-ordinal",
+            "single-persistent-buyer"
+          ]
+        },
+        "listing_set_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "demand_set_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
     "role_contract": {
       "type": "object",
       "additionalProperties": false,
@@ -90,7 +122,8 @@
         "ownership",
         "buyer_quickstart",
         "seller_quickstart",
-        "persistent_buyer_session",
+        "same_session_prepare_wait_invoke",
+        "persistent_across_requests",
         "required_receipts"
       ],
       "properties": {
@@ -99,7 +132,8 @@
         },
         "buyer_quickstart": { "const": "docs/buyer-quickstart.md" },
         "seller_quickstart": { "const": "docs/seller-quickstart.md" },
-        "persistent_buyer_session": { "type": "boolean" },
+        "same_session_prepare_wait_invoke": { "type": "boolean" },
+        "persistent_across_requests": { "type": "boolean" },
         "required_receipts": {
           "type": "array",
           "minItems": 3,
@@ -109,6 +143,7 @@
               "buyer.demand-frozen",
               "buyer.demand-invoked",
               "buyer.quickstart-read",
+              "buyer.same-session-invocation",
               "cleanup.recorded",
               "controller.authority-checked",
               "controller.observation-recorded",
@@ -158,21 +193,57 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "applicability",
         "reservation_identity",
         "fulfillment_identity",
-        "status_required",
-        "result_required",
-        "executor_correlation",
-        "teardown"
+        "reservation_fulfillment_correlation_required",
+        "terminal_status_required",
+        "versioned_result_required",
+        "executor_ref_target_correlation",
+        "fulfillment_teardown_required"
       ],
       "properties": {
-        "reservation_identity": { "const": "capacity_reservation_id" },
-        "fulfillment_identity": { "const": "fulfillment_id" },
-        "status_required": { "const": true },
-        "result_required": { "const": true },
-        "executor_correlation": { "const": "sanitized-presence-only" },
-        "teardown": { "const": "fulfillment-driven" }
-      }
+        "applicability": { "enum": ["not-applicable", "market-request"] },
+        "reservation_identity": {
+          "enum": ["not-applicable", "capacity_reservation_id"]
+        },
+        "fulfillment_identity": {
+          "enum": ["not-applicable", "fulfillment_id"]
+        },
+        "reservation_fulfillment_correlation_required": { "type": "boolean" },
+        "terminal_status_required": { "type": "boolean" },
+        "versioned_result_required": { "type": "boolean" },
+        "executor_ref_target_correlation": {
+          "enum": ["not-applicable", "sanitized-assertion"]
+        },
+        "fulfillment_teardown_required": { "type": "boolean" }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "applicability": { "const": "not-applicable" },
+            "reservation_identity": { "const": "not-applicable" },
+            "fulfillment_identity": { "const": "not-applicable" },
+            "reservation_fulfillment_correlation_required": { "const": false },
+            "terminal_status_required": { "const": false },
+            "versioned_result_required": { "const": false },
+            "executor_ref_target_correlation": { "const": "not-applicable" },
+            "fulfillment_teardown_required": { "const": false }
+          }
+        },
+        {
+          "properties": {
+            "applicability": { "const": "market-request" },
+            "reservation_identity": { "const": "capacity_reservation_id" },
+            "fulfillment_identity": { "const": "fulfillment_id" },
+            "reservation_fulfillment_correlation_required": { "const": true },
+            "terminal_status_required": { "const": true },
+            "versioned_result_required": { "const": true },
+            "executor_ref_target_correlation": { "const": "sanitized-assertion" },
+            "fulfillment_teardown_required": { "const": true }
+          }
+        }
+      ]
     },
     "cleanup": {
       "type": "object",
@@ -181,8 +252,8 @@
       "properties": {
         "required": { "const": true },
         "zero_residue": { "const": true },
-        "vm_teardown": { "const": "immediate" },
-        "lease": { "const": "backstop-only" }
+        "vm_teardown": { "enum": ["not-applicable", "immediate"] },
+        "lease": { "enum": ["not-applicable", "backstop-only"] }
       }
     }
   }
