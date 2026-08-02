@@ -1,0 +1,64 @@
+{
+  "schema_version": 2,
+  "scenario_id": "q0-host-capability",
+  "stage": "q0-host-capability",
+  "description": "Represent one host operator preflight for real KVM, Ansible, and whole-GPU capability without a market request.",
+  "deal_type": "vm",
+  "provisioning": "real-kvm-ansible",
+  "gpu_assignment": "whole-device-passthrough",
+  "counts": {
+    "orchestrators": 1,
+    "buyers": 0,
+    "sellers": 0,
+    "hosts": 1,
+    "listings": 0,
+    "requests": 0,
+    "physical_gpus": 1
+  },
+  "listings": {
+    "gpus_per_vm": 1,
+    "seller_distribution": [],
+    "frozen_within_series": true,
+    "global_physical_gpu_fence": true
+  },
+  "role_contract": {
+    "ownership": "host-agent",
+    "buyer_quickstart": "docs/buyer-quickstart.md",
+    "seller_quickstart": "docs/seller-quickstart.md",
+    "persistent_buyer_session": false,
+    "required_receipts": [
+      "cleanup.recorded",
+      "controller.authority-checked",
+      "host.provisioning-preflight"
+    ]
+  },
+  "arrival": {
+    "mode": "none",
+    "barrier_participants": 0,
+    "teardown_between_requests": false
+  },
+  "expectations": {
+    "successes": 0,
+    "scarcity": 0,
+    "retry_count": 0,
+    "scarcity_contract": {
+      "http_status": 409,
+      "error": "offer_unfulfillable",
+      "reason": "no_matching_inventory"
+    }
+  },
+  "lifecycle": {
+    "reservation_identity": "capacity_reservation_id",
+    "fulfillment_identity": "fulfillment_id",
+    "status_required": true,
+    "result_required": true,
+    "executor_correlation": "sanitized-presence-only",
+    "teardown": "fulfillment-driven"
+  },
+  "cleanup": {
+    "required": true,
+    "zero_residue": true,
+    "vm_teardown": "immediate",
+    "lease": "backstop-only"
+  }
+}

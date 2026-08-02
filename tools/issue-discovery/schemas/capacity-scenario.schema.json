@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://simple-compute-market.dev/schemas/capacity-scenario-v2.json",
+  "title": "SCM agent-driven VM/G1 capacity scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "stage",
+    "description",
+    "deal_type",
+    "provisioning",
+    "gpu_assignment",
+    "counts",
+    "listings",
+    "role_contract",
+    "arrival",
+    "expectations",
+    "lifecycle",
+    "cleanup"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "scenario_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "stage": {
+      "enum": [
+        "q0-host-capability",
+        "reference-b1",
+        "q1-b1-s1-g1",
+        "q2-b2-s1-g1",
+        "q3-b4-s1-g1",
+        "q4-b8-s1-g1",
+        "q5-serialized-reuse",
+        "q6-b2-s2-g1",
+        "q7-b4-s2-g1",
+        "q8-b4-s4-g1"
+      ]
+    },
+    "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "deal_type": { "const": "vm" },
+    "provisioning": { "const": "real-kvm-ansible" },
+    "gpu_assignment": { "const": "whole-device-passthrough" },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orchestrators",
+        "buyers",
+        "sellers",
+        "hosts",
+        "listings",
+        "requests",
+        "physical_gpus"
+      ],
+      "properties": {
+        "orchestrators": { "const": 1 },
+        "buyers": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "sellers": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "hosts": { "const": 1 },
+        "listings": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "requests": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "physical_gpus": { "const": 1 }
+      }
+    },
+    "listings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpus_per_vm",
+        "seller_distribution",
+        "frozen_within_series",
+        "global_physical_gpu_fence"
+      ],
+      "properties": {
+        "gpus_per_vm": { "const": 1 },
+        "seller_distribution": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "type": "integer", "minimum": 1, "maximum": 1 }
+        },
+        "frozen_within_series": { "const": true },
+        "global_physical_gpu_fence": { "const": true }
+      }
+    },
+    "role_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ownership",
+        "buyer_quickstart",
+        "seller_quickstart",
+        "persistent_buyer_session",
+        "required_receipts"
+      ],
+      "properties": {
+        "ownership": {
+          "enum": ["host-agent", "controller-reference", "substantive-agents"]
+        },
+        "buyer_quickstart": { "const": "docs/buyer-quickstart.md" },
+        "seller_quickstart": { "const": "docs/seller-quickstart.md" },
+        "persistent_buyer_session": { "type": "boolean" },
+        "required_receipts": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "buyer.demand-frozen",
+              "buyer.demand-invoked",
+              "buyer.quickstart-read",
+              "cleanup.recorded",
+              "controller.authority-checked",
+              "controller.observation-recorded",
+              "controller.reference-request-invoked",
+              "controller.release-recorded",
+              "host.provisioning-owned",
+              "host.provisioning-preflight",
+              "seller.listing-published",
+              "seller.quickstart-read",
+              "seller.service-ready"
+            ]
+          }
+        }
+      }
+    },
+    "arrival": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "barrier_participants", "teardown_between_requests"],
+      "properties": {
+        "mode": { "enum": ["none", "release-barrier", "serialized-reuse"] },
+        "barrier_participants": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "teardown_between_requests": { "type": "boolean" }
+      }
+    },
+    "expectations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["successes", "scarcity", "retry_count", "scarcity_contract"],
+      "properties": {
+        "successes": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "scarcity": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "retry_count": { "const": 0 },
+        "scarcity_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["http_status", "error", "reason"],
+          "properties": {
+            "http_status": { "const": 409 },
+            "error": { "const": "offer_unfulfillable" },
+            "reason": { "const": "no_matching_inventory" }
+          }
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservation_identity",
+        "fulfillment_identity",
+        "status_required",
+        "result_required",
+        "executor_correlation",
+        "teardown"
+      ],
+      "properties": {
+        "reservation_identity": { "const": "capacity_reservation_id" },
+        "fulfillment_identity": { "const": "fulfillment_id" },
+        "status_required": { "const": true },
+        "result_required": { "const": true },
+        "executor_correlation": { "const": "sanitized-presence-only" },
+        "teardown": { "const": "fulfillment-driven" }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "zero_residue", "vm_teardown", "lease"],
+      "properties": {
+        "required": { "const": true },
+        "zero_residue": { "const": true },
+        "vm_teardown": { "const": "immediate" },
+        "lease": { "const": "backstop-only" }
+      }
+    }
+  }
+}

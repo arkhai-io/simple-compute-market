@@ -15,14 +15,14 @@
 
 ## 2. VM/G1 scenario contract
 
-- [ ] 2.1 Add `capacity-scenario.schema.json` with VM/G1 invariants, explicit
+- [x] 2.1 Add `capacity-scenario.schema.json` with VM/G1 invariants, explicit
   O/B/S/H/L/R/G counts, ownership and arrival modes, quickstart references,
   expected outcomes, retry prohibition, and cleanup requirements.
-- [ ] 2.2 Add exact fixtures for Q0, Reference B1, and Q1-Q8; keep historical
+- [x] 2.2 Add exact fixtures for Q0, Reference B1, and Q1-Q8; keep historical
   G2 fixtures absent.
-- [ ] 2.3 Implement pure validation and deterministic canonical scenario
+- [x] 2.3 Implement pure validation and deterministic canonical scenario
   hashing in `capacity.py`.
-- [ ] 2.4 Test the exact finite table, Q5 serialized reuse, common barriers,
+- [x] 2.4 Test the exact finite table, Q5 serialized reuse, common barriers,
   substantive ownership from Q1 onward, global G1 fencing, and rejection of
   G2/non-VM/adaptive rows.
 

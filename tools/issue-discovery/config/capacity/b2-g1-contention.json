@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "scenario_id": "q2-b2-s1-g1",
+  "stage": "q2-b2-s1-g1",
+  "description": "Represent two substantive buyers contending concurrently for one seller listing and one whole GPU.",
+  "deal_type": "vm",
+  "provisioning": "real-kvm-ansible",
+  "gpu_assignment": "whole-device-passthrough",
+  "counts": {
+    "orchestrators": 1,
+    "buyers": 2,
+    "sellers": 1,
+    "hosts": 1,
+    "listings": 1,
+    "requests": 2,
+    "physical_gpus": 1
+  },
+  "listings": {
+    "gpus_per_vm": 1,
+    "seller_distribution": [1],
+    "frozen_within_series": true,
+    "global_physical_gpu_fence": true
+  },
+  "role_contract": {
+    "ownership": "substantive-agents",
+    "buyer_quickstart": "docs/buyer-quickstart.md",
+    "seller_quickstart": "docs/seller-quickstart.md",
+    "persistent_buyer_session": false,
+    "required_receipts": [
+      "buyer.demand-frozen",
+      "buyer.demand-invoked",
+      "buyer.quickstart-read",
+      "cleanup.recorded",
+      "controller.authority-checked",
+      "controller.observation-recorded",
+      "controller.release-recorded",
+      "host.provisioning-owned",
+      "seller.listing-published",
+      "seller.quickstart-read",
+      "seller.service-ready"
+    ]
+  },
+  "arrival": {
+    "mode": "release-barrier",
+    "barrier_participants": 2,
+    "teardown_between_requests": false
+  },
+  "expectations": {
+    "successes": 1,
+    "scarcity": 1,
+    "retry_count": 0,
+    "scarcity_contract": {
+      "http_status": 409,
+      "error": "offer_unfulfillable",
+      "reason": "no_matching_inventory"
+    }
+  },
+  "lifecycle": {
+    "reservation_identity": "capacity_reservation_id",
+    "fulfillment_identity": "fulfillment_id",
+    "status_required": true,
+    "result_required": true,
+    "executor_correlation": "sanitized-presence-only",
+    "teardown": "fulfillment-driven"
+  },
+  "cleanup": {
+    "required": true,
+    "zero_residue": true,
+    "vm_teardown": "immediate",
+    "lease": "backstop-only"
+  }
+}
