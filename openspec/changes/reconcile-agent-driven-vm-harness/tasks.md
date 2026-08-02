@@ -80,15 +80,15 @@
 
 ## 7. Public completion checks
 
-- [ ] 7.1 Run strict OpenSpec validation and the complete locked
+- [x] 7.1 Run strict OpenSpec validation and the complete locked
   issue-discovery suite.
-- [ ] 7.2 Run schema/example, CLI, mocked issue/fix, privacy, path-manifest,
+- [x] 7.2 Run schema/example, CLI, mocked issue/fix, privacy, path-manifest,
   G2/non-VM rejection, and excluded-subsystem scans.
-- [ ] 7.3 Confirm no product, E2E, workflow, dependency, lockfile, cloud-runner,
+- [x] 7.3 Confirm no product, E2E, workflow, dependency, lockfile, cloud-runner,
   qualification, or publication-v2 path changed.
-- [ ] 7.4 Record exact commands/results and the existing CI limitation that
+- [x] 7.4 Record exact commands/results and the existing CI limitation that
   `tools/issue-discovery` is excluded from the default Tests workflow.
-- [ ] 7.5 Pin the clean pushed public SHA for private compatibility testing;
+- [x] 7.5 Pin the clean pushed public SHA for private compatibility testing;
   do not open a pull request or run a capacity stage.
 
 ## Design Promotion Record
@@ -98,3 +98,44 @@
 | finite VM/G1 matrix, role ownership, lifecycle, scarcity, cleanup, and findings | `openspec/specs/test-compatibility/spec.md#requirement-agent-driven-vm-capacity-contracts-are-finite-and-non-executing` | promoted and verified |
 | public/private boundary, evidence layering, stable identity, and runner seam | `openspec/specs/test-compatibility/architecture.md#agent-driven-capacity-preparation-boundary` | promoted and verified |
 | commands, result claims, GitHub dry-run, and no-live boundary | `docs/development/ISSUE_DISCOVERY.md#capacity-preparation-interfaces`; `tools/issue-discovery/README.md#capacity-preparation-api` | promoted and verified |
+
+## Public Validation Record
+
+All commands below were run against the replacement branch based on the
+recorded `origin/dev` authority. The guarded-pushed commit containing this
+record is the public compatibility pin; its exact SHA and push receipt belong
+in the private operator handoff so that public documentation does not acquire
+private orchestration identifiers.
+
+- `npx --yes @fission-ai/openspec@1.7.0 validate
+  reconcile-agent-driven-vm-harness --strict` reported that the active change
+  is valid.
+- `npx --yes @fission-ai/openspec@1.7.0 validate test-compatibility
+  --type spec --strict` reported that the permanent specification is valid.
+- From `tools/issue-discovery`, `uv --no-config run pytest -q` passed all 273
+  locked tests.
+- Focused schema/example and VM/G1 rejection nodes passed 6 tests; the focused
+  `finding_privacy_scan` selection passed 45 tests; the `capacity` selections
+  in `test_cli.py`, `test_runner.py`, and `test_issues.py` passed 6, 47, and 25
+  tests respectively.
+- Running `./scripts/issue-discovery capacity validate` over every
+  `tools/issue-discovery/config/capacity/*.json` fixture validated exactly 10
+  scenarios. Running `capacity finding` over the tracked
+  sanitized example returned stable JSON with `status: ok` and exit 0.
+- `git diff --name-only origin/dev...HEAD` produced exactly the 33 approved
+  public paths: the manifest comparison found zero missing and zero extra
+  paths. `git diff --check` passed.
+- A `jq` assertion over every capacity fixture confirmed `deal_type == "vm"`,
+  `gpu_assignment == "whole-device-passthrough"`, and exactly one physical
+  GPU. No G2 fixture exists.
+- The changed-path exclusion scan found no product, `e2e-tests`, workflow,
+  dependency, lockfile, cloud-runner, Tekton, `g1-v2`, finding-v2,
+  qualification-framework, or publication-v2 path. The approved Reference B1
+  fixture is a finite scenario, not a qualification profile or registry.
+- `.github/workflows/tests.yml` remains unchanged and explicitly documents
+  that `tools/issue-discovery` is excluded from the default Tests workflow
+  because its bootstrap tests inspect the host system.
+
+No capacity stage, agent session, live adapter, GitHub mutation, cloud or host
+probe, wallet action, provisioning action, VM, or GPU workload was run while
+producing this record. No pull request was opened.
