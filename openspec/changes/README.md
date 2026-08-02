@@ -93,6 +93,7 @@ wheel-only internal dependencies
 | [`add-settlement-plan-shapes`](add-settlement-plan-shapes/) | active | Generic per-obligation lifecycle plus interval escrow and seller-funded bond policies; heartbeat adjudication/oracle automation deferred |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated/consumed keys and deliver secrets through the provisioning Secret profile |
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning/e2e parity; storefront loader excluded |
+| [`reconcile-agent-driven-vm-harness`](reconcile-agent-driven-vm-harness/) | active; preparation only | Rebuild the public issue-discovery VM/G1 scenario, finding, and mocked issue/fix contracts on current `dev`; no live stage or product change |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 
 `prune-storefront-database` was archived because dead policy tables are already gone and the remaining candidates carry continuation, idempotency, or observability state. `complete-development-documentation` was synchronized and archived after audience-owned documentation became permanent planning governance.
