@@ -32,10 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    strict = subparsers.add_parser("strict", help="Run strict local discovery without workarounds.")
+    strict = subparsers.add_parser(
+        "strict", help="Run strict local discovery without workarounds."
+    )
     strict.set_defaults(handler=_run_strict)
 
-    cont = subparsers.add_parser("continue", help="Continue discovery with named workaround(s).")
+    cont = subparsers.add_parser(
+        "continue", help="Continue discovery with named workaround(s)."
+    )
     cont.add_argument(
         "--with",
         dest="workarounds",
@@ -49,7 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("name", help="Profile name.")
     profile.set_defaults(handler=_run_profile)
 
-    issue = subparsers.add_parser("issue", help="List, show, or create issue candidates.")
+    issue = subparsers.add_parser(
+        "issue", help="List, show, or create issue candidates."
+    )
     issue_subparsers = issue.add_subparsers(dest="issue_command", required=True)
 
     issue_list = issue_subparsers.add_parser("list", help="List candidates for a run.")
@@ -61,7 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
     issue_show.add_argument("fingerprint")
     issue_show.set_defaults(handler=_issue_show)
 
-    issue_create = issue_subparsers.add_parser("create", help="Create a GitHub issue candidate.")
+    issue_create = issue_subparsers.add_parser(
+        "create", help="Create a GitHub issue candidate."
+    )
     issue_create.add_argument("run_dir", type=Path)
     issue_create.add_argument("fingerprint")
     issue_create.add_argument(
@@ -78,10 +86,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     issue_create.set_defaults(handler=_issue_create)
 
-    clean_room = subparsers.add_parser("clean-room", help="Plan clean-room discovery runs.")
-    clean_room_subparsers = clean_room.add_subparsers(dest="clean_room_command", required=True)
+    clean_room = subparsers.add_parser(
+        "clean-room", help="Plan clean-room discovery runs."
+    )
+    clean_room_subparsers = clean_room.add_subparsers(
+        dest="clean_room_command", required=True
+    )
 
-    clean_room_plan = clean_room_subparsers.add_parser("plan", help="Print a clean-room run plan.")
+    clean_room_plan = clean_room_subparsers.add_parser(
+        "plan", help="Print a clean-room run plan."
+    )
     clean_room_plan.add_argument("sequence", help="Clean-room sequence id.")
     clean_room_plan.set_defaults(handler=_clean_room_plan)
 
@@ -92,11 +106,102 @@ def build_parser() -> argparse.ArgumentParser:
     clean_room_script.add_argument("sequence", help="Clean-room sequence id.")
     clean_room_script.set_defaults(handler=_clean_room_script)
 
+    capacity = subparsers.add_parser(
+        "capacity",
+        help="Validate and evaluate portable capacity artifacts.",
+    )
+    capacity_subparsers = capacity.add_subparsers(
+        dest="capacity_command", required=True
+    )
+
+    capacity_validate = capacity_subparsers.add_parser(
+        "validate",
+        help="Validate a capacity scenario.",
+    )
+    capacity_validate.add_argument("scenario", type=Path)
+    capacity_validate.set_defaults(handler=_capacity_validate)
+
+    capacity_hash = capacity_subparsers.add_parser(
+        "hash",
+        help="Print the canonical hash of a capacity scenario.",
+    )
+    capacity_hash.add_argument("scenario", type=Path)
+    capacity_hash.set_defaults(handler=_capacity_hash)
+
+    capacity_evaluate = capacity_subparsers.add_parser(
+        "evaluate",
+        help="Evaluate a capacity result against its scenario.",
+    )
+    capacity_evaluate.add_argument("result", type=Path)
+    capacity_evaluate.add_argument("--scenario", type=Path, required=True)
+    _add_capacity_context_arguments(capacity_evaluate)
+    capacity_evaluate.set_defaults(handler=_capacity_evaluate)
+
+    capacity_finding = capacity_subparsers.add_parser(
+        "finding",
+        help="Validate and render a capacity finding.",
+    )
+    capacity_finding.add_argument("finding", type=Path)
+    capacity_finding.add_argument("--scenario", type=Path, required=True)
+    _add_capacity_context_arguments(capacity_finding)
+    capacity_finding.set_defaults(handler=_capacity_finding)
+
+    capacity_issue_plan = capacity_subparsers.add_parser(
+        "issue-plan",
+        help="Evaluate a capacity result and plan its issue actions.",
+    )
+    capacity_issue_plan.add_argument("result", type=Path)
+    capacity_issue_plan.add_argument("--scenario", type=Path, required=True)
+    capacity_issue_plan.add_argument("--issues-snapshot", type=Path, default=None)
+    capacity_issue_plan.add_argument("--fix-proposal", type=Path, default=None)
+    capacity_issue_plan.add_argument("--fix-fingerprint", default=None)
+    _add_capacity_context_arguments(capacity_issue_plan)
+    capacity_issue_plan.set_defaults(handler=_capacity_issue_plan)
+
+    capacity_cancel = capacity_subparsers.add_parser(
+        "cancel",
+        help="Plan or record cancellation for a capacity scenario.",
+    )
+    _add_capacity_termination_arguments(capacity_cancel)
+    capacity_cancel.set_defaults(handler=_capacity_cancel)
+
+    capacity_cleanup = capacity_subparsers.add_parser(
+        "cleanup",
+        help="Plan or record cleanup for a capacity scenario.",
+    )
+    _add_capacity_termination_arguments(capacity_cleanup)
+    capacity_cleanup.set_defaults(handler=_capacity_cleanup)
+
     return parser
 
 
+def _add_capacity_context_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--branch", required=True)
+    parser.add_argument("--sha", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--timeout-seconds", required=True)
+    parser.add_argument(
+        "--adapter",
+        dest="adapters",
+        action="append",
+        required=True,
+        metavar="KIND=MODE",
+        help="Adapter mode. Repeat for each adapter.",
+    )
+
+
+def _add_capacity_termination_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--scenario", type=Path, required=True)
+    parser.add_argument("--termination", required=True)
+    parser.add_argument("--receipt", type=Path, default=None)
+    _add_capacity_context_arguments(parser)
+
+
 def _runner(args: argparse.Namespace) -> DiscoveryRunner:
-    return DiscoveryRunner(repo_root=args.repo_root, output_dir=args.output_dir, dry_run=args.dry_run)
+    return DiscoveryRunner(
+        repo_root=args.repo_root, output_dir=args.output_dir, dry_run=args.dry_run
+    )
 
 
 def _run_strict(args: argparse.Namespace) -> int:
@@ -111,10 +216,14 @@ def _run_profile(args: argparse.Namespace) -> int:
     return _runner(args).run_profile(args.name)
 
 
+def _repo_path(args: argparse.Namespace, path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return args.repo_root / path
+
+
 def _run_dir(args: argparse.Namespace) -> Path:
-    if args.run_dir.is_absolute():
-        return args.run_dir
-    return args.repo_root / args.run_dir
+    return _repo_path(args, args.run_dir)
 
 
 def _issue_list(args: argparse.Namespace) -> int:
@@ -122,7 +231,9 @@ def _issue_list(args: argparse.Namespace) -> int:
 
 
 def _issue_show(args: argparse.Namespace) -> int:
-    return DiscoveryRunner(repo_root=args.repo_root).issue_show(_run_dir(args), args.fingerprint)
+    return DiscoveryRunner(repo_root=args.repo_root).issue_show(
+        _run_dir(args), args.fingerprint
+    )
 
 
 def _issue_create(args: argparse.Namespace) -> int:
@@ -140,6 +251,80 @@ def _clean_room_plan(args: argparse.Namespace) -> int:
 
 def _clean_room_script(args: argparse.Namespace) -> int:
     return DiscoveryRunner(repo_root=args.repo_root).clean_room_script(args.sequence)
+
+
+def _capacity_context(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "repository": args.repository,
+        "branch": args.branch,
+        "sha": args.sha,
+        "run_id": args.run_id,
+        "timeout_seconds": args.timeout_seconds,
+        "adapters": tuple(args.adapters),
+    }
+
+
+def _capacity_validate(args: argparse.Namespace) -> int:
+    return _runner(args).capacity_validate(_repo_path(args, args.scenario))
+
+
+def _capacity_hash(args: argparse.Namespace) -> int:
+    return _runner(args).capacity_hash(_repo_path(args, args.scenario))
+
+
+def _capacity_evaluate(args: argparse.Namespace) -> int:
+    return _runner(args).capacity_evaluate(
+        _repo_path(args, args.scenario),
+        _repo_path(args, args.result),
+        **_capacity_context(args),
+    )
+
+
+def _capacity_finding(args: argparse.Namespace) -> int:
+    return _runner(args).capacity_finding(
+        _repo_path(args, args.scenario),
+        _repo_path(args, args.finding),
+        **_capacity_context(args),
+    )
+
+
+def _capacity_issue_plan(args: argparse.Namespace) -> int:
+    fix_proposal = (
+        _repo_path(args, args.fix_proposal) if args.fix_proposal is not None else None
+    )
+    issues_snapshot = (
+        _repo_path(args, args.issues_snapshot)
+        if args.issues_snapshot is not None
+        else None
+    )
+    return _runner(args).capacity_issue_plan(
+        _repo_path(args, args.scenario),
+        _repo_path(args, args.result),
+        issues_snapshot,
+        fix_proposal,
+        args.fix_fingerprint,
+        **_capacity_context(args),
+    )
+
+
+def _capacity_cancel(args: argparse.Namespace) -> int:
+    receipt = _repo_path(args, args.receipt) if args.receipt is not None else None
+    return _runner(args).capacity_cancel(
+        _repo_path(args, args.scenario),
+        termination=args.termination,
+        receipt=receipt,
+        **_capacity_context(args),
+    )
+
+
+def _capacity_cleanup(args: argparse.Namespace) -> int:
+    receipt = _repo_path(args, args.receipt) if args.receipt is not None else None
+    return _runner(args).capacity_cleanup(
+        _repo_path(args, args.scenario),
+        termination=args.termination,
+        receipt=receipt,
+        **_capacity_context(args),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

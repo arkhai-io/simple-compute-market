@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,10 +18,54 @@ from issue_discovery.clean_room import (
 from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
 from issue_discovery.config import ToolPaths, load_yaml
-from issue_discovery.issues import IssuePacketGenerator, IssueRepository
+from issue_discovery.capacity import (
+    CapacityValidationError,
+    evaluate_capacity_result,
+    scenario_sha256,
+    validate_cancellation_receipt,
+    validate_capacity_result,
+    validate_cleanup_receipt,
+    validate_finding,
+    validate_public_capacity_branch,
+    validate_public_capacity_data,
+    validate_scenario_file,
+)
+from issue_discovery.issues import (
+    CapacityIssuePlanError,
+    IssuePacketGenerator,
+    IssueRepository,
+    plan_capacity_fix_candidate,
+    plan_capacity_issues,
+)
 from issue_discovery.phases import CommandSpec, PhaseFile, PhaseSpec, load_phase_file
 from issue_discovery.redaction import Redactor
 from issue_discovery.workarounds import WorkaroundSpec, load_workarounds
+
+
+_CAPACITY_PUBLIC_REPOSITORY = "arkhai-io/simple-compute-market"
+_CAPACITY_ADAPTER_KINDS = frozenset(
+    {"market", "wallet", "cloud", "host", "provisioning", "github-mutation"}
+)
+_CAPACITY_ADAPTER_MODES = frozenset({"mock", "fake", "dry-run"})
+_CAPACITY_TERMINATIONS = frozenset(
+    {
+        "completed",
+        "timeout",
+        "cancelled",
+        "partial-launch",
+        "role-failure",
+        "controller-failure",
+    }
+)
+_CAPACITY_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_CAPACITY_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$")
+
+
+class CapacityCommandError(ValueError):
+    def __init__(self, code: str, *, exit_code: int = 2) -> None:
+        super().__init__(code)
+        self.code = code
+        self.exit_code = exit_code
 
 
 @dataclass
@@ -34,7 +81,9 @@ class RunState:
 
 
 class DiscoveryRunner:
-    def __init__(self, repo_root: Path, output_dir: Path | None = None, dry_run: bool = False) -> None:
+    def __init__(
+        self, repo_root: Path, output_dir: Path | None = None, dry_run: bool = False
+    ) -> None:
         self.repo_root = repo_root.resolve()
         self.output_dir = output_dir.resolve() if output_dir is not None else None
         self.dry_run = dry_run
@@ -54,7 +103,11 @@ class DiscoveryRunner:
             print("at least one workaround is required")
             return 2
         available = load_workarounds(self.paths.config_dir / "workarounds.yaml")
-        missing = [workaround_id for workaround_id in workaround_ids if workaround_id not in available]
+        missing = [
+            workaround_id
+            for workaround_id in workaround_ids
+            if workaround_id not in available
+        ]
         if missing:
             print(f"unknown workaround: {', '.join(missing)}")
             print("available workarounds:")
@@ -71,7 +124,9 @@ class DiscoveryRunner:
         )
 
     def run_profile(self, name: str) -> int:
-        profiles = load_yaml(self.paths.config_dir / "profiles.yaml").get("profiles", [])
+        profiles = load_yaml(self.paths.config_dir / "profiles.yaml").get(
+            "profiles", []
+        )
         selected = next((item for item in profiles if item.get("id") == name), None)
         if selected is None:
             print(f"unknown profile: {name}")
@@ -81,7 +136,9 @@ class DiscoveryRunner:
             return 2
         phase_path = self.paths.config_dir / str(selected["phase_file"])
         phase_ids = tuple(str(item) for item in selected.get("phases", []))
-        profile_env = {str(key): str(value) for key, value in (selected.get("env") or {}).items()}
+        profile_env = {
+            str(key): str(value) for key, value in (selected.get("env") or {}).items()
+        }
         return self._run_phase_file(
             mode=f"profile:{name}",
             phase_path=phase_path,
@@ -107,9 +164,343 @@ class DiscoveryRunner:
         print(body_path.read_text(encoding="utf-8"), end="")
         return 0
 
-    def issue_create(self, run_dir: Path, fingerprint: str, dry_run: bool, force: bool = False) -> int:
+    def issue_create(
+        self, run_dir: Path, fingerprint: str, dry_run: bool, force: bool = False
+    ) -> int:
         repository = IssueRepository(run_dir.resolve(), repo_root=self.repo_root)
         return repository.create(fingerprint, dry_run=dry_run, force=force)
+
+    def capacity_validate(self, scenario: Path) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            value = validate_scenario_file(scenario, self.repo_root)
+            context = {"scenario": _capacity_scenario_identity(value)}
+            return context, {"valid": True}, "ok", 0
+
+        return self._capacity_dispatch("capacity.validate", operation)
+
+    def capacity_hash(self, scenario: Path) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            value = validate_scenario_file(scenario, self.repo_root)
+            identity = _capacity_scenario_identity(value)
+            return {"scenario": identity}, {"sha256": identity["sha256"]}, "ok", 0
+
+        return self._capacity_dispatch("capacity.hash", operation)
+
+    def capacity_evaluate(
+        self,
+        scenario: Path,
+        result: Path,
+        *,
+        repository: str,
+        branch: str,
+        sha: str,
+        run_id: str,
+        timeout_seconds: int,
+        adapters: tuple[str, ...],
+    ) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            context = _capacity_context(
+                repo_root=self.repo_root,
+                repository=repository,
+                branch=branch,
+                sha=sha,
+                run_id=run_id,
+                timeout_seconds=timeout_seconds,
+                adapters=adapters,
+            )
+            scenario_value = validate_scenario_file(scenario, self.repo_root)
+            context = _capacity_context_with_scenario(context, scenario_value)
+            result_value = _capacity_read_object(result)
+            validate_capacity_result(result_value, scenario_value, self.repo_root)
+            _require_capacity_result_context(result_value, context)
+            evaluation = evaluate_capacity_result(
+                scenario_value,
+                result_value,
+                self.repo_root,
+            )
+            has_findings = bool(evaluation["findings"])
+            return (
+                context,
+                evaluation,
+                "findings" if has_findings else "ok",
+                1 if has_findings else 0,
+            )
+
+        return self._capacity_dispatch("capacity.evaluate", operation)
+
+    def capacity_finding(
+        self,
+        scenario: Path,
+        finding: Path,
+        *,
+        repository: str,
+        branch: str,
+        sha: str,
+        run_id: str,
+        timeout_seconds: int,
+        adapters: tuple[str, ...],
+    ) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            context = _capacity_context(
+                repo_root=self.repo_root,
+                repository=repository,
+                branch=branch,
+                sha=sha,
+                run_id=run_id,
+                timeout_seconds=timeout_seconds,
+                adapters=adapters,
+            )
+            scenario_value = validate_scenario_file(scenario, self.repo_root)
+            context = _capacity_context_with_scenario(context, scenario_value)
+            finding_value = _capacity_read_object(finding)
+            validate_finding(finding_value, self.repo_root)
+            _require_capacity_finding_context(finding_value, context)
+            return context, finding_value, "ok", 0
+
+        return self._capacity_dispatch("capacity.finding", operation)
+
+    def capacity_issue_plan(
+        self,
+        scenario: Path,
+        result: Path,
+        issues_snapshot: Path | None,
+        fix_proposal: Path | None,
+        fix_fingerprint: str | None,
+        *,
+        repository: str,
+        branch: str,
+        sha: str,
+        run_id: str,
+        timeout_seconds: int,
+        adapters: tuple[str, ...],
+    ) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            context = _capacity_context(
+                repo_root=self.repo_root,
+                repository=repository,
+                branch=branch,
+                sha=sha,
+                run_id=run_id,
+                timeout_seconds=timeout_seconds,
+                adapters=adapters,
+            )
+            scenario_value = validate_scenario_file(scenario, self.repo_root)
+            context = _capacity_context_with_scenario(context, scenario_value)
+            result_value = _capacity_read_object(result)
+            validate_capacity_result(result_value, scenario_value, self.repo_root)
+            _require_capacity_result_context(result_value, context)
+            evaluation_value = evaluate_capacity_result(
+                scenario_value,
+                result_value,
+                self.repo_root,
+            )
+            findings = evaluation_value["findings"]
+            publication_possible = any(
+                finding["publication"]["eligible"] is True for finding in findings
+            )
+            if publication_possible:
+                if issues_snapshot is None:
+                    raise CapacityCommandError("issues-snapshot-required")
+                snapshot = _capacity_read_value(issues_snapshot)
+            else:
+                snapshot = []
+            decisions = plan_capacity_issues(
+                evaluation_value,
+                snapshot,
+                self.repo_root,
+            )
+            fix = None
+            if (fix_proposal is None) is not (fix_fingerprint is None):
+                raise CapacityCommandError("fix-selection-incomplete")
+            if fix_proposal is not None and fix_fingerprint is not None:
+                matches = [
+                    finding
+                    for finding in findings
+                    if isinstance(finding, dict)
+                    and finding.get("fingerprint") == fix_fingerprint
+                    and finding.get("publication")
+                    == {"eligible": True, "reason": "cleanup-proven"}
+                ]
+                if not matches:
+                    raise CapacityCommandError("fix-finding-not-found")
+                selected_finding = min(
+                    matches,
+                    key=lambda item: json.dumps(
+                        item,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                )
+                fix = plan_capacity_fix_candidate(
+                    selected_finding,
+                    _capacity_read_object(fix_proposal),
+                    self.repo_root,
+                    mutation_authorized=False,
+                )
+            return context, {"issue_decisions": decisions, "draft_fix": fix}, "ok", 0
+
+        return self._capacity_dispatch("capacity.issue-plan", operation)
+
+    def capacity_cancel(
+        self,
+        scenario: Path,
+        *,
+        termination: str,
+        receipt: Path | None,
+        repository: str,
+        branch: str,
+        sha: str,
+        run_id: str,
+        timeout_seconds: int,
+        adapters: tuple[str, ...],
+    ) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            context = _capacity_context(
+                repo_root=self.repo_root,
+                repository=repository,
+                branch=branch,
+                sha=sha,
+                run_id=run_id,
+                timeout_seconds=timeout_seconds,
+                adapters=adapters,
+            )
+            scenario_value = validate_scenario_file(scenario, self.repo_root)
+            context = _capacity_context_with_scenario(context, scenario_value)
+            _validate_capacity_termination(termination)
+            idempotency_key = _capacity_operation_key("cancel", context, termination)
+            if self.dry_run:
+                if receipt is not None:
+                    raise CapacityCommandError("receipt-not-allowed-in-dry-run")
+                result = {
+                    "operation": "cancel",
+                    "termination": termination,
+                    "idempotency_key": idempotency_key,
+                    "executed": False,
+                    "receipt": None,
+                }
+                return context, result, "ok", 0
+            if receipt is None:
+                raise CapacityCommandError("cancellation-receipt-required")
+            receipt_value = _capacity_read_bound_receipt(
+                receipt,
+                operation="cancel",
+                context=context,
+                termination=termination,
+                idempotency_key=idempotency_key,
+            )
+            validate_cancellation_receipt(
+                receipt_value,
+                termination=termination,
+                repo_root=self.repo_root,
+            )
+            public_receipt = _public_cancellation_receipt(receipt_value)
+            failed = receipt_value["status"] == "failed"
+            result = {
+                "operation": "cancel",
+                "termination": termination,
+                "idempotency_key": idempotency_key,
+                "executed": False,
+                "receipt": public_receipt,
+            }
+            return (
+                context,
+                result,
+                "negative-evidence" if failed else "ok",
+                1 if failed else 0,
+            )
+
+        return self._capacity_dispatch("capacity.cancel", operation)
+
+    def capacity_cleanup(
+        self,
+        scenario: Path,
+        *,
+        termination: str,
+        receipt: Path | None,
+        repository: str,
+        branch: str,
+        sha: str,
+        run_id: str,
+        timeout_seconds: int,
+        adapters: tuple[str, ...],
+    ) -> int:
+        def operation() -> tuple[dict[str, Any], dict[str, Any], str, int]:
+            context = _capacity_context(
+                repo_root=self.repo_root,
+                repository=repository,
+                branch=branch,
+                sha=sha,
+                run_id=run_id,
+                timeout_seconds=timeout_seconds,
+                adapters=adapters,
+            )
+            scenario_value = validate_scenario_file(scenario, self.repo_root)
+            context = _capacity_context_with_scenario(context, scenario_value)
+            _validate_capacity_termination(termination)
+            idempotency_key = _capacity_operation_key("cleanup", context, termination)
+            if self.dry_run:
+                if receipt is not None:
+                    raise CapacityCommandError("receipt-not-allowed-in-dry-run")
+                result = {
+                    "operation": "cleanup",
+                    "termination": termination,
+                    "idempotency_key": idempotency_key,
+                    "executed": False,
+                    "receipt": None,
+                }
+                return context, result, "ok", 0
+            if receipt is None:
+                raise CapacityCommandError("cleanup-receipt-required")
+            receipt_value = _capacity_read_bound_receipt(
+                receipt,
+                operation="cleanup",
+                context=context,
+                termination=termination,
+                idempotency_key=idempotency_key,
+            )
+            validate_cleanup_receipt(receipt_value, repo_root=self.repo_root)
+            public_receipt = _public_cleanup_receipt(receipt_value)
+            failed = not (
+                receipt_value["status"] == "succeeded"
+                and receipt_value["zero_residue"] is True
+            )
+            result = {
+                "operation": "cleanup",
+                "termination": termination,
+                "idempotency_key": idempotency_key,
+                "executed": False,
+                "receipt": public_receipt,
+            }
+            return (
+                context,
+                result,
+                "negative-evidence" if failed else "ok",
+                1 if failed else 0,
+            )
+
+        return self._capacity_dispatch("capacity.cleanup", operation)
+
+    def _capacity_dispatch(self, command: str, operation: Any) -> int:
+        try:
+            context, result, status, exit_code = operation()
+        except CapacityCommandError as exc:
+            _print_capacity_output(command, "error", None, None, exc.code)
+            return exc.exit_code
+        except (CapacityValidationError, CapacityIssuePlanError):
+            _print_capacity_output(command, "error", None, None, "validation-failed")
+            return 2
+        except (json.JSONDecodeError, OSError, RecursionError, UnicodeError):
+            _print_capacity_output(
+                command, "error", None, None, "input-unavailable-or-invalid"
+            )
+            return 2
+        except ValueError:
+            _print_capacity_output(
+                command, "error", None, None, "input-unavailable-or-invalid"
+            )
+            return 2
+        _print_capacity_output(command, status, context, result, None)
+        return exit_code
 
     def clean_room_plan(self, sequence_name: str) -> int:
         sequence = self._load_clean_room_sequence(sequence_name)
@@ -140,13 +531,17 @@ class DiscoveryRunner:
         workarounds = _normalize_workarounds(workaround)
         phase_scope_start = _earliest_start_phase(phase_file, workarounds)
         if selected_phase_ids is None and phase_scope_start is not None:
-            phases, assumed_phase_ids = _select_phases_from_start(phase_file, phase_scope_start)
+            phases, assumed_phase_ids = _select_phases_from_start(
+                phase_file, phase_scope_start
+            )
         else:
             phases = _select_phases(phase_file, selected_phase_ids)
             assumed_phase_ids = ()
         profile_env = profile_env or {}
         env = {**profile_env, **_merged_workaround_env(workarounds)}
-        skip_phases = {phase_id for spec in workarounds for phase_id in spec.skip_phases}
+        skip_phases = {
+            phase_id for spec in workarounds for phase_id in spec.skip_phases
+        }
 
         if self.dry_run:
             self._print_plan(
@@ -181,7 +576,9 @@ class DiscoveryRunner:
             "phase_scope_start": phase_scope_start,
             "assumed_passed_phases": list(assumed_phase_ids),
             "profile_env": profile_env,
-            "workaround": _workaround_json(workarounds[0]) if len(workarounds) == 1 else None,
+            "workaround": _workaround_json(workarounds[0])
+            if len(workarounds) == 1
+            else None,
             "workarounds": [_workaround_json(spec) for spec in workarounds],
             "output_dir": str(store.run_dir),
             "started_at": utc_now_iso(),
@@ -199,7 +596,9 @@ class DiscoveryRunner:
                 break
         if state.blocking_failure is None:
             self._record_assumed_phases(phase_file, assumed_phase_ids, store, state)
-            self._run_phases(phases, store, redactor, collectors, state, env, skip_phases)
+            self._run_phases(
+                phases, store, redactor, collectors, state, env, skip_phases
+            )
 
         status = "failed" if state.failed else "passed"
         manifest.update(
@@ -234,7 +633,9 @@ class DiscoveryRunner:
             if state.blocking_failure is not None:
                 self._record_skip(store, state, phase, "blocked")
                 continue
-            self._run_one_phase(phase, store, redactor, collectors, state, env, skip_phases)
+            self._run_one_phase(
+                phase, store, redactor, collectors, state, env, skip_phases
+            )
 
         for phase in always_phases:
             self._run_one_phase(phase, store, redactor, collectors, state, env, set())
@@ -258,7 +659,9 @@ class DiscoveryRunner:
             if not _dependency_satisfied(state.phase_status.get(required))
         ]
         if missing and not phase.always_run:
-            self._record_skip(store, state, phase, "dependency_not_passed", {"missing": missing})
+            self._record_skip(
+                store, state, phase, "dependency_not_passed", {"missing": missing}
+            )
             return
 
         print(f"phase: {phase.id}")
@@ -278,11 +681,15 @@ class DiscoveryRunner:
         state.phase_status[phase.id] = status
         if status == "failed":
             state.failed_phases.append(phase.id)
-            collectors.collect_many(phase.collect_on_failure, reason=f"phase_failed:{phase.id}")
+            collectors.collect_many(
+                phase.collect_on_failure, reason=f"phase_failed:{phase.id}"
+            )
             if phase.blocking and not phase.always_run:
                 state.blocking_failure = phase.id
         else:
-            collectors.collect_many(phase.collect_on_success, reason=f"phase_passed:{phase.id}")
+            collectors.collect_many(
+                phase.collect_on_success, reason=f"phase_passed:{phase.id}"
+            )
 
         record = {
             "id": phase.id,
@@ -357,7 +764,9 @@ class DiscoveryRunner:
         results = []
         ok = True
         for command in workaround.commands:
-            result = self._run_command(store, redactor, f"workaround_{workaround.id}", command, env)
+            result = self._run_command(
+                store, redactor, f"workaround_{workaround.id}", command, env
+            )
             results.append(result.to_json(store.run_dir))
             ok = ok and result.ok
             if not result.ok:
@@ -443,7 +852,11 @@ class DiscoveryRunner:
         assumed_phase_ids: tuple[str, ...],
         profile_env: dict[str, str],
     ) -> None:
-        output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
+        output = (
+            self.output_dir
+            if self.output_dir is not None
+            else self.paths.default_output_root
+        )
         print(f"issue-discovery command: {mode}")
         print(f"repo_root: {self.repo_root}")
         print(f"output: {output}")
@@ -468,7 +881,11 @@ class DiscoveryRunner:
             print(f"  - {phase.id}{suffix}")
 
     def _print_pending(self, command: str) -> None:
-        output = self.output_dir if self.output_dir is not None else self.paths.default_output_root
+        output = (
+            self.output_dir
+            if self.output_dir is not None
+            else self.paths.default_output_root
+        )
         dry_run = "yes" if self.dry_run else "no"
         print(f"issue-discovery command: {command}")
         print(f"repo_root: {self.repo_root}")
@@ -476,13 +893,267 @@ class DiscoveryRunner:
         print(f"dry_run: {dry_run}")
 
 
-def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | None) -> tuple[PhaseSpec, ...]:
+def _capacity_context(
+    *,
+    repo_root: Path,
+    repository: str,
+    branch: str,
+    sha: str,
+    run_id: str,
+    timeout_seconds: Any,
+    adapters: Any,
+) -> dict[str, Any]:
+    parsed_adapters = _parse_capacity_adapters(adapters)
+    if repository != _CAPACITY_PUBLIC_REPOSITORY:
+        raise CapacityCommandError("invalid-public-context")
+    try:
+        validate_public_capacity_branch(
+            branch,
+            repo_root,
+            label="capacity public branch",
+        )
+    except CapacityValidationError:
+        raise CapacityCommandError("invalid-public-context") from None
+    if not isinstance(sha, str) or _CAPACITY_SHA_RE.fullmatch(sha) is None:
+        raise CapacityCommandError("invalid-public-context")
+    if not isinstance(run_id, str) or _CAPACITY_RUN_ID_RE.fullmatch(run_id) is None:
+        raise CapacityCommandError("invalid-run-context")
+    if isinstance(timeout_seconds, str):
+        if re.fullmatch(r"[1-9][0-9]{0,4}", timeout_seconds) is None:
+            raise CapacityCommandError("invalid-run-context")
+        normalized_timeout = int(timeout_seconds)
+    elif isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool):
+        normalized_timeout = timeout_seconds
+    else:
+        raise CapacityCommandError("invalid-run-context")
+    if not 1 <= normalized_timeout <= 86_400:
+        raise CapacityCommandError("invalid-run-context")
+    try:
+        validate_public_capacity_data(
+            run_id,
+            repo_root,
+            subject="capacity run metadata",
+        )
+    except CapacityValidationError:
+        raise CapacityCommandError("invalid-run-context") from None
+    return {
+        "public_context": {
+            "repository": repository,
+            "branch": branch,
+            "sha": sha,
+        },
+        "run": {
+            "run_id": run_id,
+            "timeout_seconds": normalized_timeout,
+        },
+        "adapters": parsed_adapters,
+    }
+
+
+def _parse_capacity_adapters(values: Any) -> dict[str, str]:
+    if not isinstance(values, (list, tuple)) or not values:
+        raise CapacityCommandError("invalid-adapter-selection", exit_code=3)
+    parsed: dict[str, str] = {}
+    for value in values:
+        if not isinstance(value, str) or value.count("=") != 1:
+            raise CapacityCommandError("invalid-adapter-selection", exit_code=3)
+        kind, mode = value.split("=", 1)
+        if kind not in _CAPACITY_ADAPTER_KINDS or mode not in _CAPACITY_ADAPTER_MODES:
+            raise CapacityCommandError("invalid-adapter-selection", exit_code=3)
+        if kind in parsed:
+            raise CapacityCommandError("invalid-adapter-selection", exit_code=3)
+        parsed[kind] = mode
+    return {kind: parsed[kind] for kind in sorted(parsed)}
+
+
+def _capacity_context_with_scenario(
+    context: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    return {**context, "scenario": _capacity_scenario_identity(scenario)}
+
+
+def _capacity_scenario_identity(scenario: dict[str, Any]) -> dict[str, str]:
+    return {
+        "id": str(scenario["scenario_id"]),
+        "sha256": scenario_sha256(scenario),
+    }
+
+
+def _capacity_read_value(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _capacity_read_object(path: Path) -> dict[str, Any]:
+    value = _capacity_read_value(path)
+    if not isinstance(value, dict):
+        raise CapacityCommandError("input-must-be-object")
+    return value
+
+
+def _capacity_read_bound_receipt(
+    path: Path,
+    *,
+    operation: str,
+    context: dict[str, Any],
+    termination: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    envelope = _capacity_read_object(path)
+    expected_keys = {
+        "schema_version",
+        "operation",
+        "idempotency_key",
+        "public_context",
+        "scenario",
+        "run",
+        "adapters",
+        "termination",
+        "receipt",
+    }
+    if set(envelope) != expected_keys:
+        raise CapacityCommandError("receipt-envelope-invalid")
+    expected = {
+        "schema_version": 1,
+        "operation": operation,
+        "idempotency_key": idempotency_key,
+        "public_context": context["public_context"],
+        "scenario": context["scenario"],
+        "run": context["run"],
+        "adapters": context["adapters"],
+        "termination": termination,
+    }
+    if any(envelope[key] != value for key, value in expected.items()):
+        raise CapacityCommandError("receipt-context-mismatch")
+    receipt = envelope["receipt"]
+    if not isinstance(receipt, dict):
+        raise CapacityCommandError("receipt-envelope-invalid")
+    return receipt
+
+
+def _require_capacity_result_context(
+    result: dict[str, Any],
+    context: dict[str, Any],
+) -> None:
+    run = result["run"]
+    public = context["public_context"]
+    expected = {
+        "repository": public["repository"],
+        "branch": public["branch"],
+        "sha": public["sha"],
+        "run_id": context["run"]["run_id"],
+        "timeout_seconds": context["run"]["timeout_seconds"],
+    }
+    if any(run[key] != value for key, value in expected.items()):
+        raise CapacityCommandError("context-mismatch")
+
+
+def _require_capacity_finding_context(
+    finding: dict[str, Any],
+    context: dict[str, Any],
+) -> None:
+    public = context["public_context"]
+    occurrence = finding["occurrence"]
+    expected = {
+        "repository": (finding["public_context"]["repository"], public["repository"]),
+        "branch": (finding["public_context"]["branch"], public["branch"]),
+        "sha": (finding["public_context"]["sha"], public["sha"]),
+        "scenario_id": (finding["scenario"]["id"], context["scenario"]["id"]),
+        "scenario_sha256": (
+            finding["scenario"]["sha256"],
+            context["scenario"]["sha256"],
+        ),
+        "run_id": (occurrence["run_id"], context["run"]["run_id"]),
+        "timeout_seconds": (
+            occurrence["timeout_seconds"],
+            context["run"]["timeout_seconds"],
+        ),
+    }
+    if any(values[0] != values[1] for values in expected.values()):
+        raise CapacityCommandError("context-mismatch")
+
+
+def _validate_capacity_termination(value: str) -> None:
+    if value not in _CAPACITY_TERMINATIONS:
+        raise CapacityCommandError("invalid-termination")
+
+
+def _capacity_operation_key(
+    operation: str,
+    context: dict[str, Any],
+    termination: str,
+) -> str:
+    identity = {
+        "schema_version": 1,
+        "operation": operation,
+        "public_context": context["public_context"],
+        "scenario": context["scenario"],
+        "run": context["run"],
+        "adapters": context["adapters"],
+        "termination": termination,
+    }
+    encoded = json.dumps(identity, separators=(",", ":"), sort_keys=True).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _public_cancellation_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    failure = receipt["failure"]
+    return {
+        "attempted": receipt["attempted"],
+        "status": receipt["status"],
+        "failure": (
+            None
+            if failure is None
+            else {"code": failure["code"], "location": failure["location"]}
+        ),
+    }
+
+
+def _public_cleanup_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    failure = receipt["failure"]
+    return {
+        "attempted": receipt["attempted"],
+        "status": receipt["status"],
+        "zero_residue": receipt["zero_residue"],
+        "failure": (
+            None
+            if failure is None
+            else {"code": failure["code"], "location": failure["location"]}
+        ),
+    }
+
+
+def _print_capacity_output(
+    command: str,
+    status: str,
+    context: dict[str, Any] | None,
+    result: dict[str, Any] | None,
+    error_code: str | None,
+) -> None:
+    output = {
+        "schema_version": 1,
+        "command": command,
+        "status": status,
+        "context": context,
+        "result": result,
+        "error": None if error_code is None else {"code": error_code},
+    }
+    print(json.dumps(output, separators=(",", ":"), sort_keys=True))
+
+
+def _select_phases(
+    phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | None
+) -> tuple[PhaseSpec, ...]:
     if selected_phase_ids is None:
         return phase_file.phases
     by_id = {phase.id: phase for phase in phase_file.phases}
     missing = [phase_id for phase_id in selected_phase_ids if phase_id not in by_id]
     if missing:
-        raise ValueError(f"unknown phase ids in {phase_file.name}: {', '.join(missing)}")
+        raise ValueError(
+            f"unknown phase ids in {phase_file.name}: {', '.join(missing)}"
+        )
     included: set[str] = set()
     visiting: set[str] = set()
 
@@ -490,10 +1161,14 @@ def _select_phases(phase_file: PhaseFile, selected_phase_ids: tuple[str, ...] | 
         if phase_id in included:
             return
         if phase_id in visiting:
-            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"cyclic phase dependency in {phase_file.name}: {phase_id}"
+            )
         phase = by_id.get(phase_id)
         if phase is None:
-            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"unknown required phase id in {phase_file.name}: {phase_id}"
+            )
         visiting.add(phase_id)
         for required in phase.requires:
             include_with_dependencies(required)
@@ -514,7 +1189,9 @@ def _select_phases_from_start(
     try:
         start_index = phase_ids.index(start_phase)
     except ValueError as exc:
-        raise ValueError(f"unknown continuation start phase in {phase_file.name}: {start_phase}") from exc
+        raise ValueError(
+            f"unknown continuation start phase in {phase_file.name}: {start_phase}"
+        ) from exc
     selected = tuple(phase_file.phases[start_index:])
     assumed = _dependency_closure_outside_selection(phase_file, selected)
     return selected, assumed
@@ -554,10 +1231,14 @@ def _dependency_closure_outside_selection(
 
     def visit(phase_id: str) -> None:
         if phase_id in visiting:
-            raise ValueError(f"cyclic phase dependency in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"cyclic phase dependency in {phase_file.name}: {phase_id}"
+            )
         phase = by_id.get(phase_id)
         if phase is None:
-            raise ValueError(f"unknown required phase id in {phase_file.name}: {phase_id}")
+            raise ValueError(
+                f"unknown required phase id in {phase_file.name}: {phase_id}"
+            )
         visiting.add(phase_id)
         for required_id in phase.requires:
             if required_id not in selected_ids:

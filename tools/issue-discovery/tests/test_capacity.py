@@ -13,7 +13,9 @@ from issue_discovery.capacity import (
     evaluate_capacity_result,
     finding_fingerprint,
     scenario_sha256,
+    validate_cancellation_receipt,
     validate_capacity_result,
+    validate_cleanup_receipt,
     validate_finding,
     validate_finding_file,
     validate_scenario,
@@ -467,6 +469,205 @@ def test_capacity_finding_schema_is_valid_draft_2020_12() -> None:
     jsonschema.Draft202012Validator.check_schema(schema)
 
 
+@pytest.mark.parametrize(
+    ("receipt", "termination"),
+    [
+        (
+            {"attempted": False, "status": "not-required", "failure": None},
+            "completed",
+        ),
+        (
+            {"attempted": True, "status": "succeeded", "failure": None},
+            "timeout",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "failed",
+                "failure": {
+                    "code": "cancellation-failed",
+                    "location": "cancellation",
+                    "evidence_summary": "The bounded cancellation attempt failed.",
+                },
+            },
+            "controller-failure",
+        ),
+    ],
+)
+def test_cancellation_receipt_validator_accepts_complete_consistent_states(
+    receipt: dict[str, object],
+    termination: str,
+) -> None:
+    validate_cancellation_receipt(
+        receipt,
+        termination=termination,
+        repo_root=repo_root(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("receipt", "termination", "message"),
+    [
+        (
+            {"attempted": False, "status": "not-required"},
+            "completed",
+            "missing failure",
+        ),
+        (
+            {"attempted": True, "status": "not-required", "failure": None},
+            "completed",
+            "status must agree",
+        ),
+        (
+            {"attempted": False, "status": "not-required", "failure": None},
+            "timeout",
+            "cancellation must be attempted",
+        ),
+        (
+            {"attempted": True, "status": "failed", "failure": None},
+            "completed",
+            "failure must be an object",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "succeeded",
+                "failure": {
+                    "code": "unexpected-failure",
+                    "location": "cancellation",
+                    "evidence_summary": "Success cannot retain failure evidence.",
+                },
+            },
+            "completed",
+            "failure must be null unless cancellation failed",
+        ),
+    ],
+)
+def test_cancellation_receipt_validator_rejects_inconsistent_states(
+    receipt: dict[str, object],
+    termination: str,
+    message: str,
+) -> None:
+    with pytest.raises(CapacityValidationError, match=message):
+        validate_cancellation_receipt(
+            receipt,
+            termination=termination,
+            repo_root=repo_root(),
+        )
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        {
+            "attempted": True,
+            "status": "succeeded",
+            "zero_residue": True,
+            "failure": None,
+        },
+        {
+            "attempted": True,
+            "status": "failed",
+            "zero_residue": False,
+            "failure": {
+                "code": "cleanup-failed",
+                "location": "cleanup",
+                "evidence_summary": "The bounded cleanup attempt failed.",
+            },
+        },
+        {
+            "attempted": False,
+            "status": "not-attempted",
+            "zero_residue": False,
+            "failure": {
+                "code": "cleanup-not-attempted",
+                "location": "cleanup",
+                "evidence_summary": "Cleanup could not be attempted.",
+            },
+        },
+    ],
+)
+def test_cleanup_receipt_validator_accepts_complete_consistent_states(
+    receipt: dict[str, object],
+) -> None:
+    validate_cleanup_receipt(receipt, repo_root=repo_root())
+
+
+@pytest.mark.parametrize(
+    ("receipt", "message"),
+    [
+        (
+            {"attempted": True, "status": "succeeded", "zero_residue": True},
+            "missing failure",
+        ),
+        (
+            {
+                "attempted": False,
+                "status": "succeeded",
+                "zero_residue": True,
+                "failure": None,
+            },
+            "status must agree",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "succeeded",
+                "zero_residue": False,
+                "failure": None,
+            },
+            "zero_residue must be true",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "failed",
+                "zero_residue": True,
+                "failure": None,
+            },
+            "zero_residue must be false",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "failed",
+                "zero_residue": False,
+                "failure": None,
+            },
+            "failure must be an object",
+        ),
+        (
+            {
+                "attempted": False,
+                "status": "not-attempted",
+                "zero_residue": False,
+                "failure": None,
+            },
+            "failure must be an object",
+        ),
+        (
+            {
+                "attempted": True,
+                "status": "succeeded",
+                "zero_residue": True,
+                "failure": {
+                    "code": "unexpected-failure",
+                    "location": "cleanup",
+                    "evidence_summary": "Successful cleanup cannot retain failure evidence.",
+                },
+            },
+            "failure must be null when cleanup succeeded",
+        ),
+    ],
+)
+def test_cleanup_receipt_validator_rejects_inconsistent_states(
+    receipt: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(CapacityValidationError, match=message):
+        validate_cleanup_receipt(receipt, repo_root=repo_root())
+
+
 def test_q0_evaluates_host_preflight_without_market_lifecycle() -> None:
     scenario = by_stage("q0-host-capability")
     result = capacity_result(scenario, [])
@@ -700,12 +901,12 @@ def test_capacity_result_rejects_raw_payloads_or_wrong_scenario_binding() -> Non
         "password": "must-not-enter-public-results"
     }
     with pytest.raises(CapacityValidationError, match="unexpected payload"):
-        validate_capacity_result(raw, scenario)
+        validate_capacity_result(raw, scenario, repo_root())
 
     wrong_hash = capacity_result(scenario, [success_observation(1)])
     wrong_hash["scenario_sha256"] = "0" * 64
     with pytest.raises(CapacityValidationError, match="scenario_sha256"):
-        validate_capacity_result(wrong_hash, scenario)
+        validate_capacity_result(wrong_hash, scenario, repo_root())
 
 
 def test_finding_validation_rejects_credentials_paths_and_raw_identity_fields() -> None:
@@ -1117,7 +1318,7 @@ def test_non_completed_run_without_cancellation_is_rejected() -> None:
     )
 
     with pytest.raises(CapacityValidationError, match="cancellation must be attempted"):
-        validate_capacity_result(result, scenario)
+        validate_capacity_result(result, scenario, repo_root())
 
 
 def test_failed_cancellation_and_unattempted_cleanup_remain_findings() -> None:
@@ -1223,7 +1424,7 @@ def test_request_order_is_irrelevant_but_duplicate_or_out_of_range_ordinals_are_
         [success_observation(1), scarcity_observation(9)],
     )
     with pytest.raises(CapacityValidationError, match="1 through 8"):
-        validate_capacity_result(out_of_range, scenario)
+        validate_capacity_result(out_of_range, scenario, repo_root())
 
 
 def test_fingerprint_changes_only_with_semantic_identity_fields() -> None:
@@ -1259,8 +1460,41 @@ def test_fingerprint_changes_only_with_semantic_identity_fields() -> None:
         "password=not-public",
         "Bearer not-a-real-token",
         "ghp_notarealtokenvalue",
+        "github_pat_notarealtokenvalue",
+        "sk-proj-notarealtokenvalue",
+        "sk_live_notarealtokenvalue",
+        "rk_live_notarealtokenvalue",
+        "npm_notarealtokenvalue",
+        "pypi-notarealtokenvalue",
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJzeW50aGV0aWMifQ.notarealsignature",
+        "Authorization: Basic dXNlcjpwYXNz",
+        "Proxy-Authorization: Basic dXNlcjpwYXNz",
+        "Basic dXNlcjpwYXNz",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsyntheticnotrealkeymaterial",
+        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABsyntheticnotrealkeymaterial",
+        "gpu-host ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIsyntheticnotrealkeymaterial",
+        "SHA256:syntheticnotrealsshfingerprintvalue",
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "wallet_address=0x3333333333333333333333333333333333333333",
+        "4/0AXsynthetic-device-code-not-real",
         "/home/private-user/capacity/run.json",
+        "/tmp/capacity-run-123/result.json",
+        "path=C:\\Users\\alice\\secret",
+        "path=../secret",
+        "path=(/var/private/run.json)",
         "https://internal.invalid/run",
+        "fe80::1",
+        "2001:db8::1234",
+        "::1",
+        "::dead:beef",
+        "00:11:22:33:44:55",
+        "00-11-22-33-44-55",
+        "0011.2233.4455",
+        "internal-host.example.invalid",
+        "server.localdomain",
+        "localhost:2222",
+        "server:22",
         "operator@example.invalid",
         "capacity_reservation_id=reservation-opaque",
         "project_id=private-project",
@@ -1289,6 +1523,53 @@ def test_finding_privacy_scan_rejects_sensitive_public_evidence(
 
     with pytest.raises(CapacityValidationError):
         validate_finding(finding, repo_root())
+
+
+def test_finding_privacy_scan_does_not_treat_word_suffix_as_token() -> None:
+    scenario = by_stage("q2-b2-s1-g1")
+    result = capacity_result(
+        scenario,
+        [success_observation(1), scarcity_observation(2, error="other_conflict")],
+    )
+    finding = evaluate_capacity_result(scenario, result, repo_root())["findings"][0]
+    summary = "A task-oriented assertion identified a bounded harness mismatch."
+    finding["failure"]["stable_evidence_summary"] = summary.lower()
+    finding["summary"] = summary
+    finding["fingerprint"] = finding_fingerprint(
+        scenario_sha256_value=finding["scenario"]["sha256"],
+        classification=finding["classification"],
+        code=finding["failure"]["code"],
+        location=finding["failure"]["location"],
+        stable_evidence_summary=summary.lower(),
+    )
+
+    validate_finding(finding, repo_root())
+
+
+def test_finding_privacy_scan_allows_public_version_and_timestamp_text() -> None:
+    scenario = by_stage("q2-b2-s1-g1")
+    result = capacity_result(
+        scenario,
+        [success_observation(1), scarcity_observation(2, error="other_conflict")],
+    )
+    finding = evaluate_capacity_result(scenario, result, repo_root())["findings"][0]
+    summary = (
+        "Basic validation for version 1.2.3 with schema_version:1 and request:2 "
+        "produced status:409 "
+        "at 2026-08-02T12:34:56Z after duration 00:45 and ratio 12:34."
+    )
+    finding["occurrence"]["observed_at"] = "2026-08-02T12:34:56Z"
+    finding["failure"]["stable_evidence_summary"] = summary.lower()
+    finding["summary"] = summary
+    finding["fingerprint"] = finding_fingerprint(
+        scenario_sha256_value=finding["scenario"]["sha256"],
+        classification=finding["classification"],
+        code=finding["failure"]["code"],
+        location=finding["failure"]["location"],
+        stable_evidence_summary=summary.lower(),
+    )
+
+    validate_finding(finding, repo_root())
 
 
 def test_untrusted_http_detail_is_never_echoed_into_the_finding() -> None:
@@ -1332,4 +1613,4 @@ def test_sanitized_code_shaped_409_is_classified_without_accepting_raw_message()
     raw = capacity_result(scenario, [success_observation(1), conflict])
     raw["observations"][1]["detail"]["message"] = "provider internals"
     with pytest.raises(CapacityValidationError, match="sanitized code"):
-        validate_capacity_result(raw, scenario)
+        validate_capacity_result(raw, scenario, repo_root())

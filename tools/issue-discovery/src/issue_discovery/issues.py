@@ -372,6 +372,7 @@ def plan_capacity_issues(
         "termination",
         "run",
         "classification",
+        "counts",
         "findings",
     }
     missing = sorted(required - set(evaluation))
@@ -389,19 +390,35 @@ def plan_capacity_issues(
     findings = evaluation["findings"]
     if not isinstance(findings, list):
         raise CapacityIssuePlanError("capacity evaluation findings must be an array")
+    counts = evaluation["counts"]
+    expected_count_keys = {"success", "expected_scarcity", "findings"}
+    if not isinstance(counts, dict) or set(counts) != expected_count_keys:
+        raise CapacityIssuePlanError(
+            "capacity evaluation counts must contain success, expected_scarcity, and findings"
+        )
+    if any(
+        not isinstance(counts[key], int)
+        or isinstance(counts[key], bool)
+        or counts[key] < 0
+        for key in expected_count_keys
+    ) or counts["findings"] != len(findings):
+        raise CapacityIssuePlanError("capacity evaluation counts are inconsistent")
 
     if classification in {"success", "expected-scarcity"}:
         if findings:
             raise CapacityIssuePlanError(
                 f"{classification} evaluation cannot contain publishable findings"
             )
+        scarcity_suppressed = counts["expected_scarcity"] > 0
+        if classification == "expected-scarcity" and not scarcity_suppressed:
+            raise CapacityIssuePlanError(
+                "expected-scarcity evaluation must count expected scarcity"
+            )
         return {
             "schema_version": 1,
             "kind": "capacity-issue-decisions",
-            "decision": "suppressed"
-            if classification == "expected-scarcity"
-            else "no-action",
-            "reason": classification,
+            "decision": "suppressed" if scarcity_suppressed else "no-action",
+            "reason": "expected-scarcity" if scarcity_suppressed else classification,
             "plans": [],
         }
 

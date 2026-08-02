@@ -52,16 +52,16 @@
 
 ## 5. Portable CLI and runner behavior
 
-- [ ] 5.1 Add deterministic validate, hash, evaluate, finding, issue-plan,
+- [x] 5.1 Add deterministic validate, hash, evaluate, finding, issue-plan,
   cancel, and cleanup JSON/exit-code surfaces without a capacity execution
   command.
-- [ ] 5.2 Represent public repository/branch/SHA, scenario, run, timeout,
+- [x] 5.2 Represent public repository/branch/SHA, scenario, run, timeout,
   adapter, cancellation, and cleanup inputs explicitly.
-- [ ] 5.3 Reject live market, wallet, cloud, host, provisioning, and GitHub
+- [x] 5.3 Reject live market, wallet, cloud, host, provisioning, and GitHub
   mutation adapters before subprocess or network invocation.
-- [ ] 5.4 Correct only current repository paths/prerequisites in `local.yaml`
+- [x] 5.4 Correct only current repository paths/prerequisites in `local.yaml`
   and `test_bootstrap.py`; preserve ordinary issue-discovery phases.
-- [ ] 5.5 Test CLI help, valid and invalid inputs, stable JSON, dry-run output,
+- [x] 5.5 Test CLI help, valid and invalid inputs, stable JSON, dry-run output,
   cancellation, cleanup, and fail-closed behavior.
 
 ## 6. Permanent documentation promotion

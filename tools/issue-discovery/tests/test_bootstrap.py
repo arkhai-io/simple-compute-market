@@ -27,7 +27,18 @@ def make_fake_path(tmp_path: Path) -> Path:
         target = shutil.which(tool)
         assert target is not None, tool
         os.symlink(target, bin_dir / tool)
-    for tool in ("curl", "git", "jq", "make", "node", "python3", "uv"):
+    for tool in (
+        "anvil",
+        "cargo",
+        "curl",
+        "git",
+        "jq",
+        "make",
+        "node",
+        "npm",
+        "python3",
+        "uv",
+    ):
         make_executable(bin_dir / tool, "#!/usr/bin/env bash\nexit 0\n")
     make_executable(
         bin_dir / "docker",

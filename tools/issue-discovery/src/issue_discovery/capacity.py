@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import ipaddress
 import json
 import re
 from datetime import datetime
@@ -403,6 +406,11 @@ _FAILURE_LOCATION_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,119}$")
 _CONTRACT_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,2}$")
 _SUPPORTED_CONTRACT_MAJOR = 1
 
+
+def _is_default_or_qualified_branch(value: str) -> bool:
+    return value in {"dev", "main"} or value.startswith(("origin/", "refs/"))
+
+
 _DEFECT_CLASSIFICATIONS = frozenset(
     {
         "harness-defect",
@@ -687,9 +695,88 @@ def _validate_assertion_receipt(
     return receipt
 
 
+def validate_cancellation_receipt(
+    receipt: Any,
+    *,
+    termination: str,
+    repo_root: Path,
+) -> None:
+    """Validate a sanitized capacity-run cancellation receipt."""
+
+    cancellation = _expect_object(
+        receipt,
+        "result.cancellation",
+        {"attempted", "status", "failure"},
+    )
+    attempted = _expect_bool(cancellation["attempted"], "result.cancellation.attempted")
+    cancellation_status = _expect_choice(
+        cancellation["status"],
+        "result.cancellation.status",
+        {"not-required", "succeeded", "failed"},
+    )
+    if attempted is (cancellation_status == "not-required"):
+        raise CapacityValidationError(
+            "result.cancellation status must agree with whether cancellation was attempted"
+        )
+    if cancellation_status == "failed":
+        _validate_failure(cancellation["failure"], "result.cancellation.failure")
+    elif cancellation["failure"] is not None:
+        raise CapacityValidationError(
+            "result.cancellation.failure must be null unless cancellation failed"
+        )
+    if termination != "completed" and attempted is False:
+        raise CapacityValidationError(
+            "result.cancellation must be attempted for a non-completed termination"
+        )
+    validate_public_capacity_data(
+        cancellation,
+        repo_root,
+        subject="cancellation receipt",
+    )
+
+
+def validate_cleanup_receipt(receipt: Any, *, repo_root: Path) -> None:
+    """Validate a sanitized capacity-run cleanup receipt."""
+
+    cleanup = _expect_object(
+        receipt,
+        "result.cleanup",
+        {"attempted", "status", "zero_residue", "failure"},
+    )
+    cleanup_attempted = _expect_bool(cleanup["attempted"], "result.cleanup.attempted")
+    cleanup_status = _expect_choice(
+        cleanup["status"],
+        "result.cleanup.status",
+        {"succeeded", "failed", "not-attempted"},
+    )
+    zero_residue = _expect_bool(cleanup["zero_residue"], "result.cleanup.zero_residue")
+    if cleanup_attempted is (cleanup_status == "not-attempted"):
+        raise CapacityValidationError(
+            "result.cleanup status must agree with whether cleanup was attempted"
+        )
+    if cleanup_status == "succeeded" and zero_residue is False:
+        raise CapacityValidationError(
+            "result.cleanup.zero_residue must be true when cleanup succeeded"
+        )
+    if cleanup_status != "succeeded" and zero_residue is True:
+        raise CapacityValidationError(
+            "result.cleanup.zero_residue must be false unless cleanup succeeded"
+        )
+    if cleanup_status == "failed":
+        _validate_failure(cleanup["failure"], "result.cleanup.failure")
+    elif cleanup_status == "not-attempted":
+        _validate_failure(cleanup["failure"], "result.cleanup.failure")
+    elif cleanup["failure"] is not None:
+        raise CapacityValidationError(
+            "result.cleanup.failure must be null when cleanup succeeded"
+        )
+    validate_public_capacity_data(cleanup, repo_root, subject="cleanup receipt")
+
+
 def validate_capacity_result(
     result: dict[str, Any],
     scenario: dict[str, Any],
+    repo_root: Path,
 ) -> None:
     """Validate one sanitized, non-live capacity receipt document.
 
@@ -753,12 +840,21 @@ def validate_capacity_result(
         raise CapacityValidationError(
             "result.run.repository must be the public SCM repository"
         )
-    branch = _expect_string(
-        run["branch"], "result.run.branch", pattern=_SAFE_BRANCH_RE, max_length=160
+    branch = validate_public_capacity_branch(
+        run["branch"],
+        repo_root,
+        label="result.run.branch",
     )
-    if branch in {"dev", "main"}:
-        raise CapacityValidationError("result.run.branch must not be a default branch")
     _expect_string(run["sha"], "result.run.sha", pattern=_SHA40_RE, max_length=40)
+    validate_public_capacity_data(
+        {
+            "repository": run["repository"],
+            "branch": branch,
+            "run_id": run["run_id"],
+        },
+        repo_root,
+        subject="capacity run metadata",
+    )
 
     _validate_assertion_receipt(
         value["role_receipts"],
@@ -904,64 +1000,12 @@ def validate_capacity_result(
                 "result.run_failure must be null when termination is completed"
             )
 
-    cancellation = _expect_object(
+    validate_cancellation_receipt(
         value["cancellation"],
-        "result.cancellation",
-        {"attempted", "status", "failure"},
+        termination=termination,
+        repo_root=repo_root,
     )
-    attempted = _expect_bool(cancellation["attempted"], "result.cancellation.attempted")
-    cancellation_status = _expect_choice(
-        cancellation["status"],
-        "result.cancellation.status",
-        {"not-required", "succeeded", "failed"},
-    )
-    if attempted is (cancellation_status == "not-required"):
-        raise CapacityValidationError(
-            "result.cancellation status must agree with whether cancellation was attempted"
-        )
-    if cancellation_status == "failed":
-        _validate_failure(cancellation["failure"], "result.cancellation.failure")
-    elif cancellation["failure"] is not None:
-        raise CapacityValidationError(
-            "result.cancellation.failure must be null unless cancellation failed"
-        )
-    if termination != "completed" and attempted is False:
-        raise CapacityValidationError(
-            "result.cancellation must be attempted for a non-completed termination"
-        )
-
-    cleanup = _expect_object(
-        value["cleanup"],
-        "result.cleanup",
-        {"attempted", "status", "zero_residue", "failure"},
-    )
-    cleanup_attempted = _expect_bool(cleanup["attempted"], "result.cleanup.attempted")
-    cleanup_status = _expect_choice(
-        cleanup["status"],
-        "result.cleanup.status",
-        {"succeeded", "failed", "not-attempted"},
-    )
-    zero_residue = _expect_bool(cleanup["zero_residue"], "result.cleanup.zero_residue")
-    if cleanup_attempted is (cleanup_status == "not-attempted"):
-        raise CapacityValidationError(
-            "result.cleanup status must agree with whether cleanup was attempted"
-        )
-    if cleanup_status == "succeeded" and zero_residue is False:
-        raise CapacityValidationError(
-            "result.cleanup.zero_residue must be true when cleanup succeeded"
-        )
-    if cleanup_status != "succeeded" and zero_residue is True:
-        raise CapacityValidationError(
-            "result.cleanup.zero_residue must be false unless cleanup succeeded"
-        )
-    if cleanup_status == "failed":
-        _validate_failure(cleanup["failure"], "result.cleanup.failure")
-    elif cleanup_status == "not-attempted":
-        _validate_failure(cleanup["failure"], "result.cleanup.failure")
-    elif cleanup["failure"] is not None:
-        raise CapacityValidationError(
-            "result.cleanup.failure must be null when cleanup succeeded"
-        )
+    validate_cleanup_receipt(value["cleanup"], repo_root=repo_root)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -1183,7 +1227,7 @@ def evaluate_capacity_result(
     """Evaluate a sanitized receipt without invoking an adapter or subprocess."""
 
     validate_scenario(scenario, repo_root)
-    validate_capacity_result(result, scenario)
+    validate_capacity_result(result, scenario, repo_root)
     expected = scenario["expectations"]
     defects: list[dict[str, Any]] = []
     evaluated: list[dict[str, Any]] = []
@@ -1577,14 +1621,280 @@ def _iter_string_values(value: Any) -> list[str]:
     return []
 
 
+_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)(?:password|secret|token|api[_-]?key|private[_-]?key|"
+    r"access[_-]?key|credential)\s*[:=]\s*\S+"
+)
+_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|"
+    r"glpat-[A-Za-z0-9_-]+|AIza[A-Za-z0-9_-]+|"
+    r"(?:AKIA|ASIA)[A-Z0-9]{12,}|"
+    r"sk-(?:(?:ant|proj|svcacct)-)?[A-Za-z0-9_-]{8,}|"
+    r"[sr]k_(?:live|test)_[A-Za-z0-9]+|npm_[A-Za-z0-9]+|"
+    r"pypi-[A-Za-z0-9_-]+|"
+    r"xox[a-z]-[A-Za-z0-9-]+|ya29\.[A-Za-z0-9_-]+|"
+    r"4/0A[A-Za-z0-9_-]+|Bearer\s+\S+)",
+    re.IGNORECASE,
+)
+_JWT_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\."
+    r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}"
+    r"(?![A-Za-z0-9_-])"
+)
+_AUTHORIZATION_PATTERN = re.compile(
+    r"(?i)\b(?:proxy-)?authorization\s*[:=]\s*basic\s+\S+"
+)
+_BASIC_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)\bbasic\s+([A-Za-z0-9+/]{8,}={0,2})(?![A-Za-z0-9+/=])"
+)
+_SSH_IDENTITY_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"\b(?:ssh-(?:ed25519|rsa)(?:-cert-v01@openssh\.com)?|"
+    r"ecdsa-sha2-[^\s]+|sk-ssh-ed25519@openssh\.com)"
+    r"\s+[A-Za-z0-9+/]{16,}={0,3}|"
+    r"\bSHA256:[A-Za-z0-9+/]{16,}={0,3})"
+)
+_EVM_VALUE_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9])0x(?:[0-9a-f]{64}|[0-9a-f]{40})(?![0-9a-f])"
+)
+_PRIVATE_PATH_PATTERN = re.compile(
+    r"(?:^|[^A-Za-z0-9_])(?:"
+    r"[A-Za-z]:[\\/]|\\\\[^\\\s]+\\[^\\\s]+|"
+    r"~[\\/]|\.\.?[\\/]|\.ssh[\\/]|"
+    r"/(?:[A-Za-z0-9._~+-]+(?:/|$)))"
+)
+_PATH_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(?:path|file|directory|dir|cwd|workspace|home)\s*[:=]\s*\S+"
+)
+_ADDRESS_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_IP_CANDIDATE_PATTERN = re.compile(
+    r"(?<![0-9A-Za-z])(?:\[[0-9A-Fa-f:.%]+\]|[0-9A-Fa-f:.%]{2,})(?![0-9A-Za-z])"
+)
+_MAC_PATTERN = re.compile(
+    r"(?i)\b(?:[0-9a-f]{2}(?:[:-][0-9a-f]{2}){5}|"
+    r"[0-9a-f]{4}(?:\.[0-9a-f]{4}){2})\b"
+)
+_HOSTNAME_PATTERN = re.compile(
+    r"(?i)\b(?:localhost|"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"(?:invalid|internal|local|localdomain|localhost|lan|home|corp))"
+    r"(?::\d{1,5})?\b"
+)
+_HOST_PORT_PATTERN = re.compile(
+    r"(?i)(?<![A-Za-z0-9.-])"
+    r"([a-z][a-z0-9-]{0,62}(?:\.[a-z0-9-]{1,63})*):([0-9]{1,5})\b"
+)
+_HOSTISH_LABELS = frozenset(
+    {
+        "bastion",
+        "controller",
+        "devbox",
+        "gateway",
+        "host",
+        "localhost",
+        "machine",
+        "node",
+        "router",
+        "server",
+        "tower",
+        "worker",
+    }
+)
+_COMMON_NETWORK_PORTS = frozenset(
+    {
+        21,
+        22,
+        25,
+        53,
+        80,
+        110,
+        143,
+        443,
+        465,
+        587,
+        993,
+        995,
+        2222,
+        2375,
+        2376,
+        5432,
+        6379,
+        8000,
+        8080,
+        8443,
+    }
+)
+_EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_CONTROL_PATTERN = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u202a-\u202e\u2066-\u2069]"
+)
+_OPAQUE_IDENTITY_PATTERN = re.compile(
+    r"(?i)\b(?:capacity_reservation_id|fulfillment_id|executor_ref|"
+    r"executor_target|wallet_id|wallet_address|project_id|project_number|"
+    r"account_id|host_id)"
+    r"\s*[:=]\s*\S+"
+)
+_PRIVATE_REFERENCE_PATTERN = re.compile(
+    r"(?i)(?:internal[-_ ]infra|agent[-_ ]orchestration|"
+    r"(?:private|internal)[-_ ](?:repository|branch|ref|sha))"
+)
+
+
+def _contains_ip_address(text: str) -> bool:
+    for match in _IP_CANDIDATE_PATTERN.finditer(text):
+        candidate = match.group(0).strip("[]")
+        if ":" not in candidate and "." not in candidate:
+            continue
+        candidate = candidate.split("%", 1)[0]
+        try:
+            ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _contains_basic_credential(text: str) -> bool:
+    for match in _BASIC_CREDENTIAL_PATTERN.finditer(text):
+        encoded = match.group(1)
+        padded = encoded + "=" * (-len(encoded) % 4)
+        try:
+            decoded = base64.b64decode(padded, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if b":" in decoded:
+            return True
+    return False
+
+
+def _contains_host_port(text: str) -> bool:
+    for match in _HOST_PORT_PATTERN.finditer(text):
+        hostname = match.group(1).lower()
+        port = int(match.group(2))
+        if not 1 <= port <= 65_535:
+            continue
+        if (
+            "." in hostname
+            or "-" in hostname
+            or hostname in _HOSTISH_LABELS
+            or port in _COMMON_NETWORK_PORTS
+        ):
+            return True
+    return False
+
+
+def _public_capacity_privacy_errors(
+    value: Any,
+    repo_root: Path,
+    *,
+    subject: str,
+) -> list[str]:
+    redactions_path = (
+        repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
+    )
+    if not redactions_path.is_file():
+        return ["configured public redaction rules are unavailable"]
+    redactor = Redactor.from_file(redactions_path)
+    for text in _iter_string_values(value):
+        if redactor.redact(text) != text:
+            return [f"{subject} contains text matched by configured redaction rules"]
+        if "\n" in text or "\r" in text or _CONTROL_PATTERN.search(text):
+            return [f"{subject} contains multiline or raw-log-shaped text"]
+        if (
+            "-----BEGIN " in text
+            or _CREDENTIAL_PATTERN.search(text)
+            or _TOKEN_PATTERN.search(text)
+            or _JWT_PATTERN.search(text)
+            or _AUTHORIZATION_PATTERN.search(text)
+            or _contains_basic_credential(text)
+            or _SSH_IDENTITY_PATTERN.search(text)
+            or _EVM_VALUE_PATTERN.search(text)
+        ):
+            return [f"{subject} contains a credential-shaped value"]
+        if _PRIVATE_PATH_PATTERN.search(text) or _PATH_ASSIGNMENT_PATTERN.search(text):
+            return [f"{subject} contains a filesystem path"]
+        if (
+            _ADDRESS_PATTERN.search(text)
+            or _contains_ip_address(text)
+            or _MAC_PATTERN.search(text)
+            or _HOSTNAME_PATTERN.search(text)
+            or _contains_host_port(text)
+            or "://" in text
+        ):
+            return [f"{subject} contains a raw network address or URL"]
+        if _EMAIL_PATTERN.search(text):
+            return [f"{subject} contains an account-shaped value"]
+        if _OPAQUE_IDENTITY_PATTERN.search(text):
+            return [f"{subject} contains an opaque runtime identity"]
+        if _PRIVATE_REFERENCE_PATTERN.search(text):
+            return [f"{subject} contains a private repository or ref shape"]
+    return []
+
+
+def validate_public_capacity_data(
+    value: Any,
+    repo_root: Path,
+    *,
+    subject: str,
+) -> None:
+    """Reject private or credential-shaped text before public serialization."""
+
+    errors = _public_capacity_privacy_errors(value, repo_root, subject=subject)
+    if errors:
+        raise CapacityValidationError(
+            f"{subject} privacy validation failed:\n- " + "\n- ".join(errors)
+        )
+
+
+def validate_public_capacity_branch(
+    value: Any,
+    repo_root: Path,
+    *,
+    label: str,
+) -> str:
+    """Validate one canonical public working-branch name without Git execution."""
+
+    branch = _expect_string(value, label, pattern=_SAFE_BRANCH_RE, max_length=160)
+    components = branch.split("/")
+    pseudo_refs = {
+        "HEAD",
+        "FETCH_HEAD",
+        "ORIG_HEAD",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+    }
+    if (
+        _is_default_or_qualified_branch(branch)
+        or branch in pseudo_refs
+        or ".." in branch
+        or "//" in branch
+        or "@{" in branch
+        or branch.endswith(("/", ".", ".lock"))
+        or any(
+            not component or component.startswith(".") or component.endswith(".lock")
+            for component in components
+        )
+    ):
+        raise CapacityValidationError(f"{label} must be a canonical non-default branch")
+    validate_public_capacity_data(branch, repo_root, subject=label)
+    return branch
+
+
 def validate_finding(finding: dict[str, Any], repo_root: Path) -> None:
     errors = _schema_errors(
         finding,
         _schema_path(repo_root, "capacity-finding.schema.json"),
     )
     if not errors:
-        if finding["public_context"]["branch"] in {"dev", "main"}:
-            errors.append("public_context.branch must not be a default branch")
+        try:
+            validate_public_capacity_branch(
+                finding["public_context"]["branch"],
+                repo_root,
+                label="public_context.branch",
+            )
+        except CapacityValidationError as exc:
+            errors.append(str(exc))
         if finding["scenario"]["id"] not in FINITE_STAGE_ORDER:
             errors.append("scenario.id must be one of the finite VM/G1 stages")
         try:
@@ -1654,71 +1964,13 @@ def validate_finding(finding: dict[str, Any], repo_root: Path) -> None:
                 "market-request findings cannot use not-applicable lifecycle correlations"
             )
 
-        credential_pattern = re.compile(
-            r"(?i)(?:password|secret|token|api[_-]?key|private[_-]?key|"
-            r"access[_-]?key|credential)\s*[:=]\s*\S+"
+        errors.extend(
+            _public_capacity_privacy_errors(
+                finding,
+                repo_root,
+                subject="finding",
+            )
         )
-        token_pattern = re.compile(
-            r"(?:gh[pousr]_[A-Za-z0-9_]+|AIza[A-Za-z0-9_-]+|"
-            r"sk-ant-[A-Za-z0-9_-]+|xox[a-z]-[A-Za-z0-9-]+|"
-            r"ya29\.[A-Za-z0-9_-]+|Bearer\s+\S+)",
-            re.IGNORECASE,
-        )
-        private_path_pattern = re.compile(
-            r"(?:^|[\s`'\"])(?:/home/|/Users/|[A-Za-z]:\\|~/|\.ssh/)"
-        )
-        address_pattern = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-        email_pattern = re.compile(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
-        )
-        opaque_identity_pattern = re.compile(
-            r"(?i)\b(?:capacity_reservation_id|fulfillment_id|executor_ref|"
-            r"executor_target|wallet_id|project_id|project_number|account_id|host_id)"
-            r"\s*[:=]\s*\S+"
-        )
-        private_reference_pattern = re.compile(
-            r"(?i)(?:internal[-_ ]infra|agent[-_ ]orchestration|"
-            r"(?:private|internal)[-_ ](?:repository|branch|ref|sha))"
-        )
-        redactions_path = (
-            repo_root / "tools" / "issue-discovery" / "config" / "redactions.yaml"
-        )
-        if not redactions_path.is_file():
-            errors.append("configured public redaction rules are unavailable")
-            redactor = None
-        else:
-            redactor = Redactor.from_file(redactions_path)
-        for value in _iter_string_values(finding):
-            if redactor is not None and redactor.redact(value) != value:
-                errors.append(
-                    "finding contains text matched by configured redaction rules"
-                )
-                break
-            if "\n" in value or "\r" in value:
-                errors.append("finding contains multiline or raw-log-shaped text")
-                break
-            if (
-                "-----BEGIN " in value
-                or credential_pattern.search(value)
-                or token_pattern.search(value)
-            ):
-                errors.append("finding contains a credential-shaped value")
-                break
-            if private_path_pattern.search(value):
-                errors.append("finding contains an absolute workstation path")
-                break
-            if address_pattern.search(value) or "://" in value:
-                errors.append("finding contains a raw network address or URL")
-                break
-            if email_pattern.search(value):
-                errors.append("finding contains an account-shaped value")
-                break
-            if opaque_identity_pattern.search(value):
-                errors.append("finding contains an opaque runtime identity")
-                break
-            if private_reference_pattern.search(value):
-                errors.append("finding contains a private repository or ref shape")
-                break
     if errors:
         raise CapacityValidationError(
             "finding validation failed:\n- " + "\n- ".join(errors)

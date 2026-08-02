@@ -175,6 +175,7 @@ def capacity_evaluation(
     classification: str | None = None,
 ) -> dict[str, object]:
     finding = findings[0] if findings else capacity_finding()
+    resolved_classification = classification or finding["classification"]
     return {
         "schema_version": 1,
         "scenario_id": finding["scenario"]["id"],
@@ -188,7 +189,14 @@ def capacity_evaluation(
             "observed_at": finding["occurrence"]["observed_at"],
             "timeout_seconds": finding["occurrence"]["timeout_seconds"],
         },
-        "classification": classification or finding["classification"],
+        "classification": resolved_classification,
+        "counts": {
+            "success": 0,
+            "expected_scarcity": 1
+            if resolved_classification == "expected-scarcity"
+            else 0,
+            "findings": len(findings),
+        },
         "findings": findings,
     }
 
@@ -632,7 +640,7 @@ def test_issue_create_runs_gh_from_repo_root(tmp_path: Path, monkeypatch) -> Non
 
     assert code == 0
     assert calls[0]["command"][:3] == ["gh", "issue", "list"]
-    assert calls[0]["command"][calls[0]["command"].index("--state") + 1] == "open"
+    assert "--state" not in calls[0]["command"]
     assert (
         calls[0]["command"][calls[0]["command"].index("--search") + 1]
         == "fingerprint in:title"

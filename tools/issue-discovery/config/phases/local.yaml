@@ -38,7 +38,7 @@ phases:
     blocking: true
     commands:
       - id: required_commands
-        run: command -v docker && command -v make && command -v uv && command -v jq && command -v curl && command -v git && command -v node && command -v python3
+        run: command -v docker && command -v make && command -v uv && command -v jq && command -v curl && command -v git && command -v node && command -v npm && command -v cargo && command -v anvil && command -v python3
       - id: docker_daemon
         run: docker info
 
@@ -90,19 +90,15 @@ phases:
         timeout_seconds: 900
 
   - id: shared_service_tests
-    name: Shared service package tests
+    name: Core package tests
     category: code_test
     blocking: false
     requires:
       - build
     commands:
-      - id: service_reinit
-        run: make reinit
-        workdir: service
-        timeout_seconds: 600
-      - id: service_test
+      - id: core_test
         run: make test
-        workdir: service
+        workdir: core
         timeout_seconds: 600
 
   - id: policy_tests
@@ -113,12 +109,12 @@ phases:
       - build
     commands:
       - id: policy_sync
-        run: uv sync --dev
-        workdir: policy
+        run: uv sync --dev --find-links ../../.dist
+        workdir: kit/policy
         timeout_seconds: 600
       - id: policy_pytest
         run: uv run pytest tests/unit/ -v
-        workdir: policy
+        workdir: kit/policy
         timeout_seconds: 600
 
   - id: buyer_tests
@@ -129,16 +125,16 @@ phases:
       - build
     commands:
       - id: buyer_sync
-        run: uv sync --python 3.12 --extra test
-        workdir: buyer
+        run: uv sync --dev --find-links ../../../.dist
+        workdir: domains/vms/buyer
         timeout_seconds: 600
       - id: buyer_pytest
         run: uv run pytest tests/ -v
-        workdir: buyer
+        workdir: domains/vms/buyer
         timeout_seconds: 600
       - id: buyer_smoke
         run: make smoke-test
-        workdir: buyer
+        workdir: domains/vms/buyer
         timeout_seconds: 120
 
   - id: storefront_client_tests

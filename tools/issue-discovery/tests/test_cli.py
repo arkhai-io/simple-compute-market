@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from issue_discovery.cli import build_parser, main
 
@@ -84,6 +87,381 @@ def test_profile_dry_run_prints_profile_env(capsys) -> None:
         in captured.out
     )
     assert "  - redis_no_host_port_override" in captured.out
+
+
+def _install_capacity_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    return_code: int = 17,
+) -> tuple[
+    list[dict[str, object]],
+    list[tuple[str, tuple[object, ...], dict[str, object]]],
+]:
+    initializations: list[dict[str, object]] = []
+    calls: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    class RecordingRunner:
+        def __init__(
+            self,
+            repo_root: Path,
+            output_dir: Path | None = None,
+            dry_run: bool = False,
+        ) -> None:
+            initializations.append(
+                {
+                    "repo_root": repo_root,
+                    "output_dir": output_dir,
+                    "dry_run": dry_run,
+                }
+            )
+
+        def _record(self, name: str, *args: object, **kwargs: object) -> int:
+            calls.append((name, args, kwargs))
+            return return_code
+
+        def capacity_validate(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_validate", *args, **kwargs)
+
+        def capacity_hash(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_hash", *args, **kwargs)
+
+        def capacity_evaluate(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_evaluate", *args, **kwargs)
+
+        def capacity_finding(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_finding", *args, **kwargs)
+
+        def capacity_issue_plan(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_issue_plan", *args, **kwargs)
+
+        def capacity_cancel(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_cancel", *args, **kwargs)
+
+        def capacity_cleanup(self, *args: object, **kwargs: object) -> int:
+            return self._record("capacity_cleanup", *args, **kwargs)
+
+    monkeypatch.setattr("issue_discovery.cli.DiscoveryRunner", RecordingRunner)
+    return initializations, calls
+
+
+def test_capacity_parser_has_exact_preparation_commands() -> None:
+    parser = build_parser()
+    root_commands = next(
+        action for action in parser._actions if action.dest == "command"
+    )
+    assert isinstance(root_commands.choices, dict)
+    capacity_parser = root_commands.choices["capacity"]
+    capacity_commands = next(
+        action
+        for action in capacity_parser._actions
+        if action.dest == "capacity_command"
+    )
+    assert isinstance(capacity_commands.choices, dict)
+
+    assert tuple(capacity_commands.choices) == (
+        "validate",
+        "hash",
+        "evaluate",
+        "finding",
+        "issue-plan",
+        "cancel",
+        "cleanup",
+    )
+    assert {"run", "execute"}.isdisjoint(capacity_commands.choices)
+
+
+def test_capacity_help_lists_the_seven_preparation_commands(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(["capacity", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "{validate,hash,evaluate,finding,issue-plan,cancel,cleanup}" in output
+    assert "Validate a capacity scenario." in output
+    assert "Plan or record cleanup for a capacity scenario." in output
+
+
+def test_capacity_commands_dispatch_paths_context_and_global_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initializations, calls = _install_capacity_runner(monkeypatch)
+    repo = tmp_path / "repo"
+    context_arguments = [
+        "--repository",
+        "example/public-repository",
+        "--branch",
+        "replacement-branch",
+        "--sha",
+        "a" * 40,
+        "--run-id",
+        "capacity-run",
+        "--timeout-seconds",
+        "45",
+        "--adapter",
+        "market=mock",
+        "--adapter",
+        "wallet=mock",
+    ]
+    context = {
+        "repository": "example/public-repository",
+        "branch": "replacement-branch",
+        "sha": "a" * 40,
+        "run_id": "capacity-run",
+        "timeout_seconds": "45",
+        "adapters": ("market=mock", "wallet=mock"),
+    }
+    cases = [
+        (
+            "capacity_validate",
+            ["validate", "scenario.json"],
+            (repo / "scenario.json",),
+            {},
+        ),
+        (
+            "capacity_hash",
+            ["hash", "scenario.json"],
+            (repo / "scenario.json",),
+            {},
+        ),
+        (
+            "capacity_evaluate",
+            [
+                "evaluate",
+                "result.json",
+                "--scenario",
+                "scenario.json",
+                *context_arguments,
+            ],
+            (repo / "scenario.json", repo / "result.json"),
+            context,
+        ),
+        (
+            "capacity_finding",
+            [
+                "finding",
+                "finding.json",
+                "--scenario",
+                "scenario.json",
+                *context_arguments,
+            ],
+            (repo / "scenario.json", repo / "finding.json"),
+            context,
+        ),
+        (
+            "capacity_issue_plan",
+            [
+                "issue-plan",
+                "result.json",
+                "--scenario",
+                "scenario.json",
+                "--issues-snapshot",
+                "issues.json",
+                "--fix-proposal",
+                "proposal.json",
+                "--fix-fingerprint",
+                "f" * 64,
+                *context_arguments,
+            ],
+            (
+                repo / "scenario.json",
+                repo / "result.json",
+                repo / "issues.json",
+                repo / "proposal.json",
+                "f" * 64,
+            ),
+            context,
+        ),
+        (
+            "capacity_cancel",
+            [
+                "cancel",
+                "--scenario",
+                "scenario.json",
+                "--termination",
+                "timeout",
+                "--receipt",
+                "cancel.json",
+                *context_arguments,
+            ],
+            (repo / "scenario.json",),
+            {
+                "termination": "timeout",
+                "receipt": repo / "cancel.json",
+                **context,
+            },
+        ),
+        (
+            "capacity_cleanup",
+            [
+                "cleanup",
+                "--scenario",
+                "scenario.json",
+                "--termination",
+                "completed",
+                *context_arguments,
+            ],
+            (repo / "scenario.json",),
+            {"termination": "completed", "receipt": None, **context},
+        ),
+    ]
+
+    for method, arguments, expected_args, expected_kwargs in cases:
+        calls.clear()
+        code = main(
+            [
+                "--repo-root",
+                str(repo),
+                "--dry-run",
+                "capacity",
+                *arguments,
+            ]
+        )
+
+        assert code == 17
+        assert calls == [(method, expected_args, expected_kwargs)]
+        assert initializations[-1] == {
+            "repo_root": repo,
+            "output_dir": None,
+            "dry_run": True,
+        }
+
+
+def test_capacity_cli_forwards_all_live_adapters_for_runner_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, calls = _install_capacity_runner(monkeypatch, return_code=3)
+    live_adapters = (
+        "market=live",
+        "wallet=live",
+        "cloud=live",
+        "host=live",
+        "provisioning=live",
+        "github-mutation=live",
+    )
+    adapter_arguments = [
+        item for adapter in live_adapters for item in ("--adapter", adapter)
+    ]
+
+    code = main(
+        [
+            "--repo-root",
+            str(tmp_path),
+            "capacity",
+            "evaluate",
+            "result.json",
+            "--scenario",
+            "scenario.json",
+            "--repository",
+            "example/public-repository",
+            "--branch",
+            "replacement-branch",
+            "--sha",
+            "a" * 40,
+            "--run-id",
+            "capacity-run",
+            "--timeout-seconds",
+            "45",
+            *adapter_arguments,
+        ]
+    )
+
+    assert code == 3
+    assert calls[0][2]["adapters"] == live_adapters
+
+
+def test_capacity_context_requires_at_least_one_adapter() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(
+            [
+                "capacity",
+                "evaluate",
+                "result.json",
+                "--scenario",
+                "scenario.json",
+                "--repository",
+                "example/public-repository",
+                "--branch",
+                "replacement-branch",
+                "--sha",
+                "a" * 40,
+                "--run-id",
+                "capacity-run",
+                "--timeout-seconds",
+                "45",
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_capacity_cli_emits_real_stable_json_and_typed_invalid_input(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    root = repo_root()
+    scenario = "tools/issue-discovery/config/capacity/b2-g1-contention.json"
+
+    assert main(["--repo-root", str(root), "capacity", "validate", scenario]) == 0
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["command"] == "capacity.validate"
+    assert validated["status"] == "ok"
+    assert validated["result"] == {"valid": True}
+
+    assert main(["--repo-root", str(root), "capacity", "hash", scenario]) == 0
+    first = capsys.readouterr().out
+    assert main(["--repo-root", str(root), "capacity", "hash", scenario]) == 0
+    assert capsys.readouterr().out == first
+
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text("{", encoding="utf-8")
+    assert (
+        main(
+            [
+                "--repo-root",
+                str(root),
+                "capacity",
+                "validate",
+                str(malformed),
+            ]
+        )
+        == 2
+    )
+    invalid = json.loads(capsys.readouterr().out)
+    assert invalid["status"] == "error"
+    assert invalid["error"] == {"code": "input-unavailable-or-invalid"}
+
+    assert (
+        main(
+            [
+                "--repo-root",
+                str(root),
+                "capacity",
+                "evaluate",
+                "missing-result.json",
+                "--scenario",
+                scenario,
+                "--repository",
+                "arkhai-io/simple-compute-market",
+                "--branch",
+                "feat/issue-discovery-harness-post-pools",
+                "--sha",
+                "a" * 40,
+                "--run-id",
+                "capacity-run",
+                "--timeout-seconds",
+                "not-a-number",
+                "--adapter",
+                "market=mock",
+            ]
+        )
+        == 2
+    )
+    invalid_timeout = json.loads(capsys.readouterr().out)
+    assert invalid_timeout["command"] == "capacity.evaluate"
+    assert invalid_timeout["status"] == "error"
+    assert invalid_timeout["error"] == {"code": "invalid-run-context"}
 
 
 def test_issue_create_has_independent_dry_run(tmp_path: Path, capsys) -> None:
@@ -190,8 +568,7 @@ def test_clean_room_plan_prints_ladder(capsys) -> None:
     assert (
         "continue-build-redis-and-storefront-volume: "
         "./scripts/issue-discovery continue --with local_stack_build_without_zerotier "
-        "--with redis_no_host_port --with storefront_volume_chown"
-        in captured.out
+        "--with redis_no_host_port --with storefront_volume_chown" in captured.out
     )
 
 
