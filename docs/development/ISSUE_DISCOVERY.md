@@ -40,6 +40,298 @@ Inspect the clean-room discovery ladder without starting a VM:
 ./scripts/issue-discovery clean-room script local-vm
 ```
 
+## Capacity Preparation Interfaces
+
+The `capacity` namespace prepares and inspects artifacts for the finite VM/G1
+capacity contract, whose Q1-Q8 rows assign substantive agent ownership. It has
+exactly seven commands—`validate`, `hash`,
+`evaluate`, `finding`, `issue-plan`, `cancel`, and `cleanup`—and intentionally
+has no `run` or `execute` command.
+
+These commands do not launch Codex agents, perform quickstart actions, issue
+market or wallet requests, access a cloud or host, provision a VM, exercise
+KVM/Ansible/GPU hardware, cancel or clean live work, query GitHub, or mutate
+Git or GitHub. Passing them is harness-contract evidence only. It is not Q0,
+Reference B1, or Q1-Q8 execution, real-infrastructure evidence,
+system-capacity evidence, or capacity qualification. Scenario declarations for
+real KVM/Ansible and one whole GPU describe an external execution contract;
+validation does not perform or prove those actions.
+
+| Command | Current behavior | Exit behavior |
+|---|---|---|
+| `capacity validate SCENARIO` | Validate one finite VM/G1 scenario and emit its ID/hash context. | `0` valid; `2` invalid or unavailable input. |
+| `capacity hash SCENARIO` | Validate and emit the canonical SHA-256 scenario identity. | `0` valid; `2` invalid or unavailable input. |
+| `capacity evaluate RESULT --scenario SCENARIO CONTEXT` | Validate a supplied sanitized result, bind it to explicit context, and derive classifications and findings. | `0` no findings; `1` findings; `2` invalid input or context. |
+| `capacity finding FINDING --scenario SCENARIO CONTEXT` | Validate and render a supplied finding bound to scenario/run context; it does not derive a finding from a result. | `0` valid; `2` invalid input or context. |
+| `capacity issue-plan RESULT --scenario SCENARIO CONTEXT` | Re-evaluate the original sanitized result and derive every issue decision; a caller-authored evaluation is not accepted as authority. | `0` valid plan, suppression, or withholding; `2` invalid input or context. |
+| `capacity cancel ...` | With global `--dry-run`, emit a deterministic cancellation key/packet; otherwise validate an external context-bound receipt. It never performs cancellation. | `0` plan or positive receipt; `1` negative receipt; `2` invalid input or context. |
+| `capacity cleanup ...` | With global `--dry-run`, emit a deterministic cleanup key/packet; otherwise validate an external context-bound receipt. It never performs cleanup. | `0` plan or zero-residue receipt; `1` negative receipt; `2` invalid input or context. |
+
+Adapter-selection errors use exit `3`. Ordinary argument-parser usage errors
+use exit `2`; once a capacity handler is dispatched, stdout is one compact,
+key-sorted JSON line with this envelope:
+
+```json
+{
+  "schema_version": 1,
+  "command": "capacity.evaluate",
+  "status": "ok",
+  "context": {},
+  "result": {},
+  "error": null
+}
+```
+
+The displayed JSON is expanded for readability. Actual command output is one
+line. Status is `ok`, `findings`, `negative-evidence`, or `error`. Error
+envelopes do not echo rejected input paths or private values.
+
+### Scenario and result inspection
+
+This Bash example validates, hashes, and evaluates one supplied sanitized
+result. `RESULT` is a caller-chosen path; `.scm-local/capacity/` is only an
+illustrative location. During preparation, the result must come from a
+mock/fake external runner. The public commands neither produce nor persist it.
+
+```bash
+SCENARIO=tools/issue-discovery/config/capacity/b2-g1-contention.json
+RESULT=.scm-local/capacity/run-001/result.json
+PUBLIC_BRANCH="$(git branch --show-current)"
+PUBLIC_SHA="$(git rev-parse HEAD)"
+
+CAPACITY_CONTEXT=(
+  --repository arkhai-io/simple-compute-market
+  --branch "$PUBLIC_BRANCH"
+  --sha "$PUBLIC_SHA"
+  --run-id run-001
+  --timeout-seconds 900
+  --adapter market=mock
+)
+
+./scripts/issue-discovery capacity validate "$SCENARIO"
+./scripts/issue-discovery capacity hash "$SCENARIO"
+./scripts/issue-discovery capacity evaluate \
+  "$RESULT" \
+  --scenario "$SCENARIO" \
+  "${CAPACITY_CONTEXT[@]}"
+```
+
+Context rules are closed and fail-safe:
+
+- `--repository` is exactly the public SCM repository.
+- `--branch` is a canonical, unqualified, non-default public working branch;
+  `dev`, `main`, `origin/...`, `refs/...`, pseudo-refs, and malformed Git ref
+  shapes are rejected.
+- `--sha` is exactly 40 lowercase hexadecimal characters.
+- `--run-id` is a sanitized identifier of at most 120 characters, and
+  `--timeout-seconds` is from 1 through 86400.
+- Result repository, branch, SHA, run ID, timeout, scenario ID, and scenario
+  hash must agree with the supplied context.
+- At least one `--adapter KIND=MODE` is required for `evaluate`, `finding`,
+  `issue-plan`, `cancel`, and `cleanup`.
+- Adapter kinds are exactly `market`, `wallet`, `cloud`, `host`,
+  `provisioning`, and `github-mutation`; modes are exactly `mock`, `fake`, and
+  `dry-run`.
+- Duplicate kinds, unknown values, and every `live` mode exit `3` before a
+  scenario, result, finding, issue snapshot, proposal, or receipt file is
+  read.
+
+The finite scenarios are Q0, controller-driven Reference B1, and Q1-Q8. They
+scale substantive buyers before adding distinct sellers, keep every deal a VM,
+use one physical whole-GPU fence, prohibit retries, and require zero-residue
+cleanup. Q5 represents serialized reuse by one persistent buyer. G2, non-VM,
+unknown, and adaptive/unbounded inputs are rejected.
+
+### Mocked GitHub planning
+
+`issue-plan` consumes the original sanitized result and derives its evaluation
+and complete finding set. The issue snapshot is caller-supplied JSON; the
+command never queries GitHub.
+
+```bash
+ISSUES_SNAPSHOT=.scm-local/capacity/run-001/issues.json
+
+./scripts/issue-discovery capacity issue-plan \
+  "$RESULT" \
+  --scenario "$SCENARIO" \
+  --issues-snapshot "$ISSUES_SNAPSHOT" \
+  --repository arkhai-io/simple-compute-market \
+  --branch "$PUBLIC_BRANCH" \
+  --sha "$PUBLIC_SHA" \
+  --run-id run-001 \
+  --timeout-seconds 900 \
+  --adapter github-mutation=dry-run
+```
+
+A snapshot is required only when evaluation yields at least one
+publication-eligible finding. It is not read for a clean result, expected
+scarcity, or findings wholly withheld because cleanup is unproven. The
+top-level decision is `no-action` for a successful result with no expected
+scarcity. Per-finding plans
+deterministically select `create`, `no-op`, `update`, `reopen`, or `withhold`;
+exact expected scarcity returns `suppressed`. Every per-finding issue plan has
+`dry_run: true`, and all operations are inert data.
+
+The minimum snapshot shape is:
+
+```json
+[
+  {
+    "number": 17,
+    "state": "OPEN",
+    "body": "Existing issue body",
+    "comments": [
+      {"body": "Existing comment"}
+    ]
+  }
+]
+```
+
+`number`, `state`, and `body` are required; `comments` is optional. Matching
+uses machine-readable scope and occurrence markers in issue bodies or comments,
+not title text.
+
+Optional fix selection requires both `--fix-proposal` and
+`--fix-fingerprint`. A proposal has this exact shape:
+
+```json
+{
+  "schema_version": 1,
+  "ownership": "public-harness",
+  "summary": "Correct the bounded capacity result adapter.",
+  "paths": [
+    "tools/issue-discovery/src/issue_discovery/runner.py"
+  ]
+}
+```
+
+```bash
+./scripts/issue-discovery capacity issue-plan \
+  "$RESULT" \
+  --scenario "$SCENARIO" \
+  --issues-snapshot "$ISSUES_SNAPSHOT" \
+  --fix-proposal proposal.json \
+  --fix-fingerprint "$FINGERPRINT" \
+  --repository arkhai-io/simple-compute-market \
+  --branch "$PUBLIC_BRANCH" \
+  --sha "$PUBLIC_SHA" \
+  --run-id run-001 \
+  --timeout-seconds 900 \
+  --adapter github-mutation=dry-run
+```
+
+Only a cleanup-proven `harness-defect` and allowlisted public harness paths
+qualify. The candidate uses exact `fix/<fingerprint>` head naming and the
+supplied working branch as its base, with `draft: true`, `auto_merge: false`,
+and `executed: false`. Any emitted `git` or `gh` argument arrays are candidate
+data and are not invoked.
+
+This is distinct from the pre-existing `issue create` command documented
+below. That ordinary command can call authenticated `gh issue create` after
+operator review. Capacity preparation never calls that path.
+
+### Cancellation and cleanup receipts
+
+The public commands implement a two-phase contract. First, dry-run mode emits
+the deterministic idempotency key:
+
+```bash
+./scripts/issue-discovery --dry-run capacity cancel \
+  --scenario "$SCENARIO" \
+  --termination timeout \
+  "${CAPACITY_CONTEXT[@]}"
+
+./scripts/issue-discovery --dry-run capacity cleanup \
+  --scenario "$SCENARIO" \
+  --termination timeout \
+  "${CAPACITY_CONTEXT[@]}"
+```
+
+Valid terminations are `completed`, `timeout`, `cancelled`, `partial-launch`,
+`role-failure`, and `controller-failure`.
+
+A separately authorized external runner may perform the represented operation
+and return a sanitized receipt envelope. That envelope is bound to the exact
+operation, idempotency key, public repository/branch/SHA, scenario ID/hash,
+run ID/timeout, normalized adapters, and termination. Re-running the command
+without global `--dry-run` and with `--receipt RECEIPT.json` validates and
+renders a bounded summary of the external evidence; it persists nothing, and
+the public result still reports `executed: false`.
+
+A successful cancellation receipt envelope has this shape (substitute the
+exact values and key emitted by the dry-run command):
+
+```json
+{
+  "schema_version": 1,
+  "operation": "cancel",
+  "idempotency_key": "<dry-run-idempotency-key>",
+  "public_context": {
+    "repository": "arkhai-io/simple-compute-market",
+    "branch": "<working-branch>",
+    "sha": "<40-character-public-sha>"
+  },
+  "scenario": {
+    "id": "q2-b2-s1-g1",
+    "sha256": "<scenario-sha256>"
+  },
+  "run": {
+    "run_id": "run-001",
+    "timeout_seconds": 900
+  },
+  "adapters": {
+    "market": "mock"
+  },
+  "termination": "timeout",
+  "receipt": {
+    "attempted": true,
+    "status": "succeeded",
+    "failure": null
+  }
+}
+```
+
+Validate it without performing cancellation:
+
+```bash
+./scripts/issue-discovery capacity cancel \
+  --scenario "$SCENARIO" \
+  --termination timeout \
+  --receipt cancel-receipt.json \
+  "${CAPACITY_CONTEXT[@]}"
+```
+
+A cleanup envelope uses `operation: cleanup`; its inner receipt additionally
+contains `zero_residue`. Successful cleanup requires `attempted: true`,
+`status: succeeded`, `zero_residue: true`, and `failure: null`.
+
+A receipt is forbidden in dry-run mode and required outside dry-run mode.
+Cross-run, cross-adapter, cross-operation, and other context replay is
+rejected. A failed or not-attempted cleanup receipt is valid negative evidence:
+the cleanup command exits `1` and cannot establish zero residue. When the same
+typed state is incorporated into a capacity result, evaluation retains a
+cleanup-failure finding rather than hiding it.
+
+### Privacy and validation responsibility
+
+Only bounded public assertions may enter capacity output. A supplied result
+may carry opaque reservation and fulfillment values solely so evaluation can
+check correlation; evaluation and findings never emit them. Finding and output
+validation rejects private refs, filesystem paths, raw executor identities,
+accounts, wallets, credentials and tokens, SSH identities, network and host
+identities, URLs, and raw-log/control text. Raw evidence remains with the
+external runner; public findings retain only correlation states and sanitized
+summaries.
+
+The default repository Tests workflow currently excludes
+`tools/issue-discovery`. Run its locked suite explicitly when changing this
+tool:
+
+```bash
+cd tools/issue-discovery
+uv --no-config run pytest -q
+```
+
 ## Strict Versus Continue
 
 Strict mode does not apply hidden fixes. It verifies prerequisites, builds the repo, runs code-level tests, starts the compose stack in mock provisioning mode, checks readiness, registers the mock `kvm1` host, runs marker suites, runs the full integration sweep, and tears down compose.

@@ -66,15 +66,15 @@
 
 ## 6. Permanent documentation promotion
 
-- [ ] 6.1 Promote verified observable behavior to
+- [x] 6.1 Promote verified observable behavior to
   `openspec/specs/test-compatibility/spec.md`.
-- [ ] 6.2 Promote the public/private boundary, evidence model, stable identity,
+- [x] 6.2 Promote the public/private boundary, evidence model, stable identity,
   and future on-demand seam to
   `openspec/specs/test-compatibility/architecture.md`.
-- [ ] 6.3 Update `docs/development/ISSUE_DISCOVERY.md` and
+- [x] 6.3 Update `docs/development/ISSUE_DISCOVERY.md` and
   `tools/issue-discovery/README.md` with current commands, exact claim limits,
   mocked GitHub behavior, and the no-live boundary.
-- [ ] 6.4 Update the design-promotion record if implementation proves a
+- [x] 6.4 Update the design-promotion record if implementation proves a
   material decision not already mapped; do not add production references to
   this change directory.
 
@@ -95,6 +95,6 @@
 
 | Accepted decision | Permanent location | Status |
 | --- | --- | --- |
-| finite VM/G1 matrix, role ownership, lifecycle, scarcity, cleanup, and findings | `openspec/specs/test-compatibility/spec.md` | pending verification |
-| public/private boundary, evidence layering, stable identity, and runner seam | `openspec/specs/test-compatibility/architecture.md` | pending verification |
-| commands, result claims, GitHub dry-run, and no-live boundary | `docs/development/ISSUE_DISCOVERY.md`; `tools/issue-discovery/README.md` | pending verification |
+| finite VM/G1 matrix, role ownership, lifecycle, scarcity, cleanup, and findings | `openspec/specs/test-compatibility/spec.md#requirement-agent-driven-vm-capacity-contracts-are-finite-and-non-executing` | promoted and verified |
+| public/private boundary, evidence layering, stable identity, and runner seam | `openspec/specs/test-compatibility/architecture.md#agent-driven-capacity-preparation-boundary` | promoted and verified |
+| commands, result claims, GitHub dry-run, and no-live boundary | `docs/development/ISSUE_DISCOVERY.md#capacity-preparation-interfaces`; `tools/issue-discovery/README.md#capacity-preparation-api` | promoted and verified |
