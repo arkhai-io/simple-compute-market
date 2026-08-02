@@ -41,13 +41,13 @@
 
 ## 4. Issue and guarded fix-candidate planning
 
-- [ ] 4.1 Implement deterministic create, no-op, update, and reopen issue
+- [x] 4.1 Implement deterministic create, no-op, update, and reopen issue
   packets using stable scope and occurrence markers.
-- [ ] 4.2 Gate publication planning on cleanup and suppress expected scarcity.
-- [ ] 4.3 Implement harness-owned draft-fix proposal validation with exact
+- [x] 4.2 Gate publication planning on cleanup and suppress expected scarcity.
+- [x] 4.3 Implement harness-owned draft-fix proposal validation with exact
   `fix/<fingerprint>` head, replacement-branch base, candidate fallback, and
   never-auto-merge semantics.
-- [ ] 4.4 Test every decision with fake repositories or dry-run GitHub calls;
+- [x] 4.4 Test every decision with fake repositories or dry-run GitHub calls;
   no authenticated mutation test is permitted.
 
 ## 5. Portable CLI and runner behavior
