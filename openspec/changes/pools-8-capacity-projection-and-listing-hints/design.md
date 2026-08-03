@@ -31,7 +31,7 @@ Readers found so far:
 - **`domains/vms/listings/reconciler.py` is the real, central reader of `resources` and `derived_compute_listings` for capacity-driven listing derivation and reconciliation** — `available_compute_slices` queries `resources` directly (raw `SELECT ... FROM resources`) to compute open slices; `stale_open_listing_ids`/`closed_available_listing_ids` join `resources`/`derived_compute_listings` against caller-supplied `member_availability` to decide what to close/reopen. This corrects the earlier hedge in this section's prior pass, which suspected listing derivation might not read `resources` live — it does, through this module, not through `listing_service.create_listing` or `vm_job_spec_service.compute_capacity_claim_from_order`.
 - `domains/vms/storefront/src/market_storefront/services/capacity_client.py` is the current production trigger for that reconciliation: `_make_listing_reconcile_subscriber`/`capacity_events_poller_loop` subscribe to the site authority's legacy `CapacityDelta` event feed, build `member_availability` via `member_availability_view`, and call `close_stale_compute_listings_after_capacity_change`/`reopen_available_compute_listings_after_capacity_change` (in `publication_service.py`, which delegates the actual table reads to `reconciler.py`). This is the delta-event mechanism, not the POOLS-7 `site_resource_pools`/`site_capacity_buckets` pull projections — confirming, not contradicting, this document's Context claim that no production reader yet consumes the new projections. Section 4's mapping/reconciliation work will need to either replace this subscriber's data source or run alongside it during migration; deciding which is a Section 4 planning question, not resolved here.
 - `services/vm_job_spec_service.py`'s `compute_capacity_claim_from_order` builds Capacity Reservation claims from `pool_id`/`resource_id` already stored on the buyer's order/negotiation record — it does not re-query `resources` at claim time. Confirms claim construction is decoupled from the local physical tables at the point of use, even though listing *derivation* (above) is not.
-- `services/listing_service.py`'s `create_listing` (the operator/API-driven listing path) takes seller-supplied `offer_resource` (including `pool_id`/`resource_id`) directly from the request body and writes only to the generic, domain-neutral `listings` table (`upsert_listing`, defined in `core_storefront`) — it does not read `resources`/`hosts`/`derived_compute_listings` at all. This is a second, independent listing-creation path alongside the CLI/reconciler-driven derived-listing path above; the two converge only in that both ultimately write rows the shared `listings` table's publication/close/reopen logic treats uniformly.
+- `services/listing_service.py`'s `create_listing` (the operator/API-driven listing path) takes seller-supplied `offer_resource` (including `pool_id`/`resource_id`) directly from the request body and writes only to the generic, domain-neutral `listings` table (`upsert_listing`, defined in `core_storefront`) — it does not read `resources`/`hosts`/`derived_compute_listings` at all. **Correction (2026-08-03, Section 4 design): this is not a second, independent listing-creation path.** `cli_publish.py`'s `_publish_offer` calls this exact same `/listings/create` endpoint (sourcing its arguments from `available_compute_slices` instead of a human), then separately records a `derived_compute_listings` mapping row — one creation mechanism, one automated caller of it plus a bookkeeping step. See "Section 4 design," below, for the corrected picture and why it matters for the mapping-table decision.
 
 **Closing the remaining open items:**
 - `resource_transition_events`: an append-only audit log of direct-set mutations applied to a `resources` row (`SQLiteClient.apply_resource_transition`), written only from `admin_controller.py`. Classification: **physical authority** — provenance/audit trail for the same locally-authored resource state `resources` itself holds, not commercial. No other reader found.
@@ -311,6 +311,125 @@ Confirmed against `resource_pool_projection`'s own existing code, not a new patt
 Applying the same shape at the pool level: `pool_metadata` gains a generic `pool_views: dict[str, Any]` field (name deliberately distinct from `publication_views` — this is provider/negotiation-time sizing data, not buyer-facing listing content, so reusing the same word would be misleading even though the mechanism is identical), and the VM-specific payload goes under a versioned key, e.g. `pool_views["vm.ansible_pool_defaults.v1"] = {"default_vm_ram": ..., "default_vm_vcpus": ..., "default_vm_disk_size": ...}`. The shaping function (analogous to `project_bare_metal_resource`) lives in `vm_provisioning_adapter`'s own runtime module, not in `compute_provisioning_service`'s pool-directory composer directly — the composer only calls out to it, exactly matching how `_bare_metal_publication_view` calls `project_bare_metal_resource` today rather than building the bare-metal shape inline. `kit/site` never sees `default_vm_ram` or any other VM-shaped name; it only ever sees `pool_views: dict[str, Any]`, structurally identical treatment to `policy_tags` and `publication_views`. `mechanism`/`label`/`enabled`/`policy_tags` remain flat, top-level, and genuinely domain-neutral — only the VM-specific sizing data moves into the versioned nested view.
 
 This changes task 3.5's shape from "project `vm_size_defaults`" to "project `pool_views`, with the VM-domain adapter supplying the `vm.ansible_pool_defaults.v1` view content" — same underlying data, correctly layered.
+
+## Section 4 design (opened 2026-08-03)
+
+Grounded against `domains/vms/listings/reconciler.py`, `domains/vms/storefront/src/market_storefront/cli_publish.py`, `domains/vms/storefront/src/market_storefront/services/listing_service.py`, and `core_storefront.aggregation.AggregateCapacityClient`.
+
+### Correction to Section 1's framing: one listing-creation path, not two
+
+Section 1's inventory described `listing_service.create_listing` (operator/API-driven) and the CLI/reconciler-derived flow as two independent listing-creation paths. Tracing `cli_publish.py`'s `_publish_offer` more closely: it calls the storefront's own `/listings/create` HTTP endpoint — the exact same `listing_service.create_listing` code path a human operator's request would hit — then `_record_published_vm_listing` calls `reconciler.record_derived_listing` afterward to record a mapping row. There is one listing-creation mechanism; the CLI path is an automated *caller* of it (sourcing `offer`/`pool_id`/`resource_id` from `available_compute_slices` instead of a human typing them), plus an extra bookkeeping step. Worth correcting explicitly since it changes how much new machinery Section 4 actually needs.
+
+### Resolving open question B: `derived_compute_listings` is already most of the commercial mapping table
+
+`derived_compute_listings`' actual schema (`listing_id, pool_id, resource_id, gpu_count, status, derivation_key, last_reconciled_at`) carries no pricing/settlement/policy fields at all — those already live entirely on the generic `listings` table, addressed by `listing_id`. So this table is not a competing commercial-metadata store; it is already, structurally, exactly the "(pool_id, resource_id?) → storefront-owned record" mapping this document's existing "Keep projection identity separate from commercial inventory" decision calls for — just missing `site_id` and sourced from the wrong place. Resolved: **extend this table, do not build a new one**, matching the same "extend what's already indexed by the right key rather than adding a parallel table" preference from Section 2's decision A. Concretely:
+
+- Add `site_id` to `derived_compute_listings` (and `derived_bare_metal_listings`, for Section 4.5's bare-metal parity — same schema shape, same gap).
+- Fix `derivation_key`'s construction (`reconciler.listing_pool_key`/`listing_resource_key`, currently `f(pool_id_or_resource_id, gpu_count)` with no site component) to include `site_id`. **This closes a real, confirmed latent bug, not just a hygiene nicety:** since `pool_id` is only site-locally unique (task 1.3's resolution), two different sites naming a pool the same thing today collide under the same `derivation_key`, and the `ON CONFLICT(derivation_key) DO UPDATE` in `record_derived_listing` would silently let one site's row overwrite the other's mapping.
+- Redirect `available_compute_slices`' capacity computation (`reconciler.py`, currently `SELECT ... FROM resources` against the local table) to read from `site_resource_pools`/`site_capacity_buckets` via `site_projection_cache.py` instead. This is the actual substance of tasks 4.3/4.4 — the mapping table's *shape* barely changes, but its *population source* does.
+- Reconciliation's close/reopen logic (`stale_open_listing_ids`/`closed_available_listing_ids`, already keyed against caller-supplied `member_availability`) does not need to be rebuilt — only what feeds `member_availability` changes, from `capacity_client.py`'s legacy `CapacityDelta` subscription to something reading the projection caches. Whether that's a full replacement or a parallel path during migration is a task-4.3-level sequencing decision, not resolved here.
+
+### A confirmed correctness gap that motivates "Route pinned claims directly"
+
+This document's existing decision says pinned claim construction "does not broadcast a pinned state-changing request across sites" — investigating whether today's code already violates this, concretely: `AggregateCapacityClient.reserve()` (`core_storefront/aggregation.py`) has no way to target one specific site for a *fresh* reservation. It calls `self._placement(self.site_names, snapshots, claim=claim)` and tries each site returned, in placement order, until one admits — `_route_order`'s owning-site-first behavior only applies to a reservation that already has a learned `capacity_reservation_id`, which doesn't exist yet at `reserve()` time. So a listing whose offer was derived from one specific site's pool `"gpu-pool"` has nothing today stopping the aggregator from also trying a *different* site against the same bare claim `{"pool_id": "gpu-pool", ...}` if placement policy tries that site — and if that other site coincidentally also has a pool named `"gpu-pool"` (a real possibility, since pool_id is only site-locally unique per task 1.3), it would attempt to admit the reservation against the wrong physical pool entirely, silently. This is not hypothetical: it's the direct, confirmed consequence of combining (a) non-globally-unique `pool_id` with (b) today's placement-based fan-out having no concept of a claim being pinned to a specific site.
+
+### Resolved: Option 1, split into private methods (2026-08-03)
+
+Decided: extend `reserve()` with an optional `site:` parameter, but keep it a thin dispatcher over two private methods rather than one method with an `if site is not None` branch — each routing strategy owns its full body, and neither can accidentally share state or control flow with the other.
+
+```python
+async def reserve(
+    self,
+    *,
+    claim: Mapping[str, Any] | None = None,
+    deal_ref: Mapping[str, Any] | None = None,
+    ttl_seconds: float | None = None,
+    lease_start_utc: str | None = None,
+    lease_duration_seconds: int | None = None,
+    site: str | None = None,
+) -> dict[str, Any] | None:
+    """Route to one site in placement order; fall back on refusal.
+
+    ``site``, when supplied, pins the reservation to exactly that site:
+    no placement fan-out, no fallback to another site on refusal. Required
+    for a claim derived from one site's projected pool/resource identity --
+    pool_id is only site-locally unique, so falling back to another site on
+    refusal could otherwise admit against a same-named pool on the wrong
+    site.
+    """
+    if site is not None:
+        return await self._reserve_pinned(
+            site, claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
+        )
+    return await self._reserve_placed(
+        claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+        lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
+    )
+
+async def _reserve_pinned(
+    self,
+    site: str,
+    *,
+    claim: Mapping[str, Any] | None,
+    deal_ref: Mapping[str, Any] | None,
+    ttl_seconds: float | None,
+    lease_start_utc: str | None,
+    lease_duration_seconds: int | None,
+) -> dict[str, Any] | None:
+    """Reserve at exactly one named site; no fan-out, no fallback on refusal."""
+    if site not in self._sites:
+        raise ValueError(f"unknown or unconfigured site {site!r}")
+    reserved = await self._sites[site].reserve(
+        claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+        lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
+    )
+    if reserved is None:
+        return None
+    capacity_reservation_id = reserved.get("capacity_reservation_id")
+    if capacity_reservation_id:
+        self._reservation_sites[str(capacity_reservation_id)] = site
+    return _tagged(site, reserved)
+
+async def _reserve_placed(
+    self,
+    *,
+    claim: Mapping[str, Any] | None,
+    deal_ref: Mapping[str, Any] | None,
+    ttl_seconds: float | None,
+    lease_start_utc: str | None,
+    lease_duration_seconds: int | None,
+) -> dict[str, Any] | None:
+    """Try each site in placement order; fall back to the next on refusal.
+
+    Unchanged from today's `reserve()` body.
+    """
+    snapshots = await self._snapshots()
+    for name in self._placement(self.site_names, snapshots, claim=claim):
+        try:
+            reserved = await self._sites[name].reserve(
+                claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
+                lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[AGGREGATOR] reserve at site %r failed, trying next: %s", name, exc,
+            )
+            continue
+        if reserved is None:
+            continue
+        capacity_reservation_id = reserved.get("capacity_reservation_id")
+        if capacity_reservation_id:
+            self._reservation_sites[str(capacity_reservation_id)] = name
+        return _tagged(name, reserved)
+    return None
+```
+
+**Also resolved while sketching this:** `site_id` must not ride inside `claim`/`required_attributes`, and must not be added to `ComputeResource`/`offer_resource` at all. That model is the public, buyer-negotiated offer; its only free-form extension point (`attributes["tag.*"]`) is explicitly documented as buyer-visible and matched by the negotiation policy, and this document's existing "Route pinned claims directly" decision already requires that "public listing payloads expose only intended market identity/labels, not authority credentials or URLs" — `site_id` is exactly the kind of internal routing fact that must stay out of the public offer. Instead, the caller (`vm_fulfillment_service._reserve_capacity_for_obligation`) looks `site_id` up from `derived_compute_listings` by `listing_id` (a new small lookup helper, e.g. `lookup_derived_listing_site`) immediately before calling `reserve(..., site=site_id)`; `None` for a pool-scoped listing with no pinned origin falls through to `_reserve_placed` exactly as today. `compute_capacity_claim_from_order`/`_REQUIRED_COMPUTE_KEYS` need no change.
+
+### Task 4.6 is largely satisfied by construction, needs a proof not a redesign
+
+"Prove projections never participate in live admission" holds automatically as long as `reserve()` still always calls the real site's live `/capacity/reserve` endpoint for the actual admission decision — the mapping/projection layer only ever decides *which site* to call and *what claim* to send, never substitutes a cached availability check for the live call. Section 4's job here is a test proving no shortcut path exists (e.g. a mis-implemented "resource clearly available per last projection, skip live check" optimization), not new design.
 
 
 
