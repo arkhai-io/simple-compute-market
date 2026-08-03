@@ -437,11 +437,20 @@ code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored art
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"
 
+# review-diff must capture untracked new files, not only modifications to
+# tracked ones -- a reviewer needs to see everything under review, and
+# `git diff HEAD` alone is silent about paths git has never seen. `git add
+# -A -N .` (intent-to-add) makes new paths visible to the diff without
+# staging their content; the trailing `git reset` unwinds the index back
+# to exactly its pre-run state, so the target's own "without changing git
+# state" guarantee still holds once it completes.
 review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
+	git add -A -N .; \
 	git diff --binary HEAD > "$$OUTFILE"; \
+	git reset -q; \
 	echo "Done: $$OUTFILE"
 
 last-diff: ## Write a binary-safe diff for the most recent commit.

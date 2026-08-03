@@ -302,3 +302,113 @@ async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
             json={"resource_id": "r", "lease_end_utc": "2099-01-01 00:00"},
         )
         assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_surfaces_pool_metadata(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Real end-to-end proof, through both canonical typed clients rather
+    than a direct DB insert on the write side or a raw HTTP call on the
+    read side:
+
+    ProvisioningClient.create_pool(default_vm_* in provider_config)
+        -> real /api/v1/pools API -> real AnsiblePoolConfigHandler -> DB
+        -> resource-pool projection
+        -> RemoteCapacityClient.resource_pool_projection()
+
+    default_vm_* was previously unreachable through the admin API at
+    all (the handler's field allowlist rejected it) -- this proves that
+    bug is fixed at the layer it actually lived at, and that the fix is
+    visible through the storefront's actual projection consumer, not
+    just at an HTTP route reached by hand.
+    """
+    from compute_provisioning import PoolCreate
+    from core_storefront.capacity_remote import RemoteCapacityClient
+    from compute_provisioning_service.db.models import Host
+    from compute_provisioning_service.container import container
+
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(
+        PoolCreate(
+            id="hetzner-eu",
+            label="Hetzner EU",
+            provider="ansible",
+            provider_config={
+                "playbook_path": "playbooks/vm-operations.yaml",
+                "default_vm_ram": 65536,
+                "default_vm_vcpus": 16,
+                "default_vm_disk_size": "500G",
+            },
+        )
+    )
+
+    # The resource-pool projection is built from Host rows (see
+    # capacity_inventory.load_capacity_resource_inventory), not directly
+    # from the ledger's registered resources -- a Host row is required
+    # for anything to appear here at all. No typed client covers Host
+    # creation against an arbitrary pool in this fixture set, so this
+    # part still goes through the DB directly.
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, pool_id="hetzner-eu",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+
+    remote = RemoteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+
+    assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
+    assert pool_row["pool_metadata"]["enabled"] is True
+    assert pool_row["pool_metadata"]["mechanism"] == "ansible"
+    assert pool_row["pool_metadata"]["pool_views"] == {
+        "vm.ansible_pool_defaults.v1": {
+            "default_vm_ram": 65536,
+            "default_vm_vcpus": 16,
+            "default_vm_disk_size": "500G",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
+    capacity: CapacityApi,
+):
+    """A pool with no configured VM size defaults gets pool_metadata (from
+    ResourcePool's own columns) but no pool_views key at all -- read
+    through the real RemoteCapacityClient, not a raw HTTP call."""
+    from core_storefront.capacity_remote import RemoteCapacityClient
+    from compute_provisioning_service.container import container
+    from compute_provisioning_service.db.models import Host
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, pool_id="default",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="default",
+        total_units=8,
+        attributes={"vm_host": "kvm1"},
+    )
+
+    remote = RemoteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    default_row = next(row for row in rows if row["resource_pool_id"] == "default")
+
+    assert "pool_views" not in default_row["pool_metadata"]

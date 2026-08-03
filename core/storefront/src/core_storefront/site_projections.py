@@ -32,6 +32,18 @@ class ProjectionClient(Protocol, Generic[T]):
 
 @dataclass(frozen=True)
 class ProjectionCacheView(Generic[T]):
+    """One projection family's current cached state.
+
+    fetched_at:
+        When this generation was last *confirmed* current, not only when
+        its payload was last transferred. A `poll_once()` that finds the
+        remote identity unchanged advances this without re-fetching the
+        snapshot body -- deliberately: an operator reading this value
+        wants to know "how stale could this be," and a confirmed-unchanged
+        poll answers that exactly as well as a full re-fetch would, at far
+        lower cost. `None` until the first successful load or confirmation.
+    """
+
     identity: ProjectionIdentity | None
     value: T | None
     state: ProjectionState

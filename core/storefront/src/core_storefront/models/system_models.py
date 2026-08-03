@@ -13,6 +13,12 @@ class ProjectionFamilyStatus(BaseModel):
     surface. Absence of a site, or a `not_loaded`/`unavailable`/`invalid`
     state, means the projection has not yet been confirmed -- never
     authoritative empty capacity.
+
+    fetched_at:
+        ISO8601 UTC timestamp of the last time this generation was
+        *confirmed* current -- includes an unchanged-identity poll
+        confirmation, not only a full snapshot transfer. See
+        `core_storefront.site_projections.ProjectionCacheView`.
     """
 
     state: str

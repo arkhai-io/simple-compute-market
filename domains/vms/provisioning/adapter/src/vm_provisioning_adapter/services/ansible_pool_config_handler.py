@@ -20,7 +20,16 @@ _UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
 
 class AnsiblePoolConfigHandler:
     provider = "ansible"
-    _FIELDS = frozenset({"playbook_path", "requirement_delegate", "extra_vars"})
+    _FIELDS = frozenset(
+        {
+            "playbook_path",
+            "requirement_delegate",
+            "extra_vars",
+            "default_vm_ram",
+            "default_vm_vcpus",
+            "default_vm_disk_size",
+        }
+    )
 
     def validate_config(self, config: Mapping[str, Any]) -> dict[str, Any]:
         normalized, problems = self.validate_config_problems(config)
@@ -78,12 +87,42 @@ class AnsiblePoolConfigHandler:
                     message="provider_config.extra_vars must be a mapping",
                 )
             )
+        normalized_defaults: dict[str, Any] = {}
+        for field in ("default_vm_ram", "default_vm_vcpus"):
+            if field not in config or config[field] is None:
+                normalized_defaults[field] = None
+                continue
+            value = config[field]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                problems.append(
+                    PoolConfigValidationProblem(
+                        path=field,
+                        code="invalid_type",
+                        message=f"provider_config.{field} must be a positive integer",
+                    )
+                )
+            else:
+                normalized_defaults[field] = value
+        disk_size = config.get("default_vm_disk_size")
+        if disk_size is None:
+            normalized_defaults["default_vm_disk_size"] = None
+        elif not isinstance(disk_size, str) or not disk_size.strip():
+            problems.append(
+                PoolConfigValidationProblem(
+                    path="default_vm_disk_size",
+                    code="invalid_type",
+                    message="provider_config.default_vm_disk_size must be a non-empty string",
+                )
+            )
+        else:
+            normalized_defaults["default_vm_disk_size"] = disk_size
         if problems:
             return None, tuple(problems)
         return {
             "playbook_path": playbook_path,
             "requirement_delegate": requirement_delegate,
             "extra_vars": dict(extra_vars),
+            **normalized_defaults,
         }, ()
 
     def read_config(self, db: Session, pool_id: str) -> dict[str, Any]:
@@ -98,6 +137,9 @@ class AnsiblePoolConfigHandler:
             "playbook_path": row.playbook_path,
             "requirement_delegate": row.requirement_delegate,
             "extra_vars": row.extra_vars or {},
+            "default_vm_ram": row.default_vm_ram,
+            "default_vm_vcpus": row.default_vm_vcpus,
+            "default_vm_disk_size": row.default_vm_disk_size,
         }
 
     def replace_config(
@@ -116,6 +158,9 @@ class AnsiblePoolConfigHandler:
         row.requirement_delegate = normalized["requirement_delegate"]
         row.inventory_group = _UNUSED_INVENTORY_GROUP_COMPAT_VALUE
         row.extra_vars = normalized["extra_vars"]
+        row.default_vm_ram = normalized["default_vm_ram"]
+        row.default_vm_vcpus = normalized["default_vm_vcpus"]
+        row.default_vm_disk_size = normalized["default_vm_disk_size"]
 
     def delete_config(self, db: Session, pool_id: str) -> None:
         row = (

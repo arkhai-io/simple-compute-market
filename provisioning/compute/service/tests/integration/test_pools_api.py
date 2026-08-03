@@ -87,6 +87,91 @@ class TestCreatePool:
         assert exc_info.value.status_code == 400
 
 
+class TestVmSizeDefaultsThroughAdminApi:
+    """These fields were previously accepted by no path at all -- the
+    handler's field allowlist rejected them as unknown before this
+    change. This proves the fix at the layer the original bug actually
+    lived at: the real typed client, the real HTTP API, the real
+    AnsiblePoolConfigHandler, the real database -- not a direct DB
+    insert bypassing all of that.
+    """
+
+    async def test_create_with_vm_size_defaults_round_trips_through_the_api(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        created = await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config={
+                    **_ANSIBLE_CONFIG,
+                    "default_vm_ram": 65536,
+                    "default_vm_vcpus": 16,
+                    "default_vm_disk_size": "500G",
+                },
+            )
+        )
+        assert created.provider_config["default_vm_ram"] == 65536
+        assert created.provider_config["default_vm_vcpus"] == 16
+        assert created.provider_config["default_vm_disk_size"] == "500G"
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.provider_config["default_vm_ram"] == 65536
+        assert fetched.provider_config["default_vm_vcpus"] == 16
+        assert fetched.provider_config["default_vm_disk_size"] == "500G"
+
+    async def test_create_without_vm_size_defaults_leaves_them_absent(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        created = await _create_pool(client)
+        assert created.provider_config.get("default_vm_ram") is None
+        assert created.provider_config.get("default_vm_vcpus") is None
+        assert created.provider_config.get("default_vm_disk_size") is None
+
+    async def test_replace_can_clear_a_previously_set_default(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": 65536},
+            )
+        )
+
+        await client.replace_pool(
+            "hetzner-eu",
+            PoolReplace(
+                label="Hetzner EU",
+                enabled=True,
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            ),
+        )
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.provider_config.get("default_vm_ram") is None
+
+    @pytest.mark.parametrize("bad_value", [0, -1, "16", 16.5])
+    async def test_create_rejects_non_positive_or_non_integer_ram(
+        self, client_and_queue, bad_value,
+    ):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": bad_value},
+                )
+            )
+        assert exc_info.value.status_code == 400
+
+
 class TestGetAndListPools:
     async def test_get_missing_pool_returns_404(self, client_and_queue):
         client, _ = client_and_queue

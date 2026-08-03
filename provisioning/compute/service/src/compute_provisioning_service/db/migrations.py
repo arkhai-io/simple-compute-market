@@ -1047,6 +1047,19 @@ def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) 
     _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_target"])
 
 
+def _migrate_ansible_pool_config_vm_size_defaults(engine: Engine) -> None:
+    """Add ``ansible_pool_configs``' optional VM size default columns.
+
+    These back the fulfillment-time three-tier precedence's final
+    fallback tier (see ``AnsiblePoolConfig.default_vm_ram`` and siblings);
+    a NULL value on an existing row simply means that pool contributes
+    nothing at that tier, matching its pre-migration behavior exactly.
+    """
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_ram", "INTEGER")
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_vcpus", "INTEGER")
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_disk_size", "VARCHAR")
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -1079,5 +1092,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260724_002_drop_vm_leases_table",
         _migrate_drop_vm_leases_table,
+    ),
+    Migration(
+        "20260803_001_ansible_pool_config_vm_size_defaults",
+        _migrate_ansible_pool_config_vm_size_defaults,
     ),
 )
