@@ -16,7 +16,7 @@ All raw SQL, defined in `domains/vms/storefront/src/market_storefront/utils/sqli
 | `compute_allocations` | `sqlite_client.py` | Operational bookkeeping, unrelated to `SiteAllocation`/`CapacityReservation` (POOLS-7 `design.md` item 1 already confirmed this table is out of that change's scope; carried forward here rather than re-litigated) |
 | `derived_compute_listings` | `sqlite_client.py` | Commercial (published listing state); read/written by `reconciler.py`, `admin_controller.py`, `cli_publish.py` |
 | `derived_bare_metal_listings` | `sqlite_client.py` | Commercial (published listing state) |
-| `compute_capacity_pools` | `migrations.py` | Commercial pool concept, auto-derived side effect of `upsert_resource`; **no confirmed external reader** |
+| `compute_capacity_pools` | `migrations.py` | Commercial pool concept, auto-derived side effect of `upsert_resource`; **correction (2026-08-03, Section 5 design): live-read by `domains/vms/listings/reconciler.available_compute_slices`, not orphaned — see below** |
 | `compute_pool_members` | `migrations.py` | Commercial-pool membership referencing physical identity, same auto-derived/unread status as `compute_capacity_pools` |
 
 Writers found so far:
@@ -35,11 +35,11 @@ Readers found so far:
 
 **Closing the remaining open items:**
 - `resource_transition_events`: an append-only audit log of direct-set mutations applied to a `resources` row (`SQLiteClient.apply_resource_transition`), written only from `admin_controller.py`. Classification: **physical authority** — provenance/audit trail for the same locally-authored resource state `resources` itself holds, not commercial. No other reader found.
-- `compute_capacity_pools`/`compute_pool_members`: schema only in `migrations.py`; the only writer is `SQLiteClient._sync_compute_pool_for_resource`, an internal side effect that every `upsert_resource` call triggers automatically to maintain a derived per-pool GPU-count aggregate. No production code outside `sqlite_client.py` itself reads either table — no admin, listing, reconciler, or publication call site was found. Classification: **commercial pool concept** (fields are `seller_id`/`pricing_policy_id`/`escrow_policy_id`/`allocation_policy`/`min_price`/`token`/`accepted_escrows` — exactly the storefront commercial capacity-pool object this change's own non-goal warns must not be conflated with a provisioning-side Resource Pool), but with **no confirmed current consumer** — a candidate for early, low-risk retirement, or at minimum for double-checking against every admin API response shape before Section 6 touches it, since an unread write path is easy to miss as "load-bearing" if a response serializer happens to include it without a code path this grep could find.
+- `compute_capacity_pools`/`compute_pool_members`: schema only in `migrations.py`; the only writer is `SQLiteClient._sync_compute_pool_for_resource`, an internal side effect that every `upsert_resource` call triggers automatically to maintain a derived per-pool GPU-count aggregate. **Correction (2026-08-03, Section 5 design): these tables are live-read, not orphaned.** The original inventory pass searched only `domains/vms/storefront/src` and missed `domains/vms/listings/reconciler.py` (a sibling package) — its `available_compute_slices`, the function `cli_publish.py` calls to compute publication candidates, directly `JOIN`s `compute_capacity_pools`/`compute_pool_members` and is the primary live path whenever those tables exist (which `migrations.py` ensures unconditionally, so its `resources`-only fallback branch is effectively dead code in any migrated deployment). Classification stands as **commercial pool concept** (fields are `seller_id`/`pricing_policy_id`/`escrow_policy_id`/`allocation_policy`/`min_price`/`token`/`accepted_escrows` — exactly the storefront commercial capacity-pool object this change's own non-goal warns must not be conflated with a provisioning-side Resource Pool), but **not** a retirement candidate — see "Section 5 design," below, for why this table is exactly where the currently-implicit pooled-vs-specific-resource publication distinction lives today, and what `listing_mode` needs to formalize about it.
 - Migration readers: `migrations.py` only creates schema for these tables additively; no migration performs a data backfill by reading `resources`/`hosts`/`derived_compute_listings`. Closed — nothing further to trace here.
 - e2e readers: no `e2e-tests` file references these table names directly; e2e coverage exercises them only indirectly through HTTP admin/listing endpoints, which are already covered by the `admin_controller.py` inventory above. Closed.
 
-Task 1.4 is now materially complete. The one remaining soft spot is confirming `compute_capacity_pools`/`compute_pool_members` truly have zero external readers (this pass found none, but did not exhaustively check every admin response schema for an included-but-unqueried field) before treating that as settled enough to plan removal against.
+Task 1.4 is now materially complete. **Update (2026-08-03, Section 5 design):** the one flagged soft spot resolved itself, in the opposite direction from what was expected — `compute_capacity_pools`/`compute_pool_members` are not unread; the original pass simply hadn't searched `domains/vms/listings/` yet. See the corrected classification above and "Section 5 design," below. This is a good illustration of why that soft spot was flagged rather than silently trusted.
 
 
 
@@ -431,10 +431,90 @@ async def _reserve_placed(
 
 "Prove projections never participate in live admission" holds automatically as long as `reserve()` still always calls the real site's live `/capacity/reserve` endpoint for the actual admission decision — the mapping/projection layer only ever decides *which site* to call and *what claim* to send, never substitutes a cached availability check for the live call. Section 4's job here is a test proving no shortcut path exists (e.g. a mis-implemented "resource clearly available per last projection, skip live check" optimization), not new design.
 
+## Section 5 design (opened 2026-08-03)
 
+Grounded against `domains/vms/listings/reconciler.py`'s `available_compute_slices`, `domains/vms/storefront/src/market_storefront/utils/sync_negotiation.py`, and `domains/apicredits`.
+
+### What `listing_mode` actually needs to formalize
+
+`available_compute_slices` already makes a pooled-vs-specific-resource publication decision today — it's just implicit and storefront-local rather than an explicit, projected operator policy. Its live path (`compute_capacity_pools JOIN compute_pool_members`, confirmed live above) groups resources by `pool_id`; a pool with `member_count == 1` gets `single_resource_id` set (effectively "specific resource" mode), one with more members stays fungible/pooled. What decides membership is `attrs.get("pool_id")` on each locally-upserted resource — an artifact of CSV import/`upsert_resource`, not a declared policy from the site authority. `listing_mode` (`ResourcePool.policy_tags`, projected via Section 3's `pool_metadata`) replaces this emergent behavior with an explicit, site-authority-owned decision the VM domain resolves, e.g.:
+
+```python
+# domains/vms/listings/ (new, small resolver module)
+from typing import Literal
+
+VmListingMode = Literal["pooled", "specific_resource"]
+_DEFAULT_VM_LISTING_MODE: VmListingMode = "pooled"  # matches today's structural
+                                                      # default when member_count > 1,
+                                                      # the overwhelmingly common case
+
+def resolve_vm_listing_mode(policy_tags: Mapping[str, Any]) -> tuple[VmListingMode, str | None]:
+    """Return (mode, explanation). explanation is None unless the raw tag
+    was present but unrecognized, in which case the structural default is
+    used and the explanation is operator-visible (e.g. surfaced on the
+    pool's admin status), matching this document's existing
+    "Keep hints advisory and domain-owned" decision.
+    """
+    raw = raw_listing_mode(policy_tags)  # kit/resource-pools.hints
+    if raw is None:
+        return _DEFAULT_VM_LISTING_MODE, None
+    if raw in ("pooled", "specific_resource"):
+        return raw, None  # type: ignore[return-value]
+    return _DEFAULT_VM_LISTING_MODE, f"unrecognized listing_mode {raw!r}, using {_DEFAULT_VM_LISTING_MODE!r}"
+```
+
+Once Section 4's mapping work redirects `available_compute_slices` to read the projection instead of local `compute_pool_members`, this resolver's output replaces the `member_count == 1` heuristic directly.
+
+### Bare metal: structurally trivial, still needs the resolver for symmetry
+
+`derived_bare_metal_listings` (`listing_id, machine_id, physical_host_id, status, derivation_key`) has no pooled concept at all — bare-metal listings are inherently one machine each. A bare-metal `resolve_listing_mode` is a one-line structural default (`"specific_resource"`, always) with the same unrecognized-value-explanation shape as VM's, satisfying task 5.2's symmetry requirement without meaningful new logic. Not worth more design time than this.
+
+### Task 5.3, resolved by investigation: apicredits has nothing to resolve against yet
+
+`domains/apicredits` exists and its provisioning-service side (`keys_service.py`) does use `market_site.ledger.CapacityLedgerService` directly — but confirmed by search, nothing in `domains/apicredits` imports `market_resource_pools` at all. It has no `ResourcePool`/`policy_tags` concept in its model — API credits are keys/quota against the base ledger, not GPU-style pools. So there is no `policy_tags` for an apicredits `listing_mode` resolver to read in the first place; task 5.3's own condition ("only if a concrete publication consumer exists") isn't met, for a more precise reason than "no domain exists" — a domain exists, it just doesn't participate in the resource-pool projection this hint rides on. Confirmed deferral, not an assumption.
+
+### Task 5.4: where the hold-TTL cap actually goes
+
+`sync_negotiation.py`'s acceptance-hold placement reads one global, storefront-operator-configured `hold_ttl_seconds` from settings and applies it uniformly to every hold, regardless of which pool the claim is for:
+
+```python
+ttl = float(getattr(getattr(_settings, "capacity", None), "hold_ttl_seconds", 0) or 0)
+if ttl <= 0:
+    return
+...
+claim = compute_capacity_claim_from_order(order_dict)
+capacity = build_capacity_client(lambda: sqlite_client)
+held = await capacity.reserve(
+    claim=claim or None,
+    deal_ref={"listing_id": listing_id, "negotiation_id": negotiation_id},
+    ttl_seconds=ttl,
+    lease_start_utc=requested_start_utc,
+    lease_duration_seconds=requested_duration_seconds,
+)
+```
+
+Task 5.4 caps this per-pool: look up the claim's pool's `policy_tags` (via the same `site_id` lookup Section 4 needs for pinned routing) and pass the result through `kit/resource-pools.hints.capped_hold_seconds(ttl, policy_tags)` before calling `reserve()`:
+
+```python
+ttl = float(getattr(getattr(_settings, "capacity", None), "hold_ttl_seconds", 0) or 0)
+if ttl <= 0:
+    return
+claim = compute_capacity_claim_from_order(order_dict)
+site_id, policy_tags = await lookup_pool_policy_tags(sqlite_client, claim)  # new; None, {} if unresolvable
+ttl = capped_hold_seconds(ttl, policy_tags)
+...
+held = await capacity.reserve(..., ttl_seconds=ttl, ...)
+```
+
+This changes nothing about `ttl_seconds`' meaning at the site ledger — it still enforces only whatever value the storefront actually sends, exactly as this document's existing "Keep hints advisory and domain-owned" decision requires ("The site ledger continues enforcing only the actual caller-supplied TTL and does not treat the tag as authority"). Consistent with this function's existing fail-open posture (a hold that can't be placed leaves acceptance untouched), an unresolvable `policy_tags` lookup should leave `ttl` unchanged rather than block hold placement — matching `capped_hold_seconds`' own designed behavior of falling back to the caller's requested value on any invalid/missing preference.
+
+
+
+## Permanent Documentation Promotion
 
 | Decision | Permanent destination |
 |---|---|
 | Per-site/family projection load-state visibility (no durable persistence); "ignorance ≠ zero" applies to projection consumers | `openspec/specs/site-capacity/spec.md` and `architecture.md` |
 | Commercial mapping, direct claim routing, and retirement boundary | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | Domain-neutral hint keys and domain-owned values | `openspec/specs/resource-pool-management/spec.md` and `architecture.md` |
+| `compute_capacity_pools`/`compute_pool_members` reclassified as live (not orphaned); `listing_mode` formalizes their implicit pooled-vs-specific-resource behavior | `openspec/specs/resource-pool-management/spec.md` and `openspec/specs/storefront-publication/spec.md` |
