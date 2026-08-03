@@ -156,6 +156,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
+- Per-site/family projection load-state reporting, including partial multi-site failure isolation and never-loaded retry: `domains/vms/storefront/tests/unit/services/test_site_projection_cache.py` and `domains/vms/storefront/tests/unit/services/test_system_service.py`.
 
 Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
 
@@ -219,6 +220,17 @@ The site authority publishes two independent pull projections:
 - `site_capacity_buckets` vertically groups resources with identical canonical grouping criteria and currently available dimensions. Each group exposes a deterministic digest-derived `capacity_group_key` and `resource_count`, but no internal capacity-bucket identifiers or duplicated physical-resource identifier list.
 
 Each projection family has its own monotonic revision and canonical snapshot digest. Storefront caches replace complete generations atomically and retain the last complete generation when a refresh fails; unavailable projection state is distinct from an authoritative empty projection.
+
+### Requirement: Per-site projection load-state visibility
+A storefront MUST report, per configured site and per independent projection family (resource-pool, capacity-bucket), whether that projection has never loaded, is currently loaded, is stale, or is unavailable. This state MUST be visible on the storefront's operator status surface, scoped per site and family — one site's load failure MUST NOT present as broad storefront degradation while other configured sites are healthy. A storefront MUST NOT persist projection generations durably across restart; retry-until-success plus this observable status is the accepted mechanism for a site being unreachable at storefront startup. Any future reader of these caches MUST treat a never-loaded or unavailable state as unknown, not as authoritative zero capacity — the same principle "Site authority is unavailable" already states for the legacy reconciliation path applies equally here.
+
+#### Scenario: A configured site is unreachable at storefront startup
+- **WHEN** the storefront starts and one configured site's projection load has not yet succeeded
+- **THEN** operator status reports that site/family as not-yet-loaded rather than presenting an empty projection as authoritative, and the storefront continues retrying without blocking readiness for other configured sites
+
+#### Scenario: One projection family fails to refresh after a successful load
+- **WHEN** a resource-pool refresh fails while the capacity-bucket family advances
+- **THEN** the storefront retains the previous resource-pool generation in memory as stale, reports that state on the status surface, and commits the capacity-bucket replacement independently
 
 ### Requirement: Capacity accounting is private to the site authority
 The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the VM domain's `vm_host`), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.

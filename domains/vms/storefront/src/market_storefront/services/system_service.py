@@ -124,6 +124,14 @@ class SystemService:
                 result["resource_count"] = len(resources)
             except Exception:
                 result["resource_count"] = None
+            try:
+                from market_storefront.services.site_projection_cache import (
+                    projection_status_summary,
+                )
+
+                result["site_projections"] = projection_status_summary()
+            except Exception:
+                result["site_projections"] = None
 
         return result
 

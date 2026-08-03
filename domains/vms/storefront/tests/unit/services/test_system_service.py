@@ -158,3 +158,78 @@ class TestSeedResourcesIfEmpty:
         svc = _make_service(db)
         with pytest.raises(FileNotFoundError):
             await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")
+
+
+# ---------------------------------------------------------------------------
+# get_health: per-site projection load-state reporting
+# ---------------------------------------------------------------------------
+
+class TestGetHealthSiteProjections:
+    async def test_reports_per_site_per_family_state(self, db):
+        """/api/v1/system/status surfaces each configured site's projection state."""
+        summary = {
+            "site-a": {
+                "resource_pool": {
+                    "state": "loaded", "revision": 3, "digest": "abc", "last_error": None,
+                },
+                "capacity_bucket": {
+                    "state": "stale", "revision": 2, "digest": "def", "last_error": "boom",
+                },
+            },
+        }
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_status_summary",
+            return_value=summary,
+        ):
+            svc = _make_service(db)
+            result = await svc.get_health(include_registry=True)
+
+        assert result["site_projections"] == summary
+
+    async def test_omitted_from_fast_health_probe(self, db):
+        """The liveness probe (include_registry=False) does not compute this."""
+        svc = _make_service(db)
+        result = await svc.get_health(include_registry=False)
+        assert "site_projections" not in result
+
+    async def test_one_site_unavailable_is_reported_outside_the_health_gate(self, db):
+        """An unavailable/invalid site must be reported, not gated on.
+
+        Asserted directly against `checks` (the dict `all_ok` actually
+        gates on) rather than the top-level `status`, so this test does
+        not depend on unrelated checks (registry/alkahest/negotiation
+        strategy) also being healthy in whatever environment runs it.
+        """
+        summary = {
+            "site-a": {
+                "resource_pool": {
+                    "state": "unavailable", "revision": None, "digest": None,
+                    "last_error": "connection refused",
+                },
+                "capacity_bucket": {
+                    "state": "not_loaded", "revision": None, "digest": None, "last_error": None,
+                },
+            },
+        }
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_status_summary",
+            return_value=summary,
+        ):
+            svc = _make_service(db)
+            result = await svc.get_health(include_registry=True)
+
+        assert result["site_projections"]["site-a"]["resource_pool"]["state"] == "unavailable"
+        assert "site_projections" not in result["checks"]
+
+    async def test_reporting_failure_does_not_add_a_checks_entry(self, db):
+        """A raise while computing the summary yields None, not a crashed
+        health check or a new gated `checks` entry."""
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_status_summary",
+            side_effect=RuntimeError("no event loop for pollers in this process"),
+        ):
+            svc = _make_service(db)
+            result = await svc.get_health(include_registry=True)
+
+        assert result["site_projections"] is None
+        assert "site_projections" not in result["checks"]
