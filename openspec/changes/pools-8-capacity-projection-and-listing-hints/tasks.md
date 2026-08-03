@@ -15,6 +15,28 @@
 - [ ] 2.4 Add focused tests: per-site/family status reporting reflects each `ProjectionState` correctly; one site's `unavailable` state does not affect another configured site's reported state; status reporting requires no new schema/migration (regression guard against silently reintroducing persistence).
 - [ ] 2.5 Small follow-up, not blocking: confirm whether POOLS-7 task 2.3's "storefront-side connection-to-site identity ... process-local aggregation state" durability note is already satisfied by `AggregateCapacityClient._reservation_sites`'s existing documented cache-with-fallback design (`design.md`, "Related finding" under the revised decision) — likely a documentation-only closure against POOLS-7 rather than new work here; confirm scope before doing anything.
 
+### Implementation plan (planned 2026-08-03)
+
+Grounded against the exact current code, not just the design decision. Confirmed while planning: `ProjectionCache.load()`/`refresh()` (`core/storefront/src/core_storefront/site_projections.py`) already catch every exception internally and set `state=invalid`/`stale` rather than raising — so `site_projection_cache.load_site_projections()`'s `asyncio.gather(caches.resource_pools.load(), caches.capacity_buckets.load())` cannot fail one site and block another from being inserted into `_caches`. Task 2.2 is therefore "add a regression test proving this," not "fix a bug" — worth stating plainly since it would be easy to assume otherwise from the design-phase description alone.
+
+**2.1 — status surface.**
+- New function `market_storefront.services.site_projection_cache.projection_status_summary() -> dict[str, dict[str, dict[str, Any]]]`, shape `{site_id: {"resource_pool": {...}, "capacity_bucket": {...}}}`, each leaf built from `ProjectionCache.view()` (`ProjectionCacheView`: `identity`, `value` — presence/absence only, never the value itself, to avoid duplicating the full projection payload into a status endpoint — `state`, `last_error`). Iterate `projection_caches()` (already exported, already returns a copy) rather than reaching into `_caches` directly.
+- Wire into `SystemService.get_health(*, include_registry: bool = False)` (`market_storefront/services/system_service.py`) as a new `checks`-adjacent key, e.g. `result["site_projections"] = projection_status_summary()`, gated the same way `resource_count` already is (only under `include_registry=True`, i.e. `/api/v1/system/status`, not the fast `/health` probe) and wrapped in the same try/except-returns-`None`-on-failure pattern already used for `resource_count` immediately above it in that function.
+- Explicitly do not add a `_check_is_healthy` rule for this key or fold it into `all_ok` — per Section 2's revised decision, one site's `invalid`/`unavailable` state must not present as global degradation. It's reported, not gated.
+
+**2.2 — poller retry regression test.**
+- New test in `domains/vms/storefront/tests/unit/services/test_site_projection_cache.py` (create if absent): two configured sites, one client raising on every call, one succeeding; assert after `load_site_projections()` that both sites are present in `_caches` (not just the healthy one) and the failing site's cache state is `invalid`; then call `site_projection_poller_loop`'s single-iteration body (or extract the loop body into a testable `_poll_once_all()` helper if the `while True`/`asyncio.sleep` wrapper makes direct testing awkward) and assert the failing site's `version()` was attempted again.
+
+**2.3 — spec promotion.**
+- Already drafted in the delta spec (`openspec/changes/pools-8-.../specs/site-capacity/spec.md`, "Per-site projection load-state visibility"). This task is executing that promotion into the permanent `openspec/specs/site-capacity/spec.md`, not drafting new content.
+
+**2.4 — status-reporting tests.**
+- New tests alongside 2.2's, or in `domains/vms/storefront/tests/unit/services/test_system_service.py`: `get_health(include_registry=True)` reflects each configured site's per-family state correctly; a site in `invalid`/`unavailable` state does not change `result["status"]` from `"ok"`; assert no new table/migration file is touched by this section's diff (a cheap regression guard — e.g. a test asserting `market_storefront.utils.migrations` module's migration list length/hashes are unchanged by this section — against silently reintroducing persistence).
+
+**2.5 — POOLS-7 follow-up.** Unchanged from the design-phase description; this is a documentation-only check against POOLS-7's own tasks.md/spec, not code in this change.
+
+**Permanent documentation destination for this section:** `openspec/specs/site-capacity/spec.md#projection-load-state` (per the Design promotion record — Section 7 already covers execution of this).
+
 <details>
 <summary>Original tasks 2.1–2.4 (persistence layer), superseded — kept for history</summary>
 

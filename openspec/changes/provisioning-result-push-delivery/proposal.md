@@ -12,6 +12,7 @@ POOLS-7 uses storefront-initiated pull status/result reconciliation as its corre
 - Obtain sensitive credentials just in time and avoid durable plaintext credential storage in outbox or storefront lifecycle tables.
 - Retain pull status/result endpoints as the permanent reconciliation and recovery backstop.
 - State: **Deferred follow-on; blocked until POOLS-7 durable results land and trusted many-to-many ownership/authentication is selected.**
+- **Scope-review note, added 2026-08-03 (before implementation planning begins):** the two data flows above (capacity-release, Settlement Result) were identified from the one existing callback seam, not from a review of every storefront↔provisioning-service network interaction. Before finalizing what this change's delivery channel covers, review all such interactions — including the site-authority resource-pool/capacity-bucket projection polling `site_projection_cache.py` performs (`ProjectionCache`/`capacity_events_poller_loop`), which POOLS-8 is (2026-08-03) redesigning independently of this change's current scope — for other genuine push opportunities over the same authenticated transport, rather than assuming the two flows already identified are the complete set.
 
 ## Capabilities
 

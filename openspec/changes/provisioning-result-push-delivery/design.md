@@ -47,7 +47,7 @@ A storefront recovering missing local state queries POOLS-7 status/result endpoi
 
 ### Defer implementation tasks
 
-The change remains taskless until POOLS-7 finalizes result envelopes and the operator selects reverse authentication/credential rotation. Planning work should next compare mechanisms against deployment topology, compromise isolation, rotation, replay protection, and local development support.
+The change remains taskless until POOLS-7 finalizes result envelopes and the operator selects reverse authentication/credential rotation. Planning work should next compare mechanisms against deployment topology, compromise isolation, rotation, replay protection, and local development support. **Before that planning work locks in a scope (2026-08-03 note, see `proposal.md`):** first review every storefront↔provisioning-service network interaction, not only the two flows (capacity-release, Settlement Result) this document was originally scoped around from the one existing callback seam.
 
 ## Risks / Trade-offs
 
