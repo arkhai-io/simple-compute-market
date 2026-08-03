@@ -15,7 +15,7 @@
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
-| [Testing strategy](#testing-strategy) | Test levels and boundary validation |
+| [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
 
 ## System overview
@@ -128,6 +128,10 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
 ```
 
 The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time. The API-credits seller stack instead composes a storefront with a credits service and quota authority; the credits service owns keys, balances, grants, and online consumption.
+
+## Service Architecture
+
+Within a service, controllers stay thin: HTTP routing, request/response schemas, and translating exceptions into status codes. Business rules, orchestration, and I/O composition live in the 'service' layer beneath them. A per-service breakdown of its own layers belongs in that subsystem's `architecture.md`, not here.
 
 ## Authority boundaries
 
@@ -289,9 +293,9 @@ Compose is organized by market domain and includes the shared development chain.
 
 ### Production and staging
 
-The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components. Stateful services use independent persistence. SQLite-backed single-writer services use `Recreate` with ReadWriteOnce volumes. Service configuration is delivered through mounted profile files; environment variables are reserved for profile resolution and subprocess-required settings.
+The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components.
 
-The compute provisioner runs migrations before service startup and checks schema version on startup. Other services should follow the same separation as their migration work is completed.
+Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
 ## Build, packaging, and initialization
 
@@ -323,29 +327,7 @@ Long-running lifecycle workers may expose authenticated one-cycle controls when 
 
 ## Testing strategy
 
-Tests belong at the lowest level that can prove the behavior:
-
-1. **Unit tests** isolate a class or pure policy with injected collaborators.
-2. **Service integration tests** prove persistence, dependency wiring, HTTP mapping, or asynchronous state around one service.
-3. **Contract tests** share canonical producer/consumer fixtures across package boundaries.
-4. **System/e2e tests** run against deployed services over public/test HTTP seams and validate major lifecycle stages.
-
-Boundary changes require more than moved unit tests. Validation should cover:
-
-- package build and wheel contents;
-- typing markers and static type checks where contracts moved;
-- allowed dependency direction, including `TYPE_CHECKING` imports;
-- old import removal or explicit compatibility behavior;
-- changed consumer unit and integration suites;
-- composition startup and duplicate registration checks;
-- deterministic/idempotent retry behavior;
-- observable lifecycle events without arbitrary sleeps.
-
-The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
-
-Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, retains marker-specific locked dependencies needed for offline universal resolution, copies the current tracked repository into a clean verification tree, removes selected project environments, and runs each selected project's actual `make test` target with network and Python downloads disabled before packaging the artifact. Project Makefiles must keep interpreter selection configurable so the review environment can use the wheelhouse's declared Python version.
-
-See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
+Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 
 ## Capability documentation index
 

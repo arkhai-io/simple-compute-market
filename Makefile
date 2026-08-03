@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels
+.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels check-comment-hygiene
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -396,6 +396,39 @@ clobber-wheels: _require-ar-project
 	$(call clobber_python_wheel,arkhai-core-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_core_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
 	$(call clobber_python_wheel,arkhai-vms-provisioning-operator-client,$(PROVISIONING_OPERATOR_CLIENT_VERSION),$(DIST_DIR)/arkhai_vms_provisioning_operator_client-$(PROVISIONING_OPERATOR_CLIENT_VERSION)-py3-none-any.whl)
 
+# Reviw and agent targets
+
+# ---------------------------------------------------------------------------
+# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments
+# and docstrings" rule: change IDs, section/task numbers, and change-document
+# filenames must never appear in comments or docstrings outside openspec/.
+# This catches the reliably-mechanical subset of that rule (not the fuzzier
+# "references the review that introduced the code" cases, which still need
+# a human/LLM read) and is meant to run as part of every plan's closeout
+# task, not only when someone remembers to ask. Deliberately does not match
+# a bare "tombstone" -- that word has a legitimate, unrelated meaning
+# (a soft-delete marker row) already in use in this codebase, and a regex
+# can't safely tell the two usages apart; the tombstone convention itself
+# stays a judgment-call check, not a mechanical one.
+# ---------------------------------------------------------------------------
+check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
+	@echo "Scanning for change-ID and task-number references outside openspec/..."
+	@matches=$$(grep -rnE \
+		'POOLS-[0-9]+|[Ss]ection [0-9]+\.[0-9]+|[Ss]ection [0-9]+(\s|:|$$)|[Tt]ask [0-9]+\.[0-9]+|\btasks\.md\b|\bdesign\.md\b|\bproposal\.md\b' \
+		--include="*.py" --include="*.yml" --include="*.yaml" \
+		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
+		--exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir="build" \
+		. 2>/dev/null || true); \
+	if [ -n "$$matches" ]; then \
+		echo "$$matches"; \
+		echo ""; \
+		echo "FAIL: found change-history references outside openspec/. See AGENTS.md's"; \
+		echo "'Python comments and docstrings' section -- comments must describe the"; \
+		echo "current system, not the history of the change that produced it."; \
+		exit 1; \
+	fi
+	@echo "OK: no change-ID/task-number references found outside openspec/."
+
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
@@ -417,8 +450,6 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	echo "Creating $$OUTFILE ..."; \
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
-
-
 
 review-wheelhouse-prepare: dist-clean ## Rebuild wheels and refresh selected lockfiles before packaging.
 	@$(MAKE) dist
