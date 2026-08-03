@@ -13,14 +13,17 @@ documents it references.
 
 Use a discuss → plan → implement workflow:
 
-1. During discussion, record unresolved alternatives and proposed
-   decisions in the active `openspec/changes/<change>/` documents.
+1. During discussion, we will clarify any outstanding design decisions
+   and weigh alternative implementation options in this chat. At the
+   end of the design phase, update the active
+   `openspec/changes/<change>/` documents and return a packaged
+   fileset.
 2. During planning, preserve existing completed tasks and append or
    amend the implementation plan. Identify the exact permanent
    documentation affected by each accepted design decision. End the
    plan with the closeout task defined in
    `openspec/README.md#plan-closeout-requirements` — comment hygiene
-   (`make check-comment-hygiene`), documentation compliance, narrative
+   (`make check-comment-hygiene`), documentation compliance, task
    compression, and promotion.
 3. During implementation:
    a. implement and validate the plan;
@@ -45,7 +48,7 @@ belongs where.
 ## Deliverables
 
 When returning implementation artifacts, include only updated files in
-the original directory structure of the provided repository.
+a zip in the original directory structure of the provided repository.
 
 Represent a file requiring deletion by replacing its entire contents
 with a single-line tombstone comment stating the reason, at the file's
