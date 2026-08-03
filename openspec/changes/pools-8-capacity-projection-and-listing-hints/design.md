@@ -1,6 +1,6 @@
 ## Context
 
-The site authority now publishes two independent projections: `site_resource_pools` for host/resource facts and `site_capacity_buckets` for grouped advisory capacity. Each has revision/digest identity. VM storefront startup loads and polls both into atomic in-memory caches with stale retention. No production publication or claim-building reader consumes those caches, accepted identities are not durable across restart, and pool labels/provider/enabled/policy tags are absent from the resource projection.
+The site authority now publishes two independent projections: `site_resource_pools` for host/resource facts and `site_capacity_buckets` for grouped advisory capacity. Each has revision/digest identity. VM storefront startup loads and polls both into atomic in-memory caches with stale retention. No production publication or claim-building reader consumes those caches yet; accepted identities are not durable across restart (accepted by design as of 2026-08-03 — see "Section 2 revised decision," below — rather than a gap this change closes); and pool labels/provider/enabled/policy tags are absent from the resource projection.
 
 Storefront `resources` and capacity-pool tables still combine commercial metadata with locally authored physical identity. Wholesale replacement would remove pricing, settlement, and operator state that the site authority does not own.
 
@@ -46,7 +46,7 @@ Task 1.4 is now materially complete. The one remaining soft spot is confirming `
 ## Goals / Non-Goals
 
 **Goals:**
-- Persist complete independently versioned projection generations per trusted site.
+- Surface per-site/family projection load state for operator visibility, without durable persistence (revised 2026-08-03 — see "Section 2 revised decision"; originally scoped as persisting complete generations per trusted site).
 - Map provisioning identity into storefront-owned commercial publication without conflating authorities.
 - Consume mapped identity for listings and Capacity Reservation claims.
 - Add additive, advisory, domain-owned listing and hold hints.
@@ -60,11 +60,26 @@ Task 1.4 is now materially complete. The one remaining soft spot is confirming `
 
 ## Decisions
 
-### Persist configured sites and projection families independently
+### Persist configured sites and projection families independently — SUPERSEDED
 
-Storefront persistence records each operator-trusted `site_id` binding separately from remote payloads. For each `(site_id, projection_kind)`, it stores the accepted revision, digest, fetched/stale metadata, and one complete generation. Replacement is transactional per family; failure retains the previous generation as stale and never writes an empty projection.
+**Superseded 2026-08-03 (see "Section 2 revised decision" below); kept for history, not current design.**
 
-A restart loads durable generations before polling. Revision sequences are authority-local and projection-family-local; comparing revisions across sites or families is invalid.
+~~Storefront persistence records each operator-trusted `site_id` binding separately from remote payloads. For each `(site_id, projection_kind)`, it stores the accepted revision, digest, fetched/stale metadata, and one complete generation. Replacement is transactional per family; failure retains the previous generation as stale and never writes an empty projection.~~
+
+~~A restart loads durable generations before polling. Revision sequences are authority-local and projection-family-local; comparing revisions across sites or families is invalid.~~
+
+### Section 2 revised decision: no durable projection persistence (2026-08-03)
+
+Discussion (recorded here rather than only in chat, per this repository's discuss-phase convention) found the original persistence layer was solving a restart-time gap — a configured site being unreachable at the exact moment the storefront process (re)starts — that has no current production consumer to protect: Section 1's inventory confirmed nothing in production yet reads `site_projection_cache.py`'s caches (live listing reconciliation still goes through the legacy `CapacityDelta`/`reconciler.py` path). The one concrete operational case identified — the e2e/Helm deployment, where the site (provisioning service) and the storefront boot together in one chart and the storefront may start before its one configured site is reachable — is fully covered by retry-until-success plus observable status, not persisted state, since e2e has exactly one site (global and per-site readiness coincide there) and there is nothing yet depending on serving degraded data across the gap.
+
+**Accepted design:**
+- No new tables, no migrations, no `ProjectionCache` seeded-constructor changes. `ProjectionCache`/`site_projection_cache.py` keep their current shape.
+- `site_projection_poller_loop` already retries indefinitely on failure (existing code, unchanged) — this alone satisfies "keep trying until the site comes up."
+- Surface per-`(site_id, projection_kind)` load state (`ProjectionState`: `not_loaded`/`loaded`/`stale`/`unavailable`/`invalid`) on the storefront's existing operator status surface (`system_service.get_health`/`/api/v1/system/status`), following the same pattern that surface already uses for `resource_count` (`storefront-publication`'s existing "Operator-visible acceptance state" requirement: distinguish diagnosable states, report rather than silently block). A Helm readiness probe or the e2e harness can poll this status and wait, without the storefront itself needing to invent blocking/gating behavior.
+- Load-state reporting is **per site**, not global: one site failing to load must not report the whole storefront as broadly degraded when other configured sites (and their listings) are fine. For a single-site deployment (e2e today), per-site and global readiness happen to coincide, which is exactly the case that motivated this discussion.
+- Downstream consumers (whichever Section 4 introduces) MUST treat `not_loaded`/`invalid`/`unavailable` as "unknown, do not treat as zero capacity" — the same "ignorance ≠ zero" principle `site-capacity/spec.md` already states normatively for the legacy reconciliation path ("Site authority is unavailable" requirement). This is a requirement on Section 4's design, recorded here so it isn't lost before that section is planned, not new work for Section 2 itself.
+
+**Related finding, not itself Section 2 scope:** POOLS-7's task 2.3 flagged "storefront-side connection-to-site identity, currently held only in process-local aggregation state" as a durability gap to "complete or relocate ... with the durable storefront persistence work in ... POOLS-8." Investigating what that in-memory state actually is: `core_storefront.aggregation.AggregateCapacityClient._reservation_sites` (`capacity_reservation_id → site name`), whose own docstring already states it is "[a] cache, not a ledger: misses (process restart) fall back to asking every site, and the answer is re-learned." This is a different piece of state than the projection cache (this section's original subject), and it already has exactly the same soft-state, retry-on-miss design this section now adopts for projections — it does not need new persistence either, by its own existing design. This suggests POOLS-7 task 2.3's relocation note may already be satisfied as written, not merely deferred; closing it out is a small documentation task (confirm the fallback path is actually exercised/tested, then promote this as the accepted resolution in `site-capacity/spec.md` or `storefront-publication/spec.md`), not new implementation. Recorded here so it isn't lost; not yet added to this change's task list pending confirmation it belongs in this change rather than being closed directly against POOLS-7.
 
 ### Keep projection identity separate from commercial inventory
 
@@ -103,7 +118,7 @@ Core storefront may own schema-opaque projection persistence and reconciliation 
 
 ## Risks / Trade-offs
 
-- **[Projection data becomes stale]** → Retain last complete generation with explicit freshness and require live admission for every reservation.
+- **[Projection data becomes stale]** → Retain last complete generation in memory with explicit freshness state, surface per-site/family load state on the operator status endpoint, and require live admission for every reservation regardless of cached projection state (2026-08-03: no durable persistence layer — see "Section 2 revised decision"; this risk is bounded by projections never being admission-authoritative, not by restart survival).
 - **[Mapping duplicates identity]** → Store references and commercial overlays, not an independently authored physical truth.
 - **[Pool metadata leaks secrets]** → Project allowlisted normalized fields only and test payload redaction.
 - **[Pinned site is unavailable]** → Report/retry that authority; do not silently reserve elsewhere under the same listing.
@@ -111,7 +126,7 @@ Core storefront may own schema-opaque projection persistence and reconciliation 
 
 ## Migration Plan
 
-1. Add durable configured-site and projection-generation tables without changing current publication.
+1. Surface per-site/family projection load state on the operator status endpoint without changing current publication (2026-08-03: replaces the originally planned durable configured-site/projection-generation tables — see "Section 2 revised decision"; no schema change in this step).
 2. Extend producer payloads additively and load old payloads with absent optional metadata.
 3. Backfill commercial mappings from current listings/local inventory where identity is unambiguous; quarantine ambiguous rows.
 4. Switch publication and claim construction behind observable comparison/feature controls.
@@ -123,33 +138,140 @@ Rollback restores the previous publication/claim reader while retaining additive
 
 - **Are Resource Pool IDs globally generated after POOLS-7 identity cleanup, or must every persistent/publication reference remain explicitly site-scoped?** Resolved: `pool_id` is NOT globally unique and was never made so. `kit/resource-pools/src/market_resource_pools/db.py`'s `ResourcePool.id` docstring is explicit that it is an "operator-chosen slug (e.g. 'hetzner-eu-central')... [n]ot a UUID," and that cross-site pool ownership is deliberately left to the storefront rather than encoded in the identifier, because one provisioning-service database is one site and every row in it already implicitly belongs to that site. POOLS-7's early planning text (`pools-7-storefront-fulfillment-cutover/design.md`, "Final planning decisions") proposed globally unique identifiers across the board, but the identifiers that actually shipped as globally unique opaque values are `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, and `settlement_resource_id` — not `pool_id`, which was deliberately kept as a human-legible, site-local slug. Two different sites may coincidentally reuse the same `pool_id` string with no relationship to each other.
 
-  Consequence for this change: every durable storefront record this change introduces that keys off a projected pool or resource (accepted projection generations, the commercial mapping table, and any cached reference used for direct claim routing) MUST key on the explicit `(site_id, pool_id)` pair — or `(site_id, pool_id, resource_id)` where a resource-level identity is also involved — never on `pool_id` alone. This matches the "Persist configured sites and projection families independently" decision's existing `(site_id, projection_kind)` scoping and extends the same rule to identities *inside* a projection generation's payload, not only to the generation record itself. `storefront-publication`'s existing "Trusted provisioning-site identity" requirement (a storefront binds each provisioning connection to an operator-configured `site_id` and never accepts a counterparty-asserted one) is the trust boundary that makes this safe: the storefront supplies `site_id`, the projection supplies `pool_id`/`resource_id`, and only their pairing is a stable identity.
+  Consequence for this change: every durable storefront record this change introduces that keys off a projected pool or resource (the commercial mapping table, and any cached reference used for direct claim routing) MUST key on the explicit `(site_id, pool_id)` pair — or `(site_id, pool_id, resource_id)` where a resource-level identity is also involved — never on `pool_id` alone. `storefront-publication`'s existing "Trusted provisioning-site identity" requirement (a storefront binds each provisioning connection to an operator-configured `site_id` and never accepts a counterparty-asserted one) is the trust boundary that makes this safe: the storefront supplies `site_id`, the projection supplies `pool_id`/`resource_id`, and only their pairing is a stable identity.
 
-## Section 2 design discussion (opened 2026-08-03)
+## Section 2 design discussion (opened 2026-08-03) — CONCLUDED
+
+**Conclusion (2026-08-03): superseded by "Section 2 revised decision" above.** The persistence layer this discussion was designing (questions A–D and the worked seeding example) is not being built — see the revised decision for why. Kept below as the record of alternatives considered, per this repository's discuss-phase convention of recording unresolved alternatives rather than deleting them once a different path is chosen; nothing below should be read as current design.
 
 Grounded against the actual current implementation, not just the prior "Persist configured sites and projection families independently" decision's prose:
 
 - **Current in-memory shape.** `core_storefront.site_projections.ProjectionCache` (generic, `core/storefront/`) is the only cache implementation and is used only by the VM storefront's `market_storefront.services.site_projection_cache` today (bare-metal has no consumer yet — confirmed by grep, so changing `ProjectionCache` itself has a small, known blast radius). It is entirely process-local: `_caches: dict[str, SiteProjectionCaches]` is a module global rebuilt from scratch by `load_site_projections()` on every startup, which immediately does a **blocking live fetch** (`await asyncio.gather(caches.resource_pools.load(), caches.capacity_buckets.load())`) before the storefront can serve from it — there is no seeded/stale-from-disk state today, exactly as this document's Context section already claimed.
 - **Where `site_id` actually comes from today.** `market_storefront.services.capacity_client._capacity_settings()` reads `[capacity.sites]` (name → authority URL) from `settings.toml`/dynaconf at call time. This mapping is already durable — it survives restart via the operator's own config file, independent of any storefront database. This matters for schema scope, below.
 
-**Open question A — does this change need a separate `configured_sites` table, or does the generation table alone suffice?**
+**Decision A — one table, no separate `configured_sites`.** Accepted (2026-08-03): `site_projection_generations(site_id, projection_kind, revision, digest, value_json, fetched_at)` is the only new table. "Is this site currently trusted" is answered by live `[capacity.sites]` config, never a persisted flag. If site-level metadata is needed later (the discussed example: a per-site public key for authenticating to that site), it gets added as a column on whichever table already carries `site_id` at the time it's actually needed — not pre-built now. Note the one real tradeoff of collapsing to a single table: any such future site-level column would be duplicated across a site's two `projection_kind` rows (`resource_pool` and `capacity_bucket`), since `projection_kind` is part of the key. That duplication is acceptable for slow-changing operator config data (a public key changes rarely, if ever, relative to projection generations), and is deliberately deferred rather than solved speculatively — consistent with not building a table before there's a concrete column to put in it.
 
-The existing decision text says the storefront "records each operator-trusted `site_id` binding separately from remote payloads." Two readings, with different schema cost:
+**Decision B — stale/error state is not persisted.** Accepted (2026-08-03), and confirmed forward-compatible: this project's own roadmap includes replacing the polling mechanism with a provisioning-service-initiated push in a later change, and keeping `state`/`last_error` as pure runtime fields (not durable schema) means the persistence layer here is written against "the last accepted generation and when it was fetched," a concept push delivery will also produce, not against polling-specific mechanics that a push replacement would otherwise need to unwind from the schema.
 
-1. **Narrow reading:** this is describing a *trust* property (`site_id` is the storefront's own locally-configured identifier, never accepted from a remote's self-report — already true today via `[capacity.sites]`, and already normatively required by `storefront-publication`'s "Trusted provisioning-site identity"), not a mandate for a second table. Under this reading, one table — `site_projection_generations(site_id, projection_kind, revision, digest, value_json, fetched_at)`, primary key `(site_id, projection_kind)` — is sufficient. "Currently configured" is answered by checking live `[capacity.sites]`, not a persisted flag, at the point the storefront decides which generations to seed caches from at startup.
-2. **Literal reading:** a standalone `configured_sites(site_id, first_seen_at, ...)` table, updated separately from generation replacement, so a site's binding record and its projection data have independent lifecycles (e.g. so a site removed from live config but still holding open agreements has *something* durably distinguishing "known site, currently unreachable/removed" from "never seen").
+**Question C — seeding `ProjectionCache`, worked example.**
 
-  My recommendation is **(1)**: config already gives us a durable, unambiguous answer to "is this site currently trusted," re-derived fresh every startup — a second table would either duplicate that (drift risk) or would need its own reconciliation logic against config that doesn't otherwise exist anywhere in this codebase's patterns (`resource_pools`, `hosts`, etc. are all reconciled from a single authoritative source, not synced against a second local mirror of the same fact). If a future need surfaces for durable state that outlives a site's removal from config (e.g. an audit trail), that's better served by *not deleting* generation rows for orphaned `site_id`s than by adding a second table now. This also directly resolves task 2.1's "storefront migrations and repositories for trusted configured-site bindings" down to one migration, one repository, matching the one-table shape.
+To be precise about what is and is not seeded: **site URLs are never persisted or seeded from the database.** Per Decision A, `site_id → authority URL` continues to be resolved fresh from live `[capacity.sites]` config on every process start, exactly as `_capacity_settings()` does today — that part of `load_site_projections()` does not change. What gets seeded is the *projection payload* for a site the storefront already has both a live config entry and a previously-accepted generation for: the list of resource-pool/capacity-bucket rows, plus the revision/digest identity, so the cache isn't empty while waiting for the first live poll to complete.
 
-**Open question B — is "stale/error state" itself persisted, or re-derived at each restart?**
+Today (`core/storefront/src/core_storefront/site_projections.py`):
 
-`ProjectionCacheView` already carries `state`/`last_error` as runtime fields. Persisting them durably would mean every failed poll writes to disk, which is unnecessary churn and drifts from the actual meaning: "stale" is entirely a function of *not yet having reconfirmed this generation this process lifetime*, not a fact about the generation itself. Recommendation: persist only `revision`, `digest`, `value_json`, and `fetched_at` (task 2.2's "accepted value" and "fetched time"); `state` and `last_error` remain process-local, computed as: every generation loaded from disk at startup starts life as `ProjectionState.stale` (matching task 2.3's "restore ... as stale until polling confirms or replaces it" in this document's Migration Plan) until the first successful `poll_once()`/`refresh()` promotes it to `loaded`, exactly mirroring today's in-memory-only failure handling — just seeded from disk instead of `None` at construction.
+```python
+class ProjectionCache(Generic[T]):
+    def __init__(
+        self,
+        client: ProjectionClient[T],
+        *,
+        validate: Callable[[T], None] | None = None,
+    ) -> None:
+        self._client = client
+        self._validate = validate or (lambda _: None)
+        self._identity: ProjectionIdentity | None = None
+        self._value: T | None = None
+        self._state = ProjectionState.not_loaded
+        self._last_error: str | None = None
+        self._refresh_lock = asyncio.Lock()
+```
 
-**Open question C — how does `ProjectionCache` learn to start from a seed instead of `not_loaded`?**
+Proposed addition — an optional `seed`, defaulting to today's behavior when omitted:
 
-Today `ProjectionCache.__init__` always starts `_identity=None, _value=None, _state=not_loaded`. Persistence needs a seeded-construction path: either (a) a new optional `seed: ProjectionCacheView[T] | None` constructor parameter that, when given, initializes `_identity`/`_value` from it and forces `_state = ProjectionState.stale` regardless of the seed's own recorded state, or (b) a `ProjectionCache.from_stored(...)` classmethod doing the same. (a) is a smaller, more consistent diff with the existing dataclass-heavy style in this module. This is a `core_storefront` change, not VM-storefront-local, but has exactly one current caller to update.
+```python
+    def __init__(
+        self,
+        client: ProjectionClient[T],
+        *,
+        validate: Callable[[T], None] | None = None,
+        seed: tuple[ProjectionIdentity, T] | None = None,
+    ) -> None:
+        self._client = client
+        self._validate = validate or (lambda _: None)
+        if seed is not None:
+            self._identity, self._value = seed
+            # A seeded generation is durable data from a prior process
+            # lifetime, not a live confirmation — it must never be
+            # presented as `loaded` until this process's own poll/refresh
+            # confirms or replaces it.
+            self._state = ProjectionState.stale
+        else:
+            self._identity = None
+            self._value = None
+            self._state = ProjectionState.not_loaded
+        self._last_error: str | None = None
+        self._refresh_lock = asyncio.Lock()
+```
 
-**Open question D — SQLite storage convention.** The VM storefront's existing persistence (`resources`, `hosts`, `compute_capacity_pools`, etc.) is all raw SQL via `market_storefront.utils.sqlite_client.SQLiteClient` + `.utils.migrations.py`, not SQLAlchemy — this is a different package from `kit/site`/`kit/resource-pools`, which do use SQLAlchemy. Recommendation: match the local convention (raw SQL, `sqlite_client.py`/`migrations.py`) rather than introducing a second ORM into this specific package, consistent with how every other storefront-local table in this inventory is built.
+Today (`domains/vms/storefront/src/market_storefront/services/site_projection_cache.py`), URL/site discovery and cache construction happen together, with an unconditional blocking live fetch before anything is usable:
+
+```python
+async def load_site_projections() -> None:
+    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    remotes = remote_site_clients(aggregate)  # site_id -> RemoteCapacityClient, from live config
+    replacements: dict[str, SiteProjectionCaches] = {}
+    for site, remote in remotes.items():
+        caches = SiteProjectionCaches(
+            resource_pools=ProjectionCache(_RemoteProjectionClient(remote, "resource_pool")),
+            capacity_buckets=ProjectionCache(_RemoteProjectionClient(remote, "capacity_bucket")),
+        )
+        await asyncio.gather(caches.resource_pools.load(), caches.capacity_buckets.load())
+        ...
+```
+
+Proposed — URL/site discovery is unchanged (still `remote_site_clients(aggregate)` off live config); only the `ProjectionCache` construction step changes to read a persisted generation, if any, before the live fetch:
+
+```python
+async def load_site_projections() -> None:
+    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    remotes = remote_site_clients(aggregate)  # unchanged: site_id -> URL, from live config
+    repo = get_sqlite_client()  # same DB handle; new repository methods, not a new client
+    replacements: dict[str, SiteProjectionCaches] = {}
+    for site, remote in remotes.items():
+        caches = SiteProjectionCaches(
+            resource_pools=ProjectionCache(
+                _RemoteProjectionClient(remote, "resource_pool"),
+                seed=await repo.load_site_projection_generation(site, "resource_pool"),
+            ),
+            capacity_buckets=ProjectionCache(
+                _RemoteProjectionClient(remote, "capacity_bucket"),
+                seed=await repo.load_site_projection_generation(site, "capacity_bucket"),
+            ),
+        )
+        # No longer blocks on a live fetch: a seeded cache is already
+        # `stale`-but-usable. The existing poll/refresh cycle (unchanged)
+        # confirms or replaces it; task 2.2's persistence hook lives inside
+        # `refresh(force=True)`'s existing success path, not here.
+        replacements[site] = caches
+    _caches.clear()
+    _caches.update(replacements)
+    asyncio.create_task(_confirm_seeded_generations(replacements))
+```
+
+where `repo.load_site_projection_generation(site_id, projection_kind) -> tuple[ProjectionIdentity, list[dict]] | None` returns `None` for a site with no persisted row yet (first-ever startup for that site), which `ProjectionCache.__init__` already treats as "no seed" via the same `seed=None` path used today. The `_confirm_seeded_generations` background kickoff (replacing the old blocking `asyncio.gather(...load())`) is sketched here for shape only — its exact form is Section 2 planning, not resolved in this discussion.
+
+**Question D — raw SQL vs. SQLAlchemy, reviewed.**
+
+This is a real, consistent split by *tier*, not incomplete migration within one package. Evidence against the "older code" theory:
+- Zero SQLAlchemy usage anywhere in `core/storefront/src` or `domains/vms/storefront/src` (confirmed by search) — every storefront table, old and recently-added alike (e.g. `compute_capacity_pools`, added well after `kit/resource-pools` existed), uses the same raw-`sqlite3` + hand-rolled `Migration(id, apply)` engine.
+- `core_storefront.sqlite_migrations.Migration`/`apply_schema_migrations` is feature-equivalent to `provisioning/compute/service/db/migrations.py`'s `Migration(id, apply)` engine — same shape (id-keyed idempotent migrations, a `schema_migrations` tracking table) — reinforcing that this was built deliberately to the same standard, not left behind.
+- `core_storefront/sqlite_client.py`'s own docstring: "Hoisted from `market_storefront.utils.sqlite_client` when the API-credits domain became the second composition root" — an active extraction refactor, not untouched legacy code.
+
+Pros of the storefront tier's raw-SQL convention, for this specific table:
+- Zero new dependency in a tier that has none today; sqlite3 is stdlib.
+- No sync/async friction: storefront code is `async def` throughout over stdlib `sqlite3`, whereas SQLAlchemy's async support needs an async driver (`aiosqlite`) plus `greenlet`, a second access pattern with no other user in this tier.
+- One table, no joins, no relationships to model — the ORM's main value (declarative relationships, query building across mapped classes) isn't needed here.
+- Matches every other table already in this file — lower cognitive load for whoever next touches `market_storefront`.
+
+Cons:
+- No declarative schema-as-code / weaker type safety than a mapped class.
+- SQL literals inline, same as the rest of the file (accepted local style, not a new cost this change introduces).
+
+Why `kit/site`/`kit/resource-pools`/`provisioning/compute/service` use SQLAlchemy, and why that reason doesn't transfer here: multiple independently-versioned *kit packages* (site, resource-pools, fulfillment) are composed into **one shared database** inside the provisioning service via declarative `Base.metadata.create_all` composition (`kit/resource-pools/src/market_resource_pools/db.py`'s own docstring names this pattern explicitly). SQLAlchemy's cross-package declarative composition is what makes that sharing tractable. This table has no such cross-package sharing need — it lives entirely inside the VM storefront's own database, which nothing else composes into.
+
+**Recommendation:** match the storefront tier's existing raw-SQL convention for `site_projection_generations`, specifically because this table's home (VM storefront) has a consistent, actively-maintained convention with no cross-package composition need — not as a general "raw SQL over SQLAlchemy" preference outside that context. If a later table in this same change needs cross-package sharing the way the provisioning tier does, that would be a reason to reopen this, but nothing identified so far in Section 2 or Section 4 requires it.
+
+
 
 **Proposed startup sequencing for task 2.3** (pending confirmation of A–C above): `load_site_projections()` changes from "build caches, then immediately live-fetch" to (1) read live `[capacity.sites]` config, (2) for each configured site, read any persisted `(site_id, projection_kind)` generation and construct `ProjectionCache` seeded stale via question C's mechanism (or `not_loaded` if no persisted row exists — first-ever startup for that site), so the storefront can begin serving from a stale-but-non-empty cache immediately without waiting on a network round trip, then (3) kick off the existing poll/refresh cycle, which will confirm-and-promote-to-`loaded` or replace-and-persist as today's `poll_once()`/`refresh()` already do, with one addition: a successful `refresh(force=True)` must now also write the new generation to disk transactionally (task 2.2), not just update the in-memory dataclass fields.
 
@@ -159,6 +281,6 @@ Today `ProjectionCache.__init__` always starts `_identity=None, _value=None, _st
 
 | Decision | Permanent destination |
 |---|---|
-| Independent durable projection generations and stale behavior | `openspec/specs/site-capacity/spec.md` and `architecture.md` |
+| Per-site/family projection load-state visibility (no durable persistence); "ignorance ≠ zero" applies to projection consumers | `openspec/specs/site-capacity/spec.md` and `architecture.md` |
 | Commercial mapping, direct claim routing, and retirement boundary | `openspec/specs/storefront-publication/spec.md` and `architecture.md` |
 | Domain-neutral hint keys and domain-owned values | `openspec/specs/resource-pool-management/spec.md` and `architecture.md` |

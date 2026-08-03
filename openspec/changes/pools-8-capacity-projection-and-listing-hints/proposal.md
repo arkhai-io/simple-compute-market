@@ -4,7 +4,7 @@ POOLS-7 has landed independent site resource-pool and capacity-bucket projection
 
 ## What Changes
 
-- Persist configured provisioning-site bindings and the last accepted identity/value for each independent projection family so storefront restart retains complete stale-marked generations.
+- Surface per-`(site_id, projection_kind)` load state (not-yet-loaded, loaded, stale, unavailable) on the storefront's existing operator status surface, so a site being offline when the storefront first starts is observable and does not silently present as authoritative zero capacity. **Revised (2026-08-03 design review): superseded the originally planned durable persistence layer (migrations, repositories, seeded-cache restart recovery) — see `design.md`, "Section 2 revised decision." No production code currently consumes these projection caches (confirmed during Section 1's inventory pass), so a restart-time gap has no live consumer to protect yet; the load-bearing operational need (a site being offline when the storefront and site boot together in one Helm chart, as in the e2e deployment) is fully covered by retry-until-success plus observable per-site status, which the existing poller and status-reporting conventions already support without new schema.**
 - Define explicit mapping between provisioning-owned projected resource identities and storefront-owned commercial inventory, pricing, settlement options, and listing identities.
 - Make listing publication and reservation claim construction consume mapped authoritative projection identity rather than independently authored physical host/pool fields.
 - Extend the resource-pool projection with the minimum pool metadata needed for domain-owned hints, including enabled state and opaque `policy_tags`.
@@ -22,7 +22,7 @@ None.
 
 ### Modified Capabilities
 
-- `site-capacity`: Persist independently versioned projection generations and expose pool metadata needed for authoritative identity mapping without making projections admission authority.
+- `site-capacity`: Expose per-site/family projection load state for operator visibility, plus pool metadata needed for authoritative identity mapping, without making projections admission authority or introducing durable projection persistence.
 - `storefront-publication`: Reconcile site projections into commercial publication/claim data and consume domain-owned listing/hold hints.
 - `resource-pool-management`: Define domain-neutral policy-tag keys and projection metadata while leaving values and defaults to domains.
 
@@ -43,7 +43,7 @@ None.
 
 ## Impact
 
-- Storefront persistence gains configured-site/projection generation state and explicit commercial mapping/reconciliation.
+- Storefront gains per-site/family projection load-state reporting and explicit commercial mapping/reconciliation; no new durable projection-persistence schema.
 - Site projection payloads gain additive pool metadata with independent revision/digest changes.
 - VM, bare-metal, and API-credit publication adapters gain domain-owned hint resolvers where applicable.
 - Local inventory import, validator, publication, claim-building, migration, and operator paths require reader-by-reader disposition.
