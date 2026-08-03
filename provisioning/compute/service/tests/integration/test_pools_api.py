@@ -88,12 +88,9 @@ class TestCreatePool:
 
 
 class TestVmSizeDefaultsThroughAdminApi:
-    """These fields were previously accepted by no path at all -- the
-    handler's field allowlist rejected them as unknown before this
-    change. This proves the fix at the layer the original bug actually
-    lived at: the real typed client, the real HTTP API, the real
-    AnsiblePoolConfigHandler, the real database -- not a direct DB
-    insert bypassing all of that.
+    """Proves `default_vm_*` round-trips through the real typed client,
+    the real HTTP API, the real `AnsiblePoolConfigHandler`, and the real
+    database -- not only at the loader/DB level.
     """
 
     async def test_create_with_vm_size_defaults_round_trips_through_the_api(

@@ -308,7 +308,7 @@ async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
 async def test_site_resource_pools_projection_surfaces_pool_metadata(
     capacity: CapacityApi, client_and_queue,
 ):
-    """Real end-to-end proof, through both canonical typed clients rather
+    """Proves the full path, through both canonical typed clients rather
     than a direct DB insert on the write side or a raw HTTP call on the
     read side:
 
@@ -317,11 +317,10 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         -> resource-pool projection
         -> RemoteCapacityClient.resource_pool_projection()
 
-    default_vm_* was previously unreachable through the admin API at
-    all (the handler's field allowlist rejected it) -- this proves that
-    bug is fixed at the layer it actually lived at, and that the fix is
-    visible through the storefront's actual projection consumer, not
-    just at an HTTP route reached by hand.
+    default_vm_* must be settable through the admin API and visible
+    through the storefront's actual projection consumer, not only
+    reachable by writing directly to the database or reading an HTTP
+    route by hand.
     """
     from compute_provisioning import PoolCreate
     from core_storefront.capacity_remote import RemoteCapacityClient
