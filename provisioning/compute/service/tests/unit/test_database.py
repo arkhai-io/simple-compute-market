@@ -71,7 +71,7 @@ def _create_pre_migration_tables(engine):
             )
             """
         ))
-        # Pre-POOLS-6 shape of the site-authority ledger tables: no
+        # Legacy shape of the site-authority ledger tables: no
         # capacity/dimensions/dimensions columns yet. A populated row
         # here exercises the actual additive-column migration path,
         # rather than only the fresh-create-all path a brand new table

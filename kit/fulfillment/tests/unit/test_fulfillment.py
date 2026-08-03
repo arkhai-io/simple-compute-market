@@ -866,7 +866,7 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
 
 @pytest.mark.asyncio
 async def test_fresh_service_composition_reads_status_and_result_from_same_file_database(tmp_path):
-    """A new composition reconstructs Section 8 reads from durable state only."""
+    """A new composition reconstructs status/result reads from durable state only."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 

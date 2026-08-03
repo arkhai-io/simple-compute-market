@@ -237,3 +237,11 @@ A site authority SHALL expose `site_resource_pools` from authoritative domain in
 ### Requirement: Committed dimensions remain authoritative through scheduling
 
 Scheduling MUST NOT admit a dimension shape exceeding what the capacity reservation declares. Within that bound, a scheduling request MAY be narrower than the reservation — reflecting, for example, a negotiated shape change not yet expressed as a reservation resize, or a placement/pricing check against a candidate shape. The dimensions actually scheduled — not the reservation's own dimensions unconditionally — are the authoritative admitted resource shape carried with the selected settlement resource, so the domain fulfillment provider can interpret them without the caller retransmitting an independently computed shape. A negotiated shape change that is meant to persist resizes the reservation itself (supersede, never mutate) rather than relying on an implicit narrower scheduling request to represent it.
+
+#### Scenario: Scheduling request narrower than the reservation is permitted
+- **WHEN** a scheduling request asks for less of a dimension than the reservation holds
+- **THEN** scheduling admits the narrower shape and records the dimensions actually scheduled, not the reservation's full dimensions, on the selected settlement resource
+
+#### Scenario: Scheduling request exceeding the reservation is rejected
+- **WHEN** a scheduling request asks for more of a governed dimension than the reservation holds
+- **THEN** scheduling rejects the request before assignment or provider execution

@@ -4668,3 +4668,58 @@ be chasing a red herring: `capacity_reservation_debits.capacity_bucket_id`
 has its own separate foreign key to `capacity_buckets`, which the test
 simply never populated. Not a SQLAlchemy/pysqlite quirk at all — fixed
 by inserting a valid bucket row.
+
+## Section 8 correction tasks — fix-loop debugging record (2026-07-25)
+
+A code review of the diff that had marked 8.9/8.10/8.12/8.13 done found it did not
+actually run against the real service composition. Re-applying it to a clean
+checkout and running the affected suites (not inspection alone) surfaced four
+independent real bugs, all fixed in the same pass:
+
+1. **`vm_provisioning_adapter/fulfillment_results.py` was missing from the reviewed
+   diff** (present in the author's working tree, apparently lost to `make
+   review-diff` not picking up an untracked new file). Without it,
+   `AnsibleFulfillmentProvider` — and the whole `compute_provisioning_service`
+   composition root — failed to import, silently invalidating every 8.10/8.13
+   claim that depended on a real adapter or app instance (the full 13-test
+   integration suite, 16 of 17 `test_legacy_vm_lease_migration.py` tests, and two
+   convergence test files could not even collect). Only `kit/fulfillment`'s own
+   suite passed, because it mocks the provider — almost certainly why the break
+   went unnoticed. Fixed by adding the file.
+2. Two integration-test assertions were stale against the new nested
+   `domain_result` envelope shape (still reading a since-removed top-level
+   `payload["credentials"]`). Fixed to read
+   `payload["domain_result"]["payload"]["credentials"]`.
+3. **The legacy backfill conflict check was weakened, not preserved**:
+   `_existing_provisioned_resources_conflict` had changed from comparing actual
+   stored identity to comparing row count only, with the test that asserted a
+   mismatched identity is rejected flipped to assert it's accepted — a real loss
+   of the safety property the function's own docstring describes. Restored value
+   comparison and the original test assertion.
+4. `legacy_backfill.py` passed the raw VM target straight through as
+   `provisioned_resource_id`, contradicting the fulfillment-owned-opaque-identity
+   principle this same diff added to `architecture.md`. Replaced with a
+   deterministic derivation — first keyed on `fulfillment_id` (wrong: the
+   compiler generates a fresh random `fulfillment_id` per invocation, so this
+   isn't stable across a backfill re-run, caught by
+   `test_equivalent_rerun_is_idempotent_and_writes_nothing_new` failing),
+   re-keyed on `capacity_reservation_id`, which is genuinely stable across
+   re-runs of the same lease. Re-running the rerun scenario then surfaced a
+   fifth, independent bug: `_apply_legacy_vm_lease_backfill`'s `INSERT` never
+   used `draft.provisioned_resource_ref` at all — it inserted a fresh
+   `uuid.uuid4()` every time, disconnected from whatever the compiler derived.
+   Fixed the `INSERT` to use the derived value.
+
+Also restored `fetch_credentials`' docstring invariants (thinned to two sentences
+by the reviewed diff), fixed an incomplete-edit broken sentence in `spec.md`, and
+documented `VmFulfillmentCredential`/`vm.fulfillment.result.v1` in
+`openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload`
+— including that `provisioned_resource_ids` is not yet genuinely many-to-many
+(every credential today names the fulfillment's one and only output).
+
+**Root cause pattern common to bugs 1 and 3-5**: every one was invisible to the
+suite that had been run because that suite mocked the exact boundary the bug
+lived in (the real adapter import, the real backfill INSERT). This is why
+`tasks.md`'s validation notes for this and adjacent sections distinguish "runs
+against a real composition" from "passes with the boundary mocked" as different
+strength claims, not interchangeable ones.

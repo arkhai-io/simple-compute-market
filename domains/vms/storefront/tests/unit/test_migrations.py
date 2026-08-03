@@ -1,5 +1,5 @@
-"""POOLS-4: verify the compute_inventory_pools -> compute_capacity_pools
-rename migration, rather than assume SQLite's ALTER TABLE ... RENAME TO
+"""Verify the compute_inventory_pools -> compute_capacity_pools rename
+migration, rather than assume SQLite's ALTER TABLE ... RENAME TO
 correctly rewrites compute_pool_members' foreign key."""
 
 from __future__ import annotations
@@ -85,9 +85,9 @@ def test_rename_migration_preserves_data_and_pool_members_fk(tmp_path):
 
 
 def test_rename_migration_is_noop_on_fresh_database(tmp_path):
-    """A fresh database, where the (post-POOLS-4) inventory-pools migration
-    already created compute_capacity_pools directly, must not error when
-    the rename migration also runs against it."""
+    """A fresh database, where the inventory-pools migration already
+    created compute_capacity_pools directly, must not error when the
+    rename migration also runs against it."""
     conn = sqlite3.connect(str(tmp_path / "fresh.db"))
     try:
         conn.execute("CREATE TABLE compute_capacity_pools (pool_id TEXT PRIMARY KEY)")

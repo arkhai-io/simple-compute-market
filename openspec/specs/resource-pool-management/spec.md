@@ -117,6 +117,15 @@ Pool create, replace, patch, import, and validation operations MUST reject an un
 - **WHEN** an operator changes a pool's delegate or playbook after fulfillment has accepted and persisted prepared provider input
 - **THEN** retries and dispatch use the snapshotted prepared input rather than re-reading the live pool configuration
 
+### Requirement: Session-scoped pool reads
+
+Resource-pool management MUST expose a session-scoped pool lookup that loads provider configuration using the caller's open database session. Fulfillment uses this operation while freezing prepared provider input so the pool snapshot and aggregate write share one transaction.
+
+#### Scenario: Pool configuration is frozen with acceptance
+
+- **WHEN** fulfillment prepares provider input inside its acceptance transaction
+- **THEN** the pool and provider configuration are read through the same caller-owned session before the prepared operation is persisted
+
 ## Evidence
 
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
@@ -134,13 +143,3 @@ Disabling a Resource Pool is a draining action. It blocks new Capacity Settlemen
 Resource-pool management owns administrative routing metadata: pool identity, enabled state, policy tags, provider kind, provider-specific configuration, and host/resource membership. It does not own fulfillment-provider protocols or settlement-resource assignment.
 
 The higher-layer [fulfillment capability](../fulfillment/spec.md) reads enabled pool and resource information when evaluating candidates. Disabling a pool prevents new scheduling assignments while preserving existing reservations, assignments, fulfillment records, and active workloads. `market_resource_pools` must not import `market_fulfillment`, including for type-only annotations.
-
-
-### Requirement: Session-scoped pool reads
-
-Resource-pool management exposes a session-scoped pool lookup that loads provider configuration using the caller's open database session. Fulfillment uses this operation while freezing prepared provider input so the pool snapshot and aggregate write share one transaction.
-
-#### Scenario: Pool configuration is frozen with acceptance
-
-- **WHEN** fulfillment prepares provider input inside its acceptance transaction
-- **THEN** the pool and provider configuration are read through the same caller-owned session before the prepared operation is persisted
