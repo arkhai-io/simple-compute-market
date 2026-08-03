@@ -277,7 +277,42 @@ Why `kit/site`/`kit/resource-pools`/`provisioning/compute/service` use SQLAlchem
 
 
 
-## Permanent Documentation Promotion
+## Section 3 design (opened 2026-08-03)
+
+Grounded against `kit/site/src/market_site/projections.py`, `kit/resource-pools/src/market_resource_pools/{db,pools}.py`, and the Ansible provider config path (`compute_provisioning_service/db/models.py`'s `AnsiblePoolConfig`, `vm_provisioning_adapter/services/ansible_pool_config_handler.py`).
+
+### Mechanism
+
+`resource_pool_projection()` currently groups resources by `pool_id` with zero pool-level fields — only per-resource facts. The accepted "Extend resource projection with pool metadata" decision (already in this document) said *what* to add; this is the *how*:
+
+- `resource_pool_projection(resources, *, pool_metadata: Mapping[str, Mapping[str, Any]] | None = None)` gains an optional parameter: `pool_id -> {label, enabled, mechanism, policy_tags, vm_size_defaults}`, supplied by the mounting service (the provisioning service composes it from its own `ResourcePool`/`AnsiblePoolConfig` tables — `kit/site` never queries them directly, staying duck-typed against a plain dict, consistent with the existing `resource_inventory` callable pattern this function already uses).
+- Each pool's projected row gains a `pool_metadata` key holding only the allowlisted fields present in the supplied mapping. A pool absent from `pool_metadata` (older producer, or the mounting service not yet composing a directory) is projected with inventory only — additive and backward-compatible by construction, closing task 3.3 without extra logic.
+- `SiteProjectionService` gains an optional `pool_directory: Callable[[], Mapping[str, Mapping[str, Any]]] | None` constructor parameter, called once per `resource_pools()` invocation alongside the existing `resource_inventory` callable — same shape, same lifecycle.
+- Any change to the supplied pool metadata changes the projection's canonical digest exactly like a resource change does today (`canonical_digest` already hashes the complete row structure) — task 3.2's revision-advancement requirement falls out of the existing digest mechanism for free, no new logic needed.
+
+### Resolving the open question: provider identity, direct or reduced?
+
+This was an open question in this document before Section 1/2's review. Resolved by inspection: `ResourcePool.provider` (`kit/resource-pools/pools.py`) is already a coarse, non-sensitive *kind* string ("Fulfillment provider kind, e.g. 'ansible'") — not a URL, credential, or anything provider-instance-specific. The actual sensitive material lives in `ResourcePool.provider_config` (a separate column, containing e.g. `playbook_path`/`extra_vars`, potentially carrying operator secrets), which is never read by this projection at all. So there is nothing to reduce: project `provider` directly, under the field name `mechanism` (matching task 3.1's own wording and avoiding the word "provider," which this codebase otherwise uses for the thing that owns `provider_config`/credentials — a naming distinction worth keeping deliberately, not just cosmetically).
+
+### Task 3.5's actual prerequisite: `AnsiblePoolConfig` doesn't persist VM size defaults yet
+
+Confirmed in the Section 1 review pass: `default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` exist only on the fulfillment-time pydantic model and are unreachable — the pool admin API rejects any attempt to set them today. Before anything can be projected, this needs:
+
+1. **Schema:** three nullable columns on `ansible_pool_configs` (`default_vm_ram INTEGER`, `default_vm_vcpus INTEGER`, `default_vm_disk_size VARCHAR`), added via an additive `_add_column_if_missing`-style migration matching the existing pattern in `provisioning/compute/service/db/migrations.py` (e.g. `_migrate_ansible_jobs_contract_fields`). NULL on an existing row means "this pool contributes nothing at that fallback tier," identical to today's behavior.
+2. **Handler wiring:** `AnsiblePoolConfigHandler._FIELDS` gains the three keys; `validate_config_problems` gains validation (positive integer for RAM/vCPUs, non-empty string for disk size, all three independently optional/nullable); `read_config`/`replace_config` read and write them alongside the existing three fields.
+3. Only after (1)–(2) exist is there anything for the provisioning service's pool-directory composer to read and hand to the projection.
+
+This is real schema/admin-API-surface work, not just a projection change — worth calling out explicitly since it's a bigger unit than the rest of Section 3 and touches a live operator-facing contract (pool create/replace/patch would newly accept these fields).
+
+### Resolved: `pool_views`, mirroring the existing `publication_views` precedent (2026-08-03)
+
+Confirmed against `resource_pool_projection`'s own existing code, not a new pattern: at the resource level, `publication_views` is already a generic `dict[str, Any]` that `kit/site` passes through completely uninterpreted (`projected["publication_views"] = dict(resource.get("publication_views") or {})`), while the actual domain-shaped content under a versioned key like `"bare_metal.v1"` is built by `bare_metal_provisioning_adapter.runtime.project_bare_metal_resource` — a function that lives in the bare-metal *domain* package, not in `kit/site` or the generic `compute_provisioning_service`, which only calls out to it. This is exactly the "kit provides a generic delegate shape, the domain layer supplies the coupling" pattern already established elsewhere in this codebase (also visible in `resource-pool-management`'s `requirement_delegate`, resolved through the VM adapter's own allowlisted registry rather than being known to any generic kit).
+
+Applying the same shape at the pool level: `pool_metadata` gains a generic `pool_views: dict[str, Any]` field (name deliberately distinct from `publication_views` — this is provider/negotiation-time sizing data, not buyer-facing listing content, so reusing the same word would be misleading even though the mechanism is identical), and the VM-specific payload goes under a versioned key, e.g. `pool_views["vm.ansible_pool_defaults.v1"] = {"default_vm_ram": ..., "default_vm_vcpus": ..., "default_vm_disk_size": ...}`. The shaping function (analogous to `project_bare_metal_resource`) lives in `vm_provisioning_adapter`'s own runtime module, not in `compute_provisioning_service`'s pool-directory composer directly — the composer only calls out to it, exactly matching how `_bare_metal_publication_view` calls `project_bare_metal_resource` today rather than building the bare-metal shape inline. `kit/site` never sees `default_vm_ram` or any other VM-shaped name; it only ever sees `pool_views: dict[str, Any]`, structurally identical treatment to `policy_tags` and `publication_views`. `mechanism`/`label`/`enabled`/`policy_tags` remain flat, top-level, and genuinely domain-neutral — only the VM-specific sizing data moves into the versioned nested view.
+
+This changes task 3.5's shape from "project `vm_size_defaults`" to "project `pool_views`, with the VM-domain adapter supplying the `vm.ansible_pool_defaults.v1` view content" — same underlying data, correctly layered.
+
+
 
 | Decision | Permanent destination |
 |---|---|
