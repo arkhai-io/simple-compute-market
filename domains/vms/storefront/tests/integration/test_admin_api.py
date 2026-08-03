@@ -135,6 +135,69 @@ class TestHealthEndpoint:
             f"Negotiation strategy would exit on every round: {strat_check!r}"
         )
 
+    async def test_system_status_surfaces_site_projection_state(self, db):
+        """End-to-end: a populated projection status summary must survive
+        SystemService -> HealthResponse (server, pydantic) -> HTTP JSON ->
+        HealthResponse (client, dataclass) intact. Exercises the real route
+        through the real StorefrontClient, not SystemService in isolation --
+        this is exactly the layer a service-level unit test cannot prove.
+        """
+        summary = {
+            "site-a": {
+                "resource_pool": {
+                    "state": "loaded",
+                    "revision": 3,
+                    "digest": "abc123",
+                    "last_error": None,
+                    "fetched_at": "2026-08-03T12:00:00+00:00",
+                },
+                "capacity_bucket": {
+                    "state": "unavailable",
+                    "revision": None,
+                    "digest": None,
+                    "last_error": "connection refused",
+                    "fetched_at": None,
+                },
+            },
+        }
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            projection_status_provider=lambda: summary,
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_system_status()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.site_projections == summary
+        assert result.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
+        assert result.site_projections["site-a"]["capacity_bucket"]["state"] == "unavailable"
+
+    async def test_health_omits_site_projections(self, db):
+        """The fast liveness probe (/health) must not carry this field at all."""
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            projection_status_provider=lambda: {"site-a": {}},
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_health()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.site_projections is None
+
 
 # ---------------------------------------------------------------------------
 # POST /admin/pause

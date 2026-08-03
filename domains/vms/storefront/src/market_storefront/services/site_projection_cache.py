@@ -71,6 +71,7 @@ def _view_summary(view: ProjectionCacheView[list[dict[str, Any]]]) -> dict[str, 
         "revision": view.identity.revision if view.identity is not None else None,
         "digest": view.identity.digest if view.identity is not None else None,
         "last_error": view.last_error,
+        "fetched_at": view.fetched_at.isoformat() if view.fetched_at is not None else None,
     }
 
 

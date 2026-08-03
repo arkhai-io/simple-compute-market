@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,11 +25,17 @@ def db(tmp_path) -> SQLiteClient:
     return SQLiteClient(db_path=str(tmp_path / "system_service_test.db"))
 
 
-def _make_service(db: SQLiteClient, registry: dict | None = None) -> SystemService:
+def _make_service(
+    db: SQLiteClient,
+    registry: dict | None = None,
+    *,
+    projection_status_provider=None,
+) -> SystemService:
     """``registry`` arg kept for compat with older test invocations; ignored."""
     return SystemService(
         sqlite_client=db,
         agent_id="test-agent",
+        projection_status_provider=projection_status_provider,
     )
 
 
@@ -166,31 +172,39 @@ class TestSeedResourcesIfEmpty:
 
 class TestGetHealthSiteProjections:
     async def test_reports_per_site_per_family_state(self, db):
-        """/api/v1/system/status surfaces each configured site's projection state."""
+        """get_health copies the injected provider's summary through verbatim."""
         summary = {
             "site-a": {
                 "resource_pool": {
-                    "state": "loaded", "revision": 3, "digest": "abc", "last_error": None,
+                    "state": "loaded", "revision": 3, "digest": "abc",
+                    "last_error": None, "fetched_at": "2026-08-03T12:00:00+00:00",
                 },
                 "capacity_bucket": {
-                    "state": "stale", "revision": 2, "digest": "def", "last_error": "boom",
+                    "state": "stale", "revision": 2, "digest": "def",
+                    "last_error": "boom", "fetched_at": "2026-08-03T11:55:00+00:00",
                 },
             },
         }
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_status_summary",
-            return_value=summary,
-        ):
-            svc = _make_service(db)
-            result = await svc.get_health(include_registry=True)
+        svc = _make_service(db, projection_status_provider=lambda: summary)
+        result = await svc.get_health(include_registry=True)
 
         assert result["site_projections"] == summary
 
     async def test_omitted_from_fast_health_probe(self, db):
         """The liveness probe (include_registry=False) does not compute this."""
-        svc = _make_service(db)
+        svc = _make_service(db, projection_status_provider=lambda: {"site-a": {}})
         result = await svc.get_health(include_registry=False)
         assert "site_projections" not in result
+
+    async def test_default_provider_is_the_real_projection_status_summary(self, db):
+        """With no provider injected, get_health falls back to the real
+        production source rather than silently returning nothing."""
+        svc = _make_service(db)  # no projection_status_provider -- exercises the default
+        result = await svc.get_health(include_registry=True)
+        # No sites are configured/loaded in this process, so the real
+        # summary is an empty dict, not None -- proving the default path
+        # actually ran rather than swallowing an exception.
+        assert result["site_projections"] == {}
 
     async def test_one_site_unavailable_is_reported_outside_the_health_gate(self, db):
         """An unavailable/invalid site must be reported, not gated on.
@@ -204,19 +218,16 @@ class TestGetHealthSiteProjections:
             "site-a": {
                 "resource_pool": {
                     "state": "unavailable", "revision": None, "digest": None,
-                    "last_error": "connection refused",
+                    "last_error": "connection refused", "fetched_at": None,
                 },
                 "capacity_bucket": {
-                    "state": "not_loaded", "revision": None, "digest": None, "last_error": None,
+                    "state": "not_loaded", "revision": None, "digest": None,
+                    "last_error": None, "fetched_at": None,
                 },
             },
         }
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_status_summary",
-            return_value=summary,
-        ):
-            svc = _make_service(db)
-            result = await svc.get_health(include_registry=True)
+        svc = _make_service(db, projection_status_provider=lambda: summary)
+        result = await svc.get_health(include_registry=True)
 
         assert result["site_projections"]["site-a"]["resource_pool"]["state"] == "unavailable"
         assert "site_projections" not in result["checks"]
@@ -224,12 +235,11 @@ class TestGetHealthSiteProjections:
     async def test_reporting_failure_does_not_add_a_checks_entry(self, db):
         """A raise while computing the summary yields None, not a crashed
         health check or a new gated `checks` entry."""
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_status_summary",
-            side_effect=RuntimeError("no event loop for pollers in this process"),
-        ):
-            svc = _make_service(db)
-            result = await svc.get_health(include_registry=True)
+        def _boom():
+            raise RuntimeError("no event loop for pollers in this process")
+
+        svc = _make_service(db, projection_status_provider=_boom)
+        result = await svc.get_health(include_registry=True)
 
         assert result["site_projections"] is None
         assert "site_projections" not in result["checks"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Awaitable, Callable, Generic, Mapping, Protocol, TypeVar
 
@@ -35,6 +36,7 @@ class ProjectionCacheView(Generic[T]):
     value: T | None
     state: ProjectionState
     last_error: str | None
+    fetched_at: datetime | None
 
 
 class ProjectionCache(Generic[T]):
@@ -52,10 +54,13 @@ class ProjectionCache(Generic[T]):
         self._value: T | None = None
         self._state = ProjectionState.not_loaded
         self._last_error: str | None = None
+        self._fetched_at: datetime | None = None
         self._refresh_lock = asyncio.Lock()
 
     def view(self) -> ProjectionCacheView[T]:
-        return ProjectionCacheView(self._identity, self._value, self._state, self._last_error)
+        return ProjectionCacheView(
+            self._identity, self._value, self._state, self._last_error, self._fetched_at,
+        )
 
     async def load(self) -> ProjectionCacheView[T]:
         return await self.refresh(force=True)
@@ -70,6 +75,7 @@ class ProjectionCache(Generic[T]):
         if self._identity is not None and remote == self._identity:
             self._last_error = None
             self._state = ProjectionState.loaded
+            self._fetched_at = datetime.now(timezone.utc)
             return self.view()
         return await self.refresh(force=True)
 
@@ -88,6 +94,7 @@ class ProjectionCache(Generic[T]):
             self._value = value
             self._last_error = None
             self._state = ProjectionState.loaded
+            self._fetched_at = datetime.now(timezone.utc)
             return self.view()
 
     async def refresh_after_topology_error(
