@@ -535,6 +535,36 @@ So the honest answer to "is this transferable": the pattern 5.4 needs (cap an ex
 
 None of these are resolved -- recorded here for input before task 5.1/5.2's code sketches above get treated as final.
 
+## Section 6 design (opened 2026-08-03)
+
+Grounded against the full schemas of `resources` and `compute_capacity_pools` (not just the columns seen in earlier passes), `resource_transition_events`, `compute_pool_members`, and the one-time `_backfill_compute_pools` migration that originally populated `compute_capacity_pools` from `resources`.
+
+### Retirement is column-level, not table-level, for the two hybrid tables
+
+Every table in Section 1's inventory turns out to fit one of three buckets once read in full -- and two of them are internally split, which task 6.1's "physical-identity writers/readers" framing doesn't yet say out loud:
+
+| Table | Physical columns (retirement candidate once projection-sourced) | Commercial columns (must survive) |
+|---|---|---|
+| `resources` | `resource_type`, `resource_subtype`, `unit`, `value`, `state`, `attributes` | `min_price`, `token`, `max_duration_seconds`, `accepted_escrows` -- **confirmed present on this table too**, not just `compute_capacity_pools` |
+| `hosts` | all (pure physical validator input) | none |
+| `compute_pool_members` | all (pure physical membership) | none |
+| `compute_capacity_pools` | `total_gpu_count`, `gpu_model`, `region`, `sla` | `seller_id`, `pricing_policy_id`, `escrow_policy_id`, `allocation_policy`, `min_price`, `token`, `accepted_escrows`, `max_duration_seconds` |
+| `resource_transition_events` | all (audit trail of `resources`' physical-column mutations) | n/a -- existing rows are history, not a live concern |
+
+So `resources` and `compute_capacity_pools` are each a genuine hybrid, at the column level -- not a table cleanly on one side or the other. This means task 6.1 cannot "remove" either table; it can only stop writing/reading their physical columns once the projection supersedes them, while their commercial columns become a durable pricing-policy record that survives.
+
+**A pre-existing duplication task 6.1 should not paper over:** per-resource pricing already exists in three places today -- `resources.min_price`/`token`/`accepted_escrows`/`max_duration_seconds` (per-resource), `compute_capacity_pools`'s equivalent columns (per-pool, populated by the one-time `_backfill_compute_pools` migration that originally promoted `resources`' values up to pool level), and whatever a published `listings` row snapshots at creation time (per-listing). This duplication predates POOLS-8 and isn't something this change needs to fully resolve, but Section 6 should not silently pick one without checking whether per-resource price overrides distinct from pool-level pricing are actually exercised anywhere before deciding whether `resources`' commercial columns can simply be dropped in favor of the pool-level copy, or need their own preserved home.
+
+### The retiring cluster and what's still open
+
+`hosts`, `compute_pool_members`, `resources`' physical columns, `resource_transition_events`, `resource_capacity_validator.py`, and the CSV-import/`upsert_resource` physical-write path all retire together, once Section 4's redirect of `available_compute_slices` to the projection+mapping table lands -- they form one connected cluster (validator checks `hosts`; `upsert_resource` writes `resources` and, via `_sync_compute_pool_for_resource`, `compute_capacity_pools`/`compute_pool_members`; CSV import calls `upsert_resource`), not independent removals.
+
+**Open question, not resolved here:** do CSV import (`host_csv_importer.py`/`resource_csv_importer.py`) and the admin `upsert_resource` API still serve a purpose once physical registration is projection-sourced -- specifically, do operators need a bulk way to set *pricing* for many pools/resources at once, distinct from physical registration? If yes, this tooling needs repurposing (import commercial policy keyed by projected `pool_id`/`resource_id`) rather than straightforward removal, and that's a real scoping decision for whoever picks up task 6.1, not something to infer from what this session has found.
+
+### Staged rollout means freeze-then-redirect, not drop, in this change
+
+Task 6.3 asks for "a rollback path to the previous reader during staged rollout" -- that's only possible if the previous reader's data still exists. Recommend this change's actual migration work stops at freezing writes to the retiring physical columns/tables and redirecting reads to the projection, without dropping the underlying schema in the same migration. A genuine `DROP`/column removal belongs in a follow-up cleanup change after a full deployment cycle confirms rollback is never needed -- matching this document's non-destructive posture everywhere else (no migration in this change deletes agreement history; every other schema change so far has been additive).
+
 ## Permanent Documentation Promotion
 
 | Decision | Permanent destination |
