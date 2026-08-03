@@ -165,6 +165,8 @@ A **Capacity Reservation** records accepted capacity, the agreement/deal relatio
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
 
+<a id="relationship-to-fulfillment-scheduling"></a>
+
 **Relationship to fulfillment scheduling**
 
 The site authority admits and persists capacity reservations. The higher-layer [fulfillment capability](../fulfillment/spec.md) binds an admitted reservation to a Settlement Resource and records that assignment through the site boundary before provider dispatch.

@@ -257,7 +257,19 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 
 A reservation whose negotiated shape changes is superseded, never mutated: `CapacityLedgerService.resize_reservation` atomically releases the old reservation and admits a new one under a new `capacity_reservation_id`, so the reservation's committed dimensions always reflect the shape actually being negotiated. Scheduling (see "Fulfillment" below) MAY further narrow within a reservation's bound for a placement or pricing check against a candidate shape; a scheduling narrower than the reservation reports back exactly what it scheduled, not the reservation's original shape, since that is what gets provisioned if accepted (`openspec/specs/site-capacity/spec.md`'s committed-dimensions-through-scheduling requirement). As of this writing, `resize_reservation` has no negotiation-side caller — this describes the intended negotiation model, not yet-implemented wiring between negotiation and reservation resizing.
 
+#### Layered placement ownership
 
+Which physical resource ultimately serves a deal is decided up to three separate times, by two different processes, and these decisions must not be conflated:
+
+| Decision | Owned by | When | Mechanism |
+|---|---|---|---|
+| Which pool/resource a listing represents | Storefront | Publish time | Baked into the listing's `offer_resource` at creation |
+| Which site to route a reserve/probe call to | Storefront (`AggregateCapacityClient`) | Reserve/negotiate time | `fill_first`/`most_available` ranking policies over a live per-request snapshot |
+| Which concrete host within that pool fulfills the reservation | Provisioning service (`PhysicalSettlementScheduler`) | Schedule time | Deterministic round-robin (or a replaceable fairness policy) |
+
+The second layer stays storefront-owned rather than moving into the provisioning service alongside the third: pooling/placement ranking is a commercial judgment a seller makes about their own sites, not a physical-fulfillment concern, so it lives in the storefront process. The second and third layers pick among fundamentally different things — sites versus hosts within one already-chosen site — and are correctly separated by process boundary, not merely by convention.
+
+The second layer's ranking policies (`fill_first`/`most_available`) read a live, per-request capacity snapshot, never a storefront's own advisory `CapacityProjection` cache — that cache is explicitly allowed to go stale for display/listing purposes, and routing a real reservation attempt through it would turn a display cache into a load-bearing admission input, defeating the reason it's allowed to be stale. The ranking policies' own claim-matching is deliberately a *coarse, best-effort hint*, not shared code with the enforcement-level predicates `kit/site` and fulfillment scheduling use: a wrong ranking costs one extra round-trip when the aggregator falls through to the next site, not an incorrect admission, so the two matchers are allowed to diverge in a way an actual eligibility gate never could.
 
 ### Fulfillment
 
