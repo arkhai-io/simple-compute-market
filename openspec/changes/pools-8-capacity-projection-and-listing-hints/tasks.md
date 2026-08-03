@@ -2,8 +2,8 @@
 
 - [x] 1.1 Verify independent site resource-pool and capacity-bucket producers, revisions/digests, pull endpoints, and in-memory storefront caches landed under POOLS-7.
 - [x] 1.2 Remove rebuilt producer/polling/cache mechanics from this change and record remaining persistence/consumption scope in `proposal.md` and `design.md`.
-- [ ] 1.3 Resolve global versus site-scoped Resource Pool identity and record the durable/public key shape before schema work.
-- [ ] 1.4 Inventory every `resources`, capacity-pool, CSV import, validator, publication, claim-building, admin, migration, and e2e reader; classify physical authority versus commercial/operational ownership.
+- [x] 1.3 Resolve global versus site-scoped Resource Pool identity and record the durable/public key shape before schema work. **Resolved (2026-08-03, `design.md`, "Resolved Questions"): `pool_id` is a site-local operator slug, never made globally unique under POOLS-7. Every durable/public reference this change introduces must key on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.**
+- [x] 1.4 Inventory every `resources`, capacity-pool, CSV import, validator, publication, claim-building, admin, migration, and e2e reader; classify physical authority versus commercial/operational ownership. **Done (2026-08-03, `design.md`, "Local physical-authority inventory"): all eight tables classified; writers, readers, and the two independent listing-creation paths (operator/API-driven vs. CLI/reconciler-derived) traced; migration and e2e readers confirmed absent. One caveat carried forward: `compute_capacity_pools`/`compute_pool_members` show no external reader in this pass but were not checked against every admin response schema, so their zero-consumer status should be reconfirmed before Section 6 plans their removal.**
 
 ## 2. Persist projection generations
 
