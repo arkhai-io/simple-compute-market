@@ -333,9 +333,11 @@ Section 1's inventory described `listing_service.create_listing` (operator/API-d
 
 This document's existing decision says pinned claim construction "does not broadcast a pinned state-changing request across sites" — investigating whether today's code already violates this, concretely: `AggregateCapacityClient.reserve()` (`core_storefront/aggregation.py`) has no way to target one specific site for a *fresh* reservation. It calls `self._placement(self.site_names, snapshots, claim=claim)` and tries each site returned, in placement order, until one admits — `_route_order`'s owning-site-first behavior only applies to a reservation that already has a learned `capacity_reservation_id`, which doesn't exist yet at `reserve()` time. So a listing whose offer was derived from one specific site's pool `"gpu-pool"` has nothing today stopping the aggregator from also trying a *different* site against the same bare claim `{"pool_id": "gpu-pool", ...}` if placement policy tries that site — and if that other site coincidentally also has a pool named `"gpu-pool"` (a real possibility, since pool_id is only site-locally unique per task 1.3), it would attempt to admit the reservation against the wrong physical pool entirely, silently. This is not hypothetical: it's the direct, confirmed consequence of combining (a) non-globally-unique `pool_id` with (b) today's placement-based fan-out having no concept of a claim being pinned to a specific site.
 
-### Resolved: Option 1, split into private methods (2026-08-03)
+### Resolved: Option 1, split into private methods (2026-08-03) -- corrected 2026-08-03 (Section 5, Q3)
 
-Decided: extend `reserve()` with an optional `site:` parameter, but keep it a thin dispatcher over two private methods rather than one method with an `if site is not None` branch — each routing strategy owns its full body, and neither can accidentally share state or control flow with the other.
+**Correction:** the original version of this decision conditioned site-pinning on a claim being resource-pinned ("listings with a known pinned origin"). That conflated two different things. Per Section 5's Q3: the storefront commits to a *site* at reservation time; the *provisioning service* commits to a physical resource at scheduling time. Site identity comes from the mapping table (`derived_compute_listings.site_id`) and is known for **every** listing derived from a projection -- fungible or resource-pinned alike -- because every `ResourcePool` lives on exactly one site. Resource-level selection within that site is the site's own concern (its ledger's admission match, or its later `schedule_resource` fulfillment step), never the storefront's. So `site=` must be supplied whenever a mapping entry exists, regardless of `listing_mode`; the fan-out path is only for listings with **no** mapping entry at all (pre-migration or otherwise not derived from a projection).
+
+This also drove a rename: the original sketch called these `_reserve_pinned`/`_reserve_placed`, which collides with Section 5's `listing_mode` also wanting the word "pinned" for its resource-level concept. Renamed to name what's actually being decided at each layer -- **site** selection here, **resource** selection at Section 5's layer -- rather than reusing "pinned" for both and relying on context to disambiguate.
 
 ```python
 async def reserve(
@@ -350,24 +352,27 @@ async def reserve(
 ) -> dict[str, Any] | None:
     """Route to one site in placement order; fall back on refusal.
 
-    ``site``, when supplied, pins the reservation to exactly that site:
-    no placement fan-out, no fallback to another site on refusal. Required
-    for a claim derived from one site's projected pool/resource identity --
-    pool_id is only site-locally unique, so falling back to another site on
-    refusal could otherwise admit against a same-named pool on the wrong
-    site.
+    ``site``, when supplied, targets exactly that site: no placement
+    fan-out, no fallback to another site on refusal. Required whenever
+    the claim comes from a listing with a known site mapping -- fungible
+    or resource-pinned alike, since pool_id is only site-locally unique
+    and falling back to another site on refusal could otherwise admit
+    against a same-named pool on the wrong site. Which physical resource
+    within that site satisfies the claim is the site's own decision
+    (its ledger's admission match at reserve time, or its fulfillment
+    provider's placement at schedule time) -- never decided here.
     """
     if site is not None:
-        return await self._reserve_pinned(
+        return await self._reserve_at_site(
             site, claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
             lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
         )
-    return await self._reserve_placed(
+    return await self._reserve_by_placement(
         claim=claim, deal_ref=deal_ref, ttl_seconds=ttl_seconds,
         lease_start_utc=lease_start_utc, lease_duration_seconds=lease_duration_seconds,
     )
 
-async def _reserve_pinned(
+async def _reserve_at_site(
     self,
     site: str,
     *,
@@ -391,7 +396,7 @@ async def _reserve_pinned(
         self._reservation_sites[str(capacity_reservation_id)] = site
     return _tagged(site, reserved)
 
-async def _reserve_placed(
+async def _reserve_by_placement(
     self,
     *,
     claim: Mapping[str, Any] | None,
@@ -402,7 +407,8 @@ async def _reserve_placed(
 ) -> dict[str, Any] | None:
     """Try each site in placement order; fall back to the next on refusal.
 
-    Unchanged from today's `reserve()` body.
+    Only for listings with no site mapping at all. Unchanged from today's
+    `reserve()` body.
     """
     snapshots = await self._snapshots()
     for name in self._placement(self.site_names, snapshots, claim=claim):
@@ -425,7 +431,7 @@ async def _reserve_placed(
     return None
 ```
 
-**Also resolved while sketching this:** `site_id` must not ride inside `claim`/`required_attributes`, and must not be added to `ComputeResource`/`offer_resource` at all. That model is the public, buyer-negotiated offer; its only free-form extension point (`attributes["tag.*"]`) is explicitly documented as buyer-visible and matched by the negotiation policy, and this document's existing "Route pinned claims directly" decision already requires that "public listing payloads expose only intended market identity/labels, not authority credentials or URLs" — `site_id` is exactly the kind of internal routing fact that must stay out of the public offer. Instead, the caller (`vm_fulfillment_service._reserve_capacity_for_obligation`) looks `site_id` up from `derived_compute_listings` by `listing_id` (a new small lookup helper, e.g. `lookup_derived_listing_site`) immediately before calling `reserve(..., site=site_id)`; `None` for a pool-scoped listing with no pinned origin falls through to `_reserve_placed` exactly as today. `compute_capacity_claim_from_order`/`_REQUIRED_COMPUTE_KEYS` need no change.
+**Also resolved while sketching this:** `site_id` must not ride inside `claim`/`required_attributes`, and must not be added to `ComputeResource`/`offer_resource` at all. That model is the public, buyer-negotiated offer; its only free-form extension point (`attributes["tag.*"]`) is explicitly documented as buyer-visible and matched by the negotiation policy, and this document's existing "Route pinned claims directly" decision already requires that "public listing payloads expose only intended market identity/labels, not authority credentials or URLs" -- `site_id` is exactly the kind of internal routing fact that must stay out of the public offer. Instead, the caller (`vm_fulfillment_service._reserve_capacity_for_obligation`) looks `site_id` up from `derived_compute_listings` by `listing_id` (a new small lookup helper, e.g. `lookup_derived_listing_site`) immediately before calling `reserve(..., site=site_id)`; `None` for a listing with no mapping entry falls through to `_reserve_by_placement` exactly as today. `compute_capacity_claim_from_order`/`_REQUIRED_COMPUTE_KEYS` need no change.
 
 ### Task 4.6 is largely satisfied by construction, needs a proof not a redesign
 
@@ -509,6 +515,27 @@ held = await capacity.reserve(..., ttl_seconds=ttl, ...)
 This changes nothing about `ttl_seconds`' meaning at the site ledger — it still enforces only whatever value the storefront actually sends, exactly as this document's existing "Keep hints advisory and domain-owned" decision requires ("The site ledger continues enforcing only the actual caller-supplied TTL and does not treat the tag as authority"). Consistent with this function's existing fail-open posture (a hold that can't be placed leaves acceptance untouched), an unresolvable `policy_tags` lookup should leave `ttl` unchanged rather than block hold placement — matching `capped_hold_seconds`' own designed behavior of falling back to the caller's requested value on any invalid/missing preference.
 
 
+
+### Open questions (added 2026-08-03, after further review)
+
+The above moved to "resolved" too quickly. Digging further into the same function surfaced real questions:
+
+**Q1 -- naming, sanity-checked (2026-08-03), still your call.** "Fungible" is clearly established (`is_fungible_pool`, `pool_id`'s own field docstring). The other value is less settled than I first assumed: VM only has it *implicitly* (a boolean derived from `single_resource_id`), but bare-metal's `SQLiteClient.count_open_bare_metal_resources` docstring independently says "specific-resource publications" -- so "specific resource" already has real, if modest, textual precedent too, not just something I invented. On generalization: "resource" is already this codebase's established domain-neutral noun (`resource_id`, `ResourcePool`, `resource_pool_projection` all use it for GPUs, bare-metal machines, and presumably future domains alike), so "specific_resource" should generalize the same way "resource" already does -- a skill market's "specific worker" or a license market's "specific license" both read fine substituting "resource" for the domain noun, the same substitution this codebase already relies on everywhere else. I don't see a domain where it breaks down either.
+
+The collision concern that made me lean toward renaming to "pinned" is now moot -- see Q3's fix below, which renames Section 4's internals away from "pinned" entirely rather than making Section 5 avoid the word. So both `"fungible"/"specific_resource"` and `"fungible"/"pinned"` are defensible with real precedent; this is now a clean pick between them rather than one being forced by a naming collision. Recommend `"fungible"/"specific_resource"` given it already appears verbatim in bare-metal's own code, but this is genuinely your call.
+
+**Q2 -- acknowledged, no question, good investigative result** (kept for the record: `listing_mode` changes claim identity and which key `available_compute_slices` generates per candidate, not just a label).
+
+**Q3 -- resolved: site-pinning and resource-pinning are different layers, and the code needs to say so.** You're right that `_reserve_pinned` was the wrong name and, more importantly, wrongly scoped. Reservations are always site-pinned once a listing has a mapping entry (fungible or resource-specific alike) -- the storefront's only job is picking the site. Resource-level assignment is the provisioning service's job: either the site's own ledger admission match at reserve time, or its fulfillment provider's placement at `schedule_resource` time. Neither is a storefront decision. Fixed in the code block above: renamed to `_reserve_at_site`/`_reserve_by_placement`, and the condition for calling `_reserve_at_site` is now "a site mapping exists for this listing," full stop -- not conditioned on `listing_mode` at all. This also removes the naming collision Q1 was worried about, since Section 4 no longer uses the word "pinned" anywhere.
+
+**Q4 -- investigated properly this time; bare metal's situation is not what task 4.5/5.4 assumed.** Two findings that cut in opposite directions:
+
+- **Publication is already ahead of VM, not behind.** `arkhai_bare_metal.projections.TrustedBareMetalProjection` (`domains/bare_metal/src/arkhai_bare_metal/projections.py`) is a per-site, revision/digest-identified, complete/stale-tracked projection-generation model -- structurally almost exactly what Section 2 discussed and rejected building for VM, already modeled here as a pydantic contract. `arkhai_bare_metal.storefront_adapter.available_bare_metal_listing_candidates` already derives listing candidates purely from `TrustedBareMetalProjection` snapshots (`bare_metal_listing_candidates`, `close_stale_bare_metal_listings`, `record_derived_bare_metal_listing`) -- there is no local-physical-authority-table equivalent to VM's `resources`/`compute_capacity_pools` in bare-metal's publication path at all. `derived_bare_metal_listings` already has a `site_id` column (confirmed via migration), ahead of VM's `derived_compute_listings`. If anything, Section 4's VM mapping work should look to this design rather than the reverse.
+- **But none of it is wired to anything real, and capacity reservation doesn't exist at all.** `projection_snapshot` (the callback `TrustedBareMetalProjection` snapshots come from) is passed through `publication.py` but never actually constructed anywhere in the bare-metal storefront's composition root -- confirmed by search, nothing builds a real implementation. `runtime.py`'s health check hardcodes `"site_projection": "unavailable"` and `"fulfillment": "unavailable"` unconditionally; its own docstring says "trusted site bindings are composed later" (never happened yet). And there is no capacity-reservation client at all for bare metal anywhere in the repo -- no `AggregateCapacityClient` usage, no `reserve()` call, no hold/TTL placement, confirmed by search across the whole `domains/bare_metal` tree.
+
+So the honest answer to "is this transferable": the pattern 5.4 needs (cap an existing hold TTL) has nothing to attach to on bare metal, because the thing it would cap -- a working capacity-reservation flow -- doesn't exist there yet. Porting 5.4 specifically isn't "port a pattern," it's "build bare-metal capacity reservation from scratch" (site client wiring, reserve/hold/commit flow, negotiation-time integration mirroring `sync_negotiation.py`), which is a materially larger undertaking than this task, and out of proportion with the rest of Section 5. That's a real project on its own, not a small pickup. I'd treat it as separate from POOLS-8 rather than pulled forward into it -- happy to scope it properly as its own change if you want to pursue it, but I don't think it belongs inside this one.
+
+None of these are resolved -- recorded here for input before task 5.1/5.2's code sketches above get treated as final.
 
 ## Permanent Documentation Promotion
 
