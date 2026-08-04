@@ -5,7 +5,7 @@ The authoritative resource ledger for this site
 unit-counted resources, reservation holds with their lease tail, and the
 anonymous versioned capacity-event feed. Storefronts reach it through
 the ``/api/v1/capacity`` HTTP surface, which mirrors the
-``core_storefront.capacity.CapacityClient`` contract verb for verb.
+``core_storefront.capacity.SiteCapacityAuthority`` contract verb for verb.
 
 Matching semantics: a claim is an exact-match attribute mapping plus a
 quantity request, checked first against the resource's attributes JSON
@@ -637,7 +637,7 @@ class CapacityLedgerService:
             return [self._resource_payload(db, row) for row in rows]
 
     # ------------------------------------------------------------------
-    # CapacityClient verbs
+    # SiteCapacityAuthority verbs
     # ------------------------------------------------------------------
 
     def snapshot(self) -> list[dict[str, Any]]:

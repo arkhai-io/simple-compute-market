@@ -184,7 +184,7 @@ async def _commit_fresh_reservation(
     )
 
 
-# Site-authority capacity client (core_storefront.capacity.CapacityClient
+# Site-authority capacity client (core_storefront.capacity.SiteCapacityAuthority
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]

@@ -44,6 +44,29 @@ def client(site: FakeSite) -> cc.SiteCapacityClient:
     )
 
 
+def test_site_capacity_client_satisfies_the_site_capacity_authority_protocol(
+    client: cc.SiteCapacityClient,
+):
+    """The per-site client satisfies the narrower per-site protocol
+    (no subscribe -- a per-site client has no local bus of its own),
+    while the broader `CapacityClient` protocol (including subscribe)
+    is what `AggregateCapacityClient` itself implements, not what it
+    requires of its member sites."""
+    from core_storefront.capacity import CapacityClient, SiteCapacityAuthority
+
+    assert isinstance(client, SiteCapacityAuthority)
+    assert not isinstance(client, CapacityClient)
+
+
+def test_aggregate_capacity_client_satisfies_the_full_capacity_client_protocol(
+    client: cc.SiteCapacityClient,
+):
+    from core_storefront.capacity import CapacityClient
+
+    aggregate = cc.AggregateCapacityClient({"dc-a": client})
+    assert isinstance(aggregate, CapacityClient)
+
+
 def _settings(
     url: str = "http://site-authority:8081",
     sites: dict | None = None,

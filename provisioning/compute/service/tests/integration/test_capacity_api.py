@@ -1,7 +1,7 @@
 """Capacity API: the full reserve→commit→release lifecycle over HTTP.
 
 Exercises the /api/v1/capacity surface the storefront's remote
-CapacityClient will speak — payload shapes here are the wire contract.
+SiteCapacityClient will speak — payload shapes here are the wire contract.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Site-authority capacity API router.
 
 All endpoints are under ``/capacity`` (mount with ``prefix="/api/v1"``)
-and mirror the ``core_storefront.capacity.CapacityClient`` contract verb
+and mirror the ``core_storefront.capacity.SiteCapacityAuthority`` contract verb
 for verb, plus the resource registry and the versioned event feed (pull
 model with snapshot resync).
 
@@ -154,7 +154,7 @@ def make_capacity_router(
         )
 
     # ------------------------------------------------------------------
-    # CapacityClient verbs
+    # SiteCapacityAuthority verbs
     # ------------------------------------------------------------------
 
     @router.get(

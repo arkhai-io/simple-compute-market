@@ -13,7 +13,7 @@ from market_site_client import (
     SiteCapacityAdminClientError,
     SiteCapacityClient,
 )
-from tests.fake_site import FakeSite
+from fake_site import FakeSite
 
 
 def _client(handler, admin_key: str = "test-admin-key") -> SiteCapacityAdminClient:

@@ -4,7 +4,7 @@ The aggregator answers the design doc's "two machines in two
 datacenters, one listing, depletes only when both are depleted"
 (docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
 a soft-state view over N hard-state site ledgers, reached only through
-their ``CapacityClient`` interfaces. It holds no capacity itself —
+their ``SiteCapacityAuthority`` interfaces. It holds no capacity itself —
 availability is a union over member sites, a reserve is routed to one
 site and falls back to the next on refusal, and there are no
 distributed transactions to invent: cross-site contention resolves at
@@ -16,11 +16,13 @@ service, because pooling/placement is a commercial judgment per seller
 attribute distinguishes them — only the seller's market schema knows
 which attributes those are).
 
-``AggregateCapacityClient`` implements the same ``CapacityClient``
-protocol it consumes, so a storefront wired against one site and one
-wired against five run identical code. Every payload and delta is
-tagged with the site name it came from; pool members reference
-``(site, resource_id)``.
+``AggregateCapacityClient`` implements the broader ``CapacityClient``
+protocol (every ``SiteCapacityAuthority`` operation plus a local
+subscription point for capacity deltas), so a storefront wired against
+one site and one wired against five run identical code. A per-site
+client has no bus of its own to subscribe against -- only the aggregate
+does. Every payload and delta is tagged with the site name it came
+from; pool members reference ``(site, resource_id)``.
 """
 
 from __future__ import annotations
@@ -29,10 +31,10 @@ import logging
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from core_storefront.capacity import (
-    CapacityClient,
     CapacityDelta,
     CapacityEventBus,
     CapacitySubscriber,
+    SiteCapacityAuthority,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ A ranking hint, not an enforcement point — ``probe()``/``reserve()`` on
 the chosen site remain the real, authoritative check (see
 ARCHITECTURE.md's layered-ownership model). This package deliberately
 does not import ``kit/site``: it must stay usable against any
-``CapacityClient`` implementation, not just the one that happens to
+``SiteCapacityAuthority`` implementation, not just the one that happens to
 exist today, so its own default (``_coarse_resource_matches_claim``)
 only understands a small, explicitly-documented claim subset. Domains
 whose backing site needs exact claim semantics (matching every
@@ -192,7 +194,8 @@ def _tagged(site: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class AggregateCapacityClient:
-    """``CapacityClient`` over N named site clients.
+    """``CapacityClient`` over N named per-site (``SiteCapacityAuthority``)
+    clients.
 
     Reads union, writes route. A site that errors is skipped (logged):
     the aggregator is a soft-state view and one site's outage must not
@@ -202,7 +205,7 @@ class AggregateCapacityClient:
 
     def __init__(
         self,
-        sites: Mapping[str, CapacityClient],
+        sites: Mapping[str, SiteCapacityAuthority],
         *,
         placement: PlacementPolicy | None = None,
         bus: CapacityEventBus | None = None,
@@ -239,7 +242,7 @@ class AggregateCapacityClient:
         """
         return self._reservation_sites
 
-    def site(self, name: str) -> CapacityClient:
+    def site(self, name: str) -> SiteCapacityAuthority:
         return self._sites[name]
 
     # -- reads ----------------------------------------------------------

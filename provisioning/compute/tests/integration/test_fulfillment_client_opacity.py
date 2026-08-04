@@ -88,14 +88,10 @@ def _fulfillment_request(**overrides: Any) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_schedule_begin_send_no_placement_fields() -> None:
-    """The opaque fulfillment boundary holds from the client side.
-
-    Proves `ComputeProvisioningClient` never *sends* `resource_id` as a
-    required or populated field across schedule/begin -- the same
-    invariant the retired cross-service test proved by exercising a real
-    server, now proved from the client's own request bodies against a
-    mock instead.
-    """
+    """`ComputeProvisioningClient` never sends `resource_id` as a required
+    or populated field across schedule/begin -- proved from the client's
+    own request bodies against a mock, since the point is what the client
+    actually transmits, not just what it receives back."""
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
 

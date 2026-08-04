@@ -3,9 +3,9 @@
 `domains/vms/storefront/tests/fake_site.py` is an in-process fake used by
 almost every other storefront test -- and, by its own docstring, does not
 claim to pin the real wire shapes. It does not strip `resource_id` from
-reserve responses the way `kit/site`'s real router does, which is exactly
-how the original `resource_id`/`vm_host`-required bugs went undetected
-through the entire existing storefront test suite.
+reserve responses the way `kit/site`'s real router does, so a test built
+only against that fake cannot catch a `resource_id`/`vm_host`-required
+regression on either side of the real wire boundary.
 
 This file mounts the real `market_site.router` into a real FastAPI app and
 drives it with the real `market_site_client.SiteCapacityClient`
@@ -61,7 +61,8 @@ def _client(app: FastAPI) -> SiteCapacityClient:
 
 
 class TestOpaqueReservationBoundary:
-    """The regression coverage for the original resource_id/vm_host bug."""
+    """The real wire contract never carries `resource_id`/`vm_host` as
+    required or populated fields across the reservation boundary."""
 
     async def test_reserve_response_never_carries_placement_fields(self, site_app):
         """Boundary-contract test: protects any future caller, not just the

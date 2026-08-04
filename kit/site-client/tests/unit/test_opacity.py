@@ -8,9 +8,7 @@ A companion test for `ComputeProvisioningClient` (schedule/begin
 fulfillment) lives in `provisioning/compute/tests/integration/` instead,
 not here: fulfillment scheduling is a physical-resource-domain concept
 (VM, bare-metal), not a universal one, and this package must not carry a
-dependency on `compute_provisioning` to test it. The two clients were
-originally tested together in one file; splitting them was the fix for
-that layering mistake, not a refactor of convenience.
+dependency on `compute_provisioning` to test it.
 """
 
 from __future__ import annotations
@@ -60,14 +58,10 @@ class _RecordingHandler:
 
 @pytest.mark.asyncio
 async def test_reserve_commit_send_no_placement_fields() -> None:
-    """The opaque capacity boundary holds from the client side.
-
-    Proves `SiteCapacityClient` never *sends* `resource_id` as a
-    required or populated field across reserve/commit -- the same
-    invariant the retired cross-service test proved by exercising a real
-    server, now proved from the client's own request bodies against a
-    mock instead.
-    """
+    """`SiteCapacityClient` never sends `resource_id` as a required or
+    populated field across reserve/commit -- proved from the client's own
+    request bodies against a mock, since the point is what the client
+    actually transmits, not just what it receives back."""
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
 
