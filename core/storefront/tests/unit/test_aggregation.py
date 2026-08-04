@@ -23,6 +23,7 @@ class FakeSite:
         self.broken = broken
         self.reservations: dict[str, int] = {}
         self.committed: list[str] = []
+        self.reserve_call_count = 0
         self._seq = 0
 
     def _check(self) -> None:
@@ -65,6 +66,7 @@ class FakeSite:
         lease_start_utc=None,
         lease_duration_seconds=None,
     ):
+        self.reserve_call_count += 1
         self._check()
         requested = int((claim or {}).get("gpu_count") or 1)
         if self.available < requested:
@@ -191,6 +193,128 @@ async def test_writes_route_to_the_owning_site():
     released = await client.release(capacity_reservation_id=capacity_reservation_id)
     assert released["site"] == "dc-a"
     assert a.available == 4
+
+
+@pytest.mark.asyncio
+async def test_reserve_with_no_site_still_uses_placement_fan_out():
+    """The default (site omitted) is byte-for-byte today's behavior --
+    _reserve_by_placement, unchanged, for a listing with no site
+    mapping."""
+    client, a, b = _aggregate(placement=fill_first)
+    reserved = await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site=None)
+    assert reserved["site"] == "dc-a"
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_to_a_site_reserves_there():
+    client, a, b = _aggregate()
+    reserved = await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-b")
+    assert reserved["site"] == "dc-b"
+    assert a.available == 4  # untouched
+    assert b.available == 7
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_to_a_site_ignores_placement_preference():
+    """The collision case this task exists to prevent: placement would
+    prefer dc-b (more free units), but a listing mapped to dc-a must
+    reserve only at dc-a regardless."""
+    client, a, b = _aggregate(placement=most_available)
+    # Confirm placement really would pick the other site if left to
+    # choose -- otherwise this test wouldn't actually exercise anything.
+    unpinned = await client.reserve(claim={"gpu_count": 1}, deal_ref={})
+    assert unpinned["site"] == "dc-b"
+
+    pinned = await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-a")
+    assert pinned["site"] == "dc-a"
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_to_an_unknown_site_raises():
+    client, a, b = _aggregate()
+    with pytest.raises(KeyError):
+        await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-ghost")
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_to_a_broken_site_propagates_not_falls_back():
+    """No fallback for a pinned reservation: a site error must not be
+    silently absorbed by trying another site, unlike the placement path
+    (test_reserve_falls_back_past_a_broken_site)."""
+    client, a, b = _aggregate()
+    a.broken = True
+    with pytest.raises(ConnectionError):
+        await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-a")
+    # b was never touched -- confirms no fallback attempt happened.
+    assert b.available == 8
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_returns_none_on_refusal_not_an_exception():
+    """A pinned site correctly refusing (no capacity) is not an error --
+    still returns None, same as the placement path's per-site refusal."""
+    client, a, b = _aggregate()
+    reserved = await client.reserve(claim={"gpu_count": 99}, deal_ref={}, site="dc-a")
+    assert reserved is None
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_records_the_reservation_site():
+    client, a, b = _aggregate()
+    reserved = await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-b")
+    capacity_reservation_id = reserved["capacity_reservation_id"]
+    assert client.reservation_sites[capacity_reservation_id] == "dc-b"
+
+
+# ---------------------------------------------------------------------------
+# Regression proof: reserve() always hits the site's real, live endpoint --
+# no shortcut exists that could answer from cached/projected data instead.
+# Structurally confirmed too: aggregation.py has zero references to any
+# projection cache -- these tests prove the observable behavior that fact
+# implies, so a future regression that adds such a reference would also
+# have to break one of these to slip through.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_reserve_by_placement_actually_calls_the_winning_sites_reserve():
+    client, a, b = _aggregate(placement=fill_first)
+    assert a.reserve_call_count == 0
+    reserved = await client.reserve(claim={"gpu_count": 1}, deal_ref={})
+    assert reserved["site"] == "dc-a"
+    assert a.reserve_call_count == 1
+    assert b.reserve_call_count == 0  # never consulted -- fill_first packed a first
+
+
+@pytest.mark.asyncio
+async def test_reserve_by_placement_calls_every_site_it_actually_falls_back_through():
+    """Placement's fallback tries sites in order -- each one it visits
+    must be a real call, not a cached/skipped answer."""
+    client, a, b = _aggregate(placement=fill_first)
+    a.units = 0  # a refuses immediately, no capacity
+    reserved = await client.reserve(claim={"gpu_count": 1}, deal_ref={})
+    assert reserved["site"] == "dc-b"
+    assert a.reserve_call_count == 1  # visited and asked, not skipped
+    assert b.reserve_call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_to_a_site_actually_calls_that_sites_reserve():
+    client, a, b = _aggregate()
+    assert b.reserve_call_count == 0
+    await client.reserve(claim={"gpu_count": 1}, deal_ref={}, site="dc-b")
+    assert b.reserve_call_count == 1
+    assert a.reserve_call_count == 0  # not pinned, never touched
+
+
+@pytest.mark.asyncio
+async def test_reserve_pinned_call_count_is_exactly_one_even_on_refusal():
+    """A pinned site refusing must still show exactly one real call --
+    proves the refusal came from actually asking, not from a projection
+    answering "no" without a live round trip."""
+    client, a, b = _aggregate()
+    reserved = await client.reserve(claim={"gpu_count": 99}, deal_ref={}, site="dc-a")
+    assert reserved is None
+    assert a.reserve_call_count == 1
 
 
 @pytest.mark.asyncio

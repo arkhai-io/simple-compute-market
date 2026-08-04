@@ -64,12 +64,13 @@ Every implementation-ready `tasks.md` should name the exact promotion work rathe
 
 ## Plan closeout requirements
 
-Every `tasks.md` for a change or a major section within one must end with a closeout task before implementation is considered planned, not invented after a review round asks for it. The closeout task has four parts:
+Every `tasks.md` for a change or a major section within one must end with a closeout task before implementation is considered planned, not invented after a review round asks for it. The closeout task has five parts:
 
 1. **Comment hygiene.** Run `make check-comment-hygiene` and resolve every match before the task is marked done. The target catches change IDs, section numbers, and task numbers mechanically; it does not catch fuzzier violations of `AGENTS.md`'s "Python comments and docstrings" rule (references to which review or migration introduced the code), which still need a direct read.
-2. **Documentation compliance.** Re-check the change's own accepted decisions against this document's placement rules directly — do not defer this to an external reviewer noticing it first.
-3. **Narrative compression.** Shorten completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations. Move detailed alternatives, debugging narratives, and review rationale into `design.md` first if they are not already there — this step deletes duplication, not information.
-4. **Promotion.** Complete the design-promotion record (see below).
+2. **Import placement.** Migrate local (function-level) imports to module level wherever safe. Not a blanket move: check each import actually added or touched by the section for a real reason to stay local first — a genuine circular import (verify by attempting the move and reading the actual failure, not by assuming) or a documented, deliberate lazy-load reason (e.g. avoiding import cost for a rarely-exercised code path) — before relocating it. Cross-reference against the section's own diff rather than auditing every pre-existing local import in a touched file; this step is about what the section added, not a general-purpose repo cleanup. Verify each candidate move against the real test suite, not just a syntax check, since a passing import at definition time does not guarantee no circular dependency exists at call time.
+3. **Documentation compliance.** Re-check the change's own accepted decisions against this document's placement rules directly — do not defer this to an external reviewer noticing it first.
+4. **Narrative compression.** Shorten completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations. Move detailed alternatives, debugging narratives, and review rationale into `design.md` first if they are not already there — this step deletes duplication, not information.
+5. **Promotion.** Complete the design-promotion record (see below).
 
 If a plan's closeout task is growing unusually large on its own, that is a signal the change may have scope-crept past its original boundary — worth a deliberate decision about whether to split it into a new change, not something to notice only once the section is already difficult to review.
 

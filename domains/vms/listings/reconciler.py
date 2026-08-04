@@ -398,17 +398,20 @@ def _projected_resource_usage(
     capacity = resource.get("capacity") or {}
     total = int(capacity.get("gpu_count") or 0)
     available_field = resource.get("available")
-    if member_availability is None:
-        available = total
-    elif available_field is not None:
+    if available_field is not None:
         # The projection already carries this resource's live
-        # availability -- use it directly rather than a member_availability
-        # lookup, which is only a fallback for when it doesn't.
+        # availability -- use it directly, regardless of whether a
+        # member_availability lookup is also available. This is
+        # authoritative data from the projection itself, not a
+        # fallback source to be skipped whenever a different fallback
+        # (member_availability) happens to be present or absent.
         available = max(0, min(total, int((available_field or {}).get("gpu_count") or 0)))
-    else:
+    elif member_availability is not None:
         available = _member_available_units(
             total, (site_id, resource_id), member_availability,
         )
+    else:
+        available = total
     return _ProjectedResourceUsage(resource_id, gpu_model, total, available)
 
 

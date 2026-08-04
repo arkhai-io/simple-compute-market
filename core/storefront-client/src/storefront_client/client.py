@@ -626,6 +626,88 @@ class StorefrontClient(_StorefrontClientBase):
             extra_headers=self._admin_headers(),
         )
 
+    async def notify_usage_started(
+        self,
+        capacity_reservation_id: str,
+        *,
+        escrow_uid: "str | None" = None,
+        provider_id: "str | None" = None,
+        provider_lease_id: "str | None" = None,
+        resource_id: "str | None" = None,
+        vm_host: "str | None" = None,
+        vm_target: "str | None" = None,
+        gpu_count: "int | None" = None,
+        lease_end_utc: "str | None" = None,
+    ) -> dict:
+        """POST /api/v1/admin/fulfillment/events/usage-started  (admin key required).
+
+        Deal-scoped progress event: the reservation moved from held to
+        actually leased/in-use. Progress events carry no capacity effect
+        of their own (the reservation stays held throughout), but do
+        reconcile derived listings against current availability.
+        """
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        if escrow_uid is not None:
+            body["escrow_uid"] = escrow_uid
+        if provider_id is not None:
+            body["provider_id"] = provider_id
+        if provider_lease_id is not None:
+            body["provider_lease_id"] = provider_lease_id
+        if resource_id is not None:
+            body["resource_id"] = resource_id
+        if vm_host is not None:
+            body["vm_host"] = vm_host
+        if vm_target is not None:
+            body["vm_target"] = vm_target
+        if gpu_count is not None:
+            body["gpu_count"] = gpu_count
+        if lease_end_utc is not None:
+            body["lease_end_utc"] = lease_end_utc
+        return await self._post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            body,
+            extra_headers=self._admin_headers(),
+        )
+
+    async def notify_fulfillment_failed(
+        self,
+        capacity_reservation_id: str,
+        *,
+        escrow_uid: "str | None" = None,
+        provider_id: "str | None" = None,
+        provider_job_id: "str | None" = None,
+        resource_id: "str | None" = None,
+        reason: "str | None" = None,
+        message: "str | None" = None,
+        logs_ref: "str | None" = None,
+    ) -> dict:
+        """POST /api/v1/admin/fulfillment/events/failed  (admin key required).
+
+        Deal-scoped event: provisioning failed for this reservation.
+        Releases the held capacity through the site authority and
+        applies the storefront's own fulfillment failure policy.
+        """
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        if escrow_uid is not None:
+            body["escrow_uid"] = escrow_uid
+        if provider_id is not None:
+            body["provider_id"] = provider_id
+        if provider_job_id is not None:
+            body["provider_job_id"] = provider_job_id
+        if resource_id is not None:
+            body["resource_id"] = resource_id
+        if reason is not None:
+            body["reason"] = reason
+        if message is not None:
+            body["message"] = message
+        if logs_ref is not None:
+            body["logs_ref"] = logs_ref
+        return await self._post(
+            "/api/v1/admin/fulfillment/events/failed",
+            body,
+            extra_headers=self._admin_headers(),
+        )
+
     async def patch_resource(
         self,
         resource_id: str,

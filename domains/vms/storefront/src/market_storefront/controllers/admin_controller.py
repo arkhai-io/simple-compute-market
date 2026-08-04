@@ -885,15 +885,35 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
+        from domains.vms.listings.reconciler import site_id_for_listing
+
         open_listing_ids = self._open_derived_compute_listing_ids()
-        reserved = await self._capacity().reserve(
-            claim=body.required_attributes or None,
-            deal_ref={
-                "listing_id": body.listing_id,
-                "escrow_uid": body.escrow_uid,
-                "reserved_by": "admin",
-            },
+        site_id = (
+            site_id_for_listing(self._db.db_path, body.listing_id)
+            if body.listing_id else None
         )
+        try:
+            reserved = await self._capacity().reserve(
+                claim=body.required_attributes or None,
+                deal_ref={
+                    "listing_id": body.listing_id,
+                    "escrow_uid": body.escrow_uid,
+                    "reserved_by": "admin",
+                },
+                site=site_id,
+            )
+        except Exception as exc:
+            if site_id is None:
+                raise
+            # A mapped listing's site errored (not just refused) --
+            # no fallback exists to try, so this surfaces the same way
+            # a refusal already does rather than as a new, unhandled
+            # exception shape at this endpoint.
+            logger.warning(
+                "[ADMIN] reserve at pinned site %r failed for listing %r: %s",
+                site_id, body.listing_id, exc,
+            )
+            reserved = None
         if not reserved:
             raise HTTPException(
                 status_code=409,

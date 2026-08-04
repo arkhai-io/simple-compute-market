@@ -15,6 +15,7 @@ from arkhai_bare_metal.storefront_publication import (
     bare_metal_listing_candidates,
     record_derived_bare_metal_listing,
 )
+from arkhai_bare_metal.publication import bare_metal_listing_key
 
 
 def _projection(*, complete=True, resources=True):
@@ -55,7 +56,7 @@ def test_adapter_returns_exact_projection_candidate():
     assert candidates[0]["physical_resource_id"] == "resource-1"
     assert source.offer_resource(candidates[0]) == candidates[0]["offer_resource"]
     assert bare_metal_candidate_skip_keys(candidates[0]) == {
-        "bare-metal:site-a:resource-1",
+        bare_metal_listing_key(site_id="site-a", physical_resource_id="resource-1"),
     }
 
 

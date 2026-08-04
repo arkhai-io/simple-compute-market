@@ -283,12 +283,88 @@ class AggregateCapacityClient:
         ttl_seconds: float | None = None,
         lease_start_utc: str | None = None,
         lease_duration_seconds: int | None = None,
+        site: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve capacity, pinned to one site or routed by placement.
+
+        ``site`` given: reserve at exactly that site, no fallback -- see
+        ``_reserve_at_site``. This is the only correct behavior for a
+        listing already mapped to a site (``derived_compute_listings``):
+        the storefront has already committed to that site, and trying
+        another on refusal would silently satisfy the claim from a site
+        the buyer never negotiated with.
+
+        ``site`` omitted (``None``): today's unchanged placement-ordered
+        fan-out, for a listing with no site mapping -- see
+        ``_reserve_by_placement``.
+        """
+        if site is not None:
+            return await self._reserve_at_site(
+                site,
+                claim=claim,
+                deal_ref=deal_ref,
+                ttl_seconds=ttl_seconds,
+                lease_start_utc=lease_start_utc,
+                lease_duration_seconds=lease_duration_seconds,
+            )
+        return await self._reserve_by_placement(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+
+    async def _reserve_at_site(
+        self,
+        name: str,
+        *,
+        claim: Mapping[str, Any] | None,
+        deal_ref: Mapping[str, Any] | None,
+        ttl_seconds: float | None,
+        lease_start_utc: str | None,
+        lease_duration_seconds: int | None,
+    ) -> dict[str, Any] | None:
+        """Reserve at exactly one site. No fallback, no swallowed errors.
+
+        An unknown ``name`` raises ``KeyError`` (``self._sites`` is a
+        plain dict) -- a mapped listing pointing at a site that no
+        longer exists is a data-integrity problem, not "no capacity",
+        and must not look like a normal refusal. A real error from the
+        site (network failure, 5xx) propagates rather than being caught
+        here: there is no next site to fall back to, so swallowing it
+        would only hide the failure from the caller, not recover from
+        it -- the caller decides how to handle it.
+        """
+        reserved = await self._sites[name].reserve(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+        if reserved is None:
+            return None
+        capacity_reservation_id = reserved.get("capacity_reservation_id")
+        if capacity_reservation_id:
+            self._reservation_sites[str(capacity_reservation_id)] = name
+        return _tagged(name, reserved)
+
+    async def _reserve_by_placement(
+        self,
+        *,
+        claim: Mapping[str, Any] | None,
+        deal_ref: Mapping[str, Any] | None,
+        ttl_seconds: float | None,
+        lease_start_utc: str | None,
+        lease_duration_seconds: int | None,
     ) -> dict[str, Any] | None:
         """Route to one site in placement order; fall back on refusal.
 
         A refusal is a None (no capacity) or an error; either way the
         next site gets the claim. Returns None only when every member
-        refused.
+        refused. Only for a listing with no known site mapping -- see
+        ``reserve``.
         """
         snapshots = await self._snapshots()
         for name in self._placement(self.site_names, snapshots, claim=claim):
