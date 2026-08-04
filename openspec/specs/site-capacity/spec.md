@@ -165,6 +165,8 @@ A **Capacity Reservation** records accepted capacity, the agreement/deal relatio
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
 
+<a id="relationship-to-fulfillment-scheduling"></a>
+
 **Relationship to fulfillment scheduling**
 
 The site authority admits and persists capacity reservations. The higher-layer [fulfillment capability](../fulfillment/spec.md) binds an admitted reservation to a Settlement Resource and records that assignment through the site boundary before provider dispatch.
@@ -237,3 +239,11 @@ A site authority SHALL expose `site_resource_pools` from authoritative domain in
 ### Requirement: Committed dimensions remain authoritative through scheduling
 
 Scheduling MUST NOT admit a dimension shape exceeding what the capacity reservation declares. Within that bound, a scheduling request MAY be narrower than the reservation — reflecting, for example, a negotiated shape change not yet expressed as a reservation resize, or a placement/pricing check against a candidate shape. The dimensions actually scheduled — not the reservation's own dimensions unconditionally — are the authoritative admitted resource shape carried with the selected settlement resource, so the domain fulfillment provider can interpret them without the caller retransmitting an independently computed shape. A negotiated shape change that is meant to persist resizes the reservation itself (supersede, never mutate) rather than relying on an implicit narrower scheduling request to represent it.
+
+#### Scenario: Scheduling request narrower than the reservation is permitted
+- **WHEN** a scheduling request asks for less of a dimension than the reservation holds
+- **THEN** scheduling admits the narrower shape and records the dimensions actually scheduled, not the reservation's full dimensions, on the selected settlement resource
+
+#### Scenario: Scheduling request exceeding the reservation is rejected
+- **WHEN** a scheduling request asks for more of a governed dimension than the reservation holds
+- **THEN** scheduling rejects the request before assignment or provider execution

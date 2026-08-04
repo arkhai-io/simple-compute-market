@@ -137,9 +137,9 @@ async def member_availability_view(
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 
 # A mixed-direction capacity registration (e.g. GPU count grew while RAM
-# shrank -- POOLS-6 pass 1) can simultaneously strand some listings and
-# free up others; neither "consuming" nor "released" alone is safe, so
-# both reconciliation passes run.
+# shrank) can simultaneously strand some listings and free up others;
+# neither "consuming" nor "released" alone is safe, so both
+# reconciliation passes run.
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 

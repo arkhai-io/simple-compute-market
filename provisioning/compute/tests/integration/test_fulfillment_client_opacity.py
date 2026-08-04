@@ -12,9 +12,7 @@ docstring for why the two were split apart.
 
 What this test does *not* prove: that a real server actually implements
 this contract correctly end to end. That is a genuine two-real-services
-proof and belongs in the e2e suite
-(`refactor-e2e-fulfillment-lifecycle` Section 3) -- see
-`openspec/changes/refactor-e2e-fulfillment-lifecycle/design.md`.
+proof and belongs in the e2e suite.
 """
 
 from __future__ import annotations

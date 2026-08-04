@@ -398,10 +398,10 @@ class TestEnableDisablePool:
             svc.disable_pool("does-not-exist")
 
     def test_default_pool_can_be_disabled(self, svc):
-        """Corrected POOLS-1 behavior: disabling `default` only excludes it
-        from scheduling — it never stops being the system-owned pool that
-        exists. (Host fallback-to-default-on-omission is a VM-service
-        concern, covered in the integration suite, not here.)"""
+        """Disabling `default` only excludes it from scheduling — it never
+        stops being the system-owned pool that exists. (Host
+        fallback-to-default-on-omission is a VM-service concern, covered in
+        the integration suite, not here.)"""
         svc.create_pool(
             PoolCreate(
                 id="default",
@@ -583,9 +583,9 @@ pools:
         assert svc.list_pools() == []
 
     def test_validate_accepts_disabled_default_pool(self, svc):
-        """Corrected POOLS-1 behavior: a disabled `default` in an
-        authoritative document is valid — only omitting `default` entirely
-        is rejected (test_missing_default_pool_rejected, below)."""
+        """A disabled `default` in an authoritative document is valid —
+        only omitting `default` entirely is rejected
+        (test_missing_default_pool_rejected, below)."""
         response = svc.validate_pools(
             _YAML.replace("enabled: true", "enabled: false", 1)
         )

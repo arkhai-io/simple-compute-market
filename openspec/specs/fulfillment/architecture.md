@@ -24,6 +24,8 @@ An explicit-resource request is an additional constraint, not an authorization b
 
 Selection creates a binding. Retrying an equivalent request returns the existing assignment, durably recorded on the settlement aggregate so equivalence survives a process restart; a conflicting request is rejected rather than silently moving the reservation.
 
+`schedule_resource` and `begin_fulfillment` are two separate calls, orchestrated by the caller, rather than one atomic "reserve and fulfill" operation, because the selected physical resource may be commercially material before fulfillment actually begins -- a caller may need to see (and price around) which resource was selected before committing to dispatch it. A thin convenience wrapper may compose both for a caller that doesn't need that preview, but it uses the same two underlying application paths rather than a third combined one.
+
 ## Provider boundary
 
 A FulfillmentProvider receives the selected resource and resolved execution inputs. It may validate that selection but may not substitute another placement. Create, status, and teardown are provider actions over the scheduler's decision.
