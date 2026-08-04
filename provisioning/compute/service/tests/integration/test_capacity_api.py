@@ -351,7 +351,8 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     with container.session_factory()() as db:
         db.add(Host(
             name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
-            ssh_key_value="/dev/null", gpu_count=8, pool_id="hetzner-eu",
+            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+            pool_id="hetzner-eu",
         ))
         db.commit()
 
@@ -378,6 +379,15 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
             "default_vm_disk_size": "500G",
         },
     }
+    # Host.gpu_model -> capacity_inventory._project_host -> resource-pool
+    # projection's per-resource attributes -> the real RemoteCapacityClient
+    # response. Distinct from the ledger resource's own attributes dict
+    # (registered above) -- proves the Host column specifically survives
+    # the full producer -> client path, not just the ledger-side value.
+    resource_row = next(
+        r for r in pool_row["resources"] if r["physical_resource_id"] == "compute-kvm1-001"
+    )
+    assert resource_row["attributes"]["gpu_model"] == "H200"
 
 
 @pytest.mark.asyncio

@@ -251,7 +251,7 @@ def _site_pool_projection_if_enabled() -> dict[str, list[dict[str, Any]]] | None
     """
     from .utils.config import settings
 
-    if not bool(getattr(settings, "use_site_projection_for_listings", False)):
+    if not bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False)):
         return None
     return _site_pool_projection_sync()
 

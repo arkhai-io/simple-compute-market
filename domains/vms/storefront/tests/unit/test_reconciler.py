@@ -272,6 +272,22 @@ class TestAvailableComputeSlices:
         )
         assert without_arg == with_none == with_empty
 
+    def test_a_site_mapped_to_an_authoritative_empty_projection_does_not_fall_back(
+        self, db_path,
+    ):
+        """The downstream half of the site_pool_projection() None-vs-[]
+        fix: {"site-a": []} is a non-empty mapping (one key), so it must
+        take the projection path and correctly contribute zero rows for
+        that site -- not be treated the same as {} (no site data at
+        all), which would incorrectly fall back to stale local data even
+        though the authoritative answer is "this site has zero pools
+        right now"."""
+        _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)  # local data exists
+        slices = available_compute_slices(
+            db_path, home_site="site-a", site_pool_projection={"site-a": []},
+        )
+        assert slices == []
+
     def test_projection_sourced_pool_uses_local_pricing_for_home_site(self, db_path):
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)  # local pricing row
         projection = {

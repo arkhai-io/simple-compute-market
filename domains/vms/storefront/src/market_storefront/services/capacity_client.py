@@ -171,12 +171,13 @@ def _make_listing_reconcile_subscriber(
             return
         db_path = sqlite_client_factory().db_path
         availability = await member_availability_view(client, db_path)
-        # Behind an explicit opt-in until parity between the local-table
-        # and projection-sourced paths is verified against a live fleet
-        # -- see reconciler.available_compute_slices' own docstring.
+        # Structural capacity source is local tables unless this site is
+        # explicitly opted into the projection-sourced path -- see
+        # reconciler.available_compute_slices' own docstring for what
+        # each source actually provides.
         projection = (
             site_pool_projection()
-            if bool(getattr(settings, "use_site_projection_for_listings", False))
+            if bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False))
             else None
         )
         if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
@@ -470,20 +471,25 @@ def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     """Resource-pool projection rows per site, from the storefront's own
     background poller cache (``site_projection_cache``).
 
-    Only sites whose projection has a cached value contribute -- a site
-    that has never loaded or is currently unavailable is silently
-    excluded here rather than treated as "no pools" (``reconciler``'s
-    projection-sourced path already falls back to local tables when the
-    returned mapping is empty, and a site with a stale-but-present value
-    is included, since stale-but-known is preferable to omitted here,
-    matching the cache's own stale-retention design).
+    Only sites whose projection has ever loaded contribute -- ``None``
+    (never loaded, or currently unavailable/invalid) is excluded, but a
+    successfully loaded site is included *even when its own rows list is
+    empty* -- an authoritative "this site currently has zero pools"
+    answer, distinct from "this site's answer isn't known yet". Losing
+    that distinction (checking the rows list's truthiness instead of
+    whether it is ``None``) would make a site's genuine zero-pools state
+    indistinguishable from a site that hasn't loaded at all, and
+    `reconciler`'s projection-sourced path would then fall back to
+    stale local tables instead of correctly registering zero capacity --
+    the empty *result* mapping is meaningful too, and is what actually
+    signals "fall back to local data" one level up.
     """
     from market_storefront.services.site_projection_cache import projection_caches
 
     result: dict[str, list[dict[str, Any]]] = {}
     for site, caches in projection_caches().items():
         value = caches.resource_pools.view().value
-        if value:
+        if value is not None:
             result[site] = value
     return result
 

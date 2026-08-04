@@ -322,11 +322,10 @@ def _pool_rows_from_local_tables(
     conn: sqlite3.Connection,
     member_availability: dict[tuple[str | None, str], int] | None,
 ) -> list[dict[str, Any]]:
-    """Today's local-table sourcing: compute_capacity_pools joined with
+    """Local-table sourcing: compute_capacity_pools joined with
     compute_pool_members when both exist, else the legacy resources
-    table. Unchanged behavior, only reshaped so
-    `available_compute_slices` can choose between this and the
-    projection-sourced path without duplicating either.
+    table. One of the two capacity sources `available_compute_slices`
+    can choose between, alongside `_pool_rows_from_projection`.
     """
     has_pools = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
@@ -348,9 +347,11 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     ``derived_compute_listings``' site-scoped derivation keys guard
     against, if it were ever consulted for a pool that isn't home_site's
     own. Scoping every call site to home_site only is what keeps that
-    safe without needing to touch this table's schema -- deliberate, not
-    an oversight, since this table is on a path to eventual removal in
-    favor of a projection-driven pricing policy.
+    safe without needing to touch this table's schema -- deliberate:
+    this table holds pricing and descriptive fallback data the
+    projection itself doesn't carry, is intentionally not being made
+    multi-site-aware, and a non-home_site pool simply has no pricing
+    source through this table at all.
     """
     has_pools = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
@@ -618,11 +619,13 @@ def _has_derived_listings_site_column(conn: sqlite3.Connection) -> bool:
     """Whether derived_compute_listings exists AND has its site_id column.
 
     Table existence alone is not enough to prove the column is there --
-    this table's schema is independently (and redundantly) created in
-    more than one place (this module's own ensure_derived_compute_listings_table
-    and SQLiteClient's own migration chain); checking the specific column
-    here is what actually prevents a stale-schema query error if either
-    one is ever out of sync with the other again.
+    an existing on-disk database can predate this column even though
+    `ensure_derived_compute_listings_table` is now the single place this
+    table's schema is defined (`SQLiteClient` delegates to it rather
+    than keeping its own copy); the column only appears once that
+    function has actually run against this specific file. Checking the
+    specific column here, not just the table, is what protects a query
+    against reading that pre-migration state.
     """
     if conn.execute(
         "SELECT 1 FROM sqlite_master "
