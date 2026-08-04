@@ -1,8 +1,13 @@
-"""RemoteCapacityClient: wire contract, mode dispatch, and delta delivery.
+"""market_storefront.services.capacity_client: mode dispatch, placement,
+aggregate composition, and delta delivery.
 
-The FakeSite transport mirrors the provisioning service's
-/api/v1/capacity surface (whose shapes are pinned by that service's own
-integration tests); these tests pin the storefront half of the contract.
+The client's own wire-contract tests live in
+kit/site-client/tests/unit/test_client.py -- these tests cover this
+package's own orchestration on top of the client: aggregate/placement
+composition, the listing-reconcile subscriber, the projection cache
+wiring, and the event-feed poller. The FakeSite transport mirrors the
+provisioning service's /api/v1/capacity surface (whose shapes are pinned
+by that service's own integration tests).
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from core_storefront.capacity import CapacityClient, CapacityDelta
+from core_storefront.capacity import CapacityDelta
 from market_storefront.services import capacity_client as cc
 from tests._settings_overrides import settings_overrides
 from tests.fake_site import FakeSite
@@ -33,8 +38,8 @@ def site() -> FakeSite:
 
 
 @pytest.fixture
-def client(site: FakeSite) -> cc.RemoteCapacityClient:
-    return cc.RemoteCapacityClient(
+def client(site: FakeSite) -> cc.SiteCapacityClient:
+    return cc.SiteCapacityClient(
         "http://site-authority:8081", "test-key", transport=site.transport(),
     )
 
@@ -64,79 +69,13 @@ def _reset_aggregate_cache():
 
 
 @pytest.mark.asyncio
-async def test_remote_client_speaks_the_capacity_wire_contract(
-    client: cc.RemoteCapacityClient, site: FakeSite,
-):
-    assert isinstance(client, CapacityClient)
-
-    snapshot = await client.snapshot()
-    assert snapshot[0]["available_units"] == 8
-
-    assert await client.probe(claim={"gpu_model": "A100"}) is None
-    match = await client.probe(claim={"gpu_model": "H200"})
-    assert match["vm_host"] == "kvm1"
-
-    reserved = await client.reserve(
-        claim={"gpu_count": 3}, deal_ref={"escrow_uid": "0xesc"},
-    )
-    assert reserved["capacity_reservation_id"]
-    assert reserved["available_gpu_count"] == 8
-
-    await client.commit(
-        resource_id=reserved["resource_id"],
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        lease_start_utc="2099-01-01T00:00:00Z",
-        lease_end_utc="2099-01-01 01:00",
-        idempotency_ref="0xesc",
-    )
-    truncated = await client.truncate_lease(
-        capacity_reservation_id=reserved["capacity_reservation_id"], lease_end_utc="2026-06-01 00:00",
-    )
-    assert truncated["lease_end_utc"] == "2026-06-01 00:00"
-
-    released = await client.release(
-        deal_ref={"escrow_uid": "0xesc"}, failure_reason="provisioning_failed",
-    )
-    assert released["state"] == "released"
-    assert released["failure_reason"] == "provisioning_failed"
-
-    events, latest = await client.events_after(0)
-    assert [e["kind"] for e in events] == [
-        "reserved", "committed", "lease_truncated", "released",
-    ]
-    assert latest == events[-1]["version"]
-    # Every call authenticated.
-    assert set(site.seen_admin_keys) == {"test-key"}
-
-
-@pytest.mark.asyncio
-async def test_commit_without_capacity_reservation_id_is_an_error(
-    client: cc.RemoteCapacityClient,
-):
-    with pytest.raises(ValueError, match="capacity_reservation_id"):
-        await client.commit(
-            resource_id="r", capacity_reservation_id=None, lease_end_utc="2099-01-01 00:00",
-        )
-
-
-@pytest.mark.asyncio
 async def test_member_availability_view_reflects_consumption(
-    client: cc.RemoteCapacityClient,
+    client: cc.SiteCapacityClient,
 ):
     await client.reserve(claim={"gpu_count": 3}, deal_ref={})
     view = await cc.member_availability_view(client)
     assert view[(None, "compute-kvm1-001")] == 5
     assert view[("default", "compute-kvm1-001")] == 5
-
-
-@pytest.mark.asyncio
-async def test_list_reservations_filters(client: cc.RemoteCapacityClient):
-    reserved = await client.reserve(
-        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xq"},
-    )
-    rows = await client.list_reservations(escrow_uid="0xq")
-    assert [a["capacity_reservation_id"] for a in rows] == [reserved["capacity_reservation_id"]]
-    assert await client.list_reservations(state="released") == []
 
 
 def test_build_always_aggregates_site_authorities():
@@ -238,10 +177,10 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
         built = cc.build_capacity_client(lambda: None)
     # Swap in the fake transports for each named site without going
     # through real HTTP.
-    built._sites["small"] = cc.RemoteCapacityClient(
+    built._sites["small"] = cc.SiteCapacityClient(
         "http://small:8081", "test-key", transport=small_site.transport(),
     )
-    built._sites["big"] = cc.RemoteCapacityClient(
+    built._sites["big"] = cc.SiteCapacityClient(
         "http://big:8081", "test-key", transport=big_site.transport(),
     )
 
@@ -270,10 +209,10 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
         ),
     ):
         built = cc.build_capacity_client(lambda: None)
-    built._sites["wrong"] = cc.RemoteCapacityClient(
+    built._sites["wrong"] = cc.SiteCapacityClient(
         "http://wrong:8081", "test-key", transport=wrong_type_site.transport(),
     )
-    built._sites["right"] = cc.RemoteCapacityClient(
+    built._sites["right"] = cc.SiteCapacityClient(
         "http://right:8081", "test-key", transport=right_type_site.transport(),
     )
 
@@ -287,7 +226,7 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
 
 @pytest.mark.asyncio
 async def test_subscriber_closes_and_reopens_with_site_availability(
-    client: cc.RemoteCapacityClient,
+    client: cc.SiteCapacityClient,
 ):
     calls: list[tuple[str, dict | None]] = []
 
@@ -327,7 +266,7 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
 
 @pytest.mark.asyncio
 async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
-    client: cc.RemoteCapacityClient,
+    client: cc.SiteCapacityClient,
 ):
     """A mixed-direction registration e.g. GPU count grew while RAM shrank.
     "capacity_changed" must run both reconciliation passes and not be silently
@@ -368,7 +307,7 @@ async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
 async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
     """Each site's poller skips history, reconciles once, then streams
     site-tagged deltas onto the aggregate bus."""
-    client = cc.RemoteCapacityClient(
+    client = cc.SiteCapacityClient(
         "http://site-authority:8081", "test-key",
         transport=site.transport(),
     )
@@ -507,7 +446,7 @@ class TestSitePoolProjection:
 
 class TestReconcileListingsUsesCachedProjectionWhenEnabled:
     async def test_a_real_loaded_cache_entry_reaches_the_close_call(
-        self, client: cc.RemoteCapacityClient,
+        self, client: cc.SiteCapacityClient,
     ):
         """End to end: populate site_projection_cache's real module-level
         cache with a real (not mocked) ProjectionCache in the `loaded`
@@ -568,7 +507,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         assert received["site_pool_projection"] == {"default": pool_rows}
 
     async def test_flag_disabled_reaches_the_close_call_as_none(
-        self, client: cc.RemoteCapacityClient,
+        self, client: cc.SiteCapacityClient,
     ):
         """Same cache state, flag off: the cached projection must not be
         used at all -- close still runs (reconciliation itself isn't

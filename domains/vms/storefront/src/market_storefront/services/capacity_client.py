@@ -3,7 +3,7 @@
 The authoritative capacity ledger lives in site authorities (hosted by
 the provisioning service —
 docs/development/ARCHITECTURE.md, "Capacity and the Site Authority");
-the storefront is strictly a client. ``RemoteCapacityClient`` speaks
+the storefront is strictly a client. ``SiteCapacityClient`` speaks
 one authority's ``/api/v1/capacity`` HTTP surface;
 ``build_capacity_client`` assembles the configured authorities behind
 one ``AggregateCapacityClient``. Capacity deltas arrive by tailing each
@@ -43,12 +43,10 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
-from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
-    RemoteCapacityClient,
-    site_events_poller,
-)
+from core_storefront.capacity_remote import site_events_poller  # noqa: F401 — re-exported
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
+from market_site_client import SiteCapacityClient
 from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
@@ -251,7 +249,7 @@ def _aggregate_for(
         )
     aggregate = AggregateCapacityClient(
         {
-            name: RemoteCapacityClient(url, admin_key)
+            name: SiteCapacityClient(url, admin_key)
             for name, url in sites.items()
         },
         placement=placement,
@@ -280,7 +278,7 @@ def build_capacity_client(
 # Fulfillment (schedule/begin/status/result) aggregation.
 #
 # Sibling to ``AggregateCapacityClient`` above, not an extension of it:
-# ``CapacityClient``/``RemoteCapacityClient`` are deliberately scoped to the
+# ``CapacityClient``/``SiteCapacityClient`` are deliberately scoped to the
 # site authority's ``/api/v1/capacity`` surface (see their own docstrings),
 # while schedule/begin/status/result live on the compute-provisioning
 # service's ``/fulfillment`` surface, reached through
@@ -449,7 +447,7 @@ def build_fulfillment_client(
     return aggregate
 
 
-def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
+def remote_site_clients(client: Any) -> dict[str, SiteCapacityClient]:
     """The per-site remote clients behind a capacity client, by site name.
 
     Used by callers that need the beyond-the-protocol surface
@@ -460,9 +458,9 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
         return {
             name: client.site(name)
             for name in client.site_names
-            if isinstance(client.site(name), RemoteCapacityClient)
+            if isinstance(client.site(name), SiteCapacityClient)
         }
-    if isinstance(client, RemoteCapacityClient):
+    if isinstance(client, SiteCapacityClient):
         return {"default": client}
     return {}
 

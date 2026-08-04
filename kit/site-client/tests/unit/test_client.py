@@ -1,4 +1,5 @@
-"""SiteCapacityAdminClient: request shape, auth header, and error translation."""
+"""market_site_client: SiteCapacityAdminClient (request shape, auth
+header, error translation) and SiteCapacityClient (wire contract)."""
 
 from __future__ import annotations
 
@@ -7,7 +8,12 @@ import json
 import httpx
 import pytest
 
-from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
+from market_site_client import (
+    SiteCapacityAdminClient,
+    SiteCapacityAdminClientError,
+    SiteCapacityClient,
+)
+from tests.fake_site import FakeSite
 
 
 def _client(handler, admin_key: str = "test-admin-key") -> SiteCapacityAdminClient:
@@ -108,3 +114,90 @@ async def test_register_resource_defaults_match_the_server_model():
 
     assert captured["body"]["resource_type"] == "compute.gpu"
     assert captured["body"]["enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# SiteCapacityClient: buyer-facing wire contract, exercised against a real
+# stateful fake (as opposed to the register-only tests above, which use a
+# single-request MockTransport per test).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def site() -> FakeSite:
+    fake = FakeSite()
+    fake.add_resource(
+        "compute-kvm1-001", 8,
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+    return fake
+
+
+@pytest.fixture
+def capacity_client(site: FakeSite) -> SiteCapacityClient:
+    return SiteCapacityClient(
+        "http://site-authority:8081", "test-key", transport=site.transport(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_capacity_client_speaks_the_capacity_wire_contract(
+    capacity_client: SiteCapacityClient, site: FakeSite,
+):
+    snapshot = await capacity_client.snapshot()
+    assert snapshot[0]["available_units"] == 8
+
+    assert await capacity_client.probe(claim={"gpu_model": "A100"}) is None
+    match = await capacity_client.probe(claim={"gpu_model": "H200"})
+    assert match["vm_host"] == "kvm1"
+
+    reserved = await capacity_client.reserve(
+        claim={"gpu_count": 3}, deal_ref={"escrow_uid": "0xesc"},
+    )
+    assert reserved["capacity_reservation_id"]
+    assert reserved["available_gpu_count"] == 8
+
+    await capacity_client.commit(
+        resource_id=reserved["resource_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01 01:00",
+        idempotency_ref="0xesc",
+    )
+    truncated = await capacity_client.truncate_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"], lease_end_utc="2026-06-01 00:00",
+    )
+    assert truncated["lease_end_utc"] == "2026-06-01 00:00"
+
+    released = await capacity_client.release(
+        deal_ref={"escrow_uid": "0xesc"}, failure_reason="provisioning_failed",
+    )
+    assert released["state"] == "released"
+    assert released["failure_reason"] == "provisioning_failed"
+
+    events, latest = await capacity_client.events_after(0)
+    assert [e["kind"] for e in events] == [
+        "reserved", "committed", "lease_truncated", "released",
+    ]
+    assert latest == events[-1]["version"]
+    # Every call authenticated.
+    assert set(site.seen_admin_keys) == {"test-key"}
+
+
+@pytest.mark.asyncio
+async def test_capacity_client_commit_without_capacity_reservation_id_is_an_error(
+    capacity_client: SiteCapacityClient,
+):
+    with pytest.raises(ValueError, match="capacity_reservation_id"):
+        await capacity_client.commit(
+            resource_id="r", capacity_reservation_id=None, lease_end_utc="2099-01-01 00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_capacity_client_list_reservations_filters(capacity_client: SiteCapacityClient):
+    reserved = await capacity_client.reserve(
+        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xq"},
+    )
+    rows = await capacity_client.list_reservations(escrow_uid="0xq")
+    assert [a["capacity_reservation_id"] for a in rows] == [reserved["capacity_reservation_id"]]
+    assert await capacity_client.list_reservations(state="released") == []

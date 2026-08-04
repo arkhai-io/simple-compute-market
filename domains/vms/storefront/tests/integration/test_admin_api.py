@@ -499,12 +499,9 @@ class TestFulfillmentEvents:
             attributes={"gpu_model": "H200", "vm_host": "host-1"},
         )
         # Mapped listing -- routes reserve() through _reserve_at_site
-        # (the pinned-site path this test guards), not the placement
-        # fan-out. Confirmed necessary, not assumed: an earlier version
-        # of this test without a mapping silently exercised the
-        # placement path instead and passed even against an injected
-        # _reserve_at_site shortcut -- proving nothing about the path
-        # actually under test.
+        # (the pinned-site path), not the placement fan-out; without a
+        # mapping this test would exercise a different code path than
+        # the one it's meant to guard.
         record_derived_listing(
             db.db_path, listing_id="listing-refused-mapped", site_id="default",
             pool_id="pool-h200-1", resource_id=None, gpu_count=2,
@@ -607,6 +604,74 @@ class TestFulfillmentEvents:
                 )
 
         assert "409" in str(exc_info.value)
+
+    async def test_admin_reserve_capacity_returns_500_for_a_stale_site_mapping(
+        self, client,
+    ):
+        """A listing mapped to a site that isn't currently configured is
+        a data-integrity problem, not a capacity answer -- must not be
+        collapsed into the same 409 a genuine refusal returns."""
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        record_derived_listing(
+            db.db_path, listing_id="listing-stale-mapping", site_id="ghost-site",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+
+        with site_capacity(_fake_pool_site()):
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    listing_id="listing-stale-mapping",
+                    escrow_uid="manual-escrow-stale",
+                )
+
+        assert "500" in str(exc_info.value)
+
+    async def test_admin_reserve_capacity_returns_502_when_the_mapped_site_is_unreachable(
+        self, client,
+    ):
+        """The mapped site itself failing to respond is also distinct
+        from a genuine "no capacity" refusal -- must surface as an
+        upstream-communication failure, not a 409."""
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        record_derived_listing(
+            db.db_path, listing_id="listing-unreachable", site_id="default",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+        fake = _fake_pool_site()
+
+        def handle_reservation_failure(request):
+            if (
+                request.method == "POST"
+                and request.url.path == "/api/v1/capacity/reservations"
+            ):
+                raise ConnectionError("site unreachable")
+            return original_handle(request)
+
+        original_handle = fake._handle
+        fake._handle = handle_reservation_failure
+
+        with site_capacity(fake):
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    listing_id="listing-unreachable",
+                    escrow_uid="manual-escrow-unreachable",
+                )
+
+        assert "502" in str(exc_info.value)
 
     async def test_usage_started_closes_oversized_listings(self, client):
         from tests.fake_site import site_capacity
@@ -750,15 +815,11 @@ class TestFulfillmentEvents:
 
 
 # ---------------------------------------------------------------------------
-# Real orchestration: a cached projection actually reaches the real
-# reconciler and produces real storefront DB/listing state -- not a fake
-# close/reopen boundary. Closes the gap
-# TestReconcileListingsUsesCachedProjectionWhenEnabled
-# (test_remote_capacity_client.py) left open: that test proves cache ->
-# site_pool_projection() -> subscriber -> correct argument supplied, using
-# fakes for close_stale_compute_listings_after_capacity_change /
-# reopen_available_compute_listings_after_capacity_change. This test lets
-# those run for real, against a real migrated SQLiteClient.
+# Real orchestration: a cached projection reaches the real reconciler and
+# produces real storefront DB/listing state, using the real
+# close_stale_compute_listings_after_capacity_change /
+# reopen_available_compute_listings_after_capacity_change functions rather
+# than a mocked reconciliation boundary.
 # ---------------------------------------------------------------------------
 
 class TestRealOrchestrationCacheToReconciliation:

@@ -902,18 +902,26 @@ class AdminController:
                 },
                 site=site_id,
             )
+        except KeyError:
+            # The listing's own recorded site_id doesn't match any
+            # currently configured site -- a stale mapping, not a
+            # capacity answer. Distinct from "no capacity" so an
+            # operator debugging this doesn't chase the wrong problem.
+            raise HTTPException(
+                status_code=500,
+                detail=f"Listing {body.listing_id!r} is mapped to site "
+                       f"{site_id!r}, which is not currently configured",
+            )
         except Exception as exc:
             if site_id is None:
                 raise
-            # A mapped listing's site errored (not just refused) --
-            # no fallback exists to try, so this surfaces the same way
-            # a refusal already does rather than as a new, unhandled
-            # exception shape at this endpoint.
-            logger.warning(
-                "[ADMIN] reserve at pinned site %r failed for listing %r: %s",
-                site_id, body.listing_id, exc,
+            # The mapped site itself could not be reached -- also
+            # distinct from a live "no capacity" refusal.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach site {site_id!r} for listing "
+                       f"{body.listing_id!r}: {exc}",
             )
-            reserved = None
         if not reserved:
             raise HTTPException(
                 status_code=409,

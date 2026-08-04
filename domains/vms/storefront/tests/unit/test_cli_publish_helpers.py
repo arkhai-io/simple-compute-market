@@ -33,7 +33,11 @@ from market_storefront.cli_publish import (
     _publish_round,
     _stale_open_listing_ids,
 )
-from domains.vms.listings.reconciler import listing_resource_key
+from domains.vms.listings.reconciler import (
+    ensure_derived_compute_listings_table,
+    listing_resource_key,
+    record_derived_listing,
+)
 from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
 from tests.fixtures.publish import validate_published_entry, validate_failed_resource
@@ -453,10 +457,22 @@ def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monke
     finally:
         conn.close()
     assert rows == [
-        ("l-compute-4x-1x", "compute-4x", 1, "open", "compute-4x:gpus:1"),
-        ("l-compute-4x-2x", "compute-4x", 2, "open", "compute-4x:gpus:2"),
-        ("l-compute-4x-3x", "compute-4x", 3, "open", "compute-4x:gpus:3"),
-        ("l-compute-4x-4x", "compute-4x", 4, "open", "compute-4x:gpus:4"),
+        (
+            "l-compute-4x-1x", "compute-4x", 1, "open",
+            listing_resource_key("default", "compute-4x", 1),
+        ),
+        (
+            "l-compute-4x-2x", "compute-4x", 2, "open",
+            listing_resource_key("default", "compute-4x", 2),
+        ),
+        (
+            "l-compute-4x-3x", "compute-4x", 3, "open",
+            listing_resource_key("default", "compute-4x", 3),
+        ),
+        (
+            "l-compute-4x-4x", "compute-4x", 4, "open",
+            listing_resource_key("default", "compute-4x", 4),
+        ),
     ]
 
 
@@ -524,26 +540,14 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
                 "listing-3x-old",
             ),
         )
-        conn.execute(
-            """
-            CREATE TABLE derived_compute_listings (
-                listing_id TEXT PRIMARY KEY,
-                resource_id TEXT NOT NULL,
-                gpu_count INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                derivation_key TEXT NOT NULL UNIQUE,
-                last_reconciled_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.execute(
-            """INSERT INTO derived_compute_listings
-               (listing_id, resource_id, gpu_count, status, derivation_key)
-               VALUES ('listing-3x-old', 'compute-4x', 3, 'closed', 'compute-4x:gpus:3')"""
-        )
+        ensure_derived_compute_listings_table(conn)
         conn.commit()
     finally:
         conn.close()
+    record_derived_listing(
+        db, listing_id="listing-3x-old", site_id="default",
+        resource_id="compute-4x", gpu_count=3, status="closed",
+    )
 
     created: list[dict] = []
     monkeypatch.setattr(
@@ -558,9 +562,9 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
         published, failed, skipped = _publish_round(
             db_path=db,
             skip_ids={
-                "compute-4x:gpus:1",
-                "compute-4x:gpus:2",
-                "compute-4x:gpus:4",
+                listing_resource_key("default", "compute-4x", 1),
+                listing_resource_key("default", "compute-4x", 2),
+                listing_resource_key("default", "compute-4x", 4),
             },
             **_round_kwargs(),
         )
@@ -576,7 +580,8 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
             "SELECT status FROM listings WHERE listing_id = 'listing-3x-old'"
         ).fetchone()[0]
         derived_status = conn.execute(
-            "SELECT status FROM derived_compute_listings WHERE derivation_key = 'compute-4x:gpus:3'"
+            "SELECT status FROM derived_compute_listings WHERE derivation_key = ?",
+            (listing_resource_key("default", "compute-4x", 3),),
         ).fetchone()[0]
     finally:
         conn.close()

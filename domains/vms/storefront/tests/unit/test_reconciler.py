@@ -991,14 +991,10 @@ class TestProjectedResourceUsage:
         assert usage.available == 5
 
     def test_prefers_the_projections_own_available_field_even_when_member_availability_is_none(self):
-        """Regression case: the projection's own available field must be
-        used even when member_availability is None -- it is authoritative
-        live data from the projection itself, not conditional on whether
-        a *different* fallback source happens to be present. A prior
-        version of this function checked member_availability's presence
-        before checking the projection's own field, so a None
-        member_availability silently discarded real availability data
-        and defaulted to reporting full capacity as available."""
+        """The projection's own available field must be used even when
+        member_availability is None -- it is authoritative live data
+        from the projection itself, not conditional on whether a
+        *different* fallback source happens to be present."""
         usage = _projected_resource_usage(
             {
                 "physical_resource_id": "res-1",

@@ -216,9 +216,9 @@ async def test_reserve_pinned_to_a_site_reserves_there():
 
 @pytest.mark.asyncio
 async def test_reserve_pinned_to_a_site_ignores_placement_preference():
-    """The collision case this task exists to prevent: placement would
-    prefer dc-b (more free units), but a listing mapped to dc-a must
-    reserve only at dc-a regardless."""
+    """A listing mapped to a site reserves only there, regardless of
+    placement policy: placement would prefer dc-b (more free units),
+    but a mapping to dc-a must still reserve at dc-a."""
     client, a, b = _aggregate(placement=most_available)
     # Confirm placement really would pick the other site if left to
     # choose -- otherwise this test wouldn't actually exercise anything.

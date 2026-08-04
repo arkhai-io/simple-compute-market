@@ -8,7 +8,7 @@ how the original `resource_id`/`vm_host`-required bugs went undetected
 through the entire existing storefront test suite.
 
 This file mounts the real `market_site.router` into a real FastAPI app and
-drives it with the real `core_storefront.capacity_remote.RemoteCapacityClient`
+drives it with the real `market_site_client.SiteCapacityClient`
 over `ASGITransport` -- an actual wire round-trip, not a hand-rolled
 double -- so a future regression in either side of this boundary fails a
 test instead of shipping quietly again.
@@ -25,10 +25,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core_storefront.capacity_remote import RemoteCapacityClient
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
 from market_site.router import make_capacity_router
+from market_site_client import SiteCapacityClient
 
 
 @pytest.fixture
@@ -54,8 +54,8 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
     return app, ledger
 
 
-def _client(app: FastAPI) -> RemoteCapacityClient:
-    return RemoteCapacityClient(
+def _client(app: FastAPI) -> SiteCapacityClient:
+    return SiteCapacityClient(
         "http://test", transport=ASGITransport(app=app),
     )
 

@@ -11,7 +11,7 @@ from market_storefront.services import site_projection_cache as spc
 
 
 class _FakeRemote:
-    """Stands in for a `RemoteCapacityClient`; each family method independently
+    """Stands in for a `SiteCapacityClient`; each family method independently
     configurable to succeed or raise, so tests can simulate one site being
     reachable while another is not."""
 

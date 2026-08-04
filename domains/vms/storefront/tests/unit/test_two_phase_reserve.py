@@ -355,6 +355,34 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
+    """A listing already mapped to a site (derived_compute_listings)
+    must place its acceptance-time hold there -- proves site_id
+    resolution reaches _place_capacity_hold's reserve() call, not just
+    that reserve() itself honors a site kwarg when given one."""
+    from domains.vms.listings.reconciler import record_derived_listing
+
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    record_derived_listing(
+        db.db_path, listing_id="lst-1", site_id="dc-mapped",
+        resource_id="res-1", gpu_count=2,
+    )
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with patch(
+        "market_storefront.utils.config.settings", _settings(900),
+    ), patch(
+        "market_storefront.services.capacity_client.build_capacity_client",
+        return_value=capacity,
+    ):
+        await _place_capacity_hold(
+            db, negotiation_id="neg-mapped", listing_id="lst-1", order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["site"] == "dc-mapped"
+
+
+@pytest.mark.asyncio
 async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
 

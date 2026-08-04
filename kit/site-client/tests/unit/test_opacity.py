@@ -1,15 +1,15 @@
 """Opaque capacity boundary, exercised against a mock transport.
 
-Covers `RemoteCapacityClient` only. This class lives in `core_storefront`
+Covers `SiteCapacityClient` only. This class lives in `kit/site-client`
 because reserving capacity is a concept every domain this repository could
 host needs -- VM, bare-metal, apicredits, or anything hypothetical.
 
 A companion test for `ComputeProvisioningClient` (schedule/begin
 fulfillment) lives in `provisioning/compute/tests/integration/` instead,
 not here: fulfillment scheduling is a physical-resource-domain concept
-(VM, bare-metal), not a universal one, and `core` must not carry a
+(VM, bare-metal), not a universal one, and this package must not carry a
 dependency on `compute_provisioning` to test it. The two clients were
-originally tested together in this file; splitting them is the fix for
+originally tested together in one file; splitting them was the fix for
 that layering mistake, not a refactor of convenience.
 """
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from core_storefront.capacity_remote import RemoteCapacityClient
+from market_site_client import SiteCapacityClient
 
 _CAPACITY_RESERVATION_ID = "resv-mock-001"
 
@@ -62,7 +62,7 @@ class _RecordingHandler:
 async def test_reserve_commit_send_no_placement_fields() -> None:
     """The opaque capacity boundary holds from the client side.
 
-    Proves `RemoteCapacityClient` never *sends* `resource_id` as a
+    Proves `SiteCapacityClient` never *sends* `resource_id` as a
     required or populated field across reserve/commit -- the same
     invariant the retired cross-service test proved by exercising a real
     server, now proved from the client's own request bodies against a
@@ -71,7 +71,7 @@ async def test_reserve_commit_send_no_placement_fields() -> None:
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
 
-    capacity = RemoteCapacityClient("http://capacity.test", transport=transport)
+    capacity = SiteCapacityClient("http://capacity.test", transport=transport)
     reservation = await capacity.reserve(claim={"pool_id": "pool-mock", "gpu_count": 1})
     assert reservation == {"capacity_reservation_id": _CAPACITY_RESERVATION_ID}
 

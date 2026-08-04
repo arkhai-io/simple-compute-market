@@ -294,9 +294,8 @@ class AggregateCapacityClient:
         another on refusal would silently satisfy the claim from a site
         the buyer never negotiated with.
 
-        ``site`` omitted (``None``): today's unchanged placement-ordered
-        fan-out, for a listing with no site mapping -- see
-        ``_reserve_by_placement``.
+        ``site`` omitted (``None``): placement-ordered fan-out, for a
+        listing with no site mapping -- see ``_reserve_by_placement``.
         """
         if site is not None:
             return await self._reserve_at_site(

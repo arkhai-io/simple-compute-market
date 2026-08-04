@@ -315,7 +315,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     ProvisioningClient.create_pool(default_vm_* in provider_config)
         -> real /api/v1/pools API -> real AnsiblePoolConfigHandler -> DB
         -> resource-pool projection
-        -> RemoteCapacityClient.resource_pool_projection()
+        -> SiteCapacityClient.resource_pool_projection()
 
     default_vm_* must be settable through the admin API and visible
     through the storefront's actual projection consumer, not only
@@ -323,7 +323,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
     route by hand.
     """
     from compute_provisioning import PoolCreate
-    from core_storefront.capacity_remote import RemoteCapacityClient
+    from market_site_client import SiteCapacityClient
     from compute_provisioning_service.db.models import Host
     from compute_provisioning_service.container import container
 
@@ -364,7 +364,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         attributes={"vm_host": "kvm1", "gpu_model": "H200"},
     )
 
-    remote = RemoteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
@@ -380,7 +380,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         },
     }
     # Host.gpu_model -> capacity_inventory._project_host -> resource-pool
-    # projection's per-resource attributes -> the real RemoteCapacityClient
+    # projection's per-resource attributes -> the real SiteCapacityClient
     # response. Distinct from the ledger resource's own attributes dict
     # (registered above) -- proves the Host column specifically survives
     # the full producer -> client path, not just the ledger-side value.
@@ -396,8 +396,8 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 ):
     """A pool with no configured VM size defaults gets pool_metadata (from
     ResourcePool's own columns) but no pool_views key at all -- read
-    through the real RemoteCapacityClient, not a raw HTTP call."""
-    from core_storefront.capacity_remote import RemoteCapacityClient
+    through the real SiteCapacityClient, not a raw HTTP call."""
+    from market_site_client import SiteCapacityClient
     from compute_provisioning_service.container import container
     from compute_provisioning_service.db.models import Host
 
@@ -415,7 +415,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
         attributes={"vm_host": "kvm1"},
     )
 
-    remote = RemoteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     default_row = next(row for row in rows if row["resource_pool_id"] == "default")

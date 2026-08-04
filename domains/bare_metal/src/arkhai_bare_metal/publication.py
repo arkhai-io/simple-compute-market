@@ -22,9 +22,9 @@ def _length_prefixed(value: str) -> str:
     an identical key. A decimal length prefix followed by exactly that
     many characters fixes each field's boundary exactly, independent of
     its contents, making the overall key injective (different inputs
-    always produce different keys). Duplicated from
-    ``domains.vms.listings.reconciler``'s identical fix rather than
-    imported -- domains do not depend on each other for this.
+    always produce different keys). Kept local to this module rather
+    than shared with the VM domain's equivalent -- domains do not
+    depend on each other for this.
     """
     return f"{len(value)}:{value}"
 

@@ -2,11 +2,11 @@
 
 Covers `ComputeProvisioningClient` -- the client class this same package
 defines -- proving `schedule_resource`/`begin_fulfillment` never *send* a
-placement field. Lives here, not in `core/storefront`, because fulfillment
+placement field. Lives here, not in `kit/site-client`, because fulfillment
 scheduling is a physical-resource-domain concept (VM, bare-metal today),
-not a universal one `core` should know about. See the companion
-`RemoteCapacityClient` test in
-`core/storefront/tests/integration/test_capacity_client_opacity.py` for
+not a universal one that package should know about. See the companion
+`SiteCapacityClient` test in
+`kit/site-client/tests/unit/test_opacity.py` for
 the capacity-reservation half of this same boundary, and that test's
 docstring for why the two were split apart.
 
