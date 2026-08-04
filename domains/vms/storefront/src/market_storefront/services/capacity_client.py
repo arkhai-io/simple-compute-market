@@ -49,6 +49,7 @@ from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
 )
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
+from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -164,11 +165,24 @@ def _make_listing_reconcile_subscriber(
             reopen_available_compute_listings_after_capacity_change,
         )
 
+        sites = remote_site_clients(client)
+        home_site = next(iter(sites), None)
+        if home_site is None:
+            return
         db_path = sqlite_client_factory().db_path
         availability = await member_availability_view(client, db_path)
+        # Behind an explicit opt-in until parity between the local-table
+        # and projection-sourced paths is verified against a live fleet
+        # -- see reconciler.available_compute_slices' own docstring.
+        projection = (
+            site_pool_projection()
+            if bool(getattr(settings, "use_site_projection_for_listings", False))
+            else None
+        )
         if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path, member_availability=availability,
+                db_path, home_site=home_site, configured_site_count=len(sites),
+                member_availability=availability, site_pool_projection=projection,
             )
             if closed:
                 stage_event(
@@ -180,7 +194,8 @@ def _make_listing_reconcile_subscriber(
                 )
         if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path, member_availability=availability,
+                db_path, home_site=home_site, member_availability=availability,
+                site_pool_projection=projection,
             )
             if reopened:
                 stage_event(
@@ -449,6 +464,28 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
     if isinstance(client, RemoteCapacityClient):
         return {"default": client}
     return {}
+
+
+def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
+    """Resource-pool projection rows per site, from the storefront's own
+    background poller cache (``site_projection_cache``).
+
+    Only sites whose projection has a cached value contribute -- a site
+    that has never loaded or is currently unavailable is silently
+    excluded here rather than treated as "no pools" (``reconciler``'s
+    projection-sourced path already falls back to local tables when the
+    returned mapping is empty, and a site with a stale-but-present value
+    is included, since stale-but-known is preferable to omitted here,
+    matching the cache's own stale-retention design).
+    """
+    from market_storefront.services.site_projection_cache import projection_caches
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for site, caches in projection_caches().items():
+        value = caches.resource_pools.view().value
+        if value:
+            result[site] = value
+    return result
 
 
 async def capacity_events_poller_loop() -> None:

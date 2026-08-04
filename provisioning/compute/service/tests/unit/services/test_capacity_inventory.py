@@ -26,6 +26,7 @@ def _host():
         name="compute-kvm1-001",
         pool_id="gpu-pool",
         gpu_count=8,
+        gpu_model=None,
         public_host="203.0.113.10",
         kvm_host="10.0.0.10",
         enabled=True,
@@ -53,6 +54,28 @@ def test_load_capacity_resource_inventory_projects_allowlisted_host_fields():
             "enabled": True,
         }
     ]
+
+
+def test_load_capacity_resource_inventory_includes_gpu_model_when_set():
+    host = _host()
+    host.gpu_model = "H100"
+    session = _session_for(host)
+
+    result = load_capacity_resource_inventory(lambda: session)
+
+    assert result[0]["attributes"]["gpu_model"] == "H100"
+
+
+def test_load_capacity_resource_inventory_omits_gpu_model_when_unset():
+    """A host with no recorded GPU model must not project an empty/null
+    gpu_model key -- absence, not a null placeholder."""
+    host = _host()
+    assert host.gpu_model is None
+    session = _session_for(host)
+
+    result = load_capacity_resource_inventory(lambda: session)
+
+    assert "gpu_model" not in result[0]["attributes"]
 
 
 def test_bare_metal_view_uses_explicit_identities_and_same_generation_availability():

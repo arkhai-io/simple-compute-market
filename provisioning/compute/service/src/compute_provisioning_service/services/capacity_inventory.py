@@ -71,17 +71,20 @@ def _project_host(
     gpu_count = int(host.gpu_count or 0)
     resource = dict(capacity_resource or {})
     capacity = dict(resource.get("capacity") or {"gpu_count": gpu_count})
+    attributes: dict[str, Any] = {
+        "vm_host": host.name,
+        "public_host": host.public_host or host.kvm_host,
+        "gpu_count": gpu_count,
+    }
+    if host.gpu_model:
+        attributes["gpu_model"] = host.gpu_model
     projected: dict[str, Any] = {
         "resource_id": str(resource.get("resource_id") or host.name),
         "pool_id": str(resource.get("pool_id") or host.pool_id),
         "resource_type": resource.get("resource_type") or "compute.gpu",
         "resource_subtype": resource.get("resource_subtype"),
         "capacity": capacity,
-        "attributes": {
-            "vm_host": host.name,
-            "public_host": host.public_host or host.kvm_host,
-            "gpu_count": gpu_count,
-        },
+        "attributes": attributes,
         "enabled": bool(host.enabled and resource.get("enabled", True)),
     }
     if capacity_resource is not None:

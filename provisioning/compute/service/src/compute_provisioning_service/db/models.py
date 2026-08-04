@@ -160,6 +160,11 @@ class Host(Base):
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM
     gpu_count = Column(Integer, nullable=False, default=0)
+    # Descriptive hardware identity (e.g. "H100", "A100") -- categorical,
+    # matched by equality, not by sufficiency like gpu_count. Nullable: a
+    # host with gpu_count=0 has no GPU model to report, and an operator
+    # may not have recorded one yet for an existing host.
+    gpu_model = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(
         String,

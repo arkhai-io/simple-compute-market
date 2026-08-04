@@ -367,6 +367,7 @@ async def _seed_dynamic_listing_pool_rows(
             record_derived_listing(
                 db.db_path,
                 listing_id=listing_id,
+                site_id="default",
                 resource_id="pool-h200-1",
                 gpu_count=gpu_count,
             )
@@ -465,7 +466,9 @@ class TestFulfillmentEvents:
                     conn.commit()
                 finally:
                     conn.close()
-                mark_derived_listings_closed(db.db_path, ["listing-3x"])
+                mark_derived_listings_closed(
+                    db.db_path, ["listing-3x"], home_site="default", configured_site_count=1,
+                )
             return response
 
         fake._handle = handle_with_delta_reconciliation

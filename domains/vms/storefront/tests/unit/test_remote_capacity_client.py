@@ -11,7 +11,7 @@ import asyncio
 import itertools
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -411,3 +411,58 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
     assert [d.kind for d in seen] == ["committed"]
     assert seen[0].resource_id == "compute-kvm1-001"
     assert seen[0].site == "dc-a"
+
+
+# ---------------------------------------------------------------------------
+# site_pool_projection -- projection_caches() -> {site: rows} conversion
+# ---------------------------------------------------------------------------
+
+class TestSitePoolProjection:
+    def test_empty_when_nothing_cached(self):
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={},
+        ):
+            assert cc.site_pool_projection() == {}
+
+    def test_includes_a_site_with_a_loaded_value(self):
+        fake_cache = MagicMock()
+        fake_cache.resource_pools.view.return_value.value = [
+            {"resource_pool_id": "gpu-pool", "resources": []},
+        ]
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_pool_projection()
+        assert result == {
+            "site-a": [{"resource_pool_id": "gpu-pool", "resources": []}],
+        }
+
+    def test_excludes_a_site_with_no_cached_value(self):
+        """A site whose projection has never loaded (or is currently
+        unavailable/invalid) has value=None -- it must not appear at all,
+        not as an empty list -- reconciler's projection-sourced path
+        falls back to local tables only when the whole mapping is empty,
+        and a present-but-empty-list site would incorrectly look like
+        "this site genuinely has zero pools"."""
+        fake_cache = MagicMock()
+        fake_cache.resource_pools.view.return_value.value = None
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_pool_projection()
+        assert result == {}
+
+    def test_multiple_sites_only_loaded_ones_included(self):
+        loaded = MagicMock()
+        loaded.resource_pools.view.return_value.value = [{"resource_pool_id": "p"}]
+        unloaded = MagicMock()
+        unloaded.resource_pools.view.return_value.value = None
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": loaded, "site-b": unloaded},
+        ):
+            result = cc.site_pool_projection()
+        assert set(result) == {"site-a"}

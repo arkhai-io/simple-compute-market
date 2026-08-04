@@ -31,6 +31,7 @@ from market_storefront.cli_publish import (
     _publish_round,
     _stale_open_listing_ids,
 )
+from domains.vms.listings.reconciler import listing_resource_key
 from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
 from tests.fixtures.publish import validate_published_entry, validate_failed_resource
@@ -292,8 +293,8 @@ def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
         conn.close()
 
     assert _open_listing_resource_keys(db) == {
-        "compute-001:gpus:1",
-        "compute-002:gpus:2",
+        listing_resource_key("default", "compute-001", 1),
+        listing_resource_key("default", "compute-002", 2),
     }
 
 
@@ -384,10 +385,7 @@ def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
 
     assert [r["gpu_count"] for r in rows] == [1, 2, 3, 4]
     assert {r["resource_key"] for r in rows} == {
-        "compute-4x:gpus:1",
-        "compute-4x:gpus:2",
-        "compute-4x:gpus:3",
-        "compute-4x:gpus:4",
+        listing_resource_key("default", "compute-4x", n) for n in (1, 2, 3, 4)
     }
 
 
