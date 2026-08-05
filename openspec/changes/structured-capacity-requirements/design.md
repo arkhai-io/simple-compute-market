@@ -122,6 +122,23 @@ the existing matching contract it feeds -- the same dependency-direction questio
 flagged in "Unresolved questions" below for the claim-side parser applies identically here,
 since it would now be one function serving both call sites rather than two.
 
+**Second coordination point with `pools-8-capacity-projection-and-listing-hints`, this one on the config/pricing side rather than the wire/inventory side (added 2026-08-05, once `pools-8`'s own Section 6 landed):** that change's storefront-side pricing configuration
+(`[pricing.defaults.gpu.<model>]`, resolved through a three-tier storefront-override →
+pool-hint → config-default precedence for VM's own per-GPU-model pricing) adopted this
+change's family-grouped vocabulary proactively for the `gpu` family alone, structurally
+reserving `.cpu`/`.memory`/`.storage` for later without implementing them. This is a real,
+one-directional dependency: extending that pricing config beyond the `gpu` family needs this
+change's own vocabulary to have actually landed and stabilized first, since a
+`cpu`/`memory`/`storage` shape decided independently there could disagree with whatever this
+change ultimately settles on. Nothing in `pools-8` depends on this change landing before its
+own `gpu`-only scope can proceed; this is a forward-compatibility bet on this change's
+direction, not a blocking prerequisite. Whoever implements this change's own `requirements`
+shape should check `pools-8`'s pricing config (`domains/vms/storefront/src/market_storefront/settings.toml`'s
+`[pricing.defaults.gpu]` section, `domains/vms/listings/pricing_resolution.py`) as a second,
+independent precedent for the family-grouped convention, alongside the `gpu_count`/`gpu_model`
+flattening convention already described above -- both should end up consistent with whatever
+this change finalizes, not treated as two separate shapes to reconcile after the fact.
+
 ### `resource_type` vs. a buyer-facing offering concept
 
 Three distinct concepts were conflated under `resource_type` in the

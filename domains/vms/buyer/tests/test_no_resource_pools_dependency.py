@@ -1,13 +1,10 @@
-"""Regression test: importing `domains.vms.listings` must never transitively
-load `market_resource_pools`. Any consumer of this package that only needs
-unrelated buyer-side helpers (e.g. `buy_cli.py`/`listing_cli.py`) has no
-reason to depend on `kit/resource-pools` at all -- if a module-level import
-anywhere in `domains.vms.listings.reconciler` (or anything it imports at
-its own module level) ever pulls in `market_resource_pools`, this test
-pins that as a regression rather than requiring the fragile "package
-genuinely absent from the environment" setup that first caught this,
-since `market_resource_pools` may legitimately be installed in this
-environment for other reasons.
+"""Importing `domains.vms.listings` must never transitively load
+`market_resource_pools`. Buyer-side consumers of this package (e.g.
+`buy_cli.py`/`listing_cli.py`) use unrelated listing helpers and have no
+reason to depend on `kit/resource-pools` at all -- if a module-level
+import anywhere in `domains.vms.listings.reconciler` (or anything it
+imports at its own module level) pulls in `market_resource_pools`, this
+test fails.
 """
 
 from __future__ import annotations
@@ -26,6 +23,9 @@ def test_importing_domains_vms_listings_does_not_load_market_resource_pools():
         ):
             del sys.modules[name]
 
+    # Local import, not module-level: this test's own subject is a fresh
+    # import after the `sys.modules` clear above, so it cannot be imported
+    # at file scope without defeating the thing being tested.
     import domains.vms.listings  # noqa: F401
 
     loaded = [

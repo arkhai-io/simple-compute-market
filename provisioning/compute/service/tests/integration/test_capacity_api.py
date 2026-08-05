@@ -485,6 +485,47 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 
 
 @pytest.mark.asyncio
+async def test_site_capacity_projection_version_endpoints_through_the_real_client(
+    capacity: CapacityApi,
+):
+    """The one gap left after the four projection-data tests above: the
+    `_version()` siblings (a cheap poll-for-change check, not the full
+    payload) had no real-client coverage of their own. Proves both
+    through a real in-process app, and that each version's revision
+    advances when the corresponding projection's own content changes."""
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.container import container
+    from compute_provisioning_service.db.models import Host
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+
+    pool_version_before = await remote.resource_pool_projection_version()
+    bucket_version_before = await remote.capacity_bucket_projection_version()
+    assert "revision" in pool_version_before
+    assert "digest" in pool_version_before
+    assert "revision" in bucket_version_before
+    assert "digest" in bucket_version_before
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm-version-test", kvm_host="10.0.0.2", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=4, pool_id="version-pool",
+        ))
+        db.commit()
+    await capacity.register(
+        "compute-version-test-001",
+        pool_id="version-pool",
+        total_units=4,
+        attributes={"vm_host": "kvm-version-test"},
+    )
+
+    pool_version_after = await remote.resource_pool_projection_version()
+    bucket_version_after = await remote.capacity_bucket_projection_version()
+    assert pool_version_after != pool_version_before
+    assert bucket_version_after != bucket_version_before
+
+
+@pytest.mark.asyncio
 async def test_site_capacity_buckets_projection_through_the_real_client(
     capacity: CapacityApi,
 ):
