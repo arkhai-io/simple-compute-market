@@ -3,9 +3,7 @@
 `kit/resource-pools.hints` owns the key names and generic reads; this
 module owns how the VM domain resolves them against the storefront's own
 local fallback/override data (`compute_capacity_pools.region`/`.sla`,
-still the source until POOLS-8's own follow-up change retires it -- see
-`openspec/changes/pools-8-capacity-projection-and-listing-hints/design.md`,
-"Region, SLA, and pricing move to resource-pool hints too").
+the storefront-side override tier -- see `resolve_sla` below).
 
 Region and SLA are treated differently on purpose. Region is a plain fact
 about where hardware sits -- no storefront override makes sense, since a
@@ -21,8 +19,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from market_resource_pools.hints import raw_region, sla_value
-
 
 def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> str | None:
     """The pool's region: its declared hint if present, else ``fallback``
@@ -33,6 +29,11 @@ def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> s
     consumer needs to further interpret, so anything that isn't usable
     text falls back rather than propagating a malformed value.
     """
+    # Local import -- see resolve_vm_listing_mode's own comment in
+    # domains.vms.listings.listing_mode for the reason (kept out of any
+    # consumer that imports this module's signatures without calling it).
+    from market_resource_pools.hints import raw_region
+
     hint = raw_region(policy_tags)
     if isinstance(hint, str) and hint:
         return hint
@@ -65,6 +66,9 @@ def resolve_sla(
     if storefront_override is not None:
         return storefront_override
     if accept_pool_declared_sla:
+        # Local import -- same reason as resolve_region, above.
+        from market_resource_pools.hints import sla_value
+
         hint = sla_value(policy_tags)
         if hint is not None:
             return hint

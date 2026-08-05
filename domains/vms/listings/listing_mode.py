@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from typing import Any, Literal, Mapping
 
-from market_resource_pools.hints import raw_listing_mode
-
 VmListingMode = Literal["fungible", "specific_resource"]
 
 _VM_LISTING_MODES: tuple[VmListingMode, ...] = ("fungible", "specific_resource")
@@ -43,6 +41,14 @@ def resolve_vm_listing_mode(
     is used and the explanation is meant to be surfaced on an operator-visible
     status surface (never fails projection ingestion or blocks publication).
     """
+    # Local import: `market_resource_pools` stays out of any consumer that
+    # merely imports this module's types/signatures without ever calling
+    # this resolver (e.g. `domains.vms.listings.reconciler` importing
+    # `resolve_vm_listing_mode` at its own module level) -- notably the
+    # buyer distribution, which imports `domains.vms.listings` for
+    # unrelated helpers and has no reason to depend on `kit/resource-pools`.
+    from market_resource_pools.hints import raw_listing_mode
+
     raw = raw_listing_mode(policy_tags)
     if raw is None:
         return structural_default, None

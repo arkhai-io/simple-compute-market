@@ -159,6 +159,76 @@ class TestHoldPreferenceValidationThroughAdminApi:
         assert fetched.policy_tags == {"max_reservation_hold_seconds": 60}
 
 
+class TestSlaValidationThroughAdminApi:
+    """Same real-HTTP-route proof as TestHoldPreferenceValidationThroughAdminApi
+    (above), for the sibling `sla` hint the same shared validator covers --
+    SLA extends the public write contract just as much as hold preference
+    does, so it gets the same real typed-client coverage, not just the
+    unit-level `ResourcePoolService` proof."""
+
+    async def test_create_pool_with_negative_sla_returns_400(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    policy_tags={"sla": -1},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert exc_info.value.status_code == 400
+        with pytest.raises(ProvisioningError) as get_exc_info:
+            await client.get_pool("hetzner-eu")
+        assert get_exc_info.value.status_code == 404
+
+    async def test_create_pool_with_valid_sla_round_trips(self, client_and_queue):
+        client, _ = client_and_queue
+        pool = await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"sla": 99.9},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        assert pool.policy_tags == {"sla": 99.9}
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.policy_tags == {"sla": 99.9}
+
+    async def test_replace_pool_with_invalid_sla_returns_400_and_does_not_change_stored_metadata(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"sla": 95.0},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.replace_pool(
+                "hetzner-eu",
+                PoolReplace(
+                    label="Hetzner EU",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags={"sla": "high"},
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert exc_info.value.status_code == 400
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.policy_tags == {"sla": 95.0}
+
+
 class TestVmSizeDefaultsThroughAdminApi:
     """Proves `default_vm_*` round-trips through the real typed client,
     the real HTTP API, the real `AnsiblePoolConfigHandler`, and the real

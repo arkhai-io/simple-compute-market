@@ -320,13 +320,16 @@ class TestAvailableComputeSlices:
         assert all(row["gpu_model"] == "H100" for row in slices)
         assert all(row["min_price"] == "10" for row in slices)  # _seed_pool's fixed price
 
-    def test_projection_pool_for_non_home_site_is_excluded_even_with_matching_local_pool_id(
+    def test_projection_pool_for_non_home_site_never_uses_another_sites_local_row(
         self, db_path,
     ):
         """The core safety property: a non-home-site pool must never pick
         up another site's local pricing row, even when the pool_id
         happens to match -- compute_capacity_pools is not site-scoped,
-        so this is the only thing preventing a cross-site mix-up."""
+        so this is the only thing preventing a cross-site mix-up. It
+        still publishes (priceless, since it has no hint/config default
+        of its own either) -- a missing storefront override is not a
+        reason to suppress the pool."""
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-b": [  # not home_site
@@ -346,11 +349,16 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices == []
+        assert slices
+        assert all(s.get("min_price") is None for s in slices)
+        assert all(s.get("region") is None for s in slices)
 
-    def test_projection_pool_with_no_local_pricing_row_is_excluded(self, db_path):
+    def test_projection_pool_with_no_local_pricing_row_publishes_priceless(
+        self, db_path,
+    ):
         """A home-site pool with no matching local compute_capacity_pools
-        row has no price -- excluded, not published price-less."""
+        row has no storefront-override price -- it still publishes,
+        priceless, rather than being excluded."""
         projection = {
             "site-a": [
                 {
@@ -369,7 +377,8 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices == []
+        assert slices
+        assert all(s.get("min_price") is None for s in slices)
 
     def test_projection_disabled_resource_excluded_from_capacity(self, db_path):
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
@@ -393,7 +402,15 @@ class TestAvailableComputeSlices:
         )
         assert slices == []
 
-    def test_multiple_sites_only_home_site_pool_is_published(self, db_path):
+    def test_multiple_sites_both_publish_but_only_home_site_gets_local_pricing(
+        self, db_path,
+    ):
+        """Corrected from an earlier "only home_site pool is published"
+        expectation: both sites' pools now publish (a missing storefront
+        override is not a reason to suppress a pool), but only the
+        home-site pool's local `compute_capacity_pools` row is ever
+        consulted -- site-b's pool has no hint/config default either, so
+        it publishes priceless, not with site-a's price."""
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-a": [{
@@ -418,9 +435,56 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices
-        assert all(row["site_id"] == "site-a" for row in slices)
-        assert all(row["pool_id"] == "gpu-pool" for row in slices)
+        by_site = {}
+        for row in slices:
+            by_site.setdefault(row["site_id"], []).append(row)
+        assert set(by_site) == {"site-a", "site-b"}
+        assert all(row["min_price"] == "10" for row in by_site["site-a"])
+        assert all(row["min_price"] is None for row in by_site["site-b"])
+
+    def test_resource_keys_are_identical_regardless_of_hint_resolution(self, db_path):
+        """The invariant `current_available_resource_keys`/
+        `stale_open_listing_ids`/`closed_available_listing_ids` all rely
+        on without any of them threading `hint_resolution` through:
+        `resource_key`/`legacy_resource_key` never depend on resolved
+        region/SLA/pricing, however different `hint_resolution` makes
+        those fields. Capacity-delta reconciliation compares structural
+        derivation keys and availability; it never recomputes or
+        republishes commercial listing terms -- this proves that holds,
+        rather than only asserting it in a comment. No local
+        `compute_capacity_pools` row on purpose -- a storefront override
+        would win regardless of `hint_resolution` and this test would
+        prove nothing about the tiers that actually vary."""
+        projection = {
+            "site-a": [{
+                "resource_pool_id": "gpu-pool",
+                "resources": [{
+                    "physical_resource_id": "res-1",
+                    "capacity": {"gpu_count": 4},
+                    "attributes": {"gpu_model": "H100"},
+                    "enabled": True,
+                }],
+            }],
+        }
+        default_rows = available_compute_slices(
+            db_path, home_site="site-a", site_pool_projection=projection,
+        )
+        varied_rows = available_compute_slices(
+            db_path, home_site="site-a", site_pool_projection=projection,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=7.0,
+                gpu_pricing_defaults_by_model={
+                    "H100": GpuPricingFields(min_price="0.01"),
+                },
+            ),
+        )
+        default_keys = {r["resource_key"] for r in default_rows}
+        varied_keys = {r["resource_key"] for r in varied_rows}
+        assert default_keys == varied_keys
+        assert default_keys  # not vacuously true
+        # Confirm the two runs actually resolved *different* commercial
+        # values -- otherwise this test wouldn't be exercising anything.
+        assert {r["sla"] for r in default_rows} != {r["sla"] for r in varied_rows}
 
 
 # ---------------------------------------------------------------------------
@@ -1197,22 +1261,105 @@ class TestProjectedPoolRows:
         )
         assert rows == []
 
-    def test_empty_for_non_home_site_even_with_a_matching_local_pool_id(self):
+    def test_non_home_site_pool_with_a_matching_local_pool_id_never_uses_it(self):
+        """`compute_capacity_pools` is never consulted for a non-home-site
+        pool (cross-site pool_id collision risk -- see `_local_pool_pricing`),
+        even when a same-named local row exists -- but the pool still
+        publishes, priceless, since a missing storefront-override tier is
+        not a reason to suppress the pool entirely."""
         rows = _projected_pool_rows(
             {"resource_pool_id": "gpu-pool", "resources": []},
             site_id="site-b", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
             member_availability=None, capacity_buckets=None,
         )
-        assert rows == []
+        assert len(rows) == 1
+        assert rows[0]["min_price"] is None
+        assert rows[0]["region"] is None
 
-    def test_empty_for_home_site_pool_with_no_local_pricing(self):
+    def test_non_home_site_pool_publishes_from_a_complete_hint_alone(self):
+        """The actual point of the three-tier mechanism: a pool this
+        storefront has never locally priced still publishes with real
+        commercial terms, sourced entirely from its own projected hint."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {
+                        "region": "Nevada, US",
+                        "pricing": {
+                            "gpu": {
+                                "H100": {
+                                    "min_price": "5.00", "token": "0xhint",
+                                    "max_duration_seconds": 3600,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            site_id="site-b", home_site="site-a",
+            local_pricing={}, member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["region"] == "Nevada, US"
+        assert rows[0]["min_price"] == "5.00"
+        assert rows[0]["token"] == "0xhint"
+
+    def test_home_site_pool_with_no_local_row_publishes_priceless_by_default(self):
         rows = _projected_pool_rows(
             {"resource_pool_id": "unpriced", "resources": []},
             site_id="site-a", home_site="site-a",
             local_pricing={}, member_availability=None, capacity_buckets=None,
         )
-        assert rows == []
+        assert len(rows) == 1
+        assert rows[0]["min_price"] is None
+        assert rows[0]["region"] is None
+        assert rows[0]["sla"] == 0.0
+
+    def test_home_site_pool_with_no_local_row_publishes_from_config_default(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "unpriced",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "A100"},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={}, member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_defaults_by_model={
+                    "A100": GpuPricingFields(min_price="3.00"),
+                },
+            ),
+        )
+        assert len(rows) == 1
+        assert rows[0]["min_price"] == "3.00"
+
+    def test_home_site_pool_with_local_row_still_uses_it_as_the_override(self):
+        """The corrected behavior doesn't disturb the ordinary case: a
+        real local row still wins as the top-precedence override."""
+        rows = _projected_pool_rows(
+            {"resource_pool_id": "gpu-pool", "resources": []},
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["min_price"] == "10"
 
     def test_builds_one_fungible_row_for_home_site_pool_with_pricing(self):
         rows = _projected_pool_rows(

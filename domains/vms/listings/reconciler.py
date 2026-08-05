@@ -5,6 +5,10 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
+from domains.vms.listings.pricing_resolution import GpuPricingFields, resolve_gpu_pricing
+
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -568,8 +572,6 @@ class PoolHintResolutionSettings:
         if self.gpu_pricing_defaults_by_model is None:
             object.__setattr__(self, "gpu_pricing_defaults_by_model", {})
         if self.gpu_pricing_flat_default is None:
-            from domains.vms.listings.pricing_resolution import GpuPricingFields
-
             object.__setattr__(self, "gpu_pricing_flat_default", GpuPricingFields())
 
 
@@ -588,25 +590,46 @@ def _projected_pool_rows(
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
 
-    Returns an empty list if the pool has no pool_id or (site_id !=
-    home_site, or no matching local row) no pricing -- see
-    `_local_pool_pricing`. Otherwise returns exactly one row for a
-    ``fungible`` pool (matching this function's original, aggregated
-    shape), or one row per enabled member for a ``specific_resource``
-    pool -- a pool's ``listing_mode`` (from its projected `policy_tags`,
-    domain-resolved by `resolve_vm_listing_mode`) decides which shape
-    applies. An explicit tag always wins; its *absence* falls back to
-    exactly the structural heuristic this function used before
-    `listing_mode` existed (`member_count == 1` -> specific_resource) so
-    an untagged pool's publication shape does not change out from under
-    an existing derived-listing mapping.
+    Returns an empty list only if the pool has no `pool_id`. A missing
+    local `compute_capacity_pools` row (whether because this is a
+    non-home-site pool -- never locally priced by design, see
+    `_local_pool_pricing` -- or a home-site pool the storefront simply
+    hasn't registered) means no storefront-override tier is available,
+    not that the pool can't publish: region/SLA/pricing still resolve
+    through their pool-hint and config-default tiers. Whether the
+    resulting row ends up genuinely priceless is left to the same
+    downstream `publish_priceless` handling every other unpriced
+    candidate already goes through, not decided here. Otherwise returns
+    exactly one row for a ``fungible`` pool (matching this function's
+    original, aggregated shape), or one row per enabled member for a
+    ``specific_resource`` pool -- a pool's ``listing_mode`` (from its
+    projected `policy_tags`, domain-resolved by `resolve_vm_listing_mode`)
+    decides which shape applies. An explicit tag always wins; its
+    *absence* falls back to exactly the structural heuristic this
+    function used before `listing_mode` existed (`member_count == 1` ->
+    specific_resource) so an untagged pool's publication shape does not
+    change out from under an existing derived-listing mapping.
     """
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
         return []
+    # `pricing` (this pool's row in the storefront's own local
+    # `compute_capacity_pools` table) is the tier-3 storefront-override
+    # source, not a prerequisite for publishing at all -- a pool with a
+    # complete pool-declared hint (tier 2) or config default (tier 1) and
+    # no local row must still resolve and publish, or the three-tier
+    # precedence this section exists to build is unreachable for exactly
+    # the pools it was meant to help (any pool the storefront hasn't
+    # locally registered, and every non-home-site pool, since
+    # `compute_capacity_pools` is intentionally never consulted for a
+    # site other than home_site -- see `_local_pool_pricing`'s own
+    # cross-site-collision rationale, unaffected by this change: that
+    # table still isn't read for a non-home-site pool, it's just no
+    # longer required to exist for a home-site one either).
     pricing = local_pricing.get(pool_id) if site_id == home_site else None
-    if pricing is None:
-        return []
+    local_region = pricing["region"] if pricing is not None else None
+    local_sla = pricing["sla"] if pricing is not None else None
+    local_gpu_model = pricing["gpu_model"] if pricing is not None else None
 
     usages: list[_ProjectedResourceUsage] = []
     for resource in pool.get("resources") or []:
@@ -620,34 +643,26 @@ def _projected_pool_rows(
 
     metadata = pool.get("pool_metadata") or {}
     policy_tags = metadata.get("policy_tags") or {}
-    # Local import, not module-level: this keeps `market_resource_pools`
-    # out of every consumer that merely imports `domains.vms.listings`
-    # (e.g. the buyer CLI, via this package's own `__init__.py`) without
-    # ever calling into publish-candidate generation, which is the only
-    # thing that actually needs it.
-    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
-    from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
-    from domains.vms.listings.pricing_resolution import (
-        GpuPricingFields, resolve_gpu_pricing,
-    )
 
     structural_default = "specific_resource" if len(usages) == 1 else "fungible"
     mode, explanation = resolve_vm_listing_mode(
         policy_tags, structural_default=structural_default,
     )
 
-    region = resolve_region(policy_tags, fallback=pricing["region"])
+    region = resolve_region(policy_tags, fallback=local_region)
     sla = resolve_sla(
         policy_tags,
         accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,
-        storefront_override=pricing["sla"],
+        storefront_override=local_sla,
         config_default=hint_resolution.default_sla,
     )
     storefront_pricing_override = GpuPricingFields(
-        min_price=pricing["min_price"],
-        token=pricing["token"],
-        max_duration_seconds=pricing["max_duration_seconds"],
-        accepted_escrows=pricing["accepted_escrows"],
+        min_price=pricing["min_price"] if pricing is not None else None,
+        token=pricing["token"] if pricing is not None else None,
+        max_duration_seconds=(
+            pricing["max_duration_seconds"] if pricing is not None else None
+        ),
+        accepted_escrows=pricing["accepted_escrows"] if pricing is not None else None,
     )
 
     def _resolved_pricing(gpu_model_for_pricing: str | None) -> GpuPricingFields:
@@ -675,7 +690,7 @@ def _projected_pool_rows(
     if mode == "specific_resource":
         rows = []
         for usage in usages:
-            resolved_gpu_model = usage.gpu_model or pricing["gpu_model"]
+            resolved_gpu_model = usage.gpu_model or local_gpu_model
             resolved_pricing = _resolved_pricing(resolved_gpu_model)
             rows.append({
                 **base_fields,
@@ -709,7 +724,7 @@ def _projected_pool_rows(
         available_gpu_count = sum(usage.available for usage in usages)
         gpu_model = resource_gpu_model
 
-    resolved_gpu_model = gpu_model or pricing["gpu_model"]
+    resolved_gpu_model = gpu_model or local_gpu_model
     resolved_pricing = _resolved_pricing(resolved_gpu_model)
 
     return [{
@@ -743,12 +758,14 @@ def _pool_rows_from_projection(
     projection's own `pool_metadata.policy_tags` hint; pricing and SLA's
     storefront-override tier still come from the local
     `compute_capacity_pools` table -- see `_local_pool_pricing` and
-    `domains.vms.listings.pool_descriptors`. Pricing/region/sla are only
-    ever looked up locally for home_site's own pools. A non-home_site
-    pool, or a home_site pool with no local pricing row, is skipped
-    entirely: no price means no listing, matching the "priceless"
-    handling other publish flows already support rather than inventing a
-    new one.
+    `domains.vms.listings.pool_descriptors`. That local table is only
+    ever consulted for home_site's own pools; a non-home_site pool, or a
+    home_site pool with no local row, simply has no storefront-override
+    tier -- region/SLA/pricing still resolve through the pool's own
+    projected hint and the storefront's configured default, the same
+    "priceless" fallback other publish flows already support if nothing
+    resolves a real price. A missing local row is not, by itself, a
+    reason to skip the pool.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -814,14 +831,18 @@ def available_compute_slices(
     ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
     already produces). When supplied and non-empty, pool structure and
     GPU model come from the projection for *every* site in it, not just
-    ``home_site`` -- but pricing, ``region``, and ``sla`` are only ever
-    looked up from the local ``compute_capacity_pools`` table for
-    ``home_site``'s own pools. A non-``home_site`` pool has no pricing
-    source yet (no cross-site lookup is attempted, so no cross-site
-    ``pool_id`` collision is possible by construction) and is filtered
-    out rather than published without a price -- matching the existing
-    "priceless" handling other publish flows already support, not a new
-    failure mode.
+    ``home_site``. The local ``compute_capacity_pools`` table is only
+    ever consulted, for ``home_site``'s own pools, as the top-precedence
+    storefront-override tier of region/SLA/pricing resolution -- never
+    for a non-``home_site`` pool, avoiding the cross-site ``pool_id``
+    collision that table's own lack of site-scoping would otherwise risk.
+    A pool with no local override row (a non-``home_site`` pool, or a
+    ``home_site`` pool the storefront hasn't locally registered) still
+    publishes: region/SLA/pricing fall through to that pool's own
+    projected hint, then the storefront's configured default, the same
+    "priceless" handling other publish flows already support if nothing
+    resolves a real price -- a missing override is advisory-tier
+    absence, not a reason to suppress the pool.
 
     A pool's ``listing_mode`` (from its projected ``policy_tags``, only
     available on the ``site_pool_projection`` path) decides its row shape:
@@ -913,6 +934,25 @@ def current_available_resource_keys(
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> set[str]:
+    # Known, accepted cost, not an oversight: `available_compute_slices`
+    # resolves each row's region/SLA/pricing (the full three-tier chain,
+    # `PoolHintResolutionSettings` and all) even though only
+    # `resource_key`/`legacy_resource_key` are read below -- everything
+    # else is discarded. This is deliberately not worth avoiding here:
+    # resolution happens once per pool/member (not per gpu_count slice,
+    # since the gpu_count loop only copies already-resolved fields), so
+    # the actual cost is bounded by pool/member count, not capacity size.
+    # `stale_open_listing_ids`/`closed_available_listing_ids` (below) call
+    # this function for exactly this reason -- capacity-delta
+    # reconciliation compares structural derivation keys and availability;
+    # it never recomputes or republishes commercial listing terms, which
+    # is also why none of these three functions take a `hint_resolution`
+    # parameter at all (they always resolve with the default, and the
+    # result is provably identical regardless -- see
+    # `test_resource_keys_are_identical_regardless_of_hint_resolution` in
+    # `test_reconciler.py`). A narrower structural-only row builder would
+    # avoid the discarded work, but isn't warranted while the cost stays
+    # bounded this way; noted as a candidate cleanup, not a defect.
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path, home_site=home_site, member_availability=member_availability,

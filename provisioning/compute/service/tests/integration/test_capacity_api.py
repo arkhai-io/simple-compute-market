@@ -391,6 +391,69 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
 
 
 @pytest.mark.asyncio
+async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy_tags(
+    capacity: CapacityApi, client_and_queue,
+):
+    """POOLS-8 Section 6's region/SLA/pricing hints need no new wire
+    shape -- they're just more keys inside the already-projected
+    `policy_tags` dict (see the pool-metadata test above) -- but they
+    hadn't been proven through the real producer -> client path this
+    specific way before. Proves the full path:
+
+    ProvisioningClient.create_pool(policy_tags={region, sla, pricing})
+        -> real /api/v1/pools API -> real ResourcePoolService -> DB
+        -> resource-pool projection
+        -> SiteCapacityClient.resource_pool_projection()
+    """
+    from compute_provisioning import PoolCreate
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.db.models import Host
+    from compute_provisioning_service.container import container
+
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(
+        PoolCreate(
+            id="hetzner-eu",
+            label="Hetzner EU",
+            provider="ansible",
+            policy_tags={
+                "region": "California, US",
+                "sla": 99.9,
+                "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
+            },
+            provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+        )
+    )
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+            pool_id="hetzner-eu",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+
+    assert pool_row["pool_metadata"]["policy_tags"] == {
+        "region": "California, US",
+        "sla": 99.9,
+        "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
+    }
+
+
+@pytest.mark.asyncio
 async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     capacity: CapacityApi,
 ):

@@ -142,7 +142,7 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 
 ### Requirement: Reservation hold and SLA preference validation
 
-A Resource Pool management surface that accepts `max_reservation_hold_seconds` or `sla` MUST require a nonnegative number for either and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
+A Resource Pool management surface that accepts `max_reservation_hold_seconds` MUST require a nonnegative integer, or `sla` MUST require a nonnegative number (integer or fractional), and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
 
 #### Scenario: Operator supplies an invalid hold preference
 

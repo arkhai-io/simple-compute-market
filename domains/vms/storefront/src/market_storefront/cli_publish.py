@@ -65,6 +65,7 @@ from .publication_wiring import (
     build_vm_publication_source_kwargs,
 )
 from domains.vms.listings.reconciler import (
+    PoolHintResolutionSettings,
     available_compute_slices,
     load_derived_listing_for_slice,
     mark_derived_listings_closed,
@@ -73,6 +74,7 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
+from domains.vms.listings.pricing_resolution import GpuPricingFields
 from arkhai_vms.storefront_adapter import (
     vm_candidate_skip_keys,
     vm_offer_resource_for_listing,
@@ -271,10 +273,7 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
 
 def _pool_hint_resolution_settings() -> Any:
     """Build a `PoolHintResolutionSettings` from the storefront's own
-    `[pricing]` config. Local import -- `reconciler.py` is the only
-    thing that needs to know this dataclass's shape."""
-    from domains.vms.listings.pricing_resolution import GpuPricingFields
-    from domains.vms.listings.reconciler import PoolHintResolutionSettings
+    `[pricing]` config."""
     from market_storefront.utils.config import settings
 
     pricing = getattr(settings, "pricing", None)

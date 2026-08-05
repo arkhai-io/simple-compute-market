@@ -115,3 +115,82 @@ class TestResolveGpuPricing:
             flat_default=_FLAT_DEFAULT,
         )
         assert result == _FLAT_DEFAULT
+
+    def test_malformed_individual_min_price_field_falls_through(self):
+        """A hint field with the wrong shape (a dict where a price
+        string is expected) must not propagate into a commercial
+        candidate -- falls through to the next tier the same way a
+        missing field already does."""
+        result = resolve_gpu_pricing(
+            {"pricing": {"gpu": {"H100": {"min_price": {"oops": True}}}}},
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={"H100": GpuPricingFields(min_price="3.00")},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.min_price == "3.00"
+
+    def test_malformed_max_duration_seconds_falls_through(self):
+        result = resolve_gpu_pricing(
+            {"pricing": {"gpu": {"H100": {"max_duration_seconds": "not-an-int"}}}},
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.max_duration_seconds == 60  # flat default
+
+    def test_negative_max_duration_seconds_falls_through(self):
+        result = resolve_gpu_pricing(
+            {"pricing": {"gpu": {"H100": {"max_duration_seconds": -1}}}},
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.max_duration_seconds == 60  # flat default
+
+    def test_bool_max_duration_seconds_falls_through(self):
+        """bool is technically an int subtype -- explicitly rejected,
+        matching this codebase's own established rule elsewhere
+        (`kit/resource-pools/hints.py`'s hold-preference/SLA validators)."""
+        result = resolve_gpu_pricing(
+            {"pricing": {"gpu": {"H100": {"max_duration_seconds": True}}}},
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.max_duration_seconds == 60  # flat default
+
+    def test_malformed_accepted_escrows_falls_through(self):
+        result = resolve_gpu_pricing(
+            {"pricing": {"gpu": {"H100": {"accepted_escrows": "not-a-list"}}}},
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.accepted_escrows == "flat"  # flat default
+
+    def test_valid_fields_still_used_alongside_a_malformed_sibling_field(self):
+        """One malformed field in the hint must not block the other,
+        valid fields in that same hint from being used."""
+        result = resolve_gpu_pricing(
+            {
+                "pricing": {
+                    "gpu": {
+                        "H100": {
+                            "min_price": {"oops": True},  # malformed
+                            "token": "0xhint",  # valid
+                        },
+                    },
+                },
+            },
+            gpu_model="H100",
+            storefront_override=_NO_OVERRIDE,
+            config_defaults_by_model={},
+            flat_default=_FLAT_DEFAULT,
+        )
+        assert result.min_price == "1.00"  # flat default (hint rejected)
+        assert result.token == "0xhint"  # hint (valid)

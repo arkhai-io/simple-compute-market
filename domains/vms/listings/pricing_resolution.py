@@ -2,11 +2,8 @@
 
 `kit/resource-pools.hints.raw_pricing` owns the domain-neutral `pricing`
 key and its bare read; this module owns the VM domain's family-grouped
-shape (`{"gpu": {"<model>": {...}}}`, mirroring the `structured-capacity-
-requirements` change's own family-grouped requirement shape -- see
-`openspec/changes/pools-8-capacity-projection-and-listing-hints/design.md`,
-"Region, SLA, and pricing move to resource-pool hints too") and how it
-resolves against the storefront's own configured/overridden values.
+shape (`{"gpu": {"<model>": {...}}}`) and how it resolves against the
+storefront's own configured/overridden values.
 
 Three tiers, highest to lowest precedence, resolved independently per
 field (`min_price`, `token`, `max_duration_seconds`, `accepted_escrows`)
@@ -14,7 +11,7 @@ so a storefront override that only sets one field doesn't block the
 others from falling through to a lower tier:
 
 1. A per-pool storefront override (`compute_capacity_pools`' commercial
-   columns, until POOLS-8's own follow-up change retires that table).
+   columns -- the storefront's own local, per-pool pricing record).
 2. A resource-pool-declared pricing hint, keyed by GPU model.
 3. The storefront's own `[pricing]` config default for that model, or
    the flat `default_min_price`/`default_token_address`/... if no
@@ -26,8 +23,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping
-
-from market_resource_pools.hints import raw_pricing
 
 GPU_FAMILY_KEY = "gpu"
 
@@ -60,13 +55,14 @@ def resolve_gpu_pricing(
 
     Each of the four fields is resolved independently: storefront
     override (if set) wins outright; otherwise the pool's own pricing
-    hint for this model (if the hint declares that field); otherwise the
-    storefront's per-model config default (if one is configured for this
-    model); otherwise the storefront's flat config default. A field left
-    unset all the way through every tier stays ``None`` -- callers
-    already treat a ``None`` price as "priceless," matching every other
-    publish flow's existing handling, not a new failure mode this
-    resolver invents.
+    hint for this model (if the hint declares that field *and* it has a
+    valid shape for that field -- see `_VALID_HINT_FIELD`, below);
+    otherwise the storefront's per-model config default (if one is
+    configured for this model); otherwise the storefront's flat config
+    default. A field left unset all the way through every tier stays
+    ``None`` -- callers already treat a ``None`` price as "priceless,"
+    matching every other publish flow's existing handling, not a new
+    failure mode this resolver invents.
     """
     hint_fields = _hint_fields_for_model(policy_tags, gpu_model)
     config_fields = (
@@ -79,7 +75,14 @@ def resolve_gpu_pricing(
             return override_value
         if hint_fields is not None:
             hint_value = hint_fields.get(field)
-            if hint_value is not None:
+            # A hint field with the wrong shape (e.g. a dict where a
+            # price string is expected) is treated the same as an
+            # absent one -- this domain, not `kit/resource-pools`, owns
+            # validating the shape it accepts (see this module's own
+            # docstring); silently propagating a malformed value into a
+            # commercial candidate is worse than falling through to a
+            # lower tier the same way a missing value already does.
+            if hint_value is not None and _VALID_HINT_FIELD[field](hint_value):
                 return hint_value
         if config_fields is not None:
             config_value = getattr(config_fields, field)
@@ -90,11 +93,28 @@ def resolve_gpu_pricing(
     return GpuPricingFields(**{field: _resolve(field) for field in _FIELD_NAMES})
 
 
+def _is_nonnegative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+_VALID_HINT_FIELD: Mapping[str, Any] = {
+    "min_price": lambda v: isinstance(v, str),
+    "token": lambda v: isinstance(v, str),
+    "max_duration_seconds": _is_nonnegative_int,
+    "accepted_escrows": lambda v: isinstance(v, list),
+}
+
+
 def _hint_fields_for_model(
     policy_tags: Mapping[str, Any], gpu_model: str | None,
 ) -> Mapping[str, Any] | None:
     if not gpu_model:
         return None
+    # Local import -- see resolve_vm_listing_mode's own comment in
+    # domains.vms.listings.listing_mode for the reason (kept out of any
+    # consumer that imports this module's signatures without calling it).
+    from market_resource_pools.hints import raw_pricing
+
     pricing = raw_pricing(policy_tags)
     if not isinstance(pricing, Mapping):
         return None
