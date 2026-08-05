@@ -210,8 +210,7 @@ def test_claim_survives_listing_model_validation():
 def test_claim_prefers_resource_id_over_pool_id():
     """A listing carrying both pool_id and resource_id is an intentionally
     specific-resource listing: resource_id wins and pool_id is dropped from
-    the claim, rather than requiring both to match (POOLS-4 design review,
-    2026-07-16)."""
+    the claim, rather than requiring both to match."""
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )

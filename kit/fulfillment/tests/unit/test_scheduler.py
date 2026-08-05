@@ -680,3 +680,165 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
 
     assert second_transaction_opened.is_set()
     assert [first.pool_id, second.pool_id] == ["pool-a", "pool-b"]
+
+
+def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(tmp_path):
+    """A controlled failure after transaction A's writes but before commit
+    must roll back cleanly: A leaves no settlement, capacity rebind, or
+    cursor advance, and B -- once allowed to proceed -- receives the
+    original first fairness turn against a still-usable database."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, Lock
+
+    from market_fulfillment import (
+        SqlAlchemySchedulingTransaction,
+        SqlAlchemySchedulingUnitOfWork,
+    )
+    from market_fulfillment.settlement_repository import SettlementRepository
+
+    database = tmp_path / "scheduling_rollback.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    first_id = _reserve(ledger, agreement="rollback-1")
+    second_id = _reserve(ledger, agreement="rollback-2")
+
+    writes_done = Event()
+    allow_first_failure = Event()
+    second_transaction_attempted = Event()
+    second_transaction_opened = Event()
+    ordinal_lock = Lock()
+    next_ordinal = 0
+
+    class FailingTransaction(SqlAlchemySchedulingTransaction):
+        def __init__(self, *args, **kwargs):
+            nonlocal next_ordinal
+            super().__init__(*args, **kwargs)
+            with ordinal_lock:
+                next_ordinal += 1
+                self.ordinal = next_ordinal
+            if self.ordinal == 2:
+                second_transaction_opened.set()
+
+        def schedule_assignment(self, **kwargs):
+            result = super().schedule_assignment(**kwargs)
+            if self.ordinal == 1:
+                self.db.flush()
+                writes_done.set()
+                assert allow_first_failure.wait(timeout=5)
+                raise RuntimeError("controlled failure after writes, before commit")
+            return result
+
+    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
+        def transaction(self):
+            if writes_done.is_set():
+                second_transaction_attempted.set()
+            return super().transaction()
+
+    uow = ObservedUnitOfWork(
+        factory, pools, ledger, transaction_type=FailingTransaction
+    )
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory,
+        default_resource_kind="compute.gpu", unit_of_work=uow,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(scheduler.schedule_resource, _request(first_id))
+        assert writes_done.wait(timeout=5)
+        second_future = executor.submit(scheduler.schedule_resource, _request(second_id))
+        assert second_transaction_attempted.wait(timeout=5)
+        assert not second_transaction_opened.is_set()
+        allow_first_failure.set()
+        with pytest.raises(RuntimeError):
+            first_future.result(timeout=5)
+        second = second_future.result(timeout=5)
+
+    assert second_transaction_opened.is_set()
+    # B received the original first fairness turn -- A's settlement row and
+    # cursor advance never became visible -- and the database is still usable.
+    assert second.pool_id == "pool-a"
+    with factory() as db:
+        repo = SettlementRepository()
+        assert repo.get(db, first_id) is None
+
+
+def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cursors(tmp_path):
+    """Two `resource_kind` cursor rows are independent state: alternating
+    scheduling calls for different kinds, each its own independent-session
+    write transaction, must not perturb one another's round-robin cursor.
+    SQLite allows only one writer at a time, so these transactions
+    serialize rather than truly overlap -- this proves independent-session
+    serialization correctly isolates per-kind cursor state, not portable
+    row locking or a process-level multi-replica proof."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    database = tmp_path / "scheduling_interleaved.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"))
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "gpu-a", "pool-a", units=10)
+    _resource(ledger, "gpu-b", "pool-b", units=10)
+    ledger.register_resource(
+        resource_id="cpu-a", resource_type="compute.cpu",
+        total_units=10, enabled=True, pool_id="pool-a",
+    )
+    ledger.register_resource(
+        resource_id="cpu-b", resource_type="compute.cpu",
+        total_units=10, enabled=True, pool_id="pool-b",
+    )
+
+    gpu_ids = [_reserve(ledger, agreement=f"gpu-{i}") for i in range(1, 4)]
+    cpu_ids = [
+        _reserve(ledger, agreement=f"cpu-{i}", resource_kind="compute.cpu")
+        for i in range(1, 3)
+    ]
+
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory, default_resource_kind="compute.gpu",
+    )
+
+    # Alternate kinds across independent-session (thread pool) calls so each
+    # transaction opens, runs, and commits/releases the SQLite writer lock
+    # before the next one -- an interleaved call sequence at the API level,
+    # serialized at the storage layer as SQLite requires.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        gpu_1 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[0])).result(timeout=5)
+        cpu_1 = executor.submit(scheduler.schedule_resource, _request(cpu_ids[0])).result(timeout=5)
+        gpu_2 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[1])).result(timeout=5)
+        cpu_2 = executor.submit(scheduler.schedule_resource, _request(cpu_ids[1])).result(timeout=5)
+        gpu_3 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[2])).result(timeout=5)
+
+    # Each kind's own round-robin turn order is unaffected by the other
+    # kind's calls interleaved in between.
+    assert [gpu_1.pool_id, gpu_2.pool_id, gpu_3.pool_id] == ["pool-a", "pool-b", "pool-a"]
+    assert [cpu_1.pool_id, cpu_2.pool_id] == ["pool-a", "pool-b"]
+
+    with factory() as db:
+        from market_fulfillment.settlement_repository import SettlementRepository
+
+        repo = SettlementRepository()
+        gpu_row = repo.get_cursor_in_session(db, "compute.gpu")
+        cpu_row = repo.get_cursor_in_session(db, "compute.cpu")
+        assert gpu_row.last_pool_id == "pool-a"
+        assert cpu_row.last_pool_id == "pool-b"

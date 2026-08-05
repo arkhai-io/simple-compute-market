@@ -809,10 +809,10 @@ def test_recovery_diagnostics_counts_terminal_failures(session_factory, repo):
 
 
 def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
-    """Task 6.7: the provisioned_resource_id primary-key
-    constraint (6.3.4) is a genuine backstop, not just app-level dedup --
-    two real threads racing add_provisioned_resource for the same
-    stable output identity must still produce exactly one row."""
+    """The provisioned_resource_id primary-key constraint is a genuine
+    backstop, not just app-level dedup -- two real threads racing
+    add_provisioned_resource for the same stable output identity must
+    still produce exactly one row."""
 
     database = tmp_path / "add_provisioned_resource.db"
     engine = create_engine(
@@ -860,9 +860,9 @@ def test_concurrent_add_provisioned_resource_produces_exactly_one_row(tmp_path):
 
 
 def test_concurrent_claim_pending_never_returns_the_same_row_to_two_workers(tmp_path):
-    """Task 6.3.2: two real threads, independent sessions, file-backed
-    SQLite (same technique as test_scheduler.py's independent-session
-    proof), racing claim_pending against the same eligible rows."""
+    """Two real threads, independent sessions, file-backed SQLite (same
+    technique as test_scheduler.py's independent-session proof), racing
+    claim_pending against the same eligible rows."""
 
     database = tmp_path / "claim_pending.db"
     engine = create_engine(
