@@ -19,26 +19,19 @@ Use a discuss → plan → implement workflow:
    `openspec/changes/<change>/` documents and return a packaged
    fileset.
 2. During planning, preserve existing completed tasks and append or
-   amend the implementation plan. Identify the exact permanent
-   documentation affected by each accepted design decision. End the
-   plan with the closeout task defined in
-   `openspec/README.md#plan-closeout-requirements` — comment hygiene
-   (`make check-comment-hygiene`), documentation compliance, task
-   compression, and promotion.
-3. During implementation:
-   a. implement and validate the plan;
-   b. promote all accepted durable design knowledge into the
-      appropriate `openspec/specs/<subsystem>/spec.md` or, for
-      repository-wide concerns, `ARCHITECTURE.md`;
-   c. update permanent documentation to describe the current system
-      rather than recording that a change was completed;
-   d. remove temporary, migration-oriented, and changelog-style
-      commentary from production code;
-   e. ensure production comments describe present intent, invariants,
+   amend the implementation plan. Identify the exact files affected
+   by each accepted design decision. End the plan with the closeout
+   task defined in `openspec/README.md#plan-closeout-requirements`.
+   Update the active `openspec/changes/<change>/` documents and
+   return a packaged fileset.
+3. During implementation
+   a. implement the plan.
+   b. run tests covering all code changes.
+   c. pause for design review if the plan premise is invalidated by
+      discovered code.
+   d. ensure production comments describe present intent, invariants,
       and constraints and reference only stable permanent documentation
-      when broader context is required;
-   f. complete the change's design-promotion record, mapping material
-      decisions to their permanent documentation locations.
+      when broader context is required.
 
 `openspec/changes` is the temporary proposal, discussion, planning, and
 migration layer. Production code must not reference it — see
