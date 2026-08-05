@@ -490,11 +490,11 @@ class TestSiteCapacityBuckets:
         assert result == {}
 
     def test_includes_a_site_with_a_loaded_empty_projection(self):
-        """The exact case Section 5's own review caught: a site whose
-        capacity-bucket family loaded successfully with zero rows must
-        be included as an empty list, not excluded the way an unloaded
-        site is -- reconciler's fungible-mode row builder relies on this
-        to trust an authoritative zero instead of falling back."""
+        """A site whose capacity-bucket family loaded successfully with
+        zero rows must be included as an empty list, not excluded the
+        way an unloaded site is -- reconciler's fungible-mode row builder
+        relies on this to trust an authoritative zero instead of falling
+        back."""
         fake_cache = MagicMock()
         fake_cache.capacity_buckets.view.return_value.value = []
         with patch(

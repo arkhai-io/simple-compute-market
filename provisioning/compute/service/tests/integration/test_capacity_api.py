@@ -427,11 +427,11 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
 async def test_site_capacity_buckets_projection_through_the_real_client(
     capacity: CapacityApi,
 ):
-    """The typed-client wire-contract gap Section 5's review round found:
-    `resource_pool_projection()` (above) is proven through the real
-    `SiteCapacityClient`, but the sibling `capacity_bucket_projection()`
-    -- which Section 5 makes a first-class publication input for the
-    first time -- had no equivalent. Proves the full path:
+    """Proves the real `SiteCapacityClient.capacity_bucket_projection()`
+    wire contract end to end, mirroring `resource_pool_projection()`'s own
+    proof above -- capacity buckets are a first-class fungible-mode
+    publication input and need the same real-client coverage. Proves the
+    full path:
 
     two registered resources with different availability
         -> real /api/v1/capacity/site-capacity-buckets route

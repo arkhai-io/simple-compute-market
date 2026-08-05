@@ -261,7 +261,8 @@ def test_claim_carries_dimensions_when_listing_declares_a_shape():
 def test_claim_omits_undeclared_dimensions_for_older_listings():
     """A listing published before vcpu_count/ram_gb/disk_gb existed (or
     that simply never set them) still produces a valid claim -- gpu_count
-    alone, exactly like every claim before this change."""
+    alone, the same shape any claim without a declared multidimensional
+    shape produces."""
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -416,11 +417,11 @@ async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
 async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_preference(
     tmp_path,
 ):
-    """The orchestration this section's own review round found untested:
-    lookup_pool_policy_tags -> capped_hold_seconds -> reserve(ttl_seconds=...)
-    as one real sequence, not just each piece proven independently. A
-    requested TTL of 900s, capped by a mapped pool's
-    max_reservation_hold_seconds=30, must reach reserve() as 30, not 900.
+    """The full acceptance-hold sequence as one real orchestration:
+    lookup_pool_policy_tags -> capped_hold_seconds -> reserve(ttl_seconds=...),
+    not just each piece proven independently. A requested TTL of 900s,
+    capped by a mapped pool's max_reservation_hold_seconds=30, must reach
+    reserve() as 30, not 900.
     """
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
     capacity = FakeCapacity(reserve_result=_hold())

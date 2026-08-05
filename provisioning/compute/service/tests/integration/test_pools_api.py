@@ -88,12 +88,10 @@ class TestCreatePool:
 
 
 class TestHoldPreferenceValidationThroughAdminApi:
-    """The write-side validation gap Section 5's review round found: unit
-    tests proved `ResourcePoolService`'s own validation directly, but
-    nothing proved an invalid `max_reservation_hold_seconds` is actually
-    rejected through the real pool-admin HTTP API a real operator uses --
-    the layer `PoolValidationError` -> `HTTPException(400)` mapping lives
-    at, not exercised by a direct service-level call.
+    """An invalid `max_reservation_hold_seconds` must be rejected through
+    the real pool-admin HTTP API a real operator uses, not only through a
+    direct service-level call -- proves the `PoolValidationError` ->
+    `HTTPException(400)` mapping this layer depends on.
     """
 
     async def test_create_pool_with_negative_hold_returns_400(self, client_and_queue):

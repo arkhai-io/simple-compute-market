@@ -1429,10 +1429,9 @@ class TestProjectedPoolRows:
         assert rows[0]["listing_mode"] == "specific_resource"
 
     def test_specific_resource_multi_member_yields_one_row_per_member(self):
-        """The real fix this section exists for: a multi-member pool
-        declared specific_resource must publish one independently
-        identified row per member, not collapse to a single aggregate
-        the way fungible mode does."""
+        """A multi-member pool declared specific_resource must publish
+        one independently identified row per member, not collapse to a
+        single aggregate the way fungible mode does."""
         rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
