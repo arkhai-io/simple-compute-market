@@ -5,6 +5,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -117,6 +119,38 @@ def site_id_for_listing(db_path: str, listing_id: str) -> str | None:
             return None
         row = conn.execute(
             "SELECT site_id FROM derived_compute_listings WHERE listing_id = ?",
+            (listing_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return str(row[0]) if row and row[0] else None
+
+
+def pool_id_for_listing(db_path: str, listing_id: str) -> str | None:
+    """The pool a listing is mapped to, or None if unmapped.
+
+    Mirrors ``site_id_for_listing`` -- ``derived_compute_listings`` is the
+    single source of truth for this mapping too.
+
+    For a listing recorded with only a ``resource_id`` (no genuine pool),
+    ``record_derived_listing`` backfills its ``pool_id`` column to the
+    resource_id itself (its own ``resolved_pool_id`` fallback, needed
+    because that column is used as a not-null join key) -- storage alone
+    cannot distinguish that case from a genuine pool, since both produce
+    an identical stored row shape. Callers looking up a *pool's*
+    ``policy_tags`` in the projection cache don't need that distinction
+    made here: a resource id looked up against the cache's
+    ``resource_pool_id`` field will not match any real pool in practice
+    (pool ids and physical resource ids are different id namespaces
+    throughout this system), so it naturally falls through to "no
+    policy_tags found" with no special-casing required.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        if not _has_derived_listings_site_column(conn):
+            return None
+        row = conn.execute(
+            "SELECT pool_id FROM derived_compute_listings WHERE listing_id = ?",
             (listing_id,),
         ).fetchone()
     finally:
@@ -415,63 +449,155 @@ def _projected_resource_usage(
     return _ProjectedResourceUsage(resource_id, gpu_model, total, available)
 
 
-def _projected_pool_row(
+def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
+    """One capacity bucket's available GPU count, or None if unusable.
+
+    `capacity_bucket_projection` collapses a resource with no `available`
+    field at all into an empty `available` dict rather than omitting the
+    resource -- so a present-but-empty dict means "this producer predates
+    per-resource availability," not "authoritative zero." Distinguishing
+    that (None, treated as unusable -- caller falls back) from a bucket
+    that genuinely reports zero available units (0, trusted) mirrors
+    ``_projected_resource_usage``'s own None-vs-zero handling for the
+    per-resource projection.
+    """
+    available = bucket.get("available") or {}
+    if "gpu_count" not in available:
+        return None
+    try:
+        return int(available["gpu_count"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _fungible_availability_from_buckets(
+    pool_id: str, capacity_buckets: list[Mapping[str, Any]],
+) -> tuple[int, int, str | None] | None:
+    """(max_member_available, available_gpu_count, gpu_model) from this
+    pool's matching capacity buckets, or None if no usable bucket data
+    exists for this pool (caller falls back to the resource-list walk).
+
+    Each bucket already represents a group of members with identical
+    current availability (``capacity_bucket_projection``'s own grouping
+    criteria), so the pool's per-member ceiling is the max across buckets,
+    not a per-resource max -- cheaper and, once bucket data exists, no
+    less precise, since resources are only ever split into more than one
+    bucket when their availability genuinely differs.
+    """
+    max_member_available = 0
+    available_gpu_count = 0
+    gpu_model: str | None = None
+    saw_usable_bucket = False
+    for bucket in capacity_buckets:
+        if str(bucket.get("resource_pool_id") or "") != pool_id:
+            continue
+        bucket_available = _bucket_gpu_count(bucket)
+        if bucket_available is None:
+            continue
+        saw_usable_bucket = True
+        bucket_count = int(bucket.get("resource_count") or 0)
+        available_gpu_count += bucket_available * bucket_count
+        if bucket_available > max_member_available:
+            max_member_available = bucket_available
+            gpu_model = (bucket.get("grouping_attributes") or {}).get("gpu_model")
+    if not saw_usable_bucket:
+        return None
+    return max_member_available, available_gpu_count, gpu_model
+
+
+def _projected_pool_rows(
     pool: Mapping[str, Any],
     *,
     site_id: str,
     home_site: str,
     local_pricing: Mapping[str, sqlite3.Row],
     member_availability: dict[tuple[str | None, str], int] | None,
-) -> dict[str, Any] | None:
-    """Build one pool_rows entry from one projected pool, or None if it
-    has no pool_id or (site_id != home_site, or no matching local row)
-    no pricing -- see `_local_pool_pricing`.
+    capacity_buckets: list[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Build zero or more pool_rows entries from one projected pool.
+
+    Returns an empty list if the pool has no pool_id or (site_id !=
+    home_site, or no matching local row) no pricing -- see
+    `_local_pool_pricing`. Otherwise returns exactly one row for a
+    ``fungible`` pool (matching this function's original, aggregated
+    shape), or one row per enabled member for a ``specific_resource``
+    pool -- a pool's ``listing_mode`` (from its projected `policy_tags`,
+    domain-resolved by `resolve_vm_listing_mode`) decides which shape
+    applies; it is not inferred from member count.
     """
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
-        return None
+        return []
     pricing = local_pricing.get(pool_id) if site_id == home_site else None
     if pricing is None:
-        return None
+        return []
 
-    total_gpu_count = 0
-    available_gpu_count = 0
-    max_member_available = 0
-    member_count = 0
-    single_resource_id: str | None = None
-    gpu_model: str | None = None
+    metadata = pool.get("pool_metadata") or {}
+    policy_tags = metadata.get("policy_tags") or {}
+    mode, explanation = resolve_vm_listing_mode(policy_tags)
+
+    usages: list[_ProjectedResourceUsage] = []
     for resource in pool.get("resources") or []:
         if not resource.get("enabled", True):
             continue
         usage = _projected_resource_usage(
             resource, site_id=site_id, member_availability=member_availability,
         )
-        if usage is None:
-            continue
-        if gpu_model is None and usage.gpu_model:
-            gpu_model = usage.gpu_model
-        total_gpu_count += usage.total
-        available_gpu_count += usage.available
-        max_member_available = max(max_member_available, usage.available)
-        member_count += 1
-        single_resource_id = usage.resource_id if member_count == 1 else None
+        if usage is not None:
+            usages.append(usage)
 
-    return {
+    base_fields = {
         "site_id": site_id,
         "pool_id": pool_id,
-        "gpu_model": gpu_model or pricing["gpu_model"],
         "region": pricing["region"],
         "sla": pricing["sla"] if pricing["sla"] is not None else 0.0,
-        "total_gpu_count": total_gpu_count,
-        "available_gpu_count": available_gpu_count,
-        "max_member_available_gpu_count": max_member_available,
         "min_price": pricing["min_price"],
         "token": pricing["token"],
         "accepted_escrows": pricing["accepted_escrows"],
         "max_duration_seconds": pricing["max_duration_seconds"],
-        "single_resource_id": single_resource_id,
-        "member_count": member_count,
+        "listing_mode": mode,
+        "listing_mode_explanation": explanation,
     }
+
+    if mode == "specific_resource":
+        return [
+            {
+                **base_fields,
+                "gpu_model": usage.gpu_model or pricing["gpu_model"],
+                "total_gpu_count": usage.total,
+                "available_gpu_count": usage.available,
+                "max_member_available_gpu_count": usage.available,
+                "single_resource_id": usage.resource_id,
+                "member_count": 1,
+            }
+            for usage in usages
+        ]
+
+    # fungible: exactly one aggregated row.
+    total_gpu_count = sum(usage.total for usage in usages)
+    resource_gpu_model = next((u.gpu_model for u in usages if u.gpu_model), None)
+    from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets or [])
+    if from_buckets is not None:
+        max_member_available, available_gpu_count, bucket_gpu_model = from_buckets
+        gpu_model = bucket_gpu_model or resource_gpu_model
+    else:
+        # No usable site_capacity_buckets data for this pool (family not
+        # supplied/loaded, or an older producer) -- fall back to the
+        # resource-list computation this function used before buckets
+        # existed, rather than silently publishing nothing.
+        max_member_available = max((usage.available for usage in usages), default=0)
+        available_gpu_count = sum(usage.available for usage in usages)
+        gpu_model = resource_gpu_model
+
+    return [{
+        **base_fields,
+        "gpu_model": gpu_model or pricing["gpu_model"],
+        "total_gpu_count": total_gpu_count,
+        "available_gpu_count": available_gpu_count,
+        "max_member_available_gpu_count": max_member_available,
+        "single_resource_id": None,
+        "member_count": len(usages),
+    }]
 
 
 def _pool_rows_from_projection(
@@ -480,6 +606,7 @@ def _pool_rows_from_projection(
     *,
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
@@ -491,17 +618,26 @@ def _pool_rows_from_projection(
     home_site pool with no local pricing row, is skipped entirely: no
     price means no listing, matching the "priceless" handling other
     publish flows already support rather than inventing a new one.
+
+    ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
+    projection (same per-site-list shape as ``site_pool_projection``),
+    used only for ``fungible``-mode pools' per-member availability ceiling
+    -- see ``_projected_pool_rows``. Omitting it (``None``, the default)
+    falls back to the pre-existing resource-list computation for every
+    fungible pool, not an error.
     """
     local_pricing = _local_pool_pricing(conn)
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
+        buckets_for_site = (site_capacity_buckets or {}).get(site_id) or []
         for pool in pools:
-            row = _projected_pool_row(
-                pool, site_id=site_id, home_site=home_site,
-                local_pricing=local_pricing, member_availability=member_availability,
+            pool_rows.extend(
+                _projected_pool_rows(
+                    pool, site_id=site_id, home_site=home_site,
+                    local_pricing=local_pricing, member_availability=member_availability,
+                    capacity_buckets=buckets_for_site,
+                )
             )
-            if row is not None:
-                pool_rows.append(row)
     return pool_rows
 
 def available_compute_slices(
@@ -510,6 +646,7 @@ def available_compute_slices(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -540,6 +677,18 @@ def available_compute_slices(
     out rather than published without a price -- matching the existing
     "priceless" handling other publish flows already support, not a new
     failure mode.
+
+    A pool's ``listing_mode`` (from its projected ``policy_tags``, only
+    available on the ``site_pool_projection`` path) decides its row shape:
+    ``fungible`` publishes one pool-keyed aggregated row; ``specific_resource``
+    publishes one resource-keyed row per enabled member, however many
+    members the pool has. ``site_capacity_buckets`` is the matching
+    ``site_capacity_buckets`` projection (same per-site-list shape as
+    ``site_pool_projection``) and, when supplied, sources a ``fungible``
+    pool's per-member availability ceiling instead of a resource-list max
+    -- see ``_projected_pool_rows``. Only takes effect on the projection
+    path; the local-table fallback has no ``policy_tags``/bucket source
+    and is unaffected by either parameter.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
@@ -548,6 +697,7 @@ def available_compute_slices(
             pool_rows = _pool_rows_from_projection(
                 conn, site_pool_projection,
                 home_site=home_site, member_availability=member_availability,
+                site_capacity_buckets=site_capacity_buckets,
             )
         else:
             pool_rows = _pool_rows_from_local_tables(conn, member_availability)
@@ -595,6 +745,8 @@ def available_compute_slices(
                 "token": row.get("token"),
                 "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": row.get("max_duration_seconds"),
+                "listing_mode": row.get("listing_mode"),
+                "listing_mode_explanation": row.get("listing_mode_explanation"),
             })
     return out
 
@@ -605,11 +757,13 @@ def current_available_resource_keys(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> set[str]:
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -701,6 +855,7 @@ def stale_open_listing_ids(
     configured_site_count: int,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     """Open listing IDs whose requested slice no longer fits capacity.
 
@@ -720,6 +875,7 @@ def stale_open_listing_ids(
     available_keys = current_available_resource_keys(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
@@ -776,11 +932,13 @@ def closed_available_listing_ids(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     """Closed derived listing IDs whose requested slice fits capacity again."""
     available_keys = current_available_resource_keys(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
     if not available_keys:
         return []
@@ -822,7 +980,15 @@ def record_derived_listing(
     resolved_pool_id = pool_id or resource_id
     if not resolved_pool_id:
         raise ValueError("pool_id or resource_id is required")
-    use_pool_key = bool(pool_id and (resource_id is None or pool_id != resource_id))
+    # A resource-keyed candidate is any call that supplies a resource_id --
+    # pool_id's mere presence is not signal: pool_id and resource_id are
+    # always different id spaces (operator pool slug vs. physical resource
+    # id), so `pool_id != resource_id` is true whenever both are supplied,
+    # regardless of listing_mode. This must key on `resource_id is None`,
+    # matching `available_compute_slices`' own `is_fungible_pool` meaning
+    # exactly, or multiple specific_resource listings from the same pool
+    # collide onto one derivation_key and silently overwrite each other.
+    use_pool_key = pool_id is not None and resource_id is None
     derivation_key = (
         listing_pool_key(site_id, resolved_pool_id, gpu_count)
         if use_pool_key

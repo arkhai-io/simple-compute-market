@@ -647,6 +647,124 @@ pools:
         with pytest.raises(PoolValidationError):
             svc.import_pools("other_key: []")
 
+    def test_invalid_hold_preference_rejected(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      max_reservation_hold_seconds: -5
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        assert "invalid_hold_preference" in {p.code for p in response.problems}
+
+    def test_valid_hold_preference_accepted(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      max_reservation_hold_seconds: 120
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is True
+        assert response.diff is not None
+
+
+class TestHoldPreferenceValidationOnIndividualPoolWrites:
+    """The bulk YAML path (above) and these individual CRUD endpoints must
+    reject the same invalid values -- an operator must not be able to
+    bypass validation by choosing one surface over the other."""
+
+    def test_create_pool_with_negative_hold_raises(self, svc):
+        with pytest.raises(PoolValidationError):
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    policy_tags={"max_reservation_hold_seconds": -1},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert svc.list_pools() == []
+
+    def test_create_pool_with_valid_hold_succeeds(self, svc):
+        pool = svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"max_reservation_hold_seconds": 60},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        assert pool.policy_tags == {"max_reservation_hold_seconds": 60}
+
+    def test_replace_pool_with_invalid_hold_raises_and_does_not_change_stored_metadata(
+        self, svc,
+    ):
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"max_reservation_hold_seconds": 60},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(PoolValidationError):
+            svc.replace_pool(
+                "hetzner-eu",
+                PoolReplace(
+                    label="Hetzner EU",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags={"max_reservation_hold_seconds": "soon"},
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert svc.get_pool("hetzner-eu").policy_tags == {
+            "max_reservation_hold_seconds": 60,
+        }
+
+    def test_update_pool_with_invalid_hold_raises(self, svc):
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(PoolValidationError):
+            svc.update_pool(
+                "hetzner-eu",
+                PoolUpdate(policy_tags={"max_reservation_hold_seconds": -30}),
+            )
+
+    def test_update_pool_omitting_policy_tags_skips_hold_validation(self, svc):
+        """update_pool's policy_tags is optional -- omitting it entirely
+        must not trigger hold validation against an absent value."""
+        svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        pool = svc.update_pool("hetzner-eu", PoolUpdate(label="Renamed"))
+        assert pool.label == "Renamed"
+
 
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:

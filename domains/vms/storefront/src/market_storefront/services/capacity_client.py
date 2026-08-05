@@ -178,10 +178,12 @@ def _make_listing_reconcile_subscriber(
             if bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False))
             else None
         )
+        buckets = site_capacity_buckets() if projection is not None else None
         if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path, home_site=home_site, configured_site_count=len(sites),
                 member_availability=availability, site_pool_projection=projection,
+                site_capacity_buckets=buckets,
             )
             if closed:
                 stage_event(
@@ -195,6 +197,7 @@ def _make_listing_reconcile_subscriber(
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db_path, home_site=home_site, member_availability=availability,
                 site_pool_projection=projection,
+                site_capacity_buckets=buckets,
             )
             if reopened:
                 stage_event(
@@ -487,6 +490,25 @@ def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
     for site, caches in projection_caches().items():
         value = caches.resource_pools.view().value
+        if value is not None:
+            result[site] = value
+    return result
+
+
+def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
+    """Grouped capacity-bucket rows per site, same cache/inclusion rule as
+    ``site_pool_projection`` (above) -- only a site whose capacity-bucket
+    family has ever loaded contributes, including an authoritative empty
+    list, for the same reason: `reconciler`'s fungible-mode row builder
+    (`_projected_pool_rows`) must be able to tell "no bucket data yet" from
+    "genuinely zero buckets" and falls back to its own resource-list
+    computation only in the former case.
+    """
+    from market_storefront.services.site_projection_cache import projection_caches
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for site, caches in projection_caches().items():
+        value = caches.capacity_buckets.view().value
         if value is not None:
             result[site] = value
     return result

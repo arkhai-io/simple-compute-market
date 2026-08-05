@@ -205,6 +205,42 @@ def _site_pool_projection_sync() -> dict[str, list[dict[str, Any]]] | None:
     return projection or None
 
 
+def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
+    """Grouped capacity-bucket projection per site, fetched synchronously
+    for CLI flows -- same no-caching rationale as ``_site_pool_projection_sync``
+    (above), used only to source a fungible pool's per-member availability
+    ceiling (``reconciler._projected_pool_rows``); an unusable/absent
+    fetch here falls back to that function's own resource-list computation
+    rather than failing the publish round.
+    """
+    import httpx
+
+    from market_storefront.services.capacity_client import _capacity_settings
+
+    try:
+        sites, admin_key, _ = _capacity_settings()
+    except Exception:
+        return None
+    headers = {"X-Admin-Key": admin_key} if admin_key else {}
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for site_name, url in sites.items():
+        try:
+            with httpx.Client(timeout=10) as http:
+                resp = http.get(
+                    f"{url}/api/v1/capacity/site-capacity-buckets", headers=headers,
+                )
+                resp.raise_for_status()
+                rows = resp.json().get("capacity_buckets") or []
+        except Exception as exc:
+            typer.echo(
+                f"[capacity] site {site_name!r} capacity-bucket fetch failed: {exc}",
+                err=True,
+            )
+            continue
+        buckets[site_name] = rows
+    return buckets or None
+
+
 def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     """Aggregated site availability, fetched synchronously for CLI flows.
 
@@ -237,9 +273,13 @@ def _available_resources(db_path: str) -> list[dict]:
     home_site, _ = _site_topology_sync()
     if home_site is None:
         return []
+    projection = _site_pool_projection_if_enabled()
     return available_compute_slices(
         db_path, home_site=home_site, member_availability=_member_availability_sync(),
-        site_pool_projection=_site_pool_projection_if_enabled(),
+        site_pool_projection=projection,
+        site_capacity_buckets=(
+            _site_capacity_buckets_sync() if projection is not None else None
+        ),
     )
 
 
@@ -273,10 +313,14 @@ def _stale_open_listing_ids(db_path: str) -> list[str]:
     if availability is None:
         # No authority answered — closing on ignorance over-closes.
         return []
+    projection = _site_pool_projection_if_enabled()
     return stale_open_listing_ids(
         db_path, home_site=home_site, configured_site_count=configured_site_count,
         member_availability=availability,
-        site_pool_projection=_site_pool_projection_if_enabled(),
+        site_pool_projection=projection,
+        site_capacity_buckets=(
+            _site_capacity_buckets_sync() if projection is not None else None
+        ),
     )
 
 

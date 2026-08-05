@@ -42,6 +42,10 @@ A storefront's derived-listing mapping (`derived_compute_listings`, `derived_bar
 - **WHEN** a `site_id`, `pool_id`, or `resource_id` value contains a character that would otherwise separate fields in a naively joined key
 - **THEN** the resulting derivation key remains distinct from any other combination of values that could produce the same joined string
 
+#### Scenario: Two specific-resource candidates share a pool
+- **WHEN** a multi-member pool publishes more than one `specific_resource` candidate, each naming a different physical resource
+- **THEN** each candidate's derivation key is resource-keyed and distinct, and recording one candidate's mapping does not overwrite another's
+
 ### Requirement: Site-pinned claim routing
 A capacity claim for a listing with a known site mapping MUST be routed to exactly that site, with no fallback to a different site on refusal or error — this applies to every listing with a site mapping, whether the underlying capacity is fungible (pool-derived) or pinned to a specific physical resource, never only to resource-pinned listings. A listing with no recorded site mapping MAY be routed by placement policy across configured sites.
 
@@ -52,6 +56,27 @@ A capacity claim for a listing with a known site mapping MUST be routed to exact
 #### Scenario: A mapped site refuses or errors
 - **WHEN** a listing's mapped site refuses the claim or the request to that site fails
 - **THEN** the claim is not retried against a different configured site
+
+### Requirement: Domain-owned publication and hold hints
+A storefront domain MAY interpret a projected pool's `listing_mode` and `max_reservation_hold_seconds` policy tags. Each domain MUST own its accepted `listing_mode` values and structural default; an absent or unrecognized value MUST fall back to that default with an operator-visible explanation rather than failing projection ingestion or blocking publication. A cooperating storefront MUST treat a valid `max_reservation_hold_seconds` as an advisory upper bound on its own requested reservation-hold TTL — it MUST NOT change what the site ledger itself enforces, and an unresolvable or invalid preference MUST leave the caller's requested TTL unchanged rather than block hold placement.
+
+A `fungible` pool's publishable capacity range is bounded by what a single member can currently satisfy, never by a sum across members, and MUST be sourced from grouped `site_capacity_buckets` data when it is available; a `specific_resource` pool publishes one independently identified, independently reservable listing candidate per currently enabled member, regardless of member count. No listing/hold hint's projected value may be persisted into storefront-local storage — a consumer reads it live from the current projection each time it is needed.
+
+#### Scenario: Listing mode is absent or invalid
+- **WHEN** a projected pool omits `listing_mode` or supplies a value unsupported by the selected domain
+- **THEN** publication uses the domain's structural default and exposes an operator-visible explanation without failing projection ingestion
+
+#### Scenario: A fungible pool's members have unequal availability
+- **WHEN** a fungible pool's members currently have different available capacity
+- **THEN** the storefront publishes candidate slice sizes no larger than the largest currently available single member, not a sum across members
+
+#### Scenario: A specific-resource pool has more than one member
+- **WHEN** a pool resolves to `specific_resource` and has multiple currently enabled members
+- **THEN** the storefront derives one listing candidate per member rather than one pooled candidate
+
+#### Scenario: Hold preference is shorter than storefront policy
+- **WHEN** a valid positive `max_reservation_hold_seconds` is lower than the storefront's configured acceptance-hold TTL
+- **THEN** the storefront requests no more than the projected preference while live site admission remains authoritative
 
 ### Requirement: Domain publication capability
 A domain that supports seller publication MUST provide its publication source and listing interpretation through the domain contract while registry fan-out remains schema-opaque core orchestration.
@@ -100,5 +125,6 @@ A storefront SHALL load the resource-pool and capacity-bucket projections at sta
 - Resource-count diagnosis: `domains/vms/storefront/src/market_storefront/services/system_service.py` and `e2e-tests/tests/smoke/test_storefront_smoke.py`.
 - Site-scoped derivation keys and collision resistance (VM and bare-metal): `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/bare_metal/tests/test_publication.py`, and `domains/bare_metal/tests/test_storefront_publication.py`.
 - Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin, negotiation-hold, and settlement/fulfillment entry points: `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, and `domains/vms/storefront/tests/unit/test_settlement_jobs.py`.
+- Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`, and `domains/bare_metal/tests/test_listing_mode.py`.
 
 Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.

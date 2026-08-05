@@ -20,6 +20,7 @@ dependencies = [
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
+  "arkhai-kit-resource-pools",
   "arkhai-vms>=0.2.0",
 ]
 

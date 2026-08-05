@@ -14,6 +14,7 @@ reinit:
 	--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config   --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy   --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
 	--upgrade-package arkhai-vms   --reinstall-package arkhai-vms
 
 test: reinit
