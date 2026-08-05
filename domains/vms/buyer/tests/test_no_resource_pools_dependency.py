@@ -1,17 +1,12 @@
-"""Regression test for a real bug found during POOLS-8 Section 6 review:
-`domains.vms.listings.reconciler` eagerly constructed a
-`PoolHintResolutionSettings()` default at its own module-import time,
-whose `__post_init__` imported `domains.vms.listings.pricing_resolution`,
-which imported `market_resource_pools.hints` at *its* module level --
-so merely importing `domains.vms.listings` (which this package's own
-`buy_cli.py`/`listing_cli.py` do, for unrelated helpers) transitively
-loaded `market_resource_pools`, even though nothing in the buyer
-distribution needs a resource-pools dependency at all. Confirmed by a
-real failure with `market_resource_pools` genuinely absent from the
-path before the fix; this test pins it going forward using a directly
-observable signal (the module was never loaded) rather than requiring
-that fragile absent-dependency setup in every future test run, since
-`market_resource_pools` may legitimately be installed in this
+"""Regression test: importing `domains.vms.listings` must never transitively
+load `market_resource_pools`. Any consumer of this package that only needs
+unrelated buyer-side helpers (e.g. `buy_cli.py`/`listing_cli.py`) has no
+reason to depend on `kit/resource-pools` at all -- if a module-level import
+anywhere in `domains.vms.listings.reconciler` (or anything it imports at
+its own module level) ever pulls in `market_resource_pools`, this test
+pins that as a regression rather than requiring the fragile "package
+genuinely absent from the environment" setup that first caught this,
+since `market_resource_pools` may legitimately be installed in this
 environment for other reasons.
 """
 

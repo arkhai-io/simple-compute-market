@@ -394,11 +394,9 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
 async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy_tags(
     capacity: CapacityApi, client_and_queue,
 ):
-    """POOLS-8 Section 6's region/SLA/pricing hints need no new wire
-    shape -- they're just more keys inside the already-projected
-    `policy_tags` dict (see the pool-metadata test above) -- but they
-    hadn't been proven through the real producer -> client path this
-    specific way before. Proves the full path:
+    """`region`/`sla`/`pricing` need no new wire shape -- they're just
+    more keys inside the already-projected `policy_tags` dict (see the
+    pool-metadata test above). Proves the full path:
 
     ProvisioningClient.create_pool(policy_tags={region, sla, pricing})
         -> real /api/v1/pools API -> real ResourcePoolService -> DB
