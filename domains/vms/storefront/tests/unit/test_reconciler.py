@@ -14,7 +14,9 @@ import sqlite3
 
 import pytest
 
+from domains.vms.listings.pricing_resolution import GpuPricingFields
 from domains.vms.listings.reconciler import (
+    PoolHintResolutionSettings,
     _accumulate_capacity_pool_member,
     _fungible_availability_from_buckets,
     _member_available_units,
@@ -1354,6 +1356,230 @@ class TestProjectedPoolRows:
             member_availability=None, capacity_buckets=None,
         )
         assert rows[0]["gpu_model"] == "H100"
+
+    # -- region/sla hint resolution ---------------------------------------
+
+    def test_region_hint_overrides_local_pricing_fallback(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"region": "Nevada, US"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(region="us-east")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["region"] == "Nevada, US"
+
+    def test_region_falls_back_to_local_pricing_without_a_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(region="us-east")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["region"] == "us-east"
+
+    def test_sla_storefront_override_wins_over_pool_hint_by_default(self):
+        """No hint_resolution passed -- the default settings apply, and
+        the local pricing row's sla acts as the storefront's per-pool
+        override, taking precedence over any pool-declared hint
+        regardless of the (default-closed) trust gate."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 50.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=99.9)},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["sla"] == 99.9
+
+    def test_sla_pool_hint_used_when_no_local_override_and_gate_open(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 95.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=0.0,
+            ),
+        )
+        assert rows[0]["sla"] == 95.0
+
+    def test_sla_pool_hint_ignored_when_gate_closed_even_with_no_override(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 95.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=False, default_sla=12.5,
+            ),
+        )
+        assert rows[0]["sla"] == 12.5
+
+    def test_sla_falls_back_to_config_default_with_no_override_or_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=42.0,
+            ),
+        )
+        assert rows[0]["sla"] == 42.0
+
+    # -- pricing hint resolution ------------------------------------------
+
+    def test_pricing_storefront_override_wins_over_pool_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["min_price"] == "10"
+
+    def test_pricing_pool_hint_used_when_no_storefront_override(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["min_price"] == "5.00"
+
+    def test_pricing_falls_back_to_per_model_config_default(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_defaults_by_model={
+                    "H100": GpuPricingFields(min_price="3.00"),
+                },
+            ),
+        )
+        assert rows[0]["min_price"] == "3.00"
+
+    def test_pricing_falls_back_to_flat_config_default_as_last_resort(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_flat_default=GpuPricingFields(min_price="1.00"),
+            ),
+        )
+        assert rows[0]["min_price"] == "1.00"
+
+    def test_specific_resource_multi_member_prices_each_by_its_own_model(self):
+        """Two members with different GPU models must resolve pricing
+        independently -- proving pricing resolution is per-row, not
+        computed once for the whole pool."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2", "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "A100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {
+                        "listing_mode": "specific_resource",
+                        "pricing": {
+                            "gpu": {
+                                "H100": {"min_price": "5.00"},
+                                "A100": {"min_price": "3.00"},
+                            },
+                        },
+                    },
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+        )
+        by_resource = {row["single_resource_id"]: row for row in rows}
+        assert by_resource["res-1"]["min_price"] == "5.00"
+        assert by_resource["res-2"]["min_price"] == "3.00"
 
     # -- listing_mode resolution --------------------------------------
 

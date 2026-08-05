@@ -3,10 +3,17 @@ from __future__ import annotations
 from market_resource_pools.hints import (
     LISTING_MODE_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    PRICING_POLICY_TAG,
+    REGION_POLICY_TAG,
+    SLA_POLICY_TAG,
     capped_hold_seconds,
     max_reservation_hold_seconds,
     raw_listing_mode,
+    raw_pricing,
+    raw_region,
+    sla_value,
     validate_hold_preference,
+    validate_sla_preference,
 )
 
 
@@ -123,5 +130,73 @@ class TestValidateHoldPreference:
 
     def test_other_keys_do_not_affect_validity(self):
         assert validate_hold_preference(
+            {LISTING_MODE_POLICY_TAG: "whatever-a-domain-wants"},
+        ) == []
+
+
+class TestRawRegion:
+    def test_absent_returns_none(self):
+        assert raw_region({}) is None
+
+    def test_present_returned_unvalidated(self):
+        assert raw_region({REGION_POLICY_TAG: "California, US"}) == "California, US"
+        # No validity rule enforced here -- anything a domain wants to
+        # interpret is passed through as-is.
+        assert raw_region({REGION_POLICY_TAG: 12345}) == 12345
+
+
+class TestRawPricing:
+    def test_absent_returns_none(self):
+        assert raw_pricing({}) is None
+
+    def test_present_returned_unvalidated(self):
+        pricing = {"gpu": {"H100": {"min_price": "5.00"}}}
+        assert raw_pricing({PRICING_POLICY_TAG: pricing}) == pricing
+
+
+class TestSlaValue:
+    def test_absent_returns_none(self):
+        assert sla_value({}) is None
+
+    def test_valid_nonnegative_number_returned(self):
+        assert sla_value({SLA_POLICY_TAG: 99.9}) == 99.9
+
+    def test_valid_int_returned_as_float(self):
+        assert sla_value({SLA_POLICY_TAG: 100}) == 100.0
+
+    def test_zero_is_valid(self):
+        assert sla_value({SLA_POLICY_TAG: 0}) == 0.0
+
+    def test_negative_returns_none(self):
+        assert sla_value({SLA_POLICY_TAG: -0.1}) is None
+
+    def test_non_numeric_returns_none(self):
+        assert sla_value({SLA_POLICY_TAG: "99.9"}) is None
+
+    def test_bool_returns_none(self):
+        assert sla_value({SLA_POLICY_TAG: True}) is None
+
+
+class TestValidateSlaPreference:
+    def test_absent_is_valid(self):
+        assert validate_sla_preference({}) == []
+
+    def test_nonnegative_number_is_valid(self):
+        assert validate_sla_preference({SLA_POLICY_TAG: 99.9}) == []
+
+    def test_zero_is_valid(self):
+        assert validate_sla_preference({SLA_POLICY_TAG: 0}) == []
+
+    def test_negative_is_invalid(self):
+        assert len(validate_sla_preference({SLA_POLICY_TAG: -1})) == 1
+
+    def test_string_is_invalid(self):
+        assert len(validate_sla_preference({SLA_POLICY_TAG: "99.9"})) == 1
+
+    def test_bool_is_invalid(self):
+        assert len(validate_sla_preference({SLA_POLICY_TAG: False})) == 1
+
+    def test_other_keys_do_not_affect_validity(self):
+        assert validate_sla_preference(
             {LISTING_MODE_POLICY_TAG: "whatever-a-domain-wants"},
         ) == []

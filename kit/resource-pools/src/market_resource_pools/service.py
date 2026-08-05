@@ -8,7 +8,12 @@ from typing import Any, Callable, Mapping, Optional
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
-from .hints import MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG, validate_hold_preference
+from .hints import (
+    MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    SLA_POLICY_TAG,
+    validate_hold_preference,
+    validate_sla_preference,
+)
 from .pool_config_handler import PoolConfigHandler
 from .pools import (
     PoolCreate,
@@ -107,17 +112,19 @@ class ResourcePoolService:
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
 
-    def _require_valid_hold_preference(self, policy_tags: Mapping[str, Any]) -> None:
-        """Reject an invalid `max_reservation_hold_seconds` before any write.
+    def _require_valid_policy_tag_hints(self, policy_tags: Mapping[str, Any]) -> None:
+        """Reject an invalid `max_reservation_hold_seconds` or `sla` before
+        any write.
 
         Shared by every individual-pool write path (`create_pool`,
-        `replace_pool`, `update_pool`) so this hint is enforced identically
-        regardless of which one an operator uses -- the bulk YAML
-        pool-document path (`_validate_document`) enforces the same rule
-        via the same `hints.validate_hold_preference`, independently, since
-        it reports problems rather than raising.
+        `replace_pool`, `update_pool`) so these hints are enforced
+        identically regardless of which one an operator uses -- the bulk
+        YAML pool-document path (`_validate_document`) enforces the same
+        rules via the same `hints.validate_hold_preference`/
+        `validate_sla_preference`, independently, since it reports problems
+        rather than raising.
         """
-        problems = validate_hold_preference(policy_tags)
+        problems = validate_hold_preference(policy_tags) + validate_sla_preference(policy_tags)
         if problems:
             raise PoolValidationError("; ".join(problems))
 
@@ -182,7 +189,7 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._require_valid_hold_preference(data.policy_tags)
+        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -200,7 +207,7 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._require_valid_hold_preference(data.policy_tags)
+        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -216,7 +223,7 @@ class ResourcePoolService:
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
         if data.policy_tags is not None:
-            self._require_valid_hold_preference(data.policy_tags)
+            self._require_valid_policy_tag_hints(data.policy_tags)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             provider = data.provider or pool.provider
@@ -400,6 +407,15 @@ class ResourcePoolService:
                             path=f"{base}.policy_tags.{MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG}",
                             code="invalid_hold_preference",
                             message=hold_problem,
+                        )
+                    )
+                    entry_valid = False
+                for sla_problem in validate_sla_preference(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{SLA_POLICY_TAG}",
+                            code="invalid_sla_preference",
+                            message=sla_problem,
                         )
                     )
                     entry_valid = False

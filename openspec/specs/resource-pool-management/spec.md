@@ -128,7 +128,7 @@ Resource-pool management MUST expose a session-scoped pool lookup that loads pro
 
 ### Requirement: Domain-neutral publication and hold hints
 
-Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_mode` and `max_reservation_hold_seconds` without defining domain-specific listing-mode values in this shared capability. Unknown policy tags MUST remain forward-compatible opaque metadata. `pool_id` is a site-local operator slug, never made globally unique; every durable or public reference to a pool keys on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.
+Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_mode`, `max_reservation_hold_seconds`, `region`, `sla`, and `pricing` without defining domain-specific listing-mode, region, SLA, or pricing values in this shared capability. Unknown policy tags MUST remain forward-compatible opaque metadata. `pool_id` is a site-local operator slug, never made globally unique; every durable or public reference to a pool keys on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.
 
 #### Scenario: Domain interprets listing mode
 
@@ -140,18 +140,23 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 - **WHEN** a storefront version does not recognize one projected policy tag
 - **THEN** it ignores that tag without rejecting the Resource Pool or changing authoritative admission
 
-### Requirement: Reservation hold preference validation
+### Requirement: Reservation hold and SLA preference validation
 
-A Resource Pool management surface that accepts `max_reservation_hold_seconds` MUST require a nonnegative integer and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
+A Resource Pool management surface that accepts `max_reservation_hold_seconds` or `sla` MUST require a nonnegative number for either and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
 
 #### Scenario: Operator supplies an invalid hold preference
 
 - **WHEN** an operator submits a negative, fractional, or nonnumeric hold preference through any pool-write surface
 - **THEN** Resource Pool validation rejects the update without changing the stored policy metadata
 
+#### Scenario: Operator supplies an invalid SLA value
+
+- **WHEN** an operator submits a negative or nonnumeric `sla` through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy metadata, the same as an invalid hold preference
+
 ## Evidence
 
-- Domain-neutral hint keys, generic read-side resolution, and write-side hold-preference validation (both the bulk YAML import path and the individual pool admin API): `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py::TestHoldPreferenceValidationOnIndividualPoolWrites`.
+- Domain-neutral hint keys, generic read-side resolution, and write-side hold-preference and SLA-preference validation (both the bulk YAML import path and the individual pool admin API): `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py::TestHoldPreferenceValidationOnIndividualPoolWrites`.
 
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `domains/vms/provisioning/service/src/tests/integration/test_pools_api.py`.

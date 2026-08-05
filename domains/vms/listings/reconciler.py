@@ -535,6 +535,47 @@ def _fungible_availability_from_buckets(
     return 0, 0, None
 
 
+@dataclass(frozen=True)
+class PoolHintResolutionSettings:
+    """Storefront-wide policy for how much a projected pool's own
+    declared hints are trusted, as opposed to the storefront's own
+    configured/overridden values.
+
+    Defaults are the conservative posture for a brand-new trust decision
+    with no existing behavior to preserve: `accept_pool_declared_sla`
+    defaults `False` (a site's self-reported SLA claim is not published
+    unless a storefront operator explicitly opts in), matching this
+    being new capability a storefront must choose to enable, not a
+    migration of something already trusted today.
+
+    `gpu_pricing_defaults_by_model`/`gpu_pricing_flat_default` are tier 1
+    of the pricing precedence chain (see
+    `domains.vms.listings.pricing_resolution`) -- no trust decision
+    involved, since config defaults are the storefront operator's own
+    values, not a site's; defaulted here only so every caller doesn't
+    need to construct empty ones.
+    """
+
+    accept_pool_declared_sla: bool = False
+    default_sla: float = 0.0
+    gpu_pricing_defaults_by_model: Mapping[str, Any] = None  # type: ignore[assignment]
+    gpu_pricing_flat_default: Any = None
+
+    def __post_init__(self) -> None:
+        # dataclass(frozen=True) needs object.__setattr__ to fill in
+        # mutable-default-free placeholders after construction, since a
+        # bare `{}`/instance can't be a dataclass field default.
+        if self.gpu_pricing_defaults_by_model is None:
+            object.__setattr__(self, "gpu_pricing_defaults_by_model", {})
+        if self.gpu_pricing_flat_default is None:
+            from domains.vms.listings.pricing_resolution import GpuPricingFields
+
+            object.__setattr__(self, "gpu_pricing_flat_default", GpuPricingFields())
+
+
+_DEFAULT_POOL_HINT_RESOLUTION_SETTINGS = PoolHintResolutionSettings()
+
+
 def _projected_pool_rows(
     pool: Mapping[str, Any],
     *,
@@ -543,6 +584,7 @@ def _projected_pool_rows(
     local_pricing: Mapping[str, sqlite3.Row],
     member_availability: dict[tuple[str | None, str], int] | None,
     capacity_buckets: list[Mapping[str, Any]] | None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
 
@@ -584,38 +626,71 @@ def _projected_pool_rows(
     # ever calling into publish-candidate generation, which is the only
     # thing that actually needs it.
     from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+    from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
+    from domains.vms.listings.pricing_resolution import (
+        GpuPricingFields, resolve_gpu_pricing,
+    )
 
     structural_default = "specific_resource" if len(usages) == 1 else "fungible"
     mode, explanation = resolve_vm_listing_mode(
         policy_tags, structural_default=structural_default,
     )
 
+    region = resolve_region(policy_tags, fallback=pricing["region"])
+    sla = resolve_sla(
+        policy_tags,
+        accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,
+        storefront_override=pricing["sla"],
+        config_default=hint_resolution.default_sla,
+    )
+    storefront_pricing_override = GpuPricingFields(
+        min_price=pricing["min_price"],
+        token=pricing["token"],
+        max_duration_seconds=pricing["max_duration_seconds"],
+        accepted_escrows=pricing["accepted_escrows"],
+    )
+
+    def _resolved_pricing(gpu_model_for_pricing: str | None) -> GpuPricingFields:
+        # Pricing is resolved per GPU model, not once per pool -- the
+        # three-tier chain's middle and bottom tiers are both keyed by
+        # model, so this can't be folded into base_fields the way
+        # region/sla can (region/sla have no per-model dimension).
+        return resolve_gpu_pricing(
+            policy_tags,
+            gpu_model=gpu_model_for_pricing,
+            storefront_override=storefront_pricing_override,
+            config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
+            flat_default=hint_resolution.gpu_pricing_flat_default,
+        )
+
     base_fields = {
         "site_id": site_id,
         "pool_id": pool_id,
-        "region": pricing["region"],
-        "sla": pricing["sla"] if pricing["sla"] is not None else 0.0,
-        "min_price": pricing["min_price"],
-        "token": pricing["token"],
-        "accepted_escrows": pricing["accepted_escrows"],
-        "max_duration_seconds": pricing["max_duration_seconds"],
+        "region": region,
+        "sla": sla,
         "listing_mode": mode,
         "listing_mode_explanation": explanation,
     }
 
     if mode == "specific_resource":
-        return [
-            {
+        rows = []
+        for usage in usages:
+            resolved_gpu_model = usage.gpu_model or pricing["gpu_model"]
+            resolved_pricing = _resolved_pricing(resolved_gpu_model)
+            rows.append({
                 **base_fields,
-                "gpu_model": usage.gpu_model or pricing["gpu_model"],
+                "gpu_model": resolved_gpu_model,
+                "min_price": resolved_pricing.min_price,
+                "token": resolved_pricing.token,
+                "accepted_escrows": resolved_pricing.accepted_escrows,
+                "max_duration_seconds": resolved_pricing.max_duration_seconds,
                 "total_gpu_count": usage.total,
                 "available_gpu_count": usage.available,
                 "max_member_available_gpu_count": usage.available,
                 "single_resource_id": usage.resource_id,
                 "member_count": 1,
-            }
-            for usage in usages
-        ]
+            })
+        return rows
 
     # fungible: exactly one aggregated row.
     total_gpu_count = sum(usage.total for usage in usages)
@@ -634,9 +709,16 @@ def _projected_pool_rows(
         available_gpu_count = sum(usage.available for usage in usages)
         gpu_model = resource_gpu_model
 
+    resolved_gpu_model = gpu_model or pricing["gpu_model"]
+    resolved_pricing = _resolved_pricing(resolved_gpu_model)
+
     return [{
         **base_fields,
-        "gpu_model": gpu_model or pricing["gpu_model"],
+        "gpu_model": resolved_gpu_model,
+        "min_price": resolved_pricing.min_price,
+        "token": resolved_pricing.token,
+        "accepted_escrows": resolved_pricing.accepted_escrows,
+        "max_duration_seconds": resolved_pricing.max_duration_seconds,
         "total_gpu_count": total_gpu_count,
         "available_gpu_count": available_gpu_count,
         "max_member_available_gpu_count": max_member_available,
@@ -652,17 +734,21 @@ def _pool_rows_from_projection(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
     Structure (which pools/resources exist, GPU model) comes from the
-    projection, for every site present in it. Pricing/region/sla do not
-    exist in the projection at all (the provisioning service doesn't
-    track them) and are only ever looked up locally for home_site's own
-    pools -- see `_local_pool_pricing`. A non-home_site pool, or a
-    home_site pool with no local pricing row, is skipped entirely: no
-    price means no listing, matching the "priceless" handling other
-    publish flows already support rather than inventing a new one.
+    projection, for every site present in it. Region can come from the
+    projection's own `pool_metadata.policy_tags` hint; pricing and SLA's
+    storefront-override tier still come from the local
+    `compute_capacity_pools` table -- see `_local_pool_pricing` and
+    `domains.vms.listings.pool_descriptors`. Pricing/region/sla are only
+    ever looked up locally for home_site's own pools. A non-home_site
+    pool, or a home_site pool with no local pricing row, is skipped
+    entirely: no price means no listing, matching the "priceless"
+    handling other publish flows already support rather than inventing a
+    new one.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -693,6 +779,7 @@ def _pool_rows_from_projection(
                     pool, site_id=site_id, home_site=home_site,
                     local_pricing=local_pricing, member_availability=member_availability,
                     capacity_buckets=buckets_for_site,
+                    hint_resolution=hint_resolution,
                 )
             )
     return pool_rows
@@ -704,6 +791,7 @@ def available_compute_slices(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -746,6 +834,14 @@ def available_compute_slices(
     -- see ``_projected_pool_rows``. Only takes effect on the projection
     path; the local-table fallback has no ``policy_tags``/bucket source
     and is unaffected by either parameter.
+
+    ``hint_resolution`` controls how much a pool's own
+    projected ``region``/``sla`` hints are trusted relative to the
+    storefront's local `compute_capacity_pools` fallback/override values
+    -- see `domains.vms.listings.pool_descriptors`. Only takes effect on
+    the projection path, the same as ``site_pool_projection``/
+    ``site_capacity_buckets`` above; the local-table fallback has no hint
+    source to resolve against.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
@@ -755,6 +851,7 @@ def available_compute_slices(
                 conn, site_pool_projection,
                 home_site=home_site, member_availability=member_availability,
                 site_capacity_buckets=site_capacity_buckets,
+                hint_resolution=hint_resolution,
             )
         else:
             pool_rows = _pool_rows_from_local_tables(conn, member_availability)

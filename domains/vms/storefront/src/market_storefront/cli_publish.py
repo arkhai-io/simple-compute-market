@@ -269,6 +269,47 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     return view
 
 
+def _pool_hint_resolution_settings() -> Any:
+    """Build a `PoolHintResolutionSettings` from the storefront's own
+    `[pricing]` config. Local import -- `reconciler.py` is the only
+    thing that needs to know this dataclass's shape."""
+    from domains.vms.listings.pricing_resolution import GpuPricingFields
+    from domains.vms.listings.reconciler import PoolHintResolutionSettings
+    from market_storefront.utils.config import settings
+
+    pricing = getattr(settings, "pricing", None)
+
+    flat_default = GpuPricingFields(
+        min_price=(getattr(pricing, "default_min_price", "") or None),
+        token=(getattr(pricing, "default_token_address", "") or None),
+        max_duration_seconds=(
+            getattr(pricing, "default_max_duration_seconds", 0) or None
+        ),
+        accepted_escrows=None,
+    )
+
+    defaults_by_model: dict[str, GpuPricingFields] = {}
+    gpu_defaults = getattr(getattr(pricing, "defaults", None), "gpu", None)
+    if gpu_defaults:
+        for model, fields in dict(gpu_defaults).items():
+            fields = fields or {}
+            defaults_by_model[str(model)] = GpuPricingFields(
+                min_price=fields.get("min_price"),
+                token=fields.get("token"),
+                max_duration_seconds=fields.get("max_duration_seconds"),
+                accepted_escrows=fields.get("accepted_escrows"),
+            )
+
+    return PoolHintResolutionSettings(
+        accept_pool_declared_sla=bool(
+            getattr(pricing, "accept_pool_declared_sla", False),
+        ),
+        default_sla=float(getattr(pricing, "default_sla", 0.0) or 0.0),
+        gpu_pricing_defaults_by_model=defaults_by_model,
+        gpu_pricing_flat_default=flat_default,
+    )
+
+
 def _available_resources(db_path: str) -> list[dict]:
     home_site, _ = _site_topology_sync()
     if home_site is None:
@@ -280,6 +321,7 @@ def _available_resources(db_path: str) -> list[dict]:
         site_capacity_buckets=(
             _site_capacity_buckets_sync() if projection is not None else None
         ),
+        hint_resolution=_pool_hint_resolution_settings(),
     )
 
 

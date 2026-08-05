@@ -678,6 +678,37 @@ pools:
         assert response.valid is True
         assert response.diff is not None
 
+    def test_invalid_sla_rejected(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      sla: -1
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is False
+        assert response.diff is None
+        assert "invalid_sla_preference" in {p.code for p in response.problems}
+
+    def test_valid_sla_accepted(self, svc):
+        response = svc.validate_pools("""
+pools:
+  - id: default
+    label: Default Pool
+    provider: ansible
+    policy_tags:
+      sla: 99.9
+    provider_config:
+      playbook_path: playbooks/vm-operations.yaml
+      inventory_group: kvm_hosts
+""")
+        assert response.valid is True
+        assert response.diff is not None
+
 
 class TestHoldPreferenceValidationOnIndividualPoolWrites:
     """The bulk YAML path (above) and these individual CRUD endpoints must
@@ -764,6 +795,46 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
         )
         pool = svc.update_pool("hetzner-eu", PoolUpdate(label="Renamed"))
         assert pool.label == "Renamed"
+
+    def test_create_pool_with_negative_sla_raises(self, svc):
+        with pytest.raises(PoolValidationError):
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    policy_tags={"sla": -1},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert svc.list_pools() == []
+
+    def test_create_pool_with_valid_sla_succeeds(self, svc):
+        pool = svc.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"sla": 99.9},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        assert pool.policy_tags == {"sla": 99.9}
+
+    def test_create_pool_rejects_invalid_hold_and_sla_together(self, svc):
+        """Both problems surface, not just the first one found."""
+        with pytest.raises(PoolValidationError) as exc_info:
+            svc.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    policy_tags={"max_reservation_hold_seconds": -1, "sla": -1},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert "max_reservation_hold_seconds" in str(exc_info.value)
+        assert "sla" in str(exc_info.value)
 
 
 class _StubPoolConfigHandler:
