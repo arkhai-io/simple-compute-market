@@ -410,6 +410,43 @@ async def test_background_task_writes_ready_on_success(client):
 
 
 @pytest.mark.asyncio
+async def test_background_task_threads_the_listings_mapped_site_to_fulfillment(client):
+    """A listing already mapped to a site (derived_compute_listings)
+    must have that site_id reach the domain-agnostic fulfillment.fulfill
+    dispatch -- proves the site_id resolution added in
+    _run_settlement_job_bg actually reaches its call, not just that
+    fulfill_vm_obligation honors a site_id kwarg when given one."""
+    from domains.vms.listings.reconciler import record_derived_listing
+
+    await _seed_escrow_provisioning(client)
+    record_derived_listing(
+        client.db_path, listing_id="seller-ord-1", site_id="dc-mapped",
+        resource_id="res-1", gpu_count=2,
+    )
+    mock_fulfill = AsyncMock(return_value={
+        "status": "fulfilled",
+        "fulfillment_uid": "0xattest",
+        "connection_details": "ssh alice@vm1",
+        "tenant_credentials": {"password": "secret"},
+    })
+
+    with patch(
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
+        new=mock_fulfill,
+    ):
+        await _run_settlement_job_bg(
+            escrow_uid="0xescrow",
+            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            listing_id="seller-ord-1",
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+        )
+
+    assert mock_fulfill.call_args.kwargs["site_id"] == "dc-mapped"
+
+
+@pytest.mark.asyncio
 async def test_background_task_writes_failed_on_exception(client):
     await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))

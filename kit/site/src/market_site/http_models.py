@@ -1,7 +1,7 @@
 """Pydantic models for the site-authority capacity API.
 
 The ``/api/v1/capacity`` surface mirrors the
-``core_storefront.capacity.CapacityClient`` contract: claims and deal
+``core_storefront.capacity.SiteCapacityAuthority`` contract: claims and deal
 refs are opaque mappings (the claim speaks this site's resource-domain
 vocabulary, the deal ref carries the storefront's bookkeeping keys), and
 match/reservation payloads are returned verbatim as dicts so the remote

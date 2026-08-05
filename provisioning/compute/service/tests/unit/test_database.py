@@ -343,6 +343,25 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         assert ansible_config.playbook_path == "/configured/playbook.yaml"
         assert ansible_config.inventory_group == "legacy_hosts"
         assert ansible_config.extra_vars == {}
+        # VM size default columns are additive to a pre-existing row this
+        # migration chain itself created (the DEFAULT_POOL_ID backfill,
+        # above) -- confirms the migration actually adds real, queryable
+        # columns to an old-schema table, not just that the table exists.
+        assert ansible_config.default_vm_ram is None
+        assert ansible_config.default_vm_vcpus is None
+        assert ansible_config.default_vm_disk_size is None
+
+    ansible_pool_config_columns = {
+        column["name"] for column in inspector.get_columns("ansible_pool_configs")
+    }
+    assert {
+        "default_vm_ram", "default_vm_vcpus", "default_vm_disk_size",
+    }.issubset(ansible_pool_config_columns)
+
+    host_migration_columns = {
+        column["name"] for column in inspector.get_columns("hosts")
+    }
+    assert "gpu_model" in host_migration_columns
 
     with engine.begin() as connection:
         migration_ids = {
@@ -362,6 +381,8 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20260722_001_pools7_capacity_model_cutover",
         "20260724_001_legacy_vm_leases_to_fulfillment",
         "20260724_002_drop_vm_leases_table",
+        "20260803_001_ansible_pool_config_vm_size_defaults",
+        "20260804_001_hosts_gpu_model",
     }
 
 
@@ -390,6 +411,13 @@ def test_run_migrations_is_idempotent():
     assert ansible_columns.count("idempotency_key") == 1
     assert host_columns.count("public_host") == 1
     assert host_columns.count("pool_id") == 1
+    assert host_columns.count("gpu_model") == 1
+    ansible_pool_config_columns = [
+        column["name"] for column in inspector.get_columns("ansible_pool_configs")
+    ]
+    assert ansible_pool_config_columns.count("default_vm_ram") == 1
+    assert ansible_pool_config_columns.count("default_vm_vcpus") == 1
+    assert ansible_pool_config_columns.count("default_vm_disk_size") == 1
     assert "vm_leases" not in inspector.get_table_names()
     assert "site_allocations" not in inspector.get_table_names()
     assert reservation_columns.count("executor_kind") == 1
@@ -414,7 +442,7 @@ def test_run_migrations_is_idempotent():
         migration_count = connection.execute(
             text("SELECT COUNT(*) FROM schema_migrations")
         ).scalar_one()
-    assert migration_count == 11
+    assert migration_count == 13
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +468,7 @@ class TestCheckSchemaVersion:
         with engine.begin() as connection:
             connection.execute(text(
                 "DELETE FROM schema_migrations WHERE id = "
-                "'20260724_002_drop_vm_leases_table'"
+                "'20260804_001_hosts_gpu_model'"
             ))
         with pytest.raises(SchemaDriftError):
             check_schema_version(engine)

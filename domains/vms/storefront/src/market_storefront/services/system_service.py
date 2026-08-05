@@ -11,7 +11,7 @@ import httpx
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 
 import market_storefront.container as _container
 from market_storefront.utils.config import (
@@ -22,6 +22,19 @@ from market_storefront.utils.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _default_projection_status_provider() -> dict[str, Any]:
+    """Real production source for per-site projection load state.
+
+    A plain module-level function, not a bound import at class-body scope,
+    so it is only ever resolved when actually called — a caller that never
+    exercises `include_registry=True` pays no import cost, and a test can
+    substitute a fake via the constructor without patching this module.
+    """
+    from market_storefront.services.site_projection_cache import projection_status_summary
+
+    return projection_status_summary()
 
 
 # ---------------------------------------------------------------------------
@@ -36,9 +49,13 @@ class SystemService:
         *,
         sqlite_client,
         agent_id: str | None = None,
+        projection_status_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
+        self._projection_status_provider = (
+            projection_status_provider or _default_projection_status_provider
+        )
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -124,6 +141,10 @@ class SystemService:
                 result["resource_count"] = len(resources)
             except Exception:
                 result["resource_count"] = None
+            try:
+                result["site_projections"] = self._projection_status_provider()
+            except Exception:
+                result["site_projections"] = None
 
         return result
 

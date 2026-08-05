@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from core_storefront.site_projections import ProjectionCache, ProjectionIdentity
+from core_storefront.site_projections import ProjectionCache, ProjectionCacheView, ProjectionIdentity
 from market_storefront.services.capacity_client import build_capacity_client, remote_site_clients
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -45,6 +45,34 @@ _caches: dict[str, SiteProjectionCaches] = {}
 
 def projection_caches() -> dict[str, SiteProjectionCaches]:
     return dict(_caches)
+
+
+def projection_status_summary() -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-site, per-family projection load state for operator status reporting.
+
+    Reports state and identity only, never the cached payload itself --
+    callers needing the projection value use `projection_caches()`
+    directly. A missing site or a `not_loaded`/`unavailable`/`invalid`
+    state here means the projection has not yet been confirmed; it must
+    never be read as authoritative empty capacity.
+    """
+    return {
+        site: {
+            "resource_pool": _view_summary(caches.resource_pools.view()),
+            "capacity_bucket": _view_summary(caches.capacity_buckets.view()),
+        }
+        for site, caches in projection_caches().items()
+    }
+
+
+def _view_summary(view: ProjectionCacheView[list[dict[str, Any]]]) -> dict[str, Any]:
+    return {
+        "state": view.state.value,
+        "revision": view.identity.revision if view.identity is not None else None,
+        "digest": view.identity.digest if view.identity is not None else None,
+        "last_error": view.last_error,
+        "fetched_at": view.fetched_at.isoformat() if view.fetched_at is not None else None,
+    }
 
 
 async def load_site_projections() -> None:

@@ -184,7 +184,7 @@ async def _commit_fresh_reservation(
     )
 
 
-# Site-authority capacity client (core_storefront.capacity.CapacityClient
+# Site-authority capacity client (core_storefront.capacity.SiteCapacityAuthority
 # shape); duck-typed so this concept module needs no core import.
 CapacityClientLike = Any
 ProvisionVmFn = Callable[..., Awaitable[Any]]
@@ -245,8 +245,17 @@ async def _reserve_capacity_for_obligation(
     escrow_uid: str, listing_id: str | None, order_id: str | None,
     required_attributes: dict[str, Any], duration_seconds: int,
     start_utc: str | None, stage_event: StageEventFn,
+    site_id: str | None = None,
 ) -> dict[str, Any]:
-    """Commit an accepted hold or create and commit an idempotent fallback."""
+    """Commit an accepted hold or create and commit an idempotent fallback.
+
+    ``site_id`` pins a fresh reservation to the listing's mapped site --
+    see ``AggregateCapacityClient.reserve``. A propagating site error
+    is not caught here: `fulfill_vm_obligation`'s own broad
+    ``try/except`` already applies the failure policy and returns a
+    structured error response for any exception in its body, this
+    included, so no separate handling is needed at this layer.
+    """
     reserved = await _commit_capacity_hold(
         capacity=capacity, held_reservation=held_reservation,
         escrow_uid=escrow_uid, duration_seconds=duration_seconds,
@@ -258,6 +267,7 @@ async def _reserve_capacity_for_obligation(
             deal_ref={"listing_id": listing_id or order_id, "escrow_uid": escrow_uid},
             lease_start_utc=start_utc,
             lease_duration_seconds=duration_seconds,
+            site=site_id,
         )
         if reserved:
             await _commit_fresh_reservation(
@@ -290,6 +300,7 @@ async def fulfill_vm_obligation(
     register_lease: RegisterLeaseFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
+    site_id: str | None = None,
 ) -> dict[str, Any]:
     """Provision VM capacity and submit settlement fulfillment.
 
@@ -335,7 +346,7 @@ async def fulfill_vm_obligation(
             escrow_uid=escrow_uid, listing_id=listing_id, order_id=order_id,
             required_attributes=required_attributes,
             duration_seconds=duration_seconds, start_utc=start_utc,
-            stage_event=stage_event,
+            stage_event=stage_event, site_id=site_id,
         )
         reserved_capacity_reservation_id = (
             str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None

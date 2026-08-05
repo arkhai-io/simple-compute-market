@@ -24,6 +24,7 @@ from compute_provisioning_service.config import settings
 from compute_provisioning_service.middleware.auth import StorefrontAuthMiddleware
 from compute_provisioning_service.middleware.rate_limit import AgentRateLimitMiddleware
 from compute_provisioning_service.services.capacity_inventory import (
+    load_capacity_pool_metadata,
     load_capacity_resource_inventory,
 )
 
@@ -167,6 +168,10 @@ def _capacity_resource_inventory() -> list[dict[str, object]]:
     )
 
 
+def _capacity_pool_directory() -> dict[str, dict[str, object]]:
+    return load_capacity_pool_metadata(container.session_factory())
+
+
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
@@ -208,6 +213,7 @@ app = build_compute_provisioning_app(
             make_capacity_router(
                 lambda: _container_module.resolved_capacity_ledger_service,
                 get_resource_inventory=_capacity_resource_inventory,
+                get_pool_directory=_capacity_pool_directory,
             ),
             "/api/v1",
         ),

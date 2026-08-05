@@ -72,6 +72,16 @@ existing flat `dimensions`/`attributes`/`resource_type` split
 correctly. The matcher stays generic at the structural level; it never
 needs to learn that `gpu.model` is different from `gpu.count`.
 
+**Symmetric with the resource/inventory side (decided 2026-08-04, see
+`design.md`):** a site's own resource capability description adopts the
+same family-grouped shape, flattened into `dimensions`/`attributes` by
+the same shared utility that flattens `requirements` — not a
+requirement-only shape with the resource side left independently flat.
+Investigated first, not assumed: the resource side has no flattening
+step at all today (`dict_resource_satisfies_claim` reads a wire
+snapshot's `attributes` unmodified), so this closes that gap rather
+than only mirroring it cosmetically.
+
 ### 2. Separate `offering_type` from `resource_type`
 
 Introduce `offering_type` (candidate names considered:
@@ -163,8 +173,13 @@ This is a two-speed migration:
   existing contract, not around it.
 - `pools-8-capacity-projection-and-listing-hints` also touches claim
   construction (mapping projected resource identity into reservation
-  claims) — coordinate the final requirement shape with whatever that
-  change lands, rather than defining it twice.
+  claims) — coordinated (2026-08-04, see `design.md`'s symmetric-nesting
+  decision): the resource/inventory side adopts this change's shape too,
+  flattened by the same shared utility, rather than the two changes
+  defining independent shapes. POOLS-8's own inventory work landing
+  before this change is implemented (e.g. projecting GPU model) uses the
+  already-flattened form (`attributes["gpu_model"]`), forward-compatible
+  with this change's eventual nested shape without needing migration.
 - Independent of `remove-relative-uv-sources` and Section 11's API-credit
   wheel-isolation work — no overlap.
 
@@ -177,4 +192,10 @@ public matching contract if the wire shape changes, `core_storefront`'s
 the persisted `"required_attributes"` key is renamed — the admin API,
 resume-context persistence, and `core/storefront-client`. Scope for the
 wire-key rename specifically should be confirmed small before starting;
-everything else is additive/parsing-layer work.
+everything else is additive/parsing-layer work. **Expanded (2026-08-04)
+by the symmetric-nesting decision:** also touches wherever a site's own
+resource/inventory capability description is produced and consumed —
+`kit/site`'s resource-pool projection shape and the shared flattening
+utility's other call site, likely provisioning-service-side inventory
+projection (`capacity_inventory.py` and siblings) once this change
+reaches implementation.

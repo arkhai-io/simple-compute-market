@@ -3,12 +3,12 @@
 `domains/vms/storefront/tests/fake_site.py` is an in-process fake used by
 almost every other storefront test -- and, by its own docstring, does not
 claim to pin the real wire shapes. It does not strip `resource_id` from
-reserve responses the way `kit/site`'s real router does, which is exactly
-how the original `resource_id`/`vm_host`-required bugs went undetected
-through the entire existing storefront test suite.
+reserve responses the way `kit/site`'s real router does, so a test built
+only against that fake cannot catch a `resource_id`/`vm_host`-required
+regression on either side of the real wire boundary.
 
 This file mounts the real `market_site.router` into a real FastAPI app and
-drives it with the real `core_storefront.capacity_remote.RemoteCapacityClient`
+drives it with the real `market_site_client.SiteCapacityClient`
 over `ASGITransport` -- an actual wire round-trip, not a hand-rolled
 double -- so a future regression in either side of this boundary fails a
 test instead of shipping quietly again.
@@ -25,10 +25,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from core_storefront.capacity_remote import RemoteCapacityClient
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
 from market_site.router import make_capacity_router
+from market_site_client import SiteCapacityClient
 
 
 @pytest.fixture
@@ -54,14 +54,15 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
     return app, ledger
 
 
-def _client(app: FastAPI) -> RemoteCapacityClient:
-    return RemoteCapacityClient(
+def _client(app: FastAPI) -> SiteCapacityClient:
+    return SiteCapacityClient(
         "http://test", transport=ASGITransport(app=app),
     )
 
 
 class TestOpaqueReservationBoundary:
-    """The regression coverage for the original resource_id/vm_host bug."""
+    """The real wire contract never carries `resource_id`/`vm_host` as
+    required or populated fields across the reservation boundary."""
 
     async def test_reserve_response_never_carries_placement_fields(self, site_app):
         """Boundary-contract test: protects any future caller, not just the

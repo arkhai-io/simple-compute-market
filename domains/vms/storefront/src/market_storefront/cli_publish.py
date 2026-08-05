@@ -114,6 +114,23 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
     subprocess.run(cmd, cwd=str(package_root), check=True)
 
 
+def _site_topology_sync() -> tuple[str | None, int]:
+    """(home_site, configured_site_count) as of right now, for CLI flows.
+
+    Computed directly from configuration (no network call needed for
+    just the site names/count) -- fresh on every call, never cached,
+    since the count is load-bearing for whether an unmapped listing's
+    site may be defaulted or must be left ambiguous.
+    """
+    from market_storefront.services.capacity_client import _capacity_settings
+
+    try:
+        sites, _, _ = _capacity_settings()
+    except Exception:
+        return None, 0
+    return next(iter(sites), None), len(sites)
+
+
 def _capacity_snapshot_sync() -> list[dict[str, Any]] | None:
     """Aggregated site capacity snapshot, fetched synchronously for CLI flows."""
     import httpx
@@ -152,6 +169,42 @@ def _capacity_snapshot_sync() -> list[dict[str, Any]] | None:
     return resources if answered else None
 
 
+def _site_pool_projection_sync() -> dict[str, list[dict[str, Any]]] | None:
+    """Resource-pool projection per site, fetched synchronously for CLI
+    flows -- the CLI has no long-running poller (unlike the storefront
+    server's ``site_projection_cache``), so it fetches its own fresh copy
+    once per invocation rather than reading a cache that was never
+    populated in this process. No caching by design: the CLI isn't meant
+    to operate at the storefront server's scale.
+    """
+    import httpx
+
+    from market_storefront.services.capacity_client import _capacity_settings
+
+    try:
+        sites, admin_key, _ = _capacity_settings()
+    except Exception:
+        return None
+    headers = {"X-Admin-Key": admin_key} if admin_key else {}
+    projection: dict[str, list[dict[str, Any]]] = {}
+    for site_name, url in sites.items():
+        try:
+            with httpx.Client(timeout=10) as http:
+                resp = http.get(
+                    f"{url}/api/v1/capacity/site-resource-pools", headers=headers,
+                )
+                resp.raise_for_status()
+                rows = resp.json().get("resource_pools") or []
+        except Exception as exc:
+            typer.echo(
+                f"[capacity] site {site_name!r} projection fetch failed: {exc}",
+                err=True,
+            )
+            continue
+        projection[site_name] = rows
+    return projection or None
+
+
 def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     """Aggregated site availability, fetched synchronously for CLI flows.
 
@@ -181,21 +234,50 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
 
 
 def _available_resources(db_path: str) -> list[dict]:
+    home_site, _ = _site_topology_sync()
+    if home_site is None:
+        return []
     return available_compute_slices(
-        db_path, member_availability=_member_availability_sync(),
+        db_path, home_site=home_site, member_availability=_member_availability_sync(),
+        site_pool_projection=_site_pool_projection_if_enabled(),
     )
 
 
+def _site_pool_projection_if_enabled() -> dict[str, list[dict[str, Any]]] | None:
+    """Same opt-in gate as the storefront server's own reconciliation
+    subscriber (``capacity_client._reconcile_listings``) -- the CLI is
+    also a caller of `available_compute_slices` and must not diverge
+    from the server's parity-verification gate on its own.
+    """
+    from .utils.config import settings
+
+    if not bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False)):
+        return None
+    return _site_pool_projection_sync()
+
+
 def _open_listing_resource_keys(db_path: str) -> set[str]:
-    return open_listing_resource_keys(db_path)
+    home_site, configured_site_count = _site_topology_sync()
+    if home_site is None:
+        return set()
+    return open_listing_resource_keys(
+        db_path, home_site=home_site, configured_site_count=configured_site_count,
+    )
 
 
 def _stale_open_listing_ids(db_path: str) -> list[str]:
+    home_site, configured_site_count = _site_topology_sync()
+    if home_site is None:
+        return []
     availability = _member_availability_sync()
     if availability is None:
         # No authority answered — closing on ignorance over-closes.
         return []
-    return stale_open_listing_ids(db_path, member_availability=availability)
+    return stale_open_listing_ids(
+        db_path, home_site=home_site, configured_site_count=configured_site_count,
+        member_availability=availability,
+        site_pool_projection=_site_pool_projection_if_enabled(),
+    )
 
 
 def _open_order_resource_ids(db_path: str) -> set[str]:
@@ -348,6 +430,7 @@ def _reopen_derived_listing_if_present(
 ) -> dict | None:
     derived = load_derived_listing_for_slice(
         db_path,
+        site_id=str(resource["site_id"]),
         pool_id=str(resource["pool_id"]) if resource.get("pool_id") else None,
         resource_id=str(resource["resource_id"]) if resource.get("resource_id") else None,
         gpu_count=int(resource["gpu_count"]),
@@ -361,6 +444,7 @@ def _reopen_derived_listing_if_present(
     reopen_local_derived_listing(
         db_path,
         listing_id=listing_id,
+        site_id=str(resource["site_id"]),
         pool_id=str(resource["pool_id"]) if resource.get("pool_id") else None,
         resource_id=str(resource["resource_id"]) if resource.get("resource_id") else None,
         gpu_count=int(resource["gpu_count"]),
@@ -418,12 +502,17 @@ def _close_stale_derived_listings(
     base_url: str,
     private_key: Optional[str],
 ) -> list[str]:
+    home_site, configured_site_count = _site_topology_sync()
     closed_listing_ids: list[str] = []
     for listing_id in _stale_open_listing_ids(db_path):
         resp = _close_order(base_url, listing_id, private_key)
         if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
-    mark_derived_listings_closed(db_path, closed_listing_ids)
+    if home_site is not None:
+        mark_derived_listings_closed(
+            db_path, closed_listing_ids,
+            home_site=home_site, configured_site_count=configured_site_count,
+        )
     return closed_listing_ids
 
 
@@ -439,6 +528,7 @@ def _record_published_vm_listing(
     record_derived_listing(
         db_path,
         listing_id=listing_id,
+        site_id=str(candidate["site_id"]),
         pool_id=str(candidate["pool_id"]) if candidate.get("pool_id") else None,
         resource_id=str(candidate["resource_id"]) if candidate.get("resource_id") else None,
         gpu_count=int(candidate["gpu_count"]),

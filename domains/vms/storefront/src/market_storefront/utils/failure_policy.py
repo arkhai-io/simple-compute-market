@@ -265,6 +265,7 @@ async def _release_capacity(
     from market_storefront.services.capacity_client import (
         build_capacity_client,
         member_availability_view,
+        remote_site_clients,
     )
 
     result = FulfillmentFailurePolicyResult(capacity_reservation_id=ctx.capacity_reservation_id)
@@ -282,12 +283,16 @@ async def _release_capacity(
         result.state = "released"
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
-        reopened = closed_available_listing_ids(
-            db.db_path,
-            member_availability=await member_availability_view(
-                capacity, db.db_path,
-            ),
-        )
+        home_site = next(iter(remote_site_clients(capacity)), None)
+        reopened: list[str] = []
+        if home_site is not None:
+            reopened = closed_available_listing_ids(
+                db.db_path,
+                home_site=home_site,
+                member_availability=await member_availability_view(
+                    capacity, db.db_path,
+                ),
+            )
         for listing_id in reopened:
             await db.update_listing(listing_id=listing_id, status="open")
         mark_derived_listings_open(db.db_path, reopened)

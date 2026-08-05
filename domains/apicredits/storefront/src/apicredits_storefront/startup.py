@@ -114,7 +114,7 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
 
     The ledger is the credits service's; the storefront is a client, so
     registration goes through the typed capacity-administration client
-    (``RemoteCapacityClient`` only reads/commits, never registers). A
+    (``SiteCapacityClient`` only reads/commits, never registers). A
     re-registration on restart re-asserts the resource.
     """
     from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError

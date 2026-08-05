@@ -267,12 +267,30 @@ async def _ensure_recovery_capacity(
     if capacity_client is None:
         logger.warning("[FULFILLMENT_RESUME] Escrow %s requires capacity reconciliation", escrow_uid)
         return None, None
-    reserved = await capacity_client.reserve(
-        claim=context.get("required_attributes") or None,
-        deal_ref={"listing_id": context.get("listing_id"), "escrow_uid": escrow_uid},
-        lease_start_utc=context.get("start_utc"),
-        lease_duration_seconds=int(context.get("duration_seconds") or 3600),
-    )
+    from domains.vms.listings.reconciler import site_id_for_listing
+
+    listing_id = context.get("listing_id")
+    site_id = site_id_for_listing(sqlite_client.db_path, listing_id) if listing_id else None
+    try:
+        reserved = await capacity_client.reserve(
+            claim=context.get("required_attributes") or None,
+            deal_ref={"listing_id": listing_id, "escrow_uid": escrow_uid},
+            lease_start_utc=context.get("start_utc"),
+            lease_duration_seconds=int(context.get("duration_seconds") or 3600),
+            site=site_id,
+        )
+    except Exception as exc:
+        if site_id is None:
+            raise
+        # A mapped listing's site errored (not just refused) -- no
+        # fallback exists to try, so this surfaces the same way a
+        # refusal already does below rather than as a new, unhandled
+        # exception shape during resume.
+        logger.warning(
+            "[FULFILLMENT_RESUME] reserve at pinned site %r failed for escrow %s: %s",
+            site_id, escrow_uid, exc,
+        )
+        reserved = None
     if not reserved or not reserved.get("capacity_reservation_id"):
         raise RuntimeError(f"No capacity available while recovering escrow {escrow_uid}")
     reservation = str(reserved["capacity_reservation_id"])

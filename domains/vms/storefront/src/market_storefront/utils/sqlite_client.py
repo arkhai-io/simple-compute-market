@@ -26,6 +26,7 @@ from core_storefront.sqlite_client import (  # noqa: F401 — re-exported
 )
 from core_storefront.sqlite_migrations import Migration
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
+from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
 from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
@@ -213,19 +214,7 @@ class SQLiteClient(CoreSQLiteClient):
             END
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS derived_compute_listings (
-              listing_id TEXT PRIMARY KEY,
-              pool_id TEXT,
-              resource_id TEXT NOT NULL,
-              gpu_count INTEGER NOT NULL,
-              status TEXT NOT NULL,
-              derivation_key TEXT NOT NULL UNIQUE,
-              last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-            """
-        )
+        ensure_derived_compute_listings_table(cur)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS derived_bare_metal_listings (
@@ -240,18 +229,6 @@ class SQLiteClient(CoreSQLiteClient):
         )
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_resource "
-            "ON derived_compute_listings(resource_id, gpu_count)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
-            "ON derived_compute_listings(pool_id, gpu_count)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
-            "ON derived_compute_listings(status)"
-        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_machine "
             "ON derived_bare_metal_listings(machine_id)"

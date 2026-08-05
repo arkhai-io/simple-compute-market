@@ -135,6 +135,12 @@ authority_url    = ""
 poll_interval    = 5
 placement        = "fill_first"
 hold_ttl_seconds = 900
+# Structural capacity source for listing derivation: local tables
+# (compute_capacity_pools/compute_pool_members) unless this is set,
+# in which case the site-resource-pool projection is used instead
+# wherever the storefront's own cache has a loaded value. Off by
+# default until parity between the two sources is verified.
+use_site_projection_for_listings = false
 
 [provisioning]
 service_url            = "http://localhost:8085"

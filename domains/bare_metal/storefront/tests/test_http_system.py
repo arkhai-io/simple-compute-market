@@ -112,4 +112,5 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
         "agent_id": "seller-1",
         "chain_id": None,
         "resource_count": 0,
+        "site_projections": None,
     }

@@ -1,20 +1,19 @@
-"""In-memory site authority for storefront tests.
+"""In-memory site authority for kit/site-client tests.
 
-``FakeSite`` mirrors the provisioning service's ``/api/v1/capacity``
-surface behind an ``httpx.MockTransport`` (the real wire shapes are
-pinned by that service's own integration tests). ``site_capacity``
-patches ``build_capacity_client`` so every storefront code path — admin
-endpoints, failure policy, claims truncation, negotiation holds,
-fulfillment — runs against the fake ledger.
+``FakeSite`` mirrors the site authority's ``/api/v1/capacity`` surface
+behind an ``httpx.MockTransport`` (the real wire shapes are pinned by
+``kit/site``'s own router/ledger tests). Duplicated from
+``domains/vms/storefront/tests/fake_site.py`` rather than shared across
+packages -- kit cannot depend on a domain package's own test helpers, and
+this fixture is small and stable enough that duplication is cheaper than
+the alternative coupling.
 """
 
 from __future__ import annotations
 
-import contextlib
 import itertools
 import json
-from typing import Any, Iterator
-from unittest.mock import patch
+from typing import Any
 
 import httpx
 
@@ -240,76 +239,3 @@ class FakeSite:
         return None
 
 
-def aggregate_over(
-    fake: FakeSite,
-    *,
-    site_name: str = "default",
-    sqlite_client_factory: Any | None = None,
-):
-    """A real AggregateCapacityClient over the fake site's transport.
-
-    With ``sqlite_client_factory``, the production listing-reconcile
-    subscriber is attached — drive it with ``pump_events``.
-    """
-    from core_storefront.aggregation import AggregateCapacityClient
-    from market_site_client import SiteCapacityClient
-
-    from market_storefront.services.capacity_client import (
-        _make_listing_reconcile_subscriber,
-    )
-
-    remote = SiteCapacityClient(
-        "http://fake-site:8081", "test-key", transport=fake.transport(),
-    )
-    aggregate = AggregateCapacityClient({site_name: remote})
-    if sqlite_client_factory is not None:
-        aggregate.subscribe(
-            _make_listing_reconcile_subscriber(sqlite_client_factory, aggregate),
-        )
-    return aggregate
-
-
-@contextlib.contextmanager
-def site_capacity(
-    fake: FakeSite,
-    *,
-    site_name: str = "default",
-    sqlite_client_factory: Any | None = None,
-) -> Iterator[Any]:
-    """Route every build_capacity_client() call at the fake ledger."""
-    aggregate = aggregate_over(
-        fake, site_name=site_name, sqlite_client_factory=sqlite_client_factory,
-    )
-    patches = [patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
-        return_value=aggregate,
-    )]
-    # fulfillment_service binds the name at import time.
-    patches.append(patch(
-        "market_storefront.services.fulfillment_service.build_capacity_client",
-        return_value=aggregate,
-    ))
-    with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        yield aggregate
-
-
-async def pump_events(
-    aggregate: Any, fake: FakeSite, *, site_name: str = "default", after: int = 0,
-) -> int:
-    """Deliver the fake site's events to aggregate subscribers (the
-    production poller's job). Returns the last delivered version."""
-    from core_storefront.capacity import CapacityDelta
-
-    last = after
-    for event in fake.events:
-        if event["version"] <= after:
-            continue
-        await aggregate.emit_site_delta(site_name, CapacityDelta(
-            kind=event["kind"],
-            version=event["version"],
-            resource_id=event.get("resource_id"),
-        ))
-        last = event["version"]
-    return last

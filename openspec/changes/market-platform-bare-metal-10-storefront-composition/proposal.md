@@ -36,7 +36,7 @@ None.
 
 - Archived Market Platform domain and compute extraction changes provide the common contracts and deployable compute service.
 - `pools-7-storefront-fulfillment-cutover` owns the durable selected-site fulfillment path. Composition and protocol work may begin earlier, but production cutover and final lifecycle evidence depend on its public scheduling, fulfillment, result, and teardown contracts.
-- This change owns the bare-metal-specific per-resource projection producer/consumer contract needed for publication. POOLS-8 continues to own generic durable projection consumption, commercial mapping, and advisory listing hints.
+- This change owns the bare-metal-specific per-resource projection producer/consumer contract needed for publication. POOLS-8 continues to own generic durable projection consumption, commercial mapping, and advisory listing hints. **Added 2026-08-03:** POOLS-8's Section 4 also now supplies the site-targeted reservation-routing mechanism (`AggregateCapacityClient.reserve(site=...)`) this change's Section 3.2 depends on directly — see `design.md`'s "Treat selected-site routing as trusted storefront state" addendum and Open Questions.
 - `market-platform-compute-40-multi-domain-proof` follows this change and POOLS-7 to prove VM and bare-metal storefronts across shared provisioning authorities.
 - `provisioning-result-push-delivery` owns authenticated reverse delivery and is not required for the pull-based lifecycle baseline.
 

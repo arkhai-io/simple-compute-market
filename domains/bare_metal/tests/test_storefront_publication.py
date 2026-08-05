@@ -186,3 +186,55 @@ def test_complete_generation_does_not_close_other_trusted_site(db):
     )
 
     assert stale_open_bare_metal_listing_ids(db, [empty_site_a]) == []
+
+
+def test_a_pre_length_prefix_derivation_key_does_not_block_re_derivation(db):
+    """`derived_bare_metal_listings.listing_id` is the primary key and
+    each publish assigns a fresh `listing_id` -- re-deriving the same
+    underlying resource after the length-prefixed key encoding lands
+    never collides on `listing_id`, and produces a different
+    `derivation_key` than a pre-fix row would have, so the two rows
+    coexist without conflict. The old row simply becomes an orphaned,
+    inactive row -- the same accepted idempotent-re-derivation outcome
+    already relied on for legacy VM mappings, not data loss or a
+    crash.
+    """
+    pre_fix_key = "bare-metal:site-a:resource-1"  # format predating length-prefixing
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO listings(listing_id, status) VALUES (?, 'open')",
+            ("listing-legacy",),
+        )
+        conn.execute(
+            """
+            INSERT INTO derived_bare_metal_listings(
+              listing_id, site_id, physical_resource_id, machine_id,
+              physical_host_id, status, derivation_key, last_reconciled_at
+            )
+            VALUES (?, 'site-a', 'resource-1', 'machine-1', 'physical-resource-1',
+                    'open', ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            """,
+            ("listing-legacy", pre_fix_key),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    candidate = bare_metal_listing_candidates([_projection(site_id="site-a")])[0]
+    assert candidate["derivation_key"] != pre_fix_key  # confirms this exercises the gap
+    # No IntegrityError: a fresh listing_id, no conflict on either key.
+    _insert_open_listing(db, candidate, listing_id="listing-current")
+
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            "SELECT listing_id, derivation_key, status FROM derived_bare_metal_listings "
+            "ORDER BY listing_id",
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [
+        ("listing-current", candidate["derivation_key"], "open"),
+        ("listing-legacy", pre_fix_key, "open"),
+    ]

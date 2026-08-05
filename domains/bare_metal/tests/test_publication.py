@@ -150,3 +150,37 @@ def test_derivation_key_is_site_and_resource_scoped():
         site_id="site-b",
         physical_resource_id="resource-1",
     )
+
+
+def test_derivation_key_requires_nonempty_site_id():
+    with pytest.raises(ValueError):
+        bare_metal_listing_key(site_id="", physical_resource_id="resource-1")
+
+
+def test_derivation_key_requires_nonempty_physical_resource_id():
+    with pytest.raises(ValueError):
+        bare_metal_listing_key(site_id="site-a", physical_resource_id="   ")
+
+
+def test_no_collision_when_a_colon_shifts_the_field_boundary():
+    """site_id/physical_resource_id are operator-chosen strings with no
+    character restrictions -- a naive colon-delimited join would let
+    (site_id='a', physical_resource_id='b:c') and
+    (site_id='a:b', physical_resource_id='c') produce an identical
+    string. The length-prefixed encoding must not collide here."""
+    assert bare_metal_listing_key(
+        site_id="a", physical_resource_id="b:c",
+    ) != bare_metal_listing_key(
+        site_id="a:b", physical_resource_id="c",
+    )
+
+
+def test_no_collision_across_many_boundary_shifts():
+    pairs = [
+        ("a", "bcde"), ("ab", "cde"), ("abc", "de"), ("abcd", "e"),
+    ]
+    keys = {
+        bare_metal_listing_key(site_id=site, physical_resource_id=resource)
+        for site, resource in pairs
+    }
+    assert len(keys) == len(pairs)

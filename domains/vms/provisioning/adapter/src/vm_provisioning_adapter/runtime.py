@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
@@ -76,6 +76,27 @@ class VmProvisioningRuntime:
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
         )
+
+
+def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]:
+    """Shape an Ansible pool's configured VM size defaults for the
+    site-authority resource-pool projection's `pool_views` field.
+
+    Mirrors `bare_metal_provisioning_adapter.runtime.project_bare_metal_resource`'s
+    placement (the domain adapter shapes its own view; the generic
+    composer only calls out to it) but not its pydantic-validation
+    mechanism -- three optional scalars with no cross-field validation
+    need (the handler already enforces value constraints at write time)
+    don't warrant a dedicated model. Only present (non-`None`) fields are
+    included, so a pool with no configured defaults produces an empty
+    dict -- the caller omits `pool_views` entirely in that case rather
+    than emitting an empty view.
+    """
+    return {
+        key: raw_view[key]
+        for key in ("default_vm_ram", "default_vm_vcpus", "default_vm_disk_size")
+        if raw_view.get(key) is not None
+    }
 
 
 def build_vm_runtime(

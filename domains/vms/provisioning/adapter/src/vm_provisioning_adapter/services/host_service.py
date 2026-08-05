@@ -125,6 +125,7 @@ class HostService:
             ssh_key_type=data.ssh_key_type,
             ssh_key_value=key_value,
             gpu_count=data.gpu_count,
+            gpu_model=data.gpu_model,
             enabled=data.enabled,
             pool_id=pool_id,
         )
@@ -155,6 +156,8 @@ class HostService:
                 host.ssh_user = data.ssh_user
             if data.gpu_count is not None:
                 host.gpu_count = data.gpu_count
+            if data.gpu_model is not None:
+                host.gpu_model = data.gpu_model
             if data.pool_id is not None:
                 self._require_pool_exists(db, data.pool_id)
                 host.pool_id = data.pool_id
@@ -248,6 +251,7 @@ class HostService:
                     existing.ssh_key_type = ssh_key_type
                     existing.ssh_key_value = key_value
                     existing.gpu_count = entry["gpu_count"]
+                    existing.gpu_model = entry.get("gpu_model")
                 else:
                     db.add(Host(
                         name=entry["name"],
@@ -257,6 +261,7 @@ class HostService:
                         ssh_key_type=ssh_key_type,
                         ssh_key_value=key_value,
                         gpu_count=entry["gpu_count"],
+                        gpu_model=entry.get("gpu_model"),
                         enabled=True,
                     ))
 
@@ -341,11 +346,12 @@ def _parse_ini(ini_text: str) -> list[dict]:
     service itself, not machines the provisioning service sells.
 
     Returns a list of ``{"name", "kvm_host", "ssh_user", "gpu_count",
-    "ansible_ssh_private_key_file"}`` dicts.  Entries missing
+    "gpu_model", "ansible_ssh_private_key_file"}`` dicts.  Entries missing
     ``ansible_host`` or ``ansible_user`` are skipped with a warning.
 
     Variable mapping:
         ``gpus=``                         → ``gpu_count`` (int, default 0)
+        ``gpu_model=``                    → ``gpu_model`` (str, default None)
         ``public_host=``                  → ``public_host`` (tenant-facing addr)
         ``ansible_ssh_private_key_file=`` → preserved verbatim
         All other variables              → ignored
@@ -398,6 +404,7 @@ def _parse_ini(ini_text: str) -> list[dict]:
             "public_host": host_vars.get("public_host"),
             "ssh_user": ssh_user,
             "gpu_count": gpu_count,
+            "gpu_model": host_vars.get("gpu_model"),
             "ansible_ssh_private_key_file": host_vars.get(
                 "ansible_ssh_private_key_file", _DEFAULT_KEY_PATH
             ),

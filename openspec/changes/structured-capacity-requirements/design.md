@@ -49,6 +49,79 @@ existing flat `dimensions`/`attributes` split before calling
 never needs to understand nested, per-family semantics — it keeps
 working exactly as POOLS-7 Section 11.2 left it.
 
+### Symmetric nesting: inventory description matches the requirement shape (2026-08-04)
+
+**Question raised while starting `pools-8-capacity-projection-and-listing-hints`'s work on
+projecting GPU model into `site_resource_pools`:** should a site's own resource/inventory
+description (what a site *has*) be shaped the same way as a buyer's `requirements` (what a
+buyer *wants*), given they're the two sides of the exact same match?
+
+**Investigated before deciding, not assumed:** traced `kit/site/src/market_site/ledger.py`'s
+actual matching contract (`resource_satisfies_requirement`, `dict_resource_satisfies_claim`,
+`_split_claim_requirement`) directly. Confirmed two things:
+
+1. Both `required_dimensions`/`required_attributes` (claim side) and `resource.available`/
+   `resource.attributes` (resource side) are flat dicts today, compared by plain key lookup
+   (`resource.attributes.get(key) == value`, `resource.available.get(dimension, 0) < amount`).
+2. The claim side already has a flattening step (`_split_claim_requirement`) and this
+   change's own accepted direction above gives it a second one (nested `requirements` →
+   flat `dimensions`/`attributes`). **The resource side has no flattening step at all
+   today** -- `dict_resource_satisfies_claim` reads `row.get("attributes")` straight off the
+   wire snapshot, unmodified.
+
+**Accepted direction:** yes, align them, but through a **shared flattening utility**, not by
+nesting one side and leaving the other flat. A resource's capabilities get expressed in the
+same family-grouped shape a requirement does:
+
+```json
+{
+    "gpu": {"count": 4, "model": "A100"},
+    "cpu": {"count": 16},
+    "memory": {"gib": 64},
+    "storage": {"gib": 200}
+}
+```
+
+and **one** shared utility -- not two independently-maintained flatteners -- converts either
+a `requirements` object or a resource's capability description into the existing flat
+`dimensions`/`attributes` split, using the same per-family quantitative/categorical schema
+either way. This directly answers this document's own "Unresolved questions" entry about
+where the `requirements` parser should live: it answers it for the resource side too, at the
+same time, rather than deciding the two independently and risking two different answers.
+
+**Why not nest the resource side without adding a matching flatten step (the naive
+version):** that would make the resource side *look* symmetric with the claim side while
+staying mechanically different underneath -- the claim gets flattened before matching, the
+resource wouldn't, so the two still wouldn't actually go through the same logic. That is the
+"unnecessary transformer" outcome, just relocated rather than avoided. The whole point of
+sharing one utility is that a reviewer can look at `requirements.gpu.model` and a resource's
+`gpu.model` and see they are the literal same field path, flattened by the literal same
+function, compared by the same unmodified generic matcher -- not two vocabularies that
+happen to agree by convention.
+
+**Flattening convention (derived from what's already in live use, not invented fresh):**
+family-prefixed flat keys -- `gpu.count` -> `dimensions["gpu_count"]`,
+`gpu.model` -> `attributes["gpu_model"]`, `memory.gib` -> `dimensions["memory_gib"]`, and so
+on. This isn't a new vocabulary choice: `gpu_count` is already a real, live column/key name
+today (`Host.gpu_count`, `compute_pool_members.gpu_count`). Choosing this convention means
+existing flat data already sitting in that shape needs no migration once the shared utility
+lands -- it's already in the post-flatten form the utility would produce.
+
+**Practical consequence for work landing before this change is implemented:** any inventory
+field added ahead of the shared utility (e.g. `pools-8-capacity-projection-and-listing-hints`
+projecting GPU model) should be added in its **already-flattened** form (a flat
+`attributes["gpu_model"]` key), not a premature one-off nested shape with no flattening logic
+behind it. A flat key added this way requires no transformation later -- it's already exactly
+what the eventual utility would produce. A nested key added ahead of the utility would be a
+straight regression against today's matcher (which reads flat keys directly) until that
+specific field's flattening was implemented, and would need to be reconciled with whatever
+schema the shared utility eventually defines for that family.
+
+**Where the shared utility likely lives, not yet finalized:** probably `kit/site`, alongside
+the existing matching contract it feeds -- the same dependency-direction question already
+flagged in "Unresolved questions" below for the claim-side parser applies identically here,
+since it would now be one function serving both call sites rather than two.
+
 ### `resource_type` vs. a buyer-facing offering concept
 
 Three distinct concepts were conflated under `resource_type` in the
@@ -125,7 +198,17 @@ Steps 2–4 are this change's job.
   parser live for a second domain (bare-metal, apicredits) once VM has
   one? A shared kit-layer parser is tempting but needs the same
   dependency-direction scrutiny Section 11.2 already applied to
-  `ResourceFeasibilityView`.
+  `ResourceFeasibilityView`. **Narrowed, not resolved, by the
+  symmetric-nesting decision above (2026-08-04):** whatever the answer
+  is, it now has to be one function serving both the claim/requirement
+  side and the resource/inventory side identically -- the dependency-
+  direction question is the same one, just with an added constraint
+  that the answer can't special-case either caller.
+- **New (2026-08-04):** the per-family quantitative/categorical schema
+  (which leaf keys are which, per family) needs a concrete home and
+  shape of its own -- referenced by the symmetric-nesting decision above
+  but not yet designed. Likely small (a dict/registry keyed by family
+  name), but not yet written down.
 
 ## Design promotion record
 

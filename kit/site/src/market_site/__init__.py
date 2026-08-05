@@ -4,7 +4,7 @@ The shared half of a site-authority service
 (docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
 the unit-counted resource ledger, reservation holds with their lease
 tail, the anonymous versioned capacity-event feed, and the
-``/capacity`` router mirroring the ``CapacityClient`` contract. A
+``/capacity`` router mirroring the ``SiteCapacityAuthority`` contract. A
 hosting service (the VM provisioning service; the API-credits service)
 mounts the tables on its engine and the router on its app.
 """
