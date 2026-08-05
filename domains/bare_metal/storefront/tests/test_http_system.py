@@ -113,4 +113,5 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
         "chain_id": None,
         "resource_count": 0,
         "site_projections": None,
+        "listing_mode_explanations": None,
     }

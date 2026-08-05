@@ -240,14 +240,12 @@ def lookup_pool_policy_tags(
     """A listing's mapped pool's currently cached ``policy_tags``, or ``{}``.
 
     Two steps, not one opaque call: (1) resolve the listing's mapped
-    ``pool_id`` from the existing ``derived_compute_listings`` table (no
-    new column, no new table -- reusing exactly what Section 4's site
-    routing already needs); (2) read that pool's ``policy_tags`` live from
-    the in-memory projection cache -- ``policy_tags`` is projection-only
-    data with no durable local persistence (see this change's own "no new
-    local storage for any Section 5 hint consumer" decision), so it can
-    only ever be read fresh from the cache, never from a table. No hint
-    consumer persists projection-sourced data into local storage -- see
+    ``pool_id`` from the existing ``derived_compute_listings`` table (the
+    same table a mapped listing's ``site_id`` is already resolved from,
+    no new column or table needed); (2) read that pool's ``policy_tags``
+    live from the in-memory projection cache. ``policy_tags`` has no
+    durable local persistence, so it can only ever be read fresh from the
+    cache, never from a table -- see
     openspec/specs/storefront-publication/spec.md#domain-owned-publication-and-hold-hints.
 
     Always returns a plain ``dict`` (never ``None``), including on any

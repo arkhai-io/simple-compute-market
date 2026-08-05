@@ -421,3 +421,57 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
     default_row = next(row for row in rows if row["resource_pool_id"] == "default")
 
     assert "pool_views" not in default_row["pool_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_site_capacity_buckets_projection_through_the_real_client(
+    capacity: CapacityApi,
+):
+    """The typed-client wire-contract gap Section 5's review round found:
+    `resource_pool_projection()` (above) is proven through the real
+    `SiteCapacityClient`, but the sibling `capacity_bucket_projection()`
+    -- which Section 5 makes a first-class publication input for the
+    first time -- had no equivalent. Proves the full path:
+
+    two registered resources with different availability
+        -> real /api/v1/capacity/site-capacity-buckets route
+        -> real SiteCapacityClient.capacity_bucket_projection()
+
+    and that the response has the exact shape reconciler.py's
+    `_fungible_availability_from_buckets` actually consumes
+    (`resource_pool_id`, `available.gpu_count`, `resource_count`,
+    `grouping_attributes`).
+    """
+    from market_site_client import SiteCapacityClient
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+    await capacity.register(
+        "compute-kvm1-002",
+        pool_id="hetzner-eu",
+        total_units=6,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.capacity_bucket_projection()
+    buckets = [
+        b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"
+    ]
+
+    # Two freshly-registered resources with different capacity (hence
+    # different current availability) form two distinct buckets, each
+    # resource_count=1 -- not one bucket summing to 14, which is exactly
+    # the shape `_fungible_availability_from_buckets` relies on to
+    # compute a per-member ceiling rather than a pool total.
+    by_available = {b["available"]["gpu_count"]: b for b in buckets}
+    assert set(by_available) == {8, 6}
+    assert by_available[8]["resource_count"] == 1
+    assert by_available[6]["resource_count"] == 1
+    assert by_available[8]["grouping_attributes"].get("gpu_model") == "H200"

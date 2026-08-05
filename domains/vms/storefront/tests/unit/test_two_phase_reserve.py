@@ -410,3 +410,57 @@ async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
             db, negotiation_id="neg-3", listing_id="lst-1", order_dict=ORDER,
         )
     assert disabled.reserve_calls == []
+
+
+@pytest.mark.asyncio
+async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_preference(
+    tmp_path,
+):
+    """The orchestration this section's own review round found untested:
+    lookup_pool_policy_tags -> capped_hold_seconds -> reserve(ttl_seconds=...)
+    as one real sequence, not just each piece proven independently. A
+    requested TTL of 900s, capped by a mapped pool's
+    max_reservation_hold_seconds=30, must reach reserve() as 30, not 900.
+    """
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with patch(
+        "market_storefront.utils.config.settings", _settings(900),
+    ), patch(
+        "market_storefront.services.capacity_client.build_capacity_client",
+        return_value=capacity,
+    ), patch(
+        "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+        return_value={"max_reservation_hold_seconds": 30},
+    ):
+        await _place_capacity_hold(
+            db, negotiation_id="neg-capped", listing_id="lst-1", order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["ttl_seconds"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
+    """The other side of the same sequence: an empty/absent policy_tags
+    result (the ordinary case -- no mapped pool, or one with no hold
+    preference) must leave the storefront's own configured TTL untouched,
+    not silently zero it or something else unintended."""
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with patch(
+        "market_storefront.utils.config.settings", _settings(900),
+    ), patch(
+        "market_storefront.services.capacity_client.build_capacity_client",
+        return_value=capacity,
+    ), patch(
+        "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+        return_value={},
+    ):
+        await _place_capacity_hold(
+            db, negotiation_id="neg-uncapped", listing_id="lst-1", order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["ttl_seconds"] == 900

@@ -5,8 +5,6 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from domains.vms.listings.listing_mode import resolve_vm_listing_mode
-
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -471,38 +469,70 @@ def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
 
 
 def _fungible_availability_from_buckets(
-    pool_id: str, capacity_buckets: list[Mapping[str, Any]],
+    pool_id: str, capacity_buckets: list[Mapping[str, Any]] | None,
 ) -> tuple[int, int, str | None] | None:
     """(max_member_available, available_gpu_count, gpu_model) from this
-    pool's matching capacity buckets, or None if no usable bucket data
-    exists for this pool (caller falls back to the resource-list walk).
+    pool's matching capacity buckets, or None if the caller should fall
+    back to the resource-list walk instead.
 
-    Each bucket already represents a group of members with identical
-    current availability (``capacity_bucket_projection``'s own grouping
-    criteria), so the pool's per-member ceiling is the max across buckets,
-    not a per-resource max -- cheaper and, once bucket data exists, no
-    less precise, since resources are only ever split into more than one
-    bucket when their availability genuinely differs.
+    ``capacity_buckets`` is ``None`` when the capacity-bucket family has
+    never loaded for this pool's site (or the caller has no bucket data
+    to offer at all) -- every pool falls back in that case, matching
+    "ignorance is not zero." A *loaded* family -- including a genuinely
+    empty list -- is trusted: ``capacity_bucket_projection`` is built
+    from the site's complete enabled-resource inventory, so a pool with
+    any enabled member necessarily contributes at least one matching
+    bucket entry once the family has loaded. The absence of any matching
+    entry in a loaded family is therefore itself the answer (this pool
+    currently has no enabled members with available capacity), not
+    missing data -- collapsing that into "fall back" would let a
+    resource-pool projection generation fetched at a different moment
+    contradict the capacity-bucket family's own authoritative answer.
+
+    A bucket entry that exists for this pool but is individually
+    unreadable (predates per-resource `available`, see
+    `_bucket_gpu_count`) is different again: excluded from the computed
+    totals, and if every matching entry for this pool is unreadable this
+    way, treated the same as "no usable data" -- an unreadable entry is
+    not the same as a confirmed absence.
+
+    Each readable bucket already represents a group of members with
+    identical current availability (``capacity_bucket_projection``'s own
+    grouping criteria), so the pool's per-member ceiling is the max
+    across matching buckets, not a per-resource max -- cheaper and, once
+    bucket data exists, no less precise, since resources are only ever
+    split into more than one bucket when their availability genuinely
+    differs.
     """
+    if capacity_buckets is None:
+        return None
     max_member_available = 0
     available_gpu_count = 0
     gpu_model: str | None = None
-    saw_usable_bucket = False
+    saw_matching_entry = False
+    saw_usable_entry = False
     for bucket in capacity_buckets:
         if str(bucket.get("resource_pool_id") or "") != pool_id:
             continue
+        saw_matching_entry = True
         bucket_available = _bucket_gpu_count(bucket)
         if bucket_available is None:
             continue
-        saw_usable_bucket = True
+        saw_usable_entry = True
         bucket_count = int(bucket.get("resource_count") or 0)
         available_gpu_count += bucket_available * bucket_count
         if bucket_available > max_member_available:
             max_member_available = bucket_available
             gpu_model = (bucket.get("grouping_attributes") or {}).get("gpu_model")
-    if not saw_usable_bucket:
+    if saw_usable_entry:
+        return max_member_available, available_gpu_count, gpu_model
+    if saw_matching_entry:
+        # Every matching entry was individually unreadable -- not a
+        # confirmed absence, fall back.
         return None
-    return max_member_available, available_gpu_count, gpu_model
+    # No matching entry at all in a loaded family: authoritative zero,
+    # not missing data -- see this function's own docstring.
+    return 0, 0, None
 
 
 def _projected_pool_rows(
@@ -523,7 +553,11 @@ def _projected_pool_rows(
     shape), or one row per enabled member for a ``specific_resource``
     pool -- a pool's ``listing_mode`` (from its projected `policy_tags`,
     domain-resolved by `resolve_vm_listing_mode`) decides which shape
-    applies; it is not inferred from member count.
+    applies. An explicit tag always wins; its *absence* falls back to
+    exactly the structural heuristic this function used before
+    `listing_mode` existed (`member_count == 1` -> specific_resource) so
+    an untagged pool's publication shape does not change out from under
+    an existing derived-listing mapping.
     """
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
@@ -531,10 +565,6 @@ def _projected_pool_rows(
     pricing = local_pricing.get(pool_id) if site_id == home_site else None
     if pricing is None:
         return []
-
-    metadata = pool.get("pool_metadata") or {}
-    policy_tags = metadata.get("policy_tags") or {}
-    mode, explanation = resolve_vm_listing_mode(policy_tags)
 
     usages: list[_ProjectedResourceUsage] = []
     for resource in pool.get("resources") or []:
@@ -545,6 +575,20 @@ def _projected_pool_rows(
         )
         if usage is not None:
             usages.append(usage)
+
+    metadata = pool.get("pool_metadata") or {}
+    policy_tags = metadata.get("policy_tags") or {}
+    # Local import, not module-level: this keeps `market_resource_pools`
+    # out of every consumer that merely imports `domains.vms.listings`
+    # (e.g. the buyer CLI, via this package's own `__init__.py`) without
+    # ever calling into publish-candidate generation, which is the only
+    # thing that actually needs it.
+    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+
+    structural_default = "specific_resource" if len(usages) == 1 else "fungible"
+    mode, explanation = resolve_vm_listing_mode(
+        policy_tags, structural_default=structural_default,
+    )
 
     base_fields = {
         "site_id": site_id,
@@ -576,15 +620,16 @@ def _projected_pool_rows(
     # fungible: exactly one aggregated row.
     total_gpu_count = sum(usage.total for usage in usages)
     resource_gpu_model = next((u.gpu_model for u in usages if u.gpu_model), None)
-    from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets or [])
+    from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets)
     if from_buckets is not None:
         max_member_available, available_gpu_count, bucket_gpu_model = from_buckets
         gpu_model = bucket_gpu_model or resource_gpu_model
     else:
-        # No usable site_capacity_buckets data for this pool (family not
-        # supplied/loaded, or an older producer) -- fall back to the
-        # resource-list computation this function used before buckets
-        # existed, rather than silently publishing nothing.
+        # No usable capacity-bucket data for this pool right now (the
+        # family has never loaded for this pool's site, or every
+        # matching bucket entry is individually unreadable) -- fall back
+        # to a max/sum over this pool's own resource-list entries rather
+        # than silently publishing nothing.
         max_member_available = max((usage.available for usage in usages), default=0)
         available_gpu_count = sum(usage.available for usage in usages)
         gpu_model = resource_gpu_model
@@ -629,7 +674,19 @@ def _pool_rows_from_projection(
     local_pricing = _local_pool_pricing(conn)
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
-        buckets_for_site = (site_capacity_buckets or {}).get(site_id) or []
+        # None (this site's capacity-bucket family has never loaded, or
+        # site_capacity_buckets wasn't supplied at all) must survive
+        # distinctly from a loaded, genuinely empty list -- collapsing
+        # the two here would make an authoritative "zero buckets"
+        # generation for this site indistinguishable from "unknown,"
+        # letting every pool fall back to (possibly inconsistent,
+        # separately-fetched) resource-list data instead of trusting the
+        # bucket family's own answer. See `_fungible_availability_from_buckets`.
+        buckets_for_site = (
+            site_capacity_buckets.get(site_id)
+            if site_capacity_buckets is not None
+            else None
+        )
         for pool in pools:
             pool_rows.extend(
                 _projected_pool_rows(

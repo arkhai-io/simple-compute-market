@@ -16,6 +16,7 @@ import pytest
 
 from domains.vms.listings.reconciler import (
     _accumulate_capacity_pool_member,
+    _fungible_availability_from_buckets,
     _member_available_units,
     _project_legacy_resource_row,
     _projected_pool_rows,
@@ -1117,6 +1118,63 @@ class TestProjectedResourceUsage:
 
 
 # ---------------------------------------------------------------------------
+# _fungible_availability_from_buckets -- direct contract tests, isolated
+# from _projected_pool_rows' pricing/resource-walk scaffolding
+# ---------------------------------------------------------------------------
+
+class TestFungibleAvailabilityFromBuckets:
+    def test_none_family_falls_back(self):
+        assert _fungible_availability_from_buckets("gpu-pool", None) is None
+
+    def test_loaded_empty_family_is_trusted_zero(self):
+        assert _fungible_availability_from_buckets("gpu-pool", []) == (0, 0, None)
+
+    def test_loaded_family_with_no_matching_pool_is_trusted_zero(self):
+        buckets = [
+            {"resource_pool_id": "other-pool", "available": {"gpu_count": 9}, "resource_count": 2},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (0, 0, None)
+
+    def test_matching_readable_bucket_is_used(self):
+        buckets = [
+            {
+                "resource_pool_id": "gpu-pool",
+                "available": {"gpu_count": 6},
+                "resource_count": 2,
+                "grouping_attributes": {"gpu_model": "H100"},
+            },
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (6, 12, "H100")
+
+    def test_max_across_multiple_matching_buckets_not_sum(self):
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 2}, "resource_count": 1},
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 6}, "resource_count": 1},
+        ]
+        max_available, total_available, _ = _fungible_availability_from_buckets(
+            "gpu-pool", buckets,
+        )
+        assert max_available == 6
+        assert total_available == 2 + 6
+
+    def test_matching_but_unreadable_bucket_falls_back(self):
+        """A bucket entry exists for this pool but predates per-resource
+        `available` (empty dict, no `gpu_count` key) -- not the same as
+        a confirmed absence, must fall back rather than read as zero."""
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) is None
+
+    def test_one_readable_and_one_unreadable_matching_bucket_uses_the_readable_one(self):
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (4, 4, None)
+
+
+# ---------------------------------------------------------------------------
 # _projected_pool_rows -- one projected pool -> zero or more pool_rows entries
 # ---------------------------------------------------------------------------
 
@@ -1166,6 +1224,12 @@ class TestProjectedPoolRows:
                         "enabled": True,
                     },
                 ],
+                # Explicit tag: a single-member pool's *structural*
+                # default is specific_resource (backward compatibility,
+                # see test_single_member_pool_defaults_to_specific_resource_without_a_tag
+                # below) -- an explicit fungible tag is what this test
+                # actually wants to exercise.
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
@@ -1180,6 +1244,59 @@ class TestProjectedPoolRows:
         assert row["listing_mode"] == "fungible"
         assert row["listing_mode_explanation"] is None
         assert row["single_resource_id"] is None
+
+    def test_single_member_pool_defaults_to_specific_resource_without_a_tag(self):
+        """Backward compatibility: `available_compute_slices` always
+        treated a single-member pool as specific-resource before
+        `listing_mode` existed (`member_count == 1` heuristic). An
+        untagged pool with exactly one member must keep resolving that
+        way, or an existing derived-listing mapping keyed on that
+        resource's identity would silently break the moment a
+        projection without `pool_metadata` reaches this function."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["single_resource_id"] == "res-1"
+
+    def test_multi_member_pool_defaults_to_fungible_without_a_tag(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2",
+                        "capacity": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "fungible"
+        assert rows[0]["single_resource_id"] is None
 
     def test_disabled_resources_are_excluded(self):
         rows = _projected_pool_rows(
@@ -1241,6 +1358,10 @@ class TestProjectedPoolRows:
     # -- listing_mode resolution --------------------------------------
 
     def test_unrecognized_listing_mode_falls_back_with_explanation(self):
+        """One member -> structural default is specific_resource (see
+        test_single_member_pool_defaults_to_specific_resource_without_a_tag)
+        -- an unrecognized explicit value falls back to *that* default,
+        not a hardcoded constant."""
         rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
@@ -1250,6 +1371,25 @@ class TestProjectedPoolRows:
                         "capacity": {"gpu_count": 4},
                         "enabled": True,
                     },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["listing_mode_explanation"] is not None
+        assert "bogus" in rows[0]["listing_mode_explanation"]
+
+    def test_unrecognized_listing_mode_falls_back_to_fungible_for_multi_member(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                    {"physical_resource_id": "res-2", "capacity": {"gpu_count": 4}, "enabled": True},
                 ],
                 "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
             },
@@ -1411,7 +1551,17 @@ class TestProjectedPoolRows:
         assert row["max_member_available_gpu_count"] == 6
         assert row["available_gpu_count"] == 2 * 1 + 6 * 1
 
-    def test_fungible_ignores_buckets_from_other_pools(self):
+    def test_fungible_trusts_zero_when_family_loaded_with_no_matching_entries(self):
+        """Corrected behavior: a *loaded* capacity-bucket family (however
+        many entries it has) that contains no entry for this specific
+        pool is itself the authoritative answer -- zero -- not missing
+        data. `capacity_bucket_projection` covers the site's complete
+        enabled-resource inventory, so a pool with any enabled member
+        would necessarily contribute at least one matching entry once
+        the family has loaded; absence means the pool currently has none.
+        Falling back to a separately-fetched resource-pool projection
+        here would let two independently-polled projection generations
+        silently contradict each other."""
         rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
@@ -1422,6 +1572,7 @@ class TestProjectedPoolRows:
                         "enabled": True,
                     },
                 ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
@@ -1434,10 +1585,33 @@ class TestProjectedPoolRows:
                 },
             ],
         )
-        # No usable bucket for gpu-pool -- falls back to the resource walk,
-        # which sees one unavailability-tagged resource (treated as fully
-        # available with no member_availability supplied).
-        assert rows[0]["max_member_available_gpu_count"] == 8
+        assert rows[0]["max_member_available_gpu_count"] == 0
+        assert rows[0]["available_gpu_count"] == 0
+
+    def test_fungible_trusts_zero_when_family_loaded_as_a_whole_empty_list(self):
+        """The site-wide "authoritative zero buckets anywhere" case --
+        e.g. the capacity-bucket family loaded successfully but the site
+        currently has no enabled resources at all. Must be trusted the
+        same way a per-pool absence is, not treated as unknown."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[],
+        )
+        assert rows[0]["max_member_available_gpu_count"] == 0
+        assert rows[0]["available_gpu_count"] == 0
 
     def test_fungible_falls_back_to_resource_walk_when_no_bucket_data(self):
         """No site_capacity_buckets supplied at all (None) -- must not
@@ -1453,6 +1627,7 @@ class TestProjectedPoolRows:
                         "enabled": True,
                     },
                 ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
@@ -1476,6 +1651,7 @@ class TestProjectedPoolRows:
                         "enabled": True,
                     },
                 ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
@@ -1498,6 +1674,7 @@ class TestProjectedPoolRows:
                         "enabled": True,
                     },
                 ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},

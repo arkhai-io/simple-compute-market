@@ -36,6 +36,10 @@ class HealthResponse(BaseModel):
     chain_id: int | None = None
     resource_count: int | None = None
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
+    # Per-site, per-pool operator-visible reason a projected `listing_mode`
+    # fell back to a domain's structural default (unrecognized raw value).
+    # A pool's absence means no fallback is owed, not that data is missing.
+    listing_mode_explanations: dict[str, dict[str, str]] | None = None
 
 
 class AdminPauseResponse(BaseModel):

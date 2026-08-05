@@ -87,6 +87,80 @@ class TestCreatePool:
         assert exc_info.value.status_code == 400
 
 
+class TestHoldPreferenceValidationThroughAdminApi:
+    """The write-side validation gap Section 5's review round found: unit
+    tests proved `ResourcePoolService`'s own validation directly, but
+    nothing proved an invalid `max_reservation_hold_seconds` is actually
+    rejected through the real pool-admin HTTP API a real operator uses --
+    the layer `PoolValidationError` -> `HTTPException(400)` mapping lives
+    at, not exercised by a direct service-level call.
+    """
+
+    async def test_create_pool_with_negative_hold_returns_400(self, client_and_queue):
+        client, _ = client_and_queue
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.create_pool(
+                PoolCreate(
+                    id="hetzner-eu",
+                    label="Hetzner EU",
+                    provider="ansible",
+                    policy_tags={"max_reservation_hold_seconds": -1},
+                    provider_config=_ANSIBLE_CONFIG,
+                )
+            )
+        assert exc_info.value.status_code == 400
+        # Rejected before persistence -- confirmed by trying to fetch it,
+        # not just trusting the error code.
+        with pytest.raises(ProvisioningError) as get_exc_info:
+            await client.get_pool("hetzner-eu")
+        assert get_exc_info.value.status_code == 404
+
+    async def test_create_pool_with_valid_hold_round_trips(self, client_and_queue):
+        client, _ = client_and_queue
+        pool = await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"max_reservation_hold_seconds": 120},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        assert pool.policy_tags == {"max_reservation_hold_seconds": 120}
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.policy_tags == {"max_reservation_hold_seconds": 120}
+
+    async def test_replace_pool_with_invalid_hold_returns_400_and_does_not_change_stored_metadata(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await client.create_pool(
+            PoolCreate(
+                id="hetzner-eu",
+                label="Hetzner EU",
+                provider="ansible",
+                policy_tags={"max_reservation_hold_seconds": 60},
+                provider_config=_ANSIBLE_CONFIG,
+            )
+        )
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.replace_pool(
+                "hetzner-eu",
+                PoolReplace(
+                    label="Hetzner EU",
+                    provider="ansible",
+                    enabled=True,
+                    policy_tags={"max_reservation_hold_seconds": "soon"},
+                    provider_config=_ANSIBLE_CONFIG,
+                ),
+            )
+        assert exc_info.value.status_code == 400
+
+        fetched = await client.get_pool("hetzner-eu")
+        assert fetched.policy_tags == {"max_reservation_hold_seconds": 60}
+
+
 class TestVmSizeDefaultsThroughAdminApi:
     """Proves `default_vm_*` round-trips through the real typed client,
     the real HTTP API, the real `AnsiblePoolConfigHandler`, and the real

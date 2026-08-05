@@ -466,6 +466,62 @@ class TestSitePoolProjection:
         assert set(result) == {"site-a"}
 
 
+class TestSiteCapacityBuckets:
+    """Same None-vs-[] inclusion contract as TestSitePoolProjection,
+    verified independently for the sibling function -- both feed the
+    same reconciler consumer, and the two are easy to accidentally drift
+    apart since they're separate functions over separate cache fields."""
+
+    def test_empty_when_nothing_cached(self):
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={},
+        ):
+            assert cc.site_capacity_buckets() == {}
+
+    def test_excludes_a_site_with_no_cached_value(self):
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = None
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {}
+
+    def test_includes_a_site_with_a_loaded_empty_projection(self):
+        """The exact case Section 5's own review caught: a site whose
+        capacity-bucket family loaded successfully with zero rows must
+        be included as an empty list, not excluded the way an unloaded
+        site is -- reconciler's fungible-mode row builder relies on this
+        to trust an authoritative zero instead of falling back."""
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = []
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {"site-a": []}
+        assert "site-a" in result
+
+    def test_includes_a_site_with_loaded_bucket_rows(self):
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = [
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+        ]
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {
+            "site-a": [
+                {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+            ],
+        }
+
+
 # ---------------------------------------------------------------------------
 # Orchestration: a real cached projection actually reaches reconciliation,
 # not just the two pieces (cache -> dict, dict -> dispatch) in isolation.

@@ -129,3 +129,73 @@ class TestProjectionStatusSummary:
 
     async def test_empty_when_no_site_has_loaded_yet(self):
         assert spc.projection_status_summary() == {}
+
+
+class _PayloadRemote:
+    """A `_FakeRemote`-shaped stand-in that returns a caller-supplied
+    resource-pool payload, for tests that need specific `pool_metadata`
+    content rather than `_FakeRemote`'s fixed `[{"resource_pool_id": "pool-1"}]`.
+    """
+
+    def __init__(self, resource_pools: list[dict[str, Any]]) -> None:
+        self._resource_pools = resource_pools
+
+    async def resource_pool_projection_version(self) -> dict[str, Any]:
+        return {"revision": 1, "digest": "d1"}
+
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        return {"revision": 1, "digest": "d1", "resource_pools": self._resource_pools}
+
+    async def capacity_bucket_projection_version(self) -> dict[str, Any]:
+        return {"revision": 1, "digest": "d1"}
+
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        return {"revision": 1, "digest": "d1", "capacity_buckets": []}
+
+    def set_topology_error_handler(self, handler: Any) -> None:
+        pass
+
+
+class TestListingModeExplanations:
+    async def test_empty_when_nothing_loaded(self):
+        assert spc.listing_mode_explanations() == {}
+
+    async def test_no_explanation_for_a_recognized_or_absent_listing_mode(self):
+        remote = _PayloadRemote([
+            {"resource_pool_id": "gpu-pool-a", "resources": []},
+            {
+                "resource_pool_id": "gpu-pool-b", "resources": [],
+                "pool_metadata": {"policy_tags": {"listing_mode": "specific_resource"}},
+            },
+        ])
+        with _patched_remotes({"site-a": remote}):
+            await spc.load_site_projections()
+        assert spc.listing_mode_explanations() == {}
+
+    async def test_explanation_for_an_unrecognized_listing_mode(self):
+        remote = _PayloadRemote([
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [],
+                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            },
+        ])
+        with _patched_remotes({"site-a": remote}):
+            await spc.load_site_projections()
+        explanations = spc.listing_mode_explanations()
+        assert set(explanations) == {"site-a"}
+        assert "gpu-pool" in explanations["site-a"]
+        assert "bogus" in explanations["site-a"]["gpu-pool"]
+
+    async def test_one_sites_explanations_do_not_affect_another(self):
+        clean = _PayloadRemote([{"resource_pool_id": "clean-pool", "resources": []}])
+        bad = _PayloadRemote([
+            {
+                "resource_pool_id": "bad-pool", "resources": [],
+                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            },
+        ])
+        with _patched_remotes({"site-clean": clean, "site-bad": bad}):
+            await spc.load_site_projections()
+        explanations = spc.listing_mode_explanations()
+        assert set(explanations) == {"site-bad"}

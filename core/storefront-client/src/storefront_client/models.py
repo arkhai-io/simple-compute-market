@@ -154,13 +154,14 @@ class HealthResponse:
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
+    listing_mode_explanations: dict[str, Any] | None = None  # per-site/pool listing_mode fallback reasons; present on /api/v1/system/status
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
             "status", "checks", "paused", "agent_id", "chain_id",
-            "resource_count", "site_projections",
+            "resource_count", "site_projections", "listing_mode_explanations",
         }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
@@ -172,6 +173,7 @@ class HealthResponse:
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             site_projections=d.get("site_projections"),
+            listing_mode_explanations=d.get("listing_mode_explanations"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
