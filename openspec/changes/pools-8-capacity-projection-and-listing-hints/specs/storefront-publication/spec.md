@@ -25,7 +25,7 @@ Listings derived from a projection MUST retain an internal trusted mapping to th
 
 ### Requirement: Domain-owned publication and hold hints
 
-A storefront domain MAY interpret projected `listing_mode` and `max_reservation_hold_seconds` policy tags. Each domain MUST own accepted listing-mode values and fallback behavior; unknown values MUST NOT change admission authority. A cooperating storefront MUST treat the hold value as an advisory upper bound on its requested reservation TTL.
+A storefront domain MAY interpret projected `listing_mode` and `max_reservation_hold_seconds` policy tags. Each domain MUST own accepted listing-mode values and fallback behavior; unknown values MUST NOT change admission authority. A cooperating storefront MUST treat the hold value as an advisory upper bound on its requested reservation TTL. A hint consumer MUST read the current projected value live rather than persisting it into storefront-local storage.
 
 #### Scenario: Listing mode is absent or invalid
 
@@ -36,3 +36,13 @@ A storefront domain MAY interpret projected `listing_mode` and `max_reservation_
 
 - **WHEN** a valid positive `max_reservation_hold_seconds` is lower than the storefront's configured acceptance-hold TTL
 - **THEN** the storefront requests no more than the projected preference while live site admission remains authoritative
+
+#### Scenario: Fungible listing candidates reflect what a single member can satisfy
+
+- **WHEN** a pool's `listing_mode` resolves to fungible and its members currently have unequal available capacity
+- **THEN** the storefront publishes candidate slice sizes bounded by the largest currently available single member, sourced from grouped bucket availability, never from a sum across members
+
+#### Scenario: A specific-resource pool has more than one member
+
+- **WHEN** a pool's `listing_mode` resolves to specific-resource and the pool has multiple currently enabled members
+- **THEN** the storefront derives one independently identified, independently reservable listing candidate per member rather than one pooled candidate or an error

@@ -37,6 +37,16 @@ def _default_projection_status_provider() -> dict[str, Any]:
     return projection_status_summary()
 
 
+def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
+    """Real production source for per-site, per-pool listing_mode fallback
+    explanations. Same lazy-resolution and constructor-injection rationale
+    as `_default_projection_status_provider`, immediately above.
+    """
+    from market_storefront.services.site_projection_cache import listing_mode_explanations
+
+    return listing_mode_explanations()
+
+
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -50,11 +60,15 @@ class SystemService:
         sqlite_client,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
+        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
+        )
+        self._listing_mode_explanation_provider = (
+            listing_mode_explanation_provider or _default_listing_mode_explanation_provider
         )
 
     # ------------------------------------------------------------------
@@ -145,6 +159,12 @@ class SystemService:
                 result["site_projections"] = self._projection_status_provider()
             except Exception:
                 result["site_projections"] = None
+            try:
+                result["listing_mode_explanations"] = (
+                    self._listing_mode_explanation_provider()
+                )
+            except Exception:
+                result["listing_mode_explanations"] = None
 
         return result
 

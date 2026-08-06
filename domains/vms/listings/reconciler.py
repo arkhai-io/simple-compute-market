@@ -5,6 +5,10 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
+from domains.vms.listings.pricing_resolution import GpuPricingFields, resolve_gpu_pricing
+
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -117,6 +121,38 @@ def site_id_for_listing(db_path: str, listing_id: str) -> str | None:
             return None
         row = conn.execute(
             "SELECT site_id FROM derived_compute_listings WHERE listing_id = ?",
+            (listing_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return str(row[0]) if row and row[0] else None
+
+
+def pool_id_for_listing(db_path: str, listing_id: str) -> str | None:
+    """The pool a listing is mapped to, or None if unmapped.
+
+    Mirrors ``site_id_for_listing`` -- ``derived_compute_listings`` is the
+    single source of truth for this mapping too.
+
+    For a listing recorded with only a ``resource_id`` (no genuine pool),
+    ``record_derived_listing`` backfills its ``pool_id`` column to the
+    resource_id itself (its own ``resolved_pool_id`` fallback, needed
+    because that column is used as a not-null join key) -- storage alone
+    cannot distinguish that case from a genuine pool, since both produce
+    an identical stored row shape. Callers looking up a *pool's*
+    ``policy_tags`` in the projection cache don't need that distinction
+    made here: a resource id looked up against the cache's
+    ``resource_pool_id`` field will not match any real pool in practice
+    (pool ids and physical resource ids are different id namespaces
+    throughout this system), so it naturally falls through to "no
+    policy_tags found" with no special-casing required.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        if not _has_derived_listings_site_column(conn):
+            return None
+        row = conn.execute(
+            "SELECT pool_id FROM derived_compute_listings WHERE listing_id = ?",
             (listing_id,),
         ).fetchone()
     finally:
@@ -415,63 +451,295 @@ def _projected_resource_usage(
     return _ProjectedResourceUsage(resource_id, gpu_model, total, available)
 
 
-def _projected_pool_row(
+def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
+    """One capacity bucket's available GPU count, or None if unusable.
+
+    `capacity_bucket_projection` collapses a resource with no `available`
+    field at all into an empty `available` dict rather than omitting the
+    resource -- so a present-but-empty dict means "this producer predates
+    per-resource availability," not "authoritative zero." Distinguishing
+    that (None, treated as unusable -- caller falls back) from a bucket
+    that genuinely reports zero available units (0, trusted) mirrors
+    ``_projected_resource_usage``'s own None-vs-zero handling for the
+    per-resource projection.
+    """
+    available = bucket.get("available") or {}
+    if "gpu_count" not in available:
+        return None
+    try:
+        return int(available["gpu_count"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _fungible_availability_from_buckets(
+    pool_id: str, capacity_buckets: list[Mapping[str, Any]] | None,
+) -> tuple[int, int, str | None] | None:
+    """(max_member_available, available_gpu_count, gpu_model) from this
+    pool's matching capacity buckets, or None if the caller should fall
+    back to the resource-list walk instead.
+
+    ``capacity_buckets`` is ``None`` when the capacity-bucket family has
+    never loaded for this pool's site (or the caller has no bucket data
+    to offer at all) -- every pool falls back in that case, matching
+    "ignorance is not zero." A *loaded* family -- including a genuinely
+    empty list -- is trusted: ``capacity_bucket_projection`` is built
+    from the site's complete enabled-resource inventory, so a pool with
+    any enabled member necessarily contributes at least one matching
+    bucket entry once the family has loaded. The absence of any matching
+    entry in a loaded family is therefore itself the answer (this pool
+    currently has no enabled members with available capacity), not
+    missing data -- collapsing that into "fall back" would let a
+    resource-pool projection generation fetched at a different moment
+    contradict the capacity-bucket family's own authoritative answer.
+
+    A bucket entry that exists for this pool but is individually
+    unreadable (predates per-resource `available`, see
+    `_bucket_gpu_count`) is different again: excluded from the computed
+    totals, and if every matching entry for this pool is unreadable this
+    way, treated the same as "no usable data" -- an unreadable entry is
+    not the same as a confirmed absence.
+
+    Each readable bucket already represents a group of members with
+    identical current availability (``capacity_bucket_projection``'s own
+    grouping criteria), so the pool's per-member ceiling is the max
+    across matching buckets, not a per-resource max -- cheaper and, once
+    bucket data exists, no less precise, since resources are only ever
+    split into more than one bucket when their availability genuinely
+    differs.
+    """
+    if capacity_buckets is None:
+        return None
+    max_member_available = 0
+    available_gpu_count = 0
+    gpu_model: str | None = None
+    saw_matching_entry = False
+    saw_usable_entry = False
+    for bucket in capacity_buckets:
+        if str(bucket.get("resource_pool_id") or "") != pool_id:
+            continue
+        saw_matching_entry = True
+        bucket_available = _bucket_gpu_count(bucket)
+        if bucket_available is None:
+            continue
+        saw_usable_entry = True
+        bucket_count = int(bucket.get("resource_count") or 0)
+        available_gpu_count += bucket_available * bucket_count
+        if bucket_available > max_member_available:
+            max_member_available = bucket_available
+            gpu_model = (bucket.get("grouping_attributes") or {}).get("gpu_model")
+    if saw_usable_entry:
+        return max_member_available, available_gpu_count, gpu_model
+    if saw_matching_entry:
+        # Every matching entry was individually unreadable -- not a
+        # confirmed absence, fall back.
+        return None
+    # No matching entry at all in a loaded family: authoritative zero,
+    # not missing data -- see this function's own docstring.
+    return 0, 0, None
+
+
+@dataclass(frozen=True)
+class PoolHintResolutionSettings:
+    """Storefront-wide policy for how much a projected pool's own
+    declared hints are trusted, as opposed to the storefront's own
+    configured/overridden values.
+
+    Defaults are the conservative posture for a brand-new trust decision
+    with no existing behavior to preserve: `accept_pool_declared_sla`
+    defaults `False` (a site's self-reported SLA claim is not published
+    unless a storefront operator explicitly opts in), matching this
+    being new capability a storefront must choose to enable, not a
+    migration of something already trusted today.
+
+    `gpu_pricing_defaults_by_model`/`gpu_pricing_flat_default` are tier 1
+    of the pricing precedence chain (see
+    `domains.vms.listings.pricing_resolution`) -- no trust decision
+    involved, since config defaults are the storefront operator's own
+    values, not a site's; defaulted here only so every caller doesn't
+    need to construct empty ones.
+    """
+
+    accept_pool_declared_sla: bool = False
+    default_sla: float = 0.0
+    gpu_pricing_defaults_by_model: Mapping[str, Any] = None  # type: ignore[assignment]
+    gpu_pricing_flat_default: Any = None
+
+    def __post_init__(self) -> None:
+        # dataclass(frozen=True) needs object.__setattr__ to fill in
+        # mutable-default-free placeholders after construction, since a
+        # bare `{}`/instance can't be a dataclass field default.
+        if self.gpu_pricing_defaults_by_model is None:
+            object.__setattr__(self, "gpu_pricing_defaults_by_model", {})
+        if self.gpu_pricing_flat_default is None:
+            object.__setattr__(self, "gpu_pricing_flat_default", GpuPricingFields())
+
+
+_DEFAULT_POOL_HINT_RESOLUTION_SETTINGS = PoolHintResolutionSettings()
+
+
+def _projected_pool_rows(
     pool: Mapping[str, Any],
     *,
     site_id: str,
     home_site: str,
     local_pricing: Mapping[str, sqlite3.Row],
     member_availability: dict[tuple[str | None, str], int] | None,
-) -> dict[str, Any] | None:
-    """Build one pool_rows entry from one projected pool, or None if it
-    has no pool_id or (site_id != home_site, or no matching local row)
-    no pricing -- see `_local_pool_pricing`.
+    capacity_buckets: list[Mapping[str, Any]] | None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
+) -> list[dict[str, Any]]:
+    """Build zero or more pool_rows entries from one projected pool.
+
+    Returns an empty list only if the pool has no `pool_id`. A missing
+    local `compute_capacity_pools` row (whether because this is a
+    non-home-site pool -- never locally priced by design, see
+    `_local_pool_pricing` -- or a home-site pool the storefront simply
+    hasn't registered) means no storefront-override tier is available,
+    not that the pool can't publish: region/SLA/pricing still resolve
+    through their pool-hint and config-default tiers. Whether the
+    resulting row ends up genuinely priceless is left to the same
+    downstream `publish_priceless` handling every other unpriced
+    candidate already goes through, not decided here. Otherwise returns
+    exactly one row for a ``fungible`` pool (matching this function's
+    original, aggregated shape), or one row per enabled member for a
+    ``specific_resource`` pool -- a pool's ``listing_mode`` (from its
+    projected `policy_tags`, domain-resolved by `resolve_vm_listing_mode`)
+    decides which shape applies. An explicit tag always wins; its
+    *absence* falls back to exactly the structural heuristic this
+    function used before `listing_mode` existed (`member_count == 1` ->
+    specific_resource) so an untagged pool's publication shape does not
+    change out from under an existing derived-listing mapping.
     """
     pool_id = str(pool.get("resource_pool_id") or "").strip()
     if not pool_id:
-        return None
+        return []
+    # `pricing` (this pool's row in the storefront's own local
+    # `compute_capacity_pools` table) is the tier-3 storefront-override
+    # source, not a prerequisite for publishing at all -- a pool with a
+    # complete pool-declared hint (tier 2) or config default (tier 1) and
+    # no local row must still resolve and publish, or the three-tier
+    # precedence this section exists to build is unreachable for exactly
+    # the pools it was meant to help (any pool the storefront hasn't
+    # locally registered, and every non-home-site pool, since
+    # `compute_capacity_pools` is intentionally never consulted for a
+    # site other than home_site -- see `_local_pool_pricing`'s own
+    # cross-site-collision rationale, unaffected by this change: that
+    # table still isn't read for a non-home-site pool, it's just no
+    # longer required to exist for a home-site one either).
     pricing = local_pricing.get(pool_id) if site_id == home_site else None
-    if pricing is None:
-        return None
+    local_region = pricing["region"] if pricing is not None else None
+    local_sla = pricing["sla"] if pricing is not None else None
+    local_gpu_model = pricing["gpu_model"] if pricing is not None else None
 
-    total_gpu_count = 0
-    available_gpu_count = 0
-    max_member_available = 0
-    member_count = 0
-    single_resource_id: str | None = None
-    gpu_model: str | None = None
+    usages: list[_ProjectedResourceUsage] = []
     for resource in pool.get("resources") or []:
         if not resource.get("enabled", True):
             continue
         usage = _projected_resource_usage(
             resource, site_id=site_id, member_availability=member_availability,
         )
-        if usage is None:
-            continue
-        if gpu_model is None and usage.gpu_model:
-            gpu_model = usage.gpu_model
-        total_gpu_count += usage.total
-        available_gpu_count += usage.available
-        max_member_available = max(max_member_available, usage.available)
-        member_count += 1
-        single_resource_id = usage.resource_id if member_count == 1 else None
+        if usage is not None:
+            usages.append(usage)
 
-    return {
+    metadata = pool.get("pool_metadata") or {}
+    policy_tags = metadata.get("policy_tags") or {}
+
+    structural_default = "specific_resource" if len(usages) == 1 else "fungible"
+    mode, explanation = resolve_vm_listing_mode(
+        policy_tags, structural_default=structural_default,
+    )
+
+    region = resolve_region(policy_tags, fallback=local_region)
+    sla = resolve_sla(
+        policy_tags,
+        accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,
+        storefront_override=local_sla,
+        config_default=hint_resolution.default_sla,
+    )
+    storefront_pricing_override = GpuPricingFields(
+        min_price=pricing["min_price"] if pricing is not None else None,
+        token=pricing["token"] if pricing is not None else None,
+        max_duration_seconds=(
+            pricing["max_duration_seconds"] if pricing is not None else None
+        ),
+        accepted_escrows=pricing["accepted_escrows"] if pricing is not None else None,
+    )
+
+    def _resolved_pricing(gpu_model_for_pricing: str | None) -> GpuPricingFields:
+        # Pricing is resolved per GPU model, not once per pool -- the
+        # three-tier chain's middle and bottom tiers are both keyed by
+        # model, so this can't be folded into base_fields the way
+        # region/sla can (region/sla have no per-model dimension).
+        return resolve_gpu_pricing(
+            policy_tags,
+            gpu_model=gpu_model_for_pricing,
+            storefront_override=storefront_pricing_override,
+            config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
+            flat_default=hint_resolution.gpu_pricing_flat_default,
+        )
+
+    base_fields = {
         "site_id": site_id,
         "pool_id": pool_id,
-        "gpu_model": gpu_model or pricing["gpu_model"],
-        "region": pricing["region"],
-        "sla": pricing["sla"] if pricing["sla"] is not None else 0.0,
+        "region": region,
+        "sla": sla,
+        "listing_mode": mode,
+        "listing_mode_explanation": explanation,
+    }
+
+    if mode == "specific_resource":
+        rows = []
+        for usage in usages:
+            resolved_gpu_model = usage.gpu_model or local_gpu_model
+            resolved_pricing = _resolved_pricing(resolved_gpu_model)
+            rows.append({
+                **base_fields,
+                "gpu_model": resolved_gpu_model,
+                "min_price": resolved_pricing.min_price,
+                "token": resolved_pricing.token,
+                "accepted_escrows": resolved_pricing.accepted_escrows,
+                "max_duration_seconds": resolved_pricing.max_duration_seconds,
+                "total_gpu_count": usage.total,
+                "available_gpu_count": usage.available,
+                "max_member_available_gpu_count": usage.available,
+                "single_resource_id": usage.resource_id,
+                "member_count": 1,
+            })
+        return rows
+
+    # fungible: exactly one aggregated row.
+    total_gpu_count = sum(usage.total for usage in usages)
+    resource_gpu_model = next((u.gpu_model for u in usages if u.gpu_model), None)
+    from_buckets = _fungible_availability_from_buckets(pool_id, capacity_buckets)
+    if from_buckets is not None:
+        max_member_available, available_gpu_count, bucket_gpu_model = from_buckets
+        gpu_model = bucket_gpu_model or resource_gpu_model
+    else:
+        # No usable capacity-bucket data for this pool right now (the
+        # family has never loaded for this pool's site, or every
+        # matching bucket entry is individually unreadable) -- fall back
+        # to a max/sum over this pool's own resource-list entries rather
+        # than silently publishing nothing.
+        max_member_available = max((usage.available for usage in usages), default=0)
+        available_gpu_count = sum(usage.available for usage in usages)
+        gpu_model = resource_gpu_model
+
+    resolved_gpu_model = gpu_model or local_gpu_model
+    resolved_pricing = _resolved_pricing(resolved_gpu_model)
+
+    return [{
+        **base_fields,
+        "gpu_model": resolved_gpu_model,
+        "min_price": resolved_pricing.min_price,
+        "token": resolved_pricing.token,
+        "accepted_escrows": resolved_pricing.accepted_escrows,
+        "max_duration_seconds": resolved_pricing.max_duration_seconds,
         "total_gpu_count": total_gpu_count,
         "available_gpu_count": available_gpu_count,
         "max_member_available_gpu_count": max_member_available,
-        "min_price": pricing["min_price"],
-        "token": pricing["token"],
-        "accepted_escrows": pricing["accepted_escrows"],
-        "max_duration_seconds": pricing["max_duration_seconds"],
-        "single_resource_id": single_resource_id,
-        "member_count": member_count,
-    }
+        "single_resource_id": None,
+        "member_count": len(usages),
+    }]
 
 
 def _pool_rows_from_projection(
@@ -480,28 +748,57 @@ def _pool_rows_from_projection(
     *,
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
     Structure (which pools/resources exist, GPU model) comes from the
-    projection, for every site present in it. Pricing/region/sla do not
-    exist in the projection at all (the provisioning service doesn't
-    track them) and are only ever looked up locally for home_site's own
-    pools -- see `_local_pool_pricing`. A non-home_site pool, or a
-    home_site pool with no local pricing row, is skipped entirely: no
-    price means no listing, matching the "priceless" handling other
-    publish flows already support rather than inventing a new one.
+    projection, for every site present in it. Region can come from the
+    projection's own `pool_metadata.policy_tags` hint; pricing and SLA's
+    storefront-override tier still come from the local
+    `compute_capacity_pools` table -- see `_local_pool_pricing` and
+    `domains.vms.listings.pool_descriptors`. That local table is only
+    ever consulted for home_site's own pools; a non-home_site pool, or a
+    home_site pool with no local row, simply has no storefront-override
+    tier -- region/SLA/pricing still resolve through the pool's own
+    projected hint and the storefront's configured default, the same
+    "priceless" fallback other publish flows already support if nothing
+    resolves a real price. A missing local row is not, by itself, a
+    reason to skip the pool.
+
+    ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
+    projection (same per-site-list shape as ``site_pool_projection``),
+    used only for ``fungible``-mode pools' per-member availability ceiling
+    -- see ``_projected_pool_rows``. Omitting it (``None``, the default)
+    falls back to the pre-existing resource-list computation for every
+    fungible pool, not an error.
     """
     local_pricing = _local_pool_pricing(conn)
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
+        # None (this site's capacity-bucket family has never loaded, or
+        # site_capacity_buckets wasn't supplied at all) must survive
+        # distinctly from a loaded, genuinely empty list -- collapsing
+        # the two here would make an authoritative "zero buckets"
+        # generation for this site indistinguishable from "unknown,"
+        # letting every pool fall back to (possibly inconsistent,
+        # separately-fetched) resource-list data instead of trusting the
+        # bucket family's own answer. See `_fungible_availability_from_buckets`.
+        buckets_for_site = (
+            site_capacity_buckets.get(site_id)
+            if site_capacity_buckets is not None
+            else None
+        )
         for pool in pools:
-            row = _projected_pool_row(
-                pool, site_id=site_id, home_site=home_site,
-                local_pricing=local_pricing, member_availability=member_availability,
+            pool_rows.extend(
+                _projected_pool_rows(
+                    pool, site_id=site_id, home_site=home_site,
+                    local_pricing=local_pricing, member_availability=member_availability,
+                    capacity_buckets=buckets_for_site,
+                    hint_resolution=hint_resolution,
+                )
             )
-            if row is not None:
-                pool_rows.append(row)
     return pool_rows
 
 def available_compute_slices(
@@ -510,6 +807,8 @@ def available_compute_slices(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
+    hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from current storefront state.
 
@@ -532,14 +831,38 @@ def available_compute_slices(
     ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
     already produces). When supplied and non-empty, pool structure and
     GPU model come from the projection for *every* site in it, not just
-    ``home_site`` -- but pricing, ``region``, and ``sla`` are only ever
-    looked up from the local ``compute_capacity_pools`` table for
-    ``home_site``'s own pools. A non-``home_site`` pool has no pricing
-    source yet (no cross-site lookup is attempted, so no cross-site
-    ``pool_id`` collision is possible by construction) and is filtered
-    out rather than published without a price -- matching the existing
-    "priceless" handling other publish flows already support, not a new
-    failure mode.
+    ``home_site``. The local ``compute_capacity_pools`` table is only
+    ever consulted, for ``home_site``'s own pools, as the top-precedence
+    storefront-override tier of region/SLA/pricing resolution -- never
+    for a non-``home_site`` pool, avoiding the cross-site ``pool_id``
+    collision that table's own lack of site-scoping would otherwise risk.
+    A pool with no local override row (a non-``home_site`` pool, or a
+    ``home_site`` pool the storefront hasn't locally registered) still
+    publishes: region/SLA/pricing fall through to that pool's own
+    projected hint, then the storefront's configured default, the same
+    "priceless" handling other publish flows already support if nothing
+    resolves a real price -- a missing override is advisory-tier
+    absence, not a reason to suppress the pool.
+
+    A pool's ``listing_mode`` (from its projected ``policy_tags``, only
+    available on the ``site_pool_projection`` path) decides its row shape:
+    ``fungible`` publishes one pool-keyed aggregated row; ``specific_resource``
+    publishes one resource-keyed row per enabled member, however many
+    members the pool has. ``site_capacity_buckets`` is the matching
+    ``site_capacity_buckets`` projection (same per-site-list shape as
+    ``site_pool_projection``) and, when supplied, sources a ``fungible``
+    pool's per-member availability ceiling instead of a resource-list max
+    -- see ``_projected_pool_rows``. Only takes effect on the projection
+    path; the local-table fallback has no ``policy_tags``/bucket source
+    and is unaffected by either parameter.
+
+    ``hint_resolution`` controls how much a pool's own
+    projected ``region``/``sla`` hints are trusted relative to the
+    storefront's local `compute_capacity_pools` fallback/override values
+    -- see `domains.vms.listings.pool_descriptors`. Only takes effect on
+    the projection path, the same as ``site_pool_projection``/
+    ``site_capacity_buckets`` above; the local-table fallback has no hint
+    source to resolve against.
     """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
@@ -548,6 +871,8 @@ def available_compute_slices(
             pool_rows = _pool_rows_from_projection(
                 conn, site_pool_projection,
                 home_site=home_site, member_availability=member_availability,
+                site_capacity_buckets=site_capacity_buckets,
+                hint_resolution=hint_resolution,
             )
         else:
             pool_rows = _pool_rows_from_local_tables(conn, member_availability)
@@ -595,6 +920,8 @@ def available_compute_slices(
                 "token": row.get("token"),
                 "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": row.get("max_duration_seconds"),
+                "listing_mode": row.get("listing_mode"),
+                "listing_mode_explanation": row.get("listing_mode_explanation"),
             })
     return out
 
@@ -605,11 +932,32 @@ def current_available_resource_keys(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> set[str]:
+    # Known, accepted cost, not an oversight: `available_compute_slices`
+    # resolves each row's region/SLA/pricing (the full three-tier chain,
+    # `PoolHintResolutionSettings` and all) even though only
+    # `resource_key`/`legacy_resource_key` are read below -- everything
+    # else is discarded. This is deliberately not worth avoiding here:
+    # resolution happens once per pool/member (not per gpu_count slice,
+    # since the gpu_count loop only copies already-resolved fields), so
+    # the actual cost is bounded by pool/member count, not capacity size.
+    # `stale_open_listing_ids`/`closed_available_listing_ids` (below) call
+    # this function for exactly this reason -- capacity-delta
+    # reconciliation compares structural derivation keys and availability;
+    # it never recomputes or republishes commercial listing terms, which
+    # is also why none of these three functions take a `hint_resolution`
+    # parameter at all (they always resolve with the default, and the
+    # result is provably identical regardless -- see
+    # `test_resource_keys_are_identical_regardless_of_hint_resolution` in
+    # `test_reconciler.py`). A narrower structural-only row builder would
+    # avoid the discarded work, but isn't warranted while the cost stays
+    # bounded this way; noted as a candidate cleanup, not a defect.
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -701,6 +1049,7 @@ def stale_open_listing_ids(
     configured_site_count: int,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     """Open listing IDs whose requested slice no longer fits capacity.
 
@@ -720,6 +1069,7 @@ def stale_open_listing_ids(
     available_keys = current_available_resource_keys(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
@@ -776,11 +1126,13 @@ def closed_available_listing_ids(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> list[str]:
     """Closed derived listing IDs whose requested slice fits capacity again."""
     available_keys = current_available_resource_keys(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
     if not available_keys:
         return []
@@ -822,7 +1174,15 @@ def record_derived_listing(
     resolved_pool_id = pool_id or resource_id
     if not resolved_pool_id:
         raise ValueError("pool_id or resource_id is required")
-    use_pool_key = bool(pool_id and (resource_id is None or pool_id != resource_id))
+    # A resource-keyed candidate is any call that supplies a resource_id --
+    # pool_id's mere presence is not signal: pool_id and resource_id are
+    # always different id spaces (operator pool slug vs. physical resource
+    # id), so `pool_id != resource_id` is true whenever both are supplied,
+    # regardless of listing_mode. This must key on `resource_id is None`,
+    # matching `available_compute_slices`' own `is_fungible_pool` meaning
+    # exactly, or multiple specific_resource listings from the same pool
+    # collide onto one derivation_key and silently overwrite each other.
+    use_pool_key = pool_id is not None and resource_id is None
     derivation_key = (
         listing_pool_key(site_id, resolved_pool_id, gpu_count)
         if use_pool_key

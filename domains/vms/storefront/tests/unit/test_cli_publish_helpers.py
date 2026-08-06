@@ -416,6 +416,61 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(
     assert [r["gpu_count"] for r in rows] == [1, 2]
 
 
+class TestPoolHintResolutionSettings:
+    """Unit coverage for cli_publish._pool_hint_resolution_settings --
+    confirms the real `[pricing]` config is actually read, not just that
+    the reconciler-side resolver logic (tested independently in
+    test_pool_descriptors.py / test_reconciler.py) is correct in
+    isolation."""
+
+    def test_reads_defaults_from_settings_toml(self):
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.accept_pool_declared_sla is False
+        assert settings.default_sla == 0.0
+
+    def test_reads_an_explicit_override(self):
+        with settings_overrides(**{
+            "pricing.accept_pool_declared_sla": True,
+            "pricing.default_sla": 42.0,
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.accept_pool_declared_sla is True
+        assert settings.default_sla == 42.0
+
+    def test_flat_pricing_defaults_become_the_tier_1_fallback(self):
+        with settings_overrides(**{
+            "pricing.default_min_price": "1.00",
+            "pricing.default_token_address": "0xflat",
+            "pricing.default_max_duration_seconds": 60,
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_flat_default.min_price == "1.00"
+        assert settings.gpu_pricing_flat_default.token == "0xflat"
+        assert settings.gpu_pricing_flat_default.max_duration_seconds == 60
+
+    def test_unset_flat_pricing_defaults_are_none_not_empty_string(self):
+        """An unset default_min_price/token/... must fall through as
+        None so lower-priority resolution tiers still have a chance --
+        propagating "" would be treated as a real (if empty) value."""
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_flat_default.min_price is None
+        assert settings.gpu_pricing_flat_default.token is None
+
+    def test_per_model_gpu_pricing_defaults_read_from_config(self):
+        with settings_overrides(**{
+            "pricing.defaults": {
+                "gpu": {"H100": {"min_price": "5.00"}, "A100": {"min_price": "3.00"}},
+            },
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_defaults_by_model["H100"].min_price == "5.00"
+        assert settings.gpu_pricing_defaults_by_model["A100"].min_price == "3.00"
+
+    def test_no_configured_gpu_defaults_is_an_empty_mapping_not_an_error(self):
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_defaults_by_model == {}
+
+
 def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)

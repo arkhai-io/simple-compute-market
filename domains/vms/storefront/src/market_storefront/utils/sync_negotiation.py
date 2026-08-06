@@ -234,6 +234,55 @@ def _accepted_escrow_artifacts(
     return artifacts
 
 
+def lookup_pool_policy_tags(
+    sqlite_client: Any, listing_id: str | None,
+) -> dict[str, Any]:
+    """A listing's mapped pool's currently cached ``policy_tags``, or ``{}``.
+
+    Two steps, not one opaque call: (1) resolve the listing's mapped
+    ``pool_id`` from the existing ``derived_compute_listings`` table (the
+    same table a mapped listing's ``site_id`` is already resolved from,
+    no new column or table needed); (2) read that pool's ``policy_tags``
+    live from the in-memory projection cache. ``policy_tags`` has no
+    durable local persistence, so it can only ever be read fresh from the
+    cache, never from a table -- see
+    openspec/specs/storefront-publication/spec.md#domain-owned-publication-and-hold-hints.
+
+    Always returns a plain ``dict`` (never ``None``), including on any
+    resolution failure (unmapped listing, pool absent from the cache, its
+    site's projection not yet loaded) -- ``capped_hold_seconds({}, ...)``
+    already treats an empty/missing preference as "leave the caller's
+    requested TTL unchanged," so callers need no separate None-handling
+    branch, matching this function's own fail-open posture.
+    """
+    if not listing_id:
+        return {}
+    try:
+        from domains.vms.listings.reconciler import (
+            pool_id_for_listing,
+            site_id_for_listing,
+        )
+        from market_storefront.services.site_projection_cache import (
+            projection_caches,
+        )
+
+        site_id = site_id_for_listing(sqlite_client.db_path, listing_id)
+        pool_id = pool_id_for_listing(sqlite_client.db_path, listing_id)
+        if not site_id or not pool_id:
+            return {}
+        caches = projection_caches().get(site_id)
+        if caches is None:
+            return {}
+        pools = caches.resource_pools.view().value or []
+        for pool in pools:
+            if str(pool.get("resource_pool_id") or "") == pool_id:
+                metadata = pool.get("pool_metadata") or {}
+                return dict(metadata.get("policy_tags") or {})
+        return {}
+    except Exception:
+        return {}
+
+
 async def _place_capacity_hold(
     sqlite_client: Any,
     *,
@@ -263,6 +312,12 @@ async def _place_capacity_hold(
     design: a hold that can't be placed leaves acceptance untouched
     (settlement then does the plain atomic reserve, exactly as before),
     and a hold whose deal never settles auto-lapses at the ledger.
+
+    The requested TTL is capped by the listing's mapped pool's advisory
+    ``max_reservation_hold_seconds`` policy tag, if any (see
+    ``lookup_pool_policy_tags``) -- this changes nothing about what the
+    site ledger actually enforces (it still enforces only the value this
+    function sends), only what value this function chooses to send.
     """
     from core_storefront.stage_log import stage_event
 
@@ -274,6 +329,8 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     try:
+        from market_resource_pools.hints import capped_hold_seconds
+
         from domains.vms.listings.reconciler import site_id_for_listing
         from market_storefront.services.capacity_client import build_capacity_client
         from market_storefront.services.vm_job_spec_service import (
@@ -286,6 +343,8 @@ async def _place_capacity_hold(
             site_id_for_listing(sqlite_client.db_path, listing_id)
             if listing_id else None
         )
+        policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
+        ttl = capped_hold_seconds(ttl, policy_tags)
         held = await capacity.reserve(
             claim=claim or None,
             deal_ref={

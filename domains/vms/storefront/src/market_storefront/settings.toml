@@ -138,9 +138,12 @@ hold_ttl_seconds = 900
 # Structural capacity source for listing derivation: local tables
 # (compute_capacity_pools/compute_pool_members) unless this is set,
 # in which case the site-resource-pool projection is used instead
-# wherever the storefront's own cache has a loaded value. Off by
-# default until parity between the two sources is verified.
-use_site_projection_for_listings = false
+# wherever the storefront's own cache has a loaded value. On by
+# default -- the projection path has parity with local tables,
+# including bucket-sourced fungible capacity, multi-member
+# specific-resource listings, and listing-mode hints. Set to false
+# to fall back to local tables for a staged/canary rollout.
+use_site_projection_for_listings = true
 
 [provisioning]
 service_url            = "http://localhost:8085"
@@ -184,6 +187,35 @@ default_min_price            = ""
 default_token_address        = ""
 default_max_duration_seconds = 0   # 0 means unlimited
 publish_priceless            = false
+# Whether a resource pool's own projected `sla` hint
+# is consulted at all when resolving a listing's advertised SLA (the
+# middle tier of a storefront override > pool hint > this default
+# precedence chain -- see domains.vms.listings.pool_descriptors).
+# Off by default: publishing a site's self-reported SLA claim is new
+# capability a storefront operator must opt into, not something already
+# trusted today.
+accept_pool_declared_sla     = false
+# Storefront's own default SLA when neither a per-pool override
+# (compute_capacity_pools.sla) nor a trusted pool hint applies.
+default_sla                  = 0.0
+
+# Per-GPU-model pricing defaults (tier 1 of the
+# storefront-override > pool-hint > this-default precedence chain --
+# see domains.vms.listings.pricing_resolution). Structured to mirror
+# the structured-capacity-requirements change's own family-grouped
+# requirement shape, reserving room for non-GPU families (cpu/memory/
+# storage) once that change's vocabulary has landed and a pricing
+# dimension exists to key them by -- only `gpu` has entries today.
+# Add one [pricing.defaults.gpu.<model>] table per priced model; a
+# model with no table here, or a field left unset within one, falls
+# through to default_min_price/default_token_address/
+# default_max_duration_seconds above. Empty by default -- no priced
+# models ship out of the box.
+#
+# Example:
+# [pricing.defaults.gpu.H100]
+# min_price = "5.00"
+# token     = "0x0000000000000000000000000000000000000000"
 
 [integrations]
 # Sensitive — populated by Secret overlay.

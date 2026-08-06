@@ -200,6 +200,54 @@ class TestHealthEndpoint:
 
         assert result.site_projections is None
 
+    async def test_system_status_surfaces_listing_mode_explanations(self, db):
+        """Same real end-to-end round trip as
+        test_system_status_surfaces_site_projection_state (above), for the
+        sibling field -- this is exactly the layer that hid the original
+        site_projections bug (Pydantic v2's default extra="ignore" silently
+        dropping a field the server model hadn't declared), so the new
+        field gets the same real-HTTP proof rather than only a
+        SystemService-level unit test.
+        """
+        explanations = {
+            "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
+        }
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            listing_mode_explanation_provider=lambda: explanations,
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_system_status()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.listing_mode_explanations == explanations
+
+    async def test_health_omits_listing_mode_explanations(self, db):
+        """The fast liveness probe (/health) must not carry this field either."""
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            listing_mode_explanation_provider=lambda: {"site-a": {}},
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_health()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.listing_mode_explanations is None
+
 
 # ---------------------------------------------------------------------------
 # POST /admin/pause

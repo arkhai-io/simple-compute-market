@@ -30,12 +30,14 @@ def _make_service(
     registry: dict | None = None,
     *,
     projection_status_provider=None,
+    listing_mode_explanation_provider=None,
 ) -> SystemService:
     """``registry`` arg kept for compat with older test invocations; ignored."""
     return SystemService(
         sqlite_client=db,
         agent_id="test-agent",
         projection_status_provider=projection_status_provider,
+        listing_mode_explanation_provider=listing_mode_explanation_provider,
     )
 
 
@@ -243,3 +245,50 @@ class TestGetHealthSiteProjections:
 
         assert result["site_projections"] is None
         assert "site_projections" not in result["checks"]
+
+
+class TestGetHealthListingModeExplanations:
+    async def test_reports_per_site_per_pool_explanation(self, db):
+        """get_health copies the injected provider's explanations through
+        verbatim, mirroring TestGetHealthSiteProjections' own pattern."""
+        explanations = {
+            "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
+        }
+        svc = _make_service(db, listing_mode_explanation_provider=lambda: explanations)
+        result = await svc.get_health(include_registry=True)
+
+        assert result["listing_mode_explanations"] == explanations
+
+    async def test_omitted_from_fast_health_probe(self, db):
+        svc = _make_service(db, listing_mode_explanation_provider=lambda: {"site-a": {}})
+        result = await svc.get_health(include_registry=False)
+        assert "listing_mode_explanations" not in result
+
+    async def test_default_provider_is_the_real_listing_mode_explanations(self, db):
+        """With no provider injected, get_health falls back to the real
+        production source rather than silently returning nothing."""
+        svc = _make_service(db)  # no listing_mode_explanation_provider injected
+        result = await svc.get_health(include_registry=True)
+        # No sites are configured/loaded in this process, so the real
+        # function returns an empty dict, not None -- proving the default
+        # path actually ran rather than swallowing an exception.
+        assert result["listing_mode_explanations"] == {}
+
+    async def test_reporting_failure_does_not_add_a_checks_entry(self, db):
+        def _boom():
+            raise RuntimeError("no event loop for pollers in this process")
+
+        svc = _make_service(db, listing_mode_explanation_provider=_boom)
+        result = await svc.get_health(include_registry=True)
+
+        assert result["listing_mode_explanations"] is None
+        assert "listing_mode_explanations" not in result["checks"]
+
+    async def test_does_not_change_all_ok_status(self, db):
+        """A populated explanations dict (implying some pool fell back to
+        a structural default) is informational only -- it must not gate
+        overall health status."""
+        explanations = {"site-a": {"gpu-pool": "unrecognized listing_mode 'bogus'"}}
+        svc = _make_service(db, listing_mode_explanation_provider=lambda: explanations)
+        result = await svc.get_health(include_registry=True)
+        assert "listing_mode_explanations" not in result["checks"]

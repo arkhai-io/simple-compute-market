@@ -180,6 +180,15 @@ This is a two-speed migration:
   before this change is implemented (e.g. projecting GPU model) uses the
   already-flattened form (`attributes["gpu_model"]`), forward-compatible
   with this change's eventual nested shape without needing migration.
+- A second, later coordination point with the same change, on the
+  config/pricing side rather than the wire/inventory side (2026-08-05,
+  see `design.md`): `pools-8`'s storefront pricing config
+  (`[pricing.defaults.gpu.<model>]`) proactively adopted this change's
+  family-grouped vocabulary for the `gpu` family alone. Extending that
+  pricing config beyond `gpu` needs this change's own vocabulary to have
+  landed and stabilized first — check `pools-8`'s pricing config as a
+  second precedent for the family-grouped convention when finalizing
+  this change's own shape, not a separate thing to reconcile after.
 - Independent of `remove-relative-uv-sources` and Section 11's API-credit
   wheel-isolation work — no overlap.
 

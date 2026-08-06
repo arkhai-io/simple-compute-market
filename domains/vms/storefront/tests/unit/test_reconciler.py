@@ -14,11 +14,14 @@ import sqlite3
 
 import pytest
 
+from domains.vms.listings.pricing_resolution import GpuPricingFields
 from domains.vms.listings.reconciler import (
+    PoolHintResolutionSettings,
     _accumulate_capacity_pool_member,
+    _fungible_availability_from_buckets,
     _member_available_units,
     _project_legacy_resource_row,
-    _projected_pool_row,
+    _projected_pool_rows,
     _projected_resource_usage,
     available_compute_slices,
     closed_available_listing_ids,
@@ -30,6 +33,7 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     mark_derived_listings_open,
     open_listing_resource_keys,
+    pool_id_for_listing,
     record_derived_listing,
     reopen_local_derived_listing,
     site_id_for_listing,
@@ -316,13 +320,16 @@ class TestAvailableComputeSlices:
         assert all(row["gpu_model"] == "H100" for row in slices)
         assert all(row["min_price"] == "10" for row in slices)  # _seed_pool's fixed price
 
-    def test_projection_pool_for_non_home_site_is_excluded_even_with_matching_local_pool_id(
+    def test_projection_pool_for_non_home_site_never_uses_another_sites_local_row(
         self, db_path,
     ):
         """The core safety property: a non-home-site pool must never pick
         up another site's local pricing row, even when the pool_id
         happens to match -- compute_capacity_pools is not site-scoped,
-        so this is the only thing preventing a cross-site mix-up."""
+        so this is the only thing preventing a cross-site mix-up. It
+        still publishes (priceless, since it has no hint/config default
+        of its own either) -- a missing storefront override is not a
+        reason to suppress the pool."""
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-b": [  # not home_site
@@ -342,11 +349,16 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices == []
+        assert slices
+        assert all(s.get("min_price") is None for s in slices)
+        assert all(s.get("region") is None for s in slices)
 
-    def test_projection_pool_with_no_local_pricing_row_is_excluded(self, db_path):
+    def test_projection_pool_with_no_local_pricing_row_publishes_priceless(
+        self, db_path,
+    ):
         """A home-site pool with no matching local compute_capacity_pools
-        row has no price -- excluded, not published price-less."""
+        row has no storefront-override price -- it still publishes,
+        priceless, rather than being excluded."""
         projection = {
             "site-a": [
                 {
@@ -365,7 +377,8 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices == []
+        assert slices
+        assert all(s.get("min_price") is None for s in slices)
 
     def test_projection_disabled_resource_excluded_from_capacity(self, db_path):
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
@@ -389,7 +402,15 @@ class TestAvailableComputeSlices:
         )
         assert slices == []
 
-    def test_multiple_sites_only_home_site_pool_is_published(self, db_path):
+    def test_multiple_sites_both_publish_but_only_home_site_gets_local_pricing(
+        self, db_path,
+    ):
+        """Corrected from an earlier "only home_site pool is published"
+        expectation: both sites' pools now publish (a missing storefront
+        override is not a reason to suppress a pool), but only the
+        home-site pool's local `compute_capacity_pools` row is ever
+        consulted -- site-b's pool has no hint/config default either, so
+        it publishes priceless, not with site-a's price."""
         _seed_pool(db_path, pool_id="gpu-pool", gpu_count=4)
         projection = {
             "site-a": [{
@@ -414,9 +435,56 @@ class TestAvailableComputeSlices:
         slices = available_compute_slices(
             db_path, home_site="site-a", site_pool_projection=projection,
         )
-        assert slices
-        assert all(row["site_id"] == "site-a" for row in slices)
-        assert all(row["pool_id"] == "gpu-pool" for row in slices)
+        by_site = {}
+        for row in slices:
+            by_site.setdefault(row["site_id"], []).append(row)
+        assert set(by_site) == {"site-a", "site-b"}
+        assert all(row["min_price"] == "10" for row in by_site["site-a"])
+        assert all(row["min_price"] is None for row in by_site["site-b"])
+
+    def test_resource_keys_are_identical_regardless_of_hint_resolution(self, db_path):
+        """The invariant `current_available_resource_keys`/
+        `stale_open_listing_ids`/`closed_available_listing_ids` all rely
+        on without any of them threading `hint_resolution` through:
+        `resource_key`/`legacy_resource_key` never depend on resolved
+        region/SLA/pricing, however different `hint_resolution` makes
+        those fields. Capacity-delta reconciliation compares structural
+        derivation keys and availability; it never recomputes or
+        republishes commercial listing terms -- this proves that holds,
+        rather than only asserting it in a comment. No local
+        `compute_capacity_pools` row on purpose -- a storefront override
+        would win regardless of `hint_resolution` and this test would
+        prove nothing about the tiers that actually vary."""
+        projection = {
+            "site-a": [{
+                "resource_pool_id": "gpu-pool",
+                "resources": [{
+                    "physical_resource_id": "res-1",
+                    "capacity": {"gpu_count": 4},
+                    "attributes": {"gpu_model": "H100"},
+                    "enabled": True,
+                }],
+            }],
+        }
+        default_rows = available_compute_slices(
+            db_path, home_site="site-a", site_pool_projection=projection,
+        )
+        varied_rows = available_compute_slices(
+            db_path, home_site="site-a", site_pool_projection=projection,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=7.0,
+                gpu_pricing_defaults_by_model={
+                    "H100": GpuPricingFields(min_price="0.01"),
+                },
+            ),
+        )
+        default_keys = {r["resource_key"] for r in default_rows}
+        varied_keys = {r["resource_key"] for r in varied_rows}
+        assert default_keys == varied_keys
+        assert default_keys  # not vacuously true
+        # Confirm the two runs actually resolved *different* commercial
+        # values -- otherwise this test wouldn't be exercising anything.
+        assert {r["sla"] for r in default_rows} != {r["sla"] for r in varied_rows}
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +536,88 @@ class TestRecordAndLoad:
             db_path, site_id="site-b", pool_id="gpu-pool", gpu_count=2,
         )
         assert loaded is None
+
+    def test_two_specific_resource_listings_from_the_same_pool_coexist(
+        self, db_path,
+    ):
+        """Regression for the `use_pool_key` collision bug: two
+        specific_resource candidates from the same multi-member pool, at
+        the same gpu_count, must persist as two independent rows -- not
+        collapse onto one shared pool-keyed derivation_key and silently
+        overwrite each other."""
+        record_derived_listing(
+            db_path, listing_id="listing-1", site_id="site-a",
+            pool_id="gpu-pool", resource_id="res-1", gpu_count=4,
+        )
+        record_derived_listing(
+            db_path, listing_id="listing-2", site_id="site-a",
+            pool_id="gpu-pool", resource_id="res-2", gpu_count=4,
+        )
+        loaded_1 = load_derived_listing_for_slice(
+            db_path, site_id="site-a", resource_id="res-1", gpu_count=4,
+        )
+        loaded_2 = load_derived_listing_for_slice(
+            db_path, site_id="site-a", resource_id="res-2", gpu_count=4,
+        )
+        assert loaded_1 is not None
+        assert loaded_2 is not None
+        assert loaded_1["listing_id"] == "listing-1"
+        assert loaded_2["listing_id"] == "listing-2"
+
+    def test_fungible_listing_still_uses_the_pool_key(self, db_path):
+        """The fix must not disturb the fungible case: a candidate with
+        no resource_id still derives its key from pool_id."""
+        record_derived_listing(
+            db_path, listing_id="listing-1", site_id="site-a",
+            pool_id="gpu-pool", resource_id=None, gpu_count=4,
+        )
+        loaded = load_derived_listing_for_slice(
+            db_path, site_id="site-a", pool_id="gpu-pool", gpu_count=4,
+        )
+        assert loaded is not None
+        assert loaded["listing_id"] == "listing-1"
+
+
+# ---------------------------------------------------------------------------
+# pool_id_for_listing
+# ---------------------------------------------------------------------------
+
+class TestPoolIdForListing:
+    def test_returns_mapped_pool_id(self, db_path):
+        record_derived_listing(
+            db_path, listing_id="listing-1", site_id="site-a",
+            pool_id="gpu-pool", resource_id=None, gpu_count=2,
+        )
+        assert pool_id_for_listing(db_path, "listing-1") == "gpu-pool"
+
+    def test_none_for_unmapped_listing(self, db_path):
+        ensure_derived_compute_listings_table(sqlite3.connect(db_path))
+        assert pool_id_for_listing(db_path, "listing-none") is None
+
+    def test_returns_backfilled_pool_id_for_specific_resource_only_mapping(
+        self, db_path,
+    ):
+        """No way to distinguish this from a genuine pool at this table
+        alone -- see pool_id_for_listing's own docstring. Downstream
+        lookups against the live projection cache are the actual guard
+        against a false match, not this function."""
+        record_derived_listing(
+            db_path, listing_id="listing-1", site_id="site-a",
+            pool_id=None, resource_id="res-1", gpu_count=4,
+        )
+        assert pool_id_for_listing(db_path, "listing-1") == "res-1"
+
+    def test_returns_the_real_pool_id_for_a_specific_resource_within_a_pool(
+        self, db_path,
+    ):
+        """A multi-member pool's specific_resource candidate carries both
+        a real pool_id and a real resource_id -- this must return the
+        pool, not the resource."""
+        record_derived_listing(
+            db_path, listing_id="listing-1", site_id="site-a",
+            pool_id="gpu-pool", resource_id="res-1", gpu_count=4,
+        )
+        assert pool_id_for_listing(db_path, "listing-1") == "gpu-pool"
 
 
 # ---------------------------------------------------------------------------
@@ -1034,10 +1184,67 @@ class TestProjectedResourceUsage:
 
 
 # ---------------------------------------------------------------------------
-# _projected_pool_row -- one projected pool -> one pool_rows entry (or None)
+# _fungible_availability_from_buckets -- direct contract tests, isolated
+# from _projected_pool_rows' pricing/resource-walk scaffolding
 # ---------------------------------------------------------------------------
 
-class TestProjectedPoolRow:
+class TestFungibleAvailabilityFromBuckets:
+    def test_none_family_falls_back(self):
+        assert _fungible_availability_from_buckets("gpu-pool", None) is None
+
+    def test_loaded_empty_family_is_trusted_zero(self):
+        assert _fungible_availability_from_buckets("gpu-pool", []) == (0, 0, None)
+
+    def test_loaded_family_with_no_matching_pool_is_trusted_zero(self):
+        buckets = [
+            {"resource_pool_id": "other-pool", "available": {"gpu_count": 9}, "resource_count": 2},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (0, 0, None)
+
+    def test_matching_readable_bucket_is_used(self):
+        buckets = [
+            {
+                "resource_pool_id": "gpu-pool",
+                "available": {"gpu_count": 6},
+                "resource_count": 2,
+                "grouping_attributes": {"gpu_model": "H100"},
+            },
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (6, 12, "H100")
+
+    def test_max_across_multiple_matching_buckets_not_sum(self):
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 2}, "resource_count": 1},
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 6}, "resource_count": 1},
+        ]
+        max_available, total_available, _ = _fungible_availability_from_buckets(
+            "gpu-pool", buckets,
+        )
+        assert max_available == 6
+        assert total_available == 2 + 6
+
+    def test_matching_but_unreadable_bucket_falls_back(self):
+        """A bucket entry exists for this pool but predates per-resource
+        `available` (empty dict, no `gpu_count` key) -- not the same as
+        a confirmed absence, must fall back rather than read as zero."""
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) is None
+
+    def test_one_readable_and_one_unreadable_matching_bucket_uses_the_readable_one(self):
+        buckets = [
+            {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+        ]
+        assert _fungible_availability_from_buckets("gpu-pool", buckets) == (4, 4, None)
+
+
+# ---------------------------------------------------------------------------
+# _projected_pool_rows -- one projected pool -> zero or more pool_rows entries
+# ---------------------------------------------------------------------------
+
+class TestProjectedPoolRows:
     def _pricing_row(self, **overrides):
         base = {
             "gpu_model": "H100", "region": "us-east", "sla": 99.9,
@@ -1047,33 +1254,155 @@ class TestProjectedPoolRow:
         base.update(overrides)
         return base
 
-    def test_none_without_a_pool_id(self):
-        row = _projected_pool_row(
+    def test_empty_without_a_pool_id(self):
+        rows = _projected_pool_rows(
             {}, site_id="site-a", home_site="site-a",
-            local_pricing={}, member_availability=None,
+            local_pricing={}, member_availability=None, capacity_buckets=None,
         )
-        assert row is None
+        assert rows == []
 
-    def test_none_for_non_home_site_even_with_a_matching_local_pool_id(self):
-        row = _projected_pool_row(
+    def test_non_home_site_pool_with_a_matching_local_pool_id_never_uses_it(self):
+        """`compute_capacity_pools` is never consulted for a non-home-site
+        pool (cross-site pool_id collision risk -- see `_local_pool_pricing`),
+        even when a same-named local row exists -- but the pool still
+        publishes, priceless, since a missing storefront-override tier is
+        not a reason to suppress the pool entirely."""
+        rows = _projected_pool_rows(
             {"resource_pool_id": "gpu-pool", "resources": []},
             site_id="site-b", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
-            member_availability=None,
+            member_availability=None, capacity_buckets=None,
         )
-        assert row is None
+        assert len(rows) == 1
+        assert rows[0]["min_price"] is None
+        assert rows[0]["region"] is None
 
-    def test_none_for_home_site_pool_with_no_local_pricing(self):
-        row = _projected_pool_row(
+    def test_non_home_site_pool_publishes_from_a_complete_hint_alone(self):
+        """The actual point of the three-tier mechanism: a pool this
+        storefront has never locally priced still publishes with real
+        commercial terms, sourced entirely from its own projected hint."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {
+                        "region": "Nevada, US",
+                        "pricing": {
+                            "gpu": {
+                                "H100": {
+                                    "min_price": "5.00", "token": "0xhint",
+                                    "max_duration_seconds": 3600,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            site_id="site-b", home_site="site-a",
+            local_pricing={}, member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["region"] == "Nevada, US"
+        assert rows[0]["min_price"] == "5.00"
+        assert rows[0]["token"] == "0xhint"
+
+    def test_home_site_pool_with_no_local_row_publishes_priceless_by_default(self):
+        rows = _projected_pool_rows(
             {"resource_pool_id": "unpriced", "resources": []},
             site_id="site-a", home_site="site-a",
-            local_pricing={},
-            member_availability=None,
+            local_pricing={}, member_availability=None, capacity_buckets=None,
         )
-        assert row is None
+        assert len(rows) == 1
+        assert rows[0]["min_price"] is None
+        assert rows[0]["region"] is None
+        assert rows[0]["sla"] == 0.0
 
-    def test_builds_a_row_for_home_site_pool_with_pricing(self):
-        row = _projected_pool_row(
+    def test_home_site_pool_with_no_local_row_publishes_from_config_default(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "unpriced",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "A100"},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={}, member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_defaults_by_model={
+                    "A100": GpuPricingFields(min_price="3.00"),
+                },
+            ),
+        )
+        assert len(rows) == 1
+        assert rows[0]["min_price"] == "3.00"
+
+    def test_home_site_pool_with_local_row_still_uses_it_as_the_override(self):
+        """The corrected behavior doesn't disturb the ordinary case: a
+        real local row still wins as the top-precedence override."""
+        rows = _projected_pool_rows(
+            {"resource_pool_id": "gpu-pool", "resources": []},
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["min_price"] == "10"
+
+    def test_builds_one_fungible_row_for_home_site_pool_with_pricing(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+                # Explicit tag: a single-member pool's *structural*
+                # default is specific_resource (backward compatibility,
+                # see test_single_member_pool_defaults_to_specific_resource_without_a_tag
+                # below) -- an explicit fungible tag is what this test
+                # actually wants to exercise.
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["pool_id"] == "gpu-pool"
+        assert row["site_id"] == "site-a"
+        assert row["total_gpu_count"] == 4
+        assert row["min_price"] == "10"
+        assert row["listing_mode"] == "fungible"
+        assert row["listing_mode_explanation"] is None
+        assert row["single_resource_id"] is None
+
+    def test_single_member_pool_defaults_to_specific_resource_without_a_tag(self):
+        """Backward compatibility: `available_compute_slices` always
+        treated a single-member pool as specific-resource before
+        `listing_mode` existed (`member_count == 1` heuristic). An
+        untagged pool with exactly one member must keep resolving that
+        way, or an existing derived-listing mapping keyed on that
+        resource's identity would silently break the moment a
+        projection without `pool_metadata` reaches this function."""
+        rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
                 "resources": [
@@ -1087,16 +1416,39 @@ class TestProjectedPoolRow:
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
-            member_availability=None,
+            member_availability=None, capacity_buckets=None,
         )
-        assert row is not None
-        assert row["pool_id"] == "gpu-pool"
-        assert row["site_id"] == "site-a"
-        assert row["total_gpu_count"] == 4
-        assert row["min_price"] == "10"
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["single_resource_id"] == "res-1"
+
+    def test_multi_member_pool_defaults_to_fungible_without_a_tag(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2",
+                        "capacity": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "fungible"
+        assert rows[0]["single_resource_id"] is None
 
     def test_disabled_resources_are_excluded(self):
-        row = _projected_pool_row(
+        rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
                 "resources": [
@@ -1109,13 +1461,14 @@ class TestProjectedPoolRow:
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row()},
-            member_availability=None,
+            member_availability=None, capacity_buckets=None,
         )
-        assert row["total_gpu_count"] == 0
-        assert row["member_count"] == 0
+        assert len(rows) == 1
+        assert rows[0]["total_gpu_count"] == 0
+        assert rows[0]["member_count"] == 0
 
     def test_gpu_model_prefers_resource_attributes_over_local_pricing(self):
-        row = _projected_pool_row(
+        rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
                 "resources": [
@@ -1129,12 +1482,12 @@ class TestProjectedPoolRow:
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row(gpu_model="H100")},
-            member_availability=None,
+            member_availability=None, capacity_buckets=None,
         )
-        assert row["gpu_model"] == "A100"
+        assert rows[0]["gpu_model"] == "A100"
 
     def test_gpu_model_falls_back_to_local_pricing_when_resources_lack_it(self):
-        row = _projected_pool_row(
+        rows = _projected_pool_rows(
             {
                 "resource_pool_id": "gpu-pool",
                 "resources": [
@@ -1147,6 +1500,568 @@ class TestProjectedPoolRow:
             },
             site_id="site-a", home_site="site-a",
             local_pricing={"gpu-pool": self._pricing_row(gpu_model="H100")},
-            member_availability=None,
+            member_availability=None, capacity_buckets=None,
         )
-        assert row["gpu_model"] == "H100"
+        assert rows[0]["gpu_model"] == "H100"
+
+    # -- region/sla hint resolution ---------------------------------------
+
+    def test_region_hint_overrides_local_pricing_fallback(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"region": "Nevada, US"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(region="us-east")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["region"] == "Nevada, US"
+
+    def test_region_falls_back_to_local_pricing_without_a_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(region="us-east")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["region"] == "us-east"
+
+    def test_sla_storefront_override_wins_over_pool_hint_by_default(self):
+        """No hint_resolution passed -- the default settings apply, and
+        the local pricing row's sla acts as the storefront's per-pool
+        override, taking precedence over any pool-declared hint
+        regardless of the (default-closed) trust gate."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 50.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=99.9)},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["sla"] == 99.9
+
+    def test_sla_pool_hint_used_when_no_local_override_and_gate_open(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 95.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=0.0,
+            ),
+        )
+        assert rows[0]["sla"] == 95.0
+
+    def test_sla_pool_hint_ignored_when_gate_closed_even_with_no_override(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"sla": 95.0}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=False, default_sla=12.5,
+            ),
+        )
+        assert rows[0]["sla"] == 12.5
+
+    def test_sla_falls_back_to_config_default_with_no_override_or_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(sla=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                accept_pool_declared_sla=True, default_sla=42.0,
+            ),
+        )
+        assert rows[0]["sla"] == 42.0
+
+    # -- pricing hint resolution ------------------------------------------
+
+    def test_pricing_storefront_override_wins_over_pool_hint(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price="10")},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["min_price"] == "10"
+
+    def test_pricing_pool_hint_used_when_no_storefront_override(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"pricing": {"gpu": {"H100": {"min_price": "5.00"}}}},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["min_price"] == "5.00"
+
+    def test_pricing_falls_back_to_per_model_config_default(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_defaults_by_model={
+                    "H100": GpuPricingFields(min_price="3.00"),
+                },
+            ),
+        )
+        assert rows[0]["min_price"] == "3.00"
+
+    def test_pricing_falls_back_to_flat_config_default_as_last_resort(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 4},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+            hint_resolution=PoolHintResolutionSettings(
+                gpu_pricing_flat_default=GpuPricingFields(min_price="1.00"),
+            ),
+        )
+        assert rows[0]["min_price"] == "1.00"
+
+    def test_specific_resource_multi_member_prices_each_by_its_own_model(self):
+        """Two members with different GPU models must resolve pricing
+        independently -- proving pricing resolution is per-row, not
+        computed once for the whole pool."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1", "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"}, "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2", "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "A100"}, "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {
+                        "listing_mode": "specific_resource",
+                        "pricing": {
+                            "gpu": {
+                                "H100": {"min_price": "5.00"},
+                                "A100": {"min_price": "3.00"},
+                            },
+                        },
+                    },
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row(min_price=None)},
+            member_availability=None, capacity_buckets=None,
+        )
+        by_resource = {row["single_resource_id"]: row for row in rows}
+        assert by_resource["res-1"]["min_price"] == "5.00"
+        assert by_resource["res-2"]["min_price"] == "3.00"
+
+    # -- listing_mode resolution --------------------------------------
+
+    def test_unrecognized_listing_mode_falls_back_with_explanation(self):
+        """One member -> structural default is specific_resource (see
+        test_single_member_pool_defaults_to_specific_resource_without_a_tag)
+        -- an unrecognized explicit value falls back to *that* default,
+        not a hardcoded constant."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "specific_resource"
+        assert rows[0]["listing_mode_explanation"] is not None
+        assert "bogus" in rows[0]["listing_mode_explanation"]
+
+    def test_unrecognized_listing_mode_falls_back_to_fungible_for_multi_member(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {"physical_resource_id": "res-1", "capacity": {"gpu_count": 4}, "enabled": True},
+                    {"physical_resource_id": "res-2", "capacity": {"gpu_count": 4}, "enabled": True},
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "bogus"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["listing_mode"] == "fungible"
+        assert rows[0]["listing_mode_explanation"] is not None
+        assert "bogus" in rows[0]["listing_mode_explanation"]
+
+    # -- specific_resource, including multi-member ----------------------
+
+    def test_specific_resource_single_member_yields_one_resource_keyed_row(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"listing_mode": "specific_resource"},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["single_resource_id"] == "res-1"
+        assert rows[0]["listing_mode"] == "specific_resource"
+
+    def test_specific_resource_multi_member_yields_one_row_per_member(self):
+        """A multi-member pool declared specific_resource must publish
+        one independently identified row per member, not collapse to a
+        single aggregate the way fungible mode does."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "available": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2",
+                        "capacity": {"gpu_count": 8},
+                        "available": {"gpu_count": 6},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-3",
+                        "capacity": {"gpu_count": 8},
+                        "available": {"gpu_count": 0},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"listing_mode": "specific_resource"},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 3
+        by_resource = {row["single_resource_id"]: row for row in rows}
+        assert set(by_resource) == {"res-1", "res-2", "res-3"}
+        assert by_resource["res-1"]["available_gpu_count"] == 8
+        assert by_resource["res-2"]["available_gpu_count"] == 6
+        assert by_resource["res-3"]["available_gpu_count"] == 0
+        # Each row's own availability, not summed/maxed across the pool.
+        assert by_resource["res-1"]["max_member_available_gpu_count"] == 8
+        assert by_resource["res-2"]["max_member_available_gpu_count"] == 6
+
+    def test_specific_resource_disabled_member_excluded(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2",
+                        "capacity": {"gpu_count": 8},
+                        "enabled": False,
+                    },
+                ],
+                "pool_metadata": {
+                    "policy_tags": {"listing_mode": "specific_resource"},
+                },
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert len(rows) == 1
+        assert rows[0]["single_resource_id"] == "res-1"
+
+    # -- fungible mode sourced from site_capacity_buckets ----------------
+
+    def test_fungible_prefers_bucket_availability_over_resource_walk(self):
+        """The max_member_available ceiling must reflect a single bucket's
+        (i.e. a single member's) availability, not a sum across buckets,
+        and must come from the bucket data when it's usable."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                    {
+                        "physical_resource_id": "res-2",
+                        "capacity": {"gpu_count": 8},
+                        "attributes": {"gpu_model": "H100"},
+                        "enabled": True,
+                    },
+                ],
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[
+                {
+                    "resource_pool_id": "gpu-pool",
+                    "available": {"gpu_count": 2},
+                    "resource_count": 1,
+                    "grouping_attributes": {"gpu_model": "H100"},
+                },
+                {
+                    "resource_pool_id": "gpu-pool",
+                    "available": {"gpu_count": 6},
+                    "resource_count": 1,
+                    "grouping_attributes": {"gpu_model": "H100"},
+                },
+            ],
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["max_member_available_gpu_count"] == 6
+        assert row["available_gpu_count"] == 2 * 1 + 6 * 1
+
+    def test_fungible_trusts_zero_when_family_loaded_with_no_matching_entries(self):
+        """Corrected behavior: a *loaded* capacity-bucket family (however
+        many entries it has) that contains no entry for this specific
+        pool is itself the authoritative answer -- zero -- not missing
+        data. `capacity_bucket_projection` covers the site's complete
+        enabled-resource inventory, so a pool with any enabled member
+        would necessarily contribute at least one matching entry once
+        the family has loaded; absence means the pool currently has none.
+        Falling back to a separately-fetched resource-pool projection
+        here would let two independently-polled projection generations
+        silently contradict each other."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[
+                {
+                    "resource_pool_id": "other-pool",
+                    "available": {"gpu_count": 99},
+                    "resource_count": 5,
+                },
+            ],
+        )
+        assert rows[0]["max_member_available_gpu_count"] == 0
+        assert rows[0]["available_gpu_count"] == 0
+
+    def test_fungible_trusts_zero_when_family_loaded_as_a_whole_empty_list(self):
+        """The site-wide "authoritative zero buckets anywhere" case --
+        e.g. the capacity-bucket family loaded successfully but the site
+        currently has no enabled resources at all. Must be trusted the
+        same way a per-pool absence is, not treated as unknown."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 8},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[],
+        )
+        assert rows[0]["max_member_available_gpu_count"] == 0
+        assert rows[0]["available_gpu_count"] == 0
+
+    def test_fungible_falls_back_to_resource_walk_when_no_bucket_data(self):
+        """No site_capacity_buckets supplied at all (None) -- must not
+        publish zero capacity, must use the pre-existing computation."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "available": {"gpu_count": 3},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None, capacity_buckets=None,
+        )
+        assert rows[0]["max_member_available_gpu_count"] == 3
+
+    def test_fungible_falls_back_when_bucket_predates_available_field(self):
+        """A bucket whose `available` dict lacks `gpu_count` entirely
+        (an older producer that never emitted per-resource availability)
+        must not be read as an authoritative zero -- falls back to the
+        resource-list computation instead."""
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "available": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[
+                {"resource_pool_id": "gpu-pool", "available": {}, "resource_count": 1},
+            ],
+        )
+        assert rows[0]["max_member_available_gpu_count"] == 4
+
+    def test_fungible_trusts_a_genuine_zero_from_buckets(self):
+        rows = _projected_pool_rows(
+            {
+                "resource_pool_id": "gpu-pool",
+                "resources": [
+                    {
+                        "physical_resource_id": "res-1",
+                        "capacity": {"gpu_count": 4},
+                        "available": {"gpu_count": 4},
+                        "enabled": True,
+                    },
+                ],
+                "pool_metadata": {"policy_tags": {"listing_mode": "fungible"}},
+            },
+            site_id="site-a", home_site="site-a",
+            local_pricing={"gpu-pool": self._pricing_row()},
+            member_availability=None,
+            capacity_buckets=[
+                {
+                    "resource_pool_id": "gpu-pool",
+                    "available": {"gpu_count": 0},
+                    "resource_count": 1,
+                },
+            ],
+        )
+        # A real zero from a usable bucket is trusted, even though the
+        # resource-list walk (never consulted for max/available once a
+        # usable bucket exists) would have said 4.
+        assert rows[0]["max_member_available_gpu_count"] == 0
+        assert rows[0]["available_gpu_count"] == 0
+

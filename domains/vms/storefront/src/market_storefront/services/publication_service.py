@@ -56,6 +56,7 @@ async def close_stale_compute_listings_after_capacity_change(
     configured_site_count: int,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
+    site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Close open derived compute listings whose GPU slice no longer fits.
 
@@ -71,6 +72,7 @@ async def close_stale_compute_listings_after_capacity_change(
         db_path, home_site=home_site, configured_site_count=configured_site_count,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     ):
         result = await close_order({"listing_id": listing_id})
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
@@ -92,6 +94,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
+    site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Reopen closed derived listings whose slice fits capacity again.
 
@@ -111,6 +114,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     reopened_listing_ids = closed_available_listing_ids(
         db_path, home_site=home_site, member_availability=member_availability,
         site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
     for listing_id in reopened_listing_ids:
         await get_sqlite_client().update_listing(listing_id=listing_id, status="open")

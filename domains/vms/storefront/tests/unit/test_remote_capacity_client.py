@@ -256,12 +256,14 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
     async def fake_close(
         db_path, *, home_site=None, configured_site_count=0,
         member_availability=None, site_pool_projection=None,
+        site_capacity_buckets=None,
     ):
         calls.append(("close", None, member_availability))
         return ["lst-1"]
 
     async def fake_reopen(
         db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
+        site_capacity_buckets=None,
     ):
         calls.append(("reopen", None, member_availability))
         return []
@@ -299,12 +301,14 @@ async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
     async def fake_close(
         db_path, *, home_site=None, configured_site_count=0,
         member_availability=None, site_pool_projection=None,
+        site_capacity_buckets=None,
     ):
         calls.append("close")
         return []
 
     async def fake_reopen(
         db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
+        site_capacity_buckets=None,
     ):
         calls.append("reopen")
         return []
@@ -462,6 +466,62 @@ class TestSitePoolProjection:
         assert set(result) == {"site-a"}
 
 
+class TestSiteCapacityBuckets:
+    """Same None-vs-[] inclusion contract as TestSitePoolProjection,
+    verified independently for the sibling function -- both feed the
+    same reconciler consumer, and the two are easy to accidentally drift
+    apart since they're separate functions over separate cache fields."""
+
+    def test_empty_when_nothing_cached(self):
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={},
+        ):
+            assert cc.site_capacity_buckets() == {}
+
+    def test_excludes_a_site_with_no_cached_value(self):
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = None
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {}
+
+    def test_includes_a_site_with_a_loaded_empty_projection(self):
+        """A site whose capacity-bucket family loaded successfully with
+        zero rows must be included as an empty list, not excluded the
+        way an unloaded site is -- reconciler's fungible-mode row builder
+        relies on this to trust an authoritative zero instead of falling
+        back."""
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = []
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {"site-a": []}
+        assert "site-a" in result
+
+    def test_includes_a_site_with_loaded_bucket_rows(self):
+        fake_cache = MagicMock()
+        fake_cache.capacity_buckets.view.return_value.value = [
+            {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+        ]
+        with patch(
+            "market_storefront.services.site_projection_cache.projection_caches",
+            return_value={"site-a": fake_cache},
+        ):
+            result = cc.site_capacity_buckets()
+        assert result == {
+            "site-a": [
+                {"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1},
+            ],
+        }
+
+
 # ---------------------------------------------------------------------------
 # Orchestration: a real cached projection actually reaches reconciliation,
 # not just the two pieces (cache -> dict, dict -> dispatch) in isolation.
@@ -477,7 +537,8 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         a real CapacityDelta, and confirm the exact cached rows arrive as
         the site_pool_projection argument to the close call -- proving
         the wiring from cache to reconciliation is actually connected,
-        not just each half correct in isolation.
+        not just each half correct in isolation. Also proves the sibling
+        site_capacity_buckets cache reaches the same call the same way.
         """
         from core_storefront.site_projections import (
             ProjectionCache, ProjectionIdentity, ProjectionState,
@@ -485,15 +546,21 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         from market_storefront.services import site_projection_cache as spc
 
         pool_rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
+        bucket_rows = [{"resource_pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1}]
 
         resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
         resource_pools_cache._value = pool_rows
         resource_pools_cache._state = ProjectionState.loaded
         resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
 
+        capacity_buckets_cache: ProjectionCache = ProjectionCache(client=None)
+        capacity_buckets_cache._value = bucket_rows
+        capacity_buckets_cache._state = ProjectionState.loaded
+        capacity_buckets_cache._identity = ProjectionIdentity(revision=1, digest="def")
+
         caches = spc.SiteProjectionCaches(
             resource_pools=resource_pools_cache,
-            capacity_buckets=ProjectionCache(client=None),
+            capacity_buckets=capacity_buckets_cache,
         )
 
         received: dict = {}
@@ -501,12 +568,15 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_close(
             db_path, *, home_site=None, configured_site_count=0,
             member_availability=None, site_pool_projection=None,
+            site_capacity_buckets=None,
         ):
             received["site_pool_projection"] = site_pool_projection
+            received["site_capacity_buckets"] = site_capacity_buckets
             return []
 
         async def fake_reopen(
             db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
+            site_capacity_buckets=None,
         ):
             return []
 
@@ -528,13 +598,16 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             await subscriber(CapacityDelta(kind="reserved", version=1))
 
         assert received["site_pool_projection"] == {"default": pool_rows}
+        assert received["site_capacity_buckets"] == {"default": bucket_rows}
 
     async def test_flag_disabled_reaches_the_close_call_as_none(
         self, client: cc.SiteCapacityClient,
     ):
         """Same cache state, flag off: the cached projection must not be
         used at all -- close still runs (reconciliation itself isn't
-        gated), but with site_pool_projection=None."""
+        gated), but with site_pool_projection=None (and, following from
+        it, site_capacity_buckets=None -- the buckets fetch is itself
+        gated on the projection having been fetched)."""
         from core_storefront.site_projections import (
             ProjectionCache, ProjectionIdentity, ProjectionState,
         )
@@ -554,12 +627,15 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_close(
             db_path, *, home_site=None, configured_site_count=0,
             member_availability=None, site_pool_projection=None,
+            site_capacity_buckets=None,
         ):
             received["site_pool_projection"] = site_pool_projection
+            received["site_capacity_buckets"] = site_capacity_buckets
             return []
 
         async def fake_reopen(
             db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
+            site_capacity_buckets=None,
         ):
             return []
 
@@ -581,3 +657,4 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
             await subscriber(CapacityDelta(kind="reserved", version=1))
 
         assert received["site_pool_projection"] is None
+        assert received["site_capacity_buckets"] is None

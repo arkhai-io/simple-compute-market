@@ -30,7 +30,7 @@ archived POOLS-1…6 foundations
               │
               ▼
 POOLS-7 durable fulfillment cutover
-      ├──► POOLS-8 projection consumption and hints
+      ├──► POOLS-8 projection consumption and hints ──► POOLS-9 retire local physical authority
       ├──► fair scheduling policy
       ├──► add-buyer-vm-connectivity-terms
       ├──► add-storefront-principal-authentication ──► result push delivery
@@ -41,6 +41,7 @@ POOLS-7 durable fulfillment cutover
 |---|---|---|
 | [`pools-7-storefront-fulfillment-cutover`](pools-7-storefront-fulfillment-cutover/) | active; 72 prerequisite tasks completed | Central durable Settlement Record, scheduling, fulfillment, pull result, recovery, storefront cutover, and teardown path |
 | [`pools-8-capacity-projection-and-listing-hints`](pools-8-capacity-projection-and-listing-hints/) | active; may overlap after identity decisions | Persists already-produced projections, maps them into commercial publication/claims, and adds advisory domain-owned hints |
+| [`pools-9-retire-local-physical-authority`](pools-9-retire-local-physical-authority/) | design phase; not yet planned | Retires the VM storefront's local physical-authority tables (`resources`, `compute_capacity_pools`, `compute_pool_members`, `hosts`) and CSV import, once `pools-8`'s projection-backed path has baked without needing a rollback; requires a new direct pool-commercial-metadata admin endpoint as a prerequisite of removing CSV import, not an optional follow-up. No fleet-wide deployment signal exists to gate its own start on — deliberately not defined in advance |
 | [`structured-capacity-requirements`](structured-capacity-requirements/) | design phase; not yet planned | Structured buyer-facing `requirements` shape, `offering_type` separated from the site-inventory `resource_type` discriminator, and canonical `ResourceRequirement`/`CapacityClaim` vocabulary; carries forward design decisions from POOLS-7 Section 11.2's code review. Coordinate final shape with `pools-8`'s claim-construction work before implementing |
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | blocked/design-gated | Simulation/decisions may proceed; production policy waits for POOLS-7 transactional assignment state and a selected fairness subject |
 | [`add-buyer-vm-connectivity-terms`](add-buyer-vm-connectivity-terms/) | design phase; not yet planned | Buyer-specified, negotiated VM connectivity (FRP relay) terms, replacing storefront-operator-only configuration as the sole source; depends on POOLS-7 Section 9's `connectivity` field shape |
