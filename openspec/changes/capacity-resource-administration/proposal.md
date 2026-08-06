@@ -63,6 +63,17 @@ consolidation exists to remove, so capacity moves in full.
   capacity.
 - Give the INI host format a disposition for its `gpus=`/`gpu_model=` variables,
   which currently feed the retiring columns.
+- **Added 2026-08-06 (Goal 4 analysis):** stop writing a compute dimension name into
+  every domain's capacity declaration. `register_resource` currently sets
+  `capacity[PRIMARY_DIMENSION] = total_units` unconditionally when a caller supplies no
+  capacity map, and `PRIMARY_DIMENSION` is the module constant `"gpu_count"`. The
+  API-credits storefront calls `register_resource(total_units=100,
+  resource_type="api_credits")` with no capacity map, so an API-credits quota is stored
+  as a GPU count today. A caller supplying `capacity={"tokens": 1000}` alongside
+  `total_units` gets both keys written, declaring the resource as 1000 tokens *and*
+  1000 GPUs. This belongs here rather than with the publication or kit-extraction work
+  because it is a defect in `register_resource`, which this change already rewrites,
+  and because this change's whole subject is making capacity declarations authoritative.
 - Add operator-facing coverage: CLI, `docs/seller-quickstart.md`, and the
   configuration reference, so registering capacity is a documented workflow rather
   than a raw HTTP call.
@@ -104,7 +115,9 @@ None.
 
 ## Impact
 
-- **Affected code:** `provisioning/compute/service/src/compute_provisioning_service/`
+- **Affected code:** `kit/site/src/market_site/ledger.py` (`register_resource`'s
+  `total_units` mirror and `_resource_capacity`'s fallback),
+  `provisioning/compute/service/src/compute_provisioning_service/`
   (`app_runtime.py` startup steps, `config.py` path resolution, `settings.toml`,
   `services/capacity_inventory.py`, `db/models.py`, `db/migrations.py`),
   `kit/site` (`router.py`, `http_models.py`) and `kit/site-client`,

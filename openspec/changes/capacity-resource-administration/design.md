@@ -196,6 +196,33 @@ authority. What survives is a *populating* step that writes the authority from a
 legacy input, which is observably different: an operator who declares capacity for a
 host wins outright, and no read path consults the host.
 
+### The primary-dimension fallback writes a GPU name into every domain (added 2026-08-06)
+
+`kit/site/ledger.py` declares `PRIMARY_DIMENSION = "gpu_count"` as a module constant,
+and `register_resource` writes `new_dimensions[PRIMARY_DIMENSION] = int(total_units)`
+whenever a caller supplies no explicit capacity map. `_resource_capacity` falls back the
+same way when reading a row whose `capacity` was never populated.
+
+The irony is instructive: the comment immediately above the constant explains that
+domain-specific claim aliases "are supplied by the composition root ... so this module
+carries no VM-specific knowledge." That is true of `unit_claim_keys`, which the
+API-credits composition root correctly overrides to `("units",)`. It is false of the
+constant on the next line. Half the genericization was done and the comment claims all
+of it, which is how this survived.
+
+The fix belongs to this change because the write is in `register_resource`. What it
+should become depends on a question this change does **not** answer: whether the scalar
+`CapacityBucket.total_units` / `CapacityReservation.units` mirror survives at all. That
+scalar is what forces a primary dimension to exist — it predates multidimensional
+capacity and is maintained as a mirror of one named dimension. Retiring it removes the
+need for a primary dimension entirely; keeping it means the name must be supplied by the
+composition root like `unit_claim_keys` already is.
+
+This change takes the smaller of the two: make the name composition-supplied, and stop
+writing it when the caller declared capacity explicitly. Retiring the scalar is a schema
+change touching every legacy single-quantity caller, and is recorded below as deferred
+rather than folded in.
+
 ## Risks / Trade-offs
 
 - **[Derivation produces capacity resources an operator did not intend]** → Derive
@@ -240,6 +267,17 @@ ignored by the restored reader.
 
 ## Open Questions
 
+- **Should the scalar `total_units` / `units` mirror be retired entirely?** It predates
+  multidimensional capacity and is the only reason a primary dimension must exist.
+  Deferrable: making the dimension name composition-supplied removes the cross-domain
+  defect without the schema change, and retiring the scalar touches every legacy
+  single-quantity caller.
+- **"Ledger" is a misnomer for `CapacityLedgerService` and `kit/site/ledger.py`**
+  (repository owner, 2026-08-06). A ledger is append-only; this is mutable reservation
+  state with an adjacent `CapacityEvent` table that genuinely is append-only. Recorded
+  here because this change touches the module heavily. Not renamed: it is pure churn
+  across kit, provisioning, specs, and tests with no capability behind it, and it should
+  ride with a change that has reason to touch those call sites anyway.
 - **Does the capacity definitions document need a canonical export**, the way
   `ResourcePoolService.export_pools_yaml` supports round-tripping pool state? Useful
   for operators who declare through the API and want a file, but not required by

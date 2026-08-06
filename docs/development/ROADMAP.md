@@ -79,32 +79,58 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 
 The site-to-storefront direction is **not** many-to-many. A provisioning service binds to one storefront: it holds a single `storefront_url`, and a single shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so two storefronts sharing one provisioner would share one secret with no isolation between them. The reverse channel's per-deal override for that URL exists in the event sink but no storefront ever populates it, so it always falls through to the global setting. Making one site serve several storefronts is part of this goal's work, not a property to build on.
 
-The storefront does not. Each storefront composition root injects exactly one market-domain contract, and both the bare-metal composition and the multi-domain topology proof record one-market-domain-per-storefront-process as an explicit non-goal. Those positions predate the decision to pursue this goal and are **unreconciled**: they are recorded architectural direction that this goal supersedes, and reconciling each change's own documents is part of the work rather than an oversight to be assumed away.
+The site models this correctly already. A capacity resource carries `publication_views` keyed by view identity — `bare_metal.v1`, `vm.ansible_pool_defaults.v1` — off one row per host identity, with a guard rejecting several capacity resources mapping to the same host, and `Cross-mode physical accounting` requires a shareable VM slice and an exclusive bare-metal claim on one host to conflict before executor work starts. One physical resource, several form-factor projections, is how inventory is already represented.
 
-Two questions are open and not yet answered by any change. Whether a multi-domain storefront multiplexes several contracts in one process or federates single-domain processes behind a shared publication surface is undecided, and the two shapes imply substantially different work. Discovery is also unaddressed: a registry publishes one filter and listing schema, so a storefront spanning several domains either publishes to several registries or the compute family needs a shared discovery schema.
+The storefront cannot consume it. The VM storefront resolves its market-domain contract from a module-level singleton at five call sites; the bare-metal storefront is already domain-parameterized, carrying the contract as a runtime field, so the two roles disagree on how a contract arrives. No storefront table carries a domain discriminator.
+
+The site also does not bound what may be sold. Pool policy declares listing mode, region, SLA, pricing, and hold caps, but not which offering modes a pool can deliver; `executor_kind` is recorded on reservations but never validated, and at reserve time it is inferred from whether the matched resource carries a `vm_host` attribute rather than supplied by the caller. A request for capacity a pool cannot deliver is admitted, held, scheduled, and fails at provisioning.
+
+Discovery is closer than it looks. The registry's listing shape already constrains `virtualization_type` to `[bare_metal, vm, container]`, carries host-level fields alongside slice-level ones, and already exposes that field in its filter vocabulary — the catalogue is family-shaped. What is missing is that nothing publishes the field, the registry's declared identity names one domain (`vms.compute`), and bare metal has no buyer package at all.
+
+The direction is settled: several compute-family contracts hosted in one storefront process, rather than federating single-domain storefronts over one site. Federation would require several storefronts to share one site authority, and that relationship is one-to-one today. Both the bare-metal composition and the multi-domain topology proof record one-contract-per-process as a non-goal; the first has been struck as a superseded scope fence, and the second is flagged for scope review because its topology proof is structurally built on the superseded shape.
 
 | Open gap | Owned by |
 |---|---|
+| Pools do not declare which offering modes they can deliver, and nothing rejects a request for capacity a pool cannot serve | [`pool-declared-offering-modes`](../../openspec/changes/pool-declared-offering-modes/) |
+| The VM storefront resolves its contract from module scope, so it cannot be selected per record | [`storefront-domain-parameterization`](../../openspec/changes/storefront-domain-parameterization/) |
+| A storefront serves one market domain, forcing hardware to be partitioned by how it is sold | [`multi-domain-storefront-composition`](../../openspec/changes/multi-domain-storefront-composition/) |
+| Bare metal has no buyer package, and no registry identity admits a bare-metal buyer | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
+| Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
 | Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
 | Many-to-many storefront-to-site ownership, strict recorded executor identity, and concurrent domain execution are not proven as one topology | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 | Storefront request identity is a single shared key, with no per-record ownership | [`add-storefront-principal-authentication`](../../openspec/changes/add-storefront-principal-authentication/) |
 
 ---
 
-## Goal 4 — Prepare the kit layer for new market domains
+## Goal 4 — Make a domain a composition of kit
 
-**Value.** This lowers the marginal cost of every domain added after it. If a shared capability carries one domain's vocabulary, each new domain either inherits defaults that mean nothing to it or forks the capability. The goal is making the fifth domain cheap, not making the second one possible — planned additions include a Kubernetes pod domain in the compute family, an inference-token domain, and a model-training domain.
+**Value.** The architecture's layering is core for what applies to every domain, kit for composable functionality many domains share, and the domain layer for instantiating and configuring kit. The storefront role does not follow it, so the marginal cost of a market domain is roughly three thousand lines of negotiation, settlement, capacity, publication, and failure-handling machinery that is identical in every domain but its codecs.
 
-**Current state.** The kit layer has an explicit one-way hierarchy — foundation capabilities, then the site and resource-pool authorities, then the fulfillment lifecycle — and the boundary holds: kit packages do not import deployed services or domain adapters, and type-only imports obey the same direction. Resource pools are provider-neutral, carrying provider kind and provider-owned configuration generically. Publication and reservation-hold hints are domain-neutral by construction, validating only what has a universal meaning and leaving domain-specific content opaque. The API-credits domain demonstrates that a market with no physical delivery reuses the same negotiation and settlement roles without acquiring compute dependencies.
+That cost is why bare metal has been a storefront skeleton and why API credits carries a full parallel copy of eight VM services. It compounds: every defect fixed in one copy stays live in the other, and every new cross-cutting capability — billable holds, shape-aware pricing, feasibility verification — must be built once per domain or silently skip the domains that lack it. A capability that reads as "the market does X" is often really "the VM market does X."
 
-The site authority is where compute vocabulary has not finished leaving. GPU count is a module-level primary dimension, resource type defaults to a GPU-specific value, and VM host identity is special-cased in attribute extraction, with dimension fallbacks that assume GPU counting. Composition roots already supply some of this from above, so the genericization is partly done rather than absent.
+Extracting that machinery into kit changes what adding a domain means. A Kubernetes-pod domain, an inference-token domain, or a model-training domain becomes codecs, a contract, and configuration rather than a fork of the VM storefront. The two domains delivered here are both the beneficiaries and the proof: bare metal because it has none of the machinery, API credits because it has a complete parallel copy, so composing them exercises both directions.
 
-The domain layer's own organization is uneven. The API-credits domain is partially in place, and the in-tree domains do not share one structure — which matters more as the number of domains grows than it did with two.
+**Current state.** Kit's layering discipline holds where kit has been reached: `kit/policy`, `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` carry no domain vocabulary at all. The problem is the concerns that never reached it.
 
-No active change owns the kit reorganization or the new domains. The gap below is adjacent work already in flight.
+Eight cross-cutting storefront concerns are implemented twice and absent once. Measured across the VM and API-credits storefronts: `sync_negotiation` 914 against 609 lines, `capacity_client` 556 against 217, `failure_policy` 392 against 182, `settlement_jobs` 368 against 274, `claims_runtime` 224 against 128, `publication_service` 215 against 193, `negotiation_watchdog` 138 against 110, `alkahest_service` 65 against 58. Bare metal has none of them, which is why its storefront is 1,930 lines against the VM storefront's 14,408 — not simpler, incomplete.
+
+Neither new domain is deployable or testable end to end. Bare metal has no stack definition, and no end-to-end scenario references either domain: every deal path the repository proves is a VM deal path.
+
+The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
+
+**Completion test.** Bare metal and API credits each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
 
 | Open gap | Owned by |
 |---|---|
+| No seam exists for kit-owned storefront runtime, and no rule prevents an extraction leaving copies behind | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
+| The synchronous negotiation runtime is implemented twice and absent once | [`kit-owned-negotiation-runtime`](../../openspec/changes/kit-owned-negotiation-runtime/) |
+| Settlement orchestration, claim servicing, and failure handling are implemented twice and absent once | [`kit-owned-settlement-runtime`](../../openspec/changes/kit-owned-settlement-runtime/) |
+| The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
+| Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+
+A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
+
+---|---|
 | Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
