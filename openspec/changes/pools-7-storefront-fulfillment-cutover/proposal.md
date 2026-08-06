@@ -212,7 +212,7 @@ reservation states were never shipped and do not require compatibility handling.
   implement this change's durable lifecycle.
 - Related, nonblocking follow-on: `provisioning-result-push-delivery` hardens the existing provisioning→storefront callback transport and adds durable result delivery on top of this change's pull-correct durable state.
 - `market-platform-bare-metal-10-storefront-composition` consumes the selected-site lifecycle after it lands; it does not block VM cutover.
-- `market-platform-compute-40-multi-domain-proof` is the post-cutover regression/topology gate for two storefronts and two provisioning authorities.
+- `market-platform-compute-40-multi-domain-proof` is the post-cutover regression/topology gate. **Amended 2026-08-06:** it was rewritten and its topology is now one multi-domain storefront against two provisioning authorities, exercising both compute domains at each — not two storefronts. Many-to-many storefront-to-authority ownership was removed from its scope rather than deferred.
 
 ## Impact
 
