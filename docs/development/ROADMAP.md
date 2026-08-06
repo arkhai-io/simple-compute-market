@@ -87,7 +87,7 @@ The site also does not bound what may be sold. Pool policy declares listing mode
 
 Discovery is closer than it looks. The registry's listing shape already constrains `virtualization_type` to `[bare_metal, vm, container]`, carries host-level fields alongside slice-level ones, and already exposes that field in its filter vocabulary — the catalogue is family-shaped. What is missing is that nothing publishes the field, the registry's declared identity names one domain (`vms.compute`), and bare metal has no buyer package at all.
 
-The direction is settled: several compute-family contracts hosted in one storefront process, rather than federating single-domain storefronts over one site. Federation would require several storefronts to share one site authority, and that relationship is one-to-one today. Both the bare-metal composition and the multi-domain topology proof record one-contract-per-process as a non-goal; the first has been struck as a superseded scope fence, and the second is flagged for scope review because its topology proof is structurally built on the superseded shape.
+The direction is settled: several compute-family contracts hosted in one storefront process, rather than federating single-domain storefronts over one site. Federation would require several storefronts to share one site authority, and that relationship is one-to-one today. Both the bare-metal composition and the multi-domain topology proof recorded one-contract-per-process as a non-goal. Both are now reconciled: the first struck as a superseded scope fence, the second rewritten against current code — its topology is now one multi-domain storefront against two authorities, and its many-to-many storefront-to-authority axis was removed rather than deferred, since there are no plans to support it.
 
 | Open gap | Owned by |
 |---|---|
@@ -97,7 +97,7 @@ The direction is settled: several compute-family contracts hosted in one storefr
 | Bare metal has no buyer package, and no registry identity admits a bare-metal buyer | [`bare-metal-buyer-domain`](../../openspec/changes/bare-metal-buyer-domain/) |
 | Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
 | Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
-| Many-to-many storefront-to-site ownership, strict recorded executor identity, and concurrent domain execution are not proven as one topology | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| Selected-authority ownership, cross-mode rejection, and executor strictness have never been exercised together across more than one authority | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 | Storefront request identity is a single shared key, with no per-record ownership | [`add-storefront-principal-authentication`](../../openspec/changes/add-storefront-principal-authentication/) |
 
 ---
