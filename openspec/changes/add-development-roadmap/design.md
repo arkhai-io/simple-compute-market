@@ -199,7 +199,7 @@ an opening for planning content to return to `docs/` generally.
 6. Run `openspec validate --all --strict` and confirm no regression against the
    baseline recorded 2026-08-06: 37 passed, 7 failed, every failure a change carrying
    no spec deltas — `add-buyer-vm-connectivity-terms`,
-   `add-storefront-principal-authentication`, `fix-vm-fulfillment-capacity-boundary`,
+   `service-identity-signing`, `fix-vm-fulfillment-capacity-boundary`,
    `negotiation-driven-capacity-resize`, `pools-9-retire-local-physical-authority`,
    `refactor-e2e-fulfillment-lifecycle`, and `structured-capacity-requirements`. With
    this change's own artifacts in place the suite reports 38 passed and the same 7

@@ -2718,7 +2718,7 @@ one shared `admin_api_key` with no per-request caller identity — by its
 own docstring, "the provisioning service is an internal dependency of a
 single storefront." An ownership check has no second caller identity to
 compare against under that model. Real per-caller enforcement is deferred
-to a new prerequisite change, `add-storefront-principal-authentication`
+to a new prerequisite change, `service-identity-signing`
 (proposed 2026-07-25; see its `proposal.md`/`design.md`), which gives the
 provisioning service real per-request principal identity and an
 `owner_principal` column on `SettlementRecord`. That change's candidate
@@ -2731,7 +2731,7 @@ that note's own caveat. Section 8 ships task 8.5 as an existence-only
 check (reject unknown identifiers) structured so the later
 `owner_principal` comparison can replace it without reshaping the
 endpoint, and `provisioning-result-push-delivery` gains a second, direct
-dependency on `add-storefront-principal-authentication` alongside its
+dependency on `service-identity-signing` alongside its
 existing dependency on this change.
 
 ### Section 8 completed design-promotion record
@@ -2744,7 +2744,7 @@ existing dependency on this change.
 | `credential_fetch_failed` stable error category | `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy` |
 | Many-to-many credential/output association via `provisioned_resource_id`; `VmFulfillmentCredential` VM-domain payload; `domain_resource_ref` removed | `openspec/specs/fulfillment/spec.md`; `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload` for the VM payload and credential fields |
 | No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
-| Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |
+| Ownership-check scope: this change keeps its existence-only check. **Amended 2026-08-06:** the successor change (`add-storefront-principal-authentication`, superseded by `service-identity-signing`) no longer supplies per-record ownership enforcement — with one storefront per authority the check is vacuous | `openspec/specs/fulfillment/spec.md` |
 
 ### Section 8 implementation confirmation (2026-07-25)
 

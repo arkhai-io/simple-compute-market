@@ -98,7 +98,7 @@ The direction is settled: several compute-family contracts hosted in one storefr
 | Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
 | Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
 | Selected-authority ownership, cross-mode rejection, and executor strictness have never been exercised together across more than one authority | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
-| Storefront request identity is a single shared key, with no per-record ownership | [`add-storefront-principal-authentication`](../../openspec/changes/add-storefront-principal-authentication/) |
+| Service-to-service identity is one shared secret that both gates inbound requests and signs outbound callbacks | [`service-identity-signing`](../../openspec/changes/service-identity-signing/) |
 
 ---
 
