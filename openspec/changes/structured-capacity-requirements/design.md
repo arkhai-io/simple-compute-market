@@ -139,6 +139,34 @@ independent precedent for the family-grouped convention, alongside the `gpu_coun
 flattening convention already described above -- both should end up consistent with whatever
 this change finalizes, not treated as two separate shapes to reconcile after the fact.
 
+### Third coordination point: rates nest inside the family shape (2026-08-06)
+
+`capacity-shape-pricing` carries a per-dimension rate as a **field of each capability
+family**, next to what it describes -- a `gpu` family holding its model, its count, and
+its per-card-hour rate together -- rather than in a parallel rate-keyed map alongside
+the shape. Its `design.md` records why: a parallel map is a second structure keyed by
+the same families, so a family present in one and absent from the other is
+representable and meaningless.
+
+That makes rates the **third** consumer of the family-grouped shape this change
+settles, after requirements (what a buyer wants) and inventory capabilities (what a site
+has). The shared flattening utility accepted above therefore has a third call site, and
+this change's vocabulary decision now constrains pricing configuration as well as the
+wire and inventory shapes.
+
+The one-directional dependency recorded above for `pools-8`'s
+`[pricing.defaults.gpu.<model>]` applies with more force: `capacity-shape-pricing` is
+the change that extends that configuration beyond the `gpu` family, and its task list
+says to stop and coordinate rather than choose a `cpu`/`memory`/`storage` shape
+independently if this change has not landed.
+
+One known discrepancy to reconcile here rather than in either pricing change: the
+registry filter vocabulary and buyer CLI already use `ram_gb` and `disk_gb`, while the
+flattening convention above would suggest `memory_gib` and `storage_gib`.
+`publish-multidimensional-listing-shape` publishes into the existing wire names
+deliberately and defers the reconciliation to this change, on the grounds that
+introducing a third spelling would make reconciliation harder.
+
 ### `resource_type` vs. a buyer-facing offering concept
 
 Three distinct concepts were conflated under `resource_type` in the
