@@ -72,10 +72,17 @@ fail_on_unreachable = true
 # storefront is strictly a client. Same site vocabulary as the VM
 # storefront ([capacity.sites] table or authority_url single site);
 # authority_url defaults to credits.service_url.
+#
+# hold_ttl_seconds defaults to 0 as a security posture, for the same
+# reason as the VM storefront: nothing gates hold placement on funds or
+# any chain interaction, there is no rate limiting, and buyer addresses
+# are free to mint, so an actor can hold the entire quota indefinitely
+# at no cost by negotiating, accepting, and never settling. Turn holds
+# back on only once held capacity is billed.
 authority_url    = ""
 poll_interval    = 5
 placement        = "fill_first"
-hold_ttl_seconds = 900
+hold_ttl_seconds = 0
 
 [fulfillment.failure_policy]
 # Actions applied when issuance/fulfillment fails. `release_capacity`

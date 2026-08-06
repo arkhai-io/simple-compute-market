@@ -1,14 +1,25 @@
 ## Why
 
 A capacity hold excludes every other buyer from that capacity for its duration and costs
-the holder nothing. Today `hold_ttl_seconds` defaults to 900, so an accepted deal that
-never settles blocks its capacity for fifteen minutes free, and the only thing limiting
-the damage is that holds are placed late, at terms acceptance.
+the holder nothing. Acquiring one costs two signed HTTP requests: nothing in the
+negotiation path gates hold placement on funds, an escrow, or any chain interaction,
+there is no rate limiting anywhere in the storefront, there is no per-buyer concurrency
+limit on negotiations, and a fresh buyer address is free to mint. A single actor could
+therefore hold a storefront's entire sellable inventory indefinitely at no cost, by
+negotiating, accepting, and never settling.
 
-The storefront has no rate limiting anywhere, and this is deliberate: nothing touches
-physical infrastructure until payment is accepted, so there has been nothing to protect.
-A hold changes that. It consumes a scarce, physical, exclusive resource before payment
-exists.
+`default-no-pre-settlement-capacity-hold` closed that vector by denying the capability:
+both storefronts now ship `hold_ttl_seconds = 0`, so capacity becomes exclusive only at
+settlement. That is the correct interim posture and it is not a solution — it reopens
+the window the two-phase reserve exists to close, where a buyer whose escrow has settled
+finds the capacity taken, and it forecloses every improvement that depends on holding
+capacity earlier. This change is what buys the capability back.
+
+The storefront's absence of rate limiting is itself deliberate: nothing touches physical
+infrastructure until payment is accepted, so there has been nothing to protect. A hold
+changes that. It consumes a scarce, physical, exclusive resource before payment exists,
+and shortening its window is not a mitigation — the fraction of capacity an attacker
+holds is bounded by their request rate, not by the hold duration.
 
 The right primitive is not identity-based. Capping holds per identity would block a
 buyer willing to pay from holding capacity they are paying for, which is backwards in a
@@ -106,6 +117,9 @@ None.
 - Prerequisite for `negotiation-time-capacity-hold`. Moving holds earlier without
   billing them is exactly the uncompensated-exclusion problem this change exists to
   prevent.
+- Reverses `default-no-pre-settlement-capacity-hold`. Restoring a non-zero
+  `hold_ttl_seconds` default is part of this change's own work, once holding capacity
+  costs the holder something; that change's spec permits the restoration explicitly.
 - Reuses `add-settlement-plan-shapes`' per-obligation lifecycle. That change's interval
   escrows are generated from an accepted total, which does not exist before agreement,
   so the generation rule differs — see `design.md`.

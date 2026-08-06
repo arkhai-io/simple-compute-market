@@ -48,6 +48,11 @@ placed.
       mistake, and it silently overcharges relative to service delivered.
 - [ ] 3.4 Confirm funds exhaustion is ordinary expiry through the existing path, not a
       special case.
+- [ ] 3.5 Restore a non-zero `hold_ttl_seconds` default for both storefronts, reversing
+      `default-no-pre-settlement-capacity-hold`, and replace that change's security
+      justification comment with one describing the new posture. The restoration is
+      safe only because holding now costs the holder; state that in the comment rather
+      than silently raising the value.
 - [ ] 3.5 Focused tests: funded bound governs below the ceiling; ceiling governs above
       it; exhaustion lapses the hold normally.
 

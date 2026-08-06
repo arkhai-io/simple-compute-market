@@ -109,6 +109,29 @@ No active change owns the kit reorganization or the new domains. The gap below i
 
 ---
 
+## Goal 5 — Make capacity exclusivity compensated
+
+**Value.** A capacity hold is exclusion: while one buyer holds capacity, no other buyer can have it. Today acquiring that exclusion costs two signed HTTP requests and nothing else — no funds, no chain interaction, and no limit on how many a single actor may hold. One adversary can therefore hold a storefront's entire sellable inventory indefinitely, at no cost, denying every legitimate buyer. Shortening the hold window does not fix this; it only raises the request rate the attacker needs.
+
+Pricing held time closes that vector structurally rather than defensively. Cost scales with capacity-time held, so minting identities buys an attacker nothing and no rate limit has to punish a buyer who genuinely wants a lot of capacity. It is the only mechanism that stops the attack without also constraining the customer.
+
+Having closed it, the same mechanism unlocks what the market cannot currently afford to do. Holding capacity earlier — failing a deal at reservation rather than after payment, letting a buyer negotiate seriously over specific hardware, closing the race between two buyers wanting the same machine — is unaffordable today precisely because exclusivity is free. Once it is paid for, capacity can be held for as long as someone is willing to pay, which is the precondition for early reservation and eventually for forward reservation of future capacity windows. A pool whose holds are expensive also becomes a visible scarcity signal before any deal settles.
+
+**Current state.** The vector is closed by denying the capability: both storefronts now ship `capacity.hold_ttl_seconds = 0`, so no capacity is held before the buyer's escrow settles and exclusivity arises only from a settled deal. The two-phase reserve implementation remains and is exercised by local end-to-end profiles that deliberately override the default. The cost of that posture is a reopened race — a buyer whose escrow settles may find the capacity taken and need a refund — which is accepted as a bounded, recoverable failure against an unbounded one.
+
+Nothing else about a hold has changed. A reservation carries no rate, no funding reference, and no price; its duration comes from configuration capped by pool policy rather than from anything the holder committed. Held time is never charged and an early release returns nothing, because there is nothing to return. Hold placement during negotiation bypasses the reservation ledger's idempotency guard entirely, since that guard keys on a settlement identity that does not yet exist, so a retried placement mints a second reservation. Expiry loads every outstanding held reservation on every ledger operation and compares timestamps in application code, and terminal reservations are never pruned — both tolerable only because the population is currently small.
+
+| Open gap | Owned by |
+|---|---|
+| Holds bypass reservation idempotency; expiry scans all held rows on every operation; terminal reservations accumulate without bound | [`capacity-reservation-lifecycle-hardening`](../../openspec/changes/capacity-reservation-lifecycle-hardening/) |
+| Holding capacity is free, so exclusivity cannot be granted before payment without exposing the denial vector | [`billable-capacity-reservations`](../../openspec/changes/billable-capacity-reservations/) |
+| Capacity is not held while a buyer is negotiating for it, so two buyers can negotiate the same capacity to completion | [`negotiation-time-capacity-hold`](../../openspec/changes/negotiation-time-capacity-hold/) |
+| The shipped default granted unfunded exclusivity, and framed the safe value as a performance trade | [`default-no-pre-settlement-capacity-hold`](../../openspec/changes/default-no-pre-settlement-capacity-hold/) |
+
+Restoring a non-zero hold default is `billable-capacity-reservations`' own work: the posture above is a denial of capability that this goal exists to buy back.
+
+---
+
 ## Related documents
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the current system and its boundaries.
