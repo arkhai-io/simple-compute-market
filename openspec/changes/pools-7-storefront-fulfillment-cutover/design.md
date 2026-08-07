@@ -1184,7 +1184,7 @@ that new channel properly — including that one storefront authenticates
 pushes from *N* distinct provisioning services, not a single symmetric
 secret — is real scope on its own, and doing it inside POOLS-7 risked
 scope creep onto an already-large change. It's split into its own
-change: `provisioning-result-push-delivery` (not yet started). POOLS-7
+change: `replace-polling-with-authenticated-push` (not yet started). POOLS-7
 keeps the goal in view but ships pull for v1, on the existing, already-
 solved storefront→provisioning auth direction.
 
@@ -1221,7 +1221,7 @@ only the transport is:**
   generation counter to detect here. Shipping the field anyway (e.g. as a
   constant) would overclaim a capability this system doesn't have and
   invite a caller to build staleness logic against a signal that never
-  changes. If `provisioning-result-push-delivery` still needs a
+  changes. If `replace-polling-with-authenticated-push` still needs a
   `credential_generation` concept for its own retry-race problem (a stale
   push overwriting a newer one — a real problem pull doesn't have), it
   defines and justifies that field itself against its own transport, not
@@ -1238,7 +1238,7 @@ only the transport is:**
   `get_fulfillment_status`/`get_fulfillment_result` poll a normalized,
   durable, cross-domain fulfillment abstraction, not a raw Ansible job.
 
-When `provisioning-result-push-delivery` lands, it adds a push transport
+When `replace-polling-with-authenticated-push` lands, it adds a push transport
 *alongside* pull (pull is a reasonable permanent reconciliation backstop
 even after push exists, per point 2's earlier discussion of exactly this
 concern) — it does not need to redesign the durable persistence layer
@@ -2335,7 +2335,7 @@ Investigation found `deal_ref` on five contract classes in `provisioning/compute
 - The new fulfillment-dispatch code (`AnsibleFulfillmentProvider.dispatch_create`/`dispatch_teardown`, Section 5) constructs its own `ExecutorActionEnvelope` with `deal_ref={}`. No commercial or deal identity is read, forwarded, or newly threaded through the fulfillment-acceptance path, satisfying the boundary rule for the code this section actually writes.
 - The `deal_ref` field itself is **not** removed from `ExecutorActionEnvelope`, `JobAccepted`, `ProvisioningJob`, `LeaseRegistration`/`LeaseView`, or the `AnsibleJob.deal_ref` column in Section 5. Removing it now would break the still-active legacy path before its callers (`ComputeContractService.submit_action`, `BareMetalComputeAdapter.submit`, `register_lease`'s `body.deal_ref.get("escrow_uid")` read) are retired — the same class of premature-removal mistake this document already caught and reversed once for the `pool_id` attributes fallback (Section 4, item 5).
 - **Tracked explicitly for Section 11** ("Remove obsolete schema and compatibility paths," which already scopes "obsolete executor/provider fields"): once Section 9 retires the legacy callers, remove `deal_ref` from all five contract classes and drop `AnsibleJob.deal_ref`. `escrow_uid` already has an independent, non-`deal_ref` source everywhere checked (the reservation's own `escrow_uid` column; bare-metal's adapter already falls back to it), so this removal is mechanically safe once the legacy callers are gone.
-- `CapacityReservation.deal_ref` (`kit/site`) and `StorefrontLifecycleEventSink`/`notify_storefront_capacity_released` remain out of scope for POOLS-7 entirely — a pre-existing, separately-flagged transport seam this document already identifies as `provisioning-result-push-delivery`'s territory to properly redesign, not something to touch incidentally here.
+- `CapacityReservation.deal_ref` (`kit/site`) and `StorefrontLifecycleEventSink`/`notify_storefront_capacity_released` remain out of scope for POOLS-7 entirely — a pre-existing, separately-flagged transport seam this document already identifies as `replace-polling-with-authenticated-push`'s territory to properly redesign, not something to touch incidentally here.
 
 ### Envelope naming and payload ownership
 
@@ -2657,7 +2657,7 @@ below):
    per the existing "Versioned envelopes" requirement's own scope statement
    that it applies to "settlement/fulfillment result payloads once those
    values cross a durable or cross-domain boundary." Defining it now, not
-   deferred, so `provisioning-result-push-delivery` can reuse the same
+   deferred, so `replace-polling-with-authenticated-push` can reuse the same
    shape unchanged, matching what that change's proposal already assumes.
 
 6. **Credential/resource association is domain-specific and many-to-many.**
@@ -2730,7 +2730,7 @@ its own accepted contracts before being treated as a starting point, per
 that note's own caveat. Section 8 ships task 8.5 as an existence-only
 check (reject unknown identifiers) structured so the later
 `owner_principal` comparison can replace it without reshaping the
-endpoint, and `provisioning-result-push-delivery` gains a second, direct
+endpoint, and `replace-polling-with-authenticated-push` gains a second, direct
 dependency on `service-identity-signing` alongside its
 existing dependency on this change.
 
@@ -3385,7 +3385,7 @@ What changes is narrow, confined to the release-submission/completion seam:
 
 1. **Submission.** `VmReleaseExecutor.submit_release` stops submitting an Ansible `vm_remove` job directly. It resolves the durable `fulfillment_id` for the reservation's `capacity_reservation_id` and calls the new `begin_fulfillment_teardown(fulfillment_id)`, which durably prepares the teardown envelope and transitions `active → teardown_dispatch_pending` — no provider I/O inline, mirroring how `begin_fulfillment` separates durable acceptance from dispatch. It returns `fulfillment_id` as the tracked "job id." `FulfillmentConvergenceWatchdog` — already implemented, already running — owns dispatch, retry, and status convergence through to `torn_down`/`teardown_failed`, entirely independently of `LeaseLifecycleService`'s own polling cadence. This is what "entirely from provisioning-owned watchdog handlers" (task 10.3, as originally drafted) actually refers to: the convergence watchdog already is that owner; it needed a caller, not new mechanics.
 2. **Completion.** `LeaseLifecycleService`'s `_process_releasing_reservation` calls one shared `ReleaseJobPort.get_job(job_id)`. Bare-metal genuinely needs this to keep resolving real, polled Ansible job status (confirmed: `reclaim_access_for_reservation` submits a real job, not only a `"direct-release"` sentinel), so the shared port cannot simply be repointed at fulfillment state. Instead, `release_jobs` becomes a small kind-routed dispatcher — the same shape as the existing `ExecutorReleaseDispatcher` for submission — routing `get_job` by the reservation's `executor_kind`: bare-metal's route is byte-for-byte unchanged (`job_service`/`AsyncJobQueue`); VM's route answers by reading the `SettlementRecord`'s teardown state for the given `fulfillment_id` (`torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `pending`), via a thin adapter over `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly.
-3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `provisioning-result-push-delivery` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
+3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `replace-polling-with-authenticated-push` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
 
 ### Accepted decision: no new API for early termination
 
@@ -3415,7 +3415,7 @@ Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_v
 | `LeaseLifecycleService` retained as sole VM/bare-metal release trigger and capacity-release owner; `ExecutorReleasePort`/`ReleaseJobPort` become the seam fulfillment-backed teardown crosses, not a replaced mechanism | `openspec/specs/physical-provisioning/spec.md`; `docs/development/ARCHITECTURE.md` only if the repository-wide service/worker map changes |
 | Kind-routed `ReleaseJobPort` dispatch (bare-metal via job queue, VM via fulfillment aggregate state) | `openspec/specs/physical-provisioning/spec.md` |
 | `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` (`ComputeProvisioningClient.terminate_lease`) as the storefront-facing early-termination call; no new endpoint | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the storefront-side call site |
-| Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `provisioning-result-push-delivery` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
+| Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `replace-polling-with-authenticated-push` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
 | `register_lease` field scope: `executor_kind`/`executor_target`/`lease_end_utc` retained (no independent write path exists for `vm_target`); `executor_ref` dropped (self-heals from the independently-written `vm_host`) | `openspec/specs/physical-provisioning/spec.md` |
 
 Implementation must confirm or correct each destination above against the actual accepted code shape before promotion; this table records intent, not a substitute for the design-promotion record task 12 requires at closure.

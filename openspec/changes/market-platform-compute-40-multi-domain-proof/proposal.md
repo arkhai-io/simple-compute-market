@@ -72,7 +72,7 @@ None.
 - Do not use real hardware timing as acceptance evidence, or add proof-only production
   APIs.
 - Do not prove authenticated reverse delivery. Pull reconciliation is the correctness
-  baseline; push remains `provisioning-result-push-delivery`'s.
+  baseline; push remains `replace-polling-with-authenticated-push`'s.
 
 ## Impact
 

@@ -119,7 +119,7 @@ None.
 - Supersedes `add-storefront-principal-authentication`, which is removed rather than
   amended: its mechanism and its motivating topology are both gone, and Git history
   preserves it.
-- Unblocks `provisioning-result-push-delivery`, which was blocked on a trusted reverse
+- Unblocks `replace-polling-with-authenticated-push`, which was blocked on a trusted reverse
   channel and can now replace polling with authenticated push.
 - `pools-7-storefront-fulfillment-cutover` Section 8's ownership check no longer needs
   this change: with one storefront per authority the check is vacuous. Its
