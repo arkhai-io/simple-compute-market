@@ -94,7 +94,8 @@ cmd_dispatch() {
 cmd_watch() {
     require_gh
     local branch; branch="$(current_branch)"
-    local run_id; run_id="$(latest_run_id "$branch")"
+    local run_id="${1:-}"
+    [ -n "$run_id" ] || run_id="$(latest_run_id "$branch")"
     [ -n "$run_id" ] || die "no $WORKFLOW run found for branch '$branch'"
     if ! gh run watch "$run_id" --exit-status 2>/dev/null; then
         local status
@@ -173,11 +174,15 @@ usage() {
 usage: scripts/e2e-ci.sh <command>
 
   dispatch      run the E2E workflow against the current branch on origin
-  watch         follow the newest run for this branch until it finishes
-  status        list recent runs for this branch
-  logs [RUN_ID] download the step log and the compose-logs artifact
+  watch [RUN_ID]  follow a run until it finishes; newest for this branch by default
+  status          list recent runs for this branch
+  logs [RUN_ID]   download the scenario output and the compose-logs artifact
 
 Output goes to .e2e-logs/<run-id>/ (override with E2E_LOG_DIR).
+
+Through make, pass the id as a variable — a bare word would be read as a target:
+
+  make e2e-logs RUN=31420559605
 USAGE
 }
 

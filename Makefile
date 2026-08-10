@@ -416,14 +416,16 @@ clobber-wheels: _require-ar-project
 e2e-dispatch: ## Run the E2E workflow against the current branch on origin
 	@bash ./scripts/e2e-ci.sh dispatch
 
-e2e-watch: ## Follow this branch's newest E2E run until it finishes
-	@bash ./scripts/e2e-ci.sh watch
+e2e-watch: ## Follow this branch's newest E2E run, or RUN=<id>, until it finishes
+	@bash ./scripts/e2e-ci.sh watch $(RUN)
 
 e2e-status: ## List recent E2E runs for this branch
 	@bash ./scripts/e2e-ci.sh status
 
-e2e-logs: ## Download this branch's newest E2E step log and compose-logs artifact
-	@bash ./scripts/e2e-ci.sh logs
+# A bare word after the target name would be parsed as another target, so the run
+# id is passed as a variable: make e2e-logs RUN=31420559605
+e2e-logs: ## Download E2E evidence for this branch's newest run, or RUN=<id>
+	@bash ./scripts/e2e-ci.sh logs $(RUN)
 
 check-wheel-closure: ## Fail if a wheel cannot import from its own declared dependencies
 	@python3 scripts/check_wheel_closure.py
