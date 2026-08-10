@@ -193,6 +193,37 @@ class AdminController:
         )
 
     @router.post(
+        "/capacity/projections/refresh",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def refresh_site_projections(self) -> dict[str, Any]:
+        """Reload every site projection and report what each site now holds.
+
+        Projections are pull-synchronized on a poller interval. A caller that has
+        just changed inventory at the site authority — registering a host, say —
+        would otherwise have to wait out that interval or sleep, and a test that
+        sleeps is a test that is slow when it passes and flaky when it does not.
+
+        Returns the per-site load state so a caller can assert the pull happened
+        rather than assuming it. A site reporting `not_loaded`, `unavailable`, or
+        `invalid` has not confirmed its projection and must not be read as an
+        authoritative empty.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections()
+        summary = projection_status_summary()
+        logger.info(
+            "[ADMIN] Site projections refreshed on demand: %s",
+            {site: {k: v.get("state") for k, v in families.items()}
+             for site, families in summary.items()},
+        )
+        return {"sites": summary}
+
+    @router.post(
         "/portfolio/resources/import",
         response_model=ImportResourcesResponse,
         summary="Bulk-import compute resources from a CSV file (admin)",

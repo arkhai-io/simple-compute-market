@@ -6,14 +6,12 @@ from collections.abc import Callable, Iterable, Mapping
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from bare_metal_provisioning_adapter.runtime import project_bare_metal_resource
 from market_resource_pools import ResourcePool
+from sqlalchemy.orm import Session
 from vm_provisioning_adapter.runtime import project_ansible_pool_defaults
 
 from compute_provisioning_service.db.models import AnsiblePoolConfig, Host
-
 
 SessionFactory = Callable[[], Session]
 BARE_METAL_PUBLICATION_ATTR = "bare_metal_publication"
@@ -71,12 +69,21 @@ def _project_host(
     gpu_count = int(host.gpu_count or 0)
     resource = dict(capacity_resource or {})
     capacity = dict(resource.get("capacity") or {"gpu_count": gpu_count})
-    attributes: dict[str, Any] = {
+    # The capacity resource's own attributes come first: this function's contract
+    # is that capacity resources are authoritative for Physical Resource identity
+    # and host rows supply only executor correlation. Building attributes from the
+    # host alone dropped every declared attribute a consumer matches on — region
+    # above all, which no host row carries — so a consumer asking for a region it
+    # had just published could never match anything.
+    attributes: dict[str, Any] = dict(resource.get("attributes") or {})
+    attributes.update({
         "vm_host": host.name,
         "public_host": host.public_host or host.kvm_host,
         "gpu_count": gpu_count,
-    }
-    if host.gpu_model:
+    })
+    # Host GPU model is a fallback, not an override: the resource declares what it
+    # is offering, and the host only says what hardware is installed.
+    if host.gpu_model and not attributes.get("gpu_model"):
         attributes["gpu_model"] = host.gpu_model
     projected: dict[str, Any] = {
         "resource_id": str(resource.get("resource_id") or host.name),

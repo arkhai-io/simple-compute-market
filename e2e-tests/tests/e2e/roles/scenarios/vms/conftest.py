@@ -44,6 +44,7 @@ class DealState:
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
     _provisioning_mock_mode: bool = False
+    _executor_host_registered: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
