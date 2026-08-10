@@ -352,6 +352,14 @@ rather than repaired.
   loads its domain, discovers a listing, and negotiates; it is blocked downstream.
 
   One new failure was this change's own defect, described in 9.4a.
+- [x] 9.4b Re-run after the 9.4a fix (`633fcc63`): **5 failed, 53 passed, 42
+  skipped**, against the 5/53/42 baseline. `test_credits_full_deal` passes. No
+  `UnknownCatalogueEntryError`, no `ModuleNotFoundError`, no
+  "skipping buyer domain", and no "none is installed" anywhere in the run.
+
+  Same failure count as baseline, different composition: the baseline's one
+  packaging failure is resolved, and the count holds because stage B4 is now
+  blocked by the pre-existing filter defect it was previously unable to reach.
 - [x] 9.4a `market credits buy` failed with
   `UnknownCatalogueEntryError: unknown negotiation policy: answer_key_challenge`.
   The API-credit buyer contract declared no negotiation capability, so the buyer
