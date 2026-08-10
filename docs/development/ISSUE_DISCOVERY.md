@@ -323,6 +323,15 @@ identities, URLs, and raw-log/control text. Raw evidence remains with the
 external runner; public findings retain only correlation states and sanitized
 summaries.
 
+Unusable input and a parseable document that fails a contract are separate
+results. Input that is syntactically invalid, or that nests containers deeper
+than the declared maximum, is reported as unusable input; a document that
+parses but violates a contract is reported as a validation failure. The
+nesting bound is declared by the tool rather than inherited from the running
+interpreter's recursion limit, so the same input yields the same result code on
+every supported interpreter. The bound is far above any admissible capacity
+document and constrains only pathological input.
+
 The default repository Tests workflow currently excludes
 `tools/issue-discovery`. Run its locked suite explicitly when changing this
 tool:
@@ -331,6 +340,11 @@ tool:
 cd tools/issue-discovery
 uv --no-config run pytest -q
 ```
+
+`pyproject.toml` declares `requires-python = ">=3.11"` and pins no
+interpreter, so `uv` selects one. The suite is verified on CPython 3.12 and
+3.14. A host that pins an interpreter should record which one alongside its
+results.
 
 ## Strict Versus Continue
 

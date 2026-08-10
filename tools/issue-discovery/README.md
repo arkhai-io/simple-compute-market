@@ -113,7 +113,9 @@ uv --no-config run pytest -q
 ```
 
 The default repository Tests workflow excludes this package, so this locked
-suite must be run explicitly for issue-discovery changes.
+suite must be run explicitly for issue-discovery changes. No interpreter is
+pinned, so `uv` selects one; the suite is verified on CPython 3.12 and 3.14 and
+its result codes do not vary across that range.
 
 Generated outputs belong under `.scm-local/` at the repo root and should not be
 committed.

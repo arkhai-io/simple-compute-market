@@ -148,6 +148,22 @@ and workspace roots are external inputs owned by the private runner. This is
 enough for a later Tekton Task, GitHub Action, managed job, or VM wrapper; no
 such wrapper belongs in this change.
 
+### Bound input nesting in the contract, not in the interpreter
+
+Unusable input and a parseable document that fails a contract are different
+findings and carry different result codes. Distinguishing them by catching
+`RecursionError` from the JSON decoder makes the boundary a property of the
+running interpreter rather than of this contract: interpreters differ in the
+depth at which decoding fails, and one that parses a document another rejects
+will report a contract failure where the other reports unusable input.
+
+The tool therefore declares its own maximum nesting depth and refuses deeper
+input before parsing. The bound is far above any admissible capacity document,
+so it constrains only pathological input. Depth is measured on the raw text,
+since parsing is the step being protected, and string contents are skipped so
+brackets inside literals do not count. A distinct error type keeps the two
+findings separable at the call site rather than by exception ordering.
+
 ## Alternatives Rejected
 
 - **Merge the historical harness branch:** rejected because it would import
@@ -163,6 +179,17 @@ such wrapper belongs in this change.
   external effects.
 - **Add CI or Tekton now:** rejected because portable interfaces avoid a later
   rewrite without creating speculative runner infrastructure.
+- **Relax the input-nesting assertion to accept either result code:** rejected
+  because the assertion was correct and the ambiguity was the defect; accepting
+  both codes would have preserved a result contract that varies by host.
+- **Pin an interpreter for the locked suite:** rejected as the primary fix
+  because it makes one host reproducible while leaving the result contract
+  host-dependent everywhere else, including a future runner that selects its
+  own interpreter. Pinning remains available as host configuration once a
+  runner exists.
+- **Bound input size instead of nesting depth:** rejected because size is a
+  proxy that would refuse a large admissible document and admit a small
+  pathological one.
 
 ## Compatibility, Migration, and Rollback
 
@@ -195,6 +222,7 @@ service state, cloud resource, or remote issue/branch needs repair.
 | finite VM/G1 matrix, role ownership, current lifecycle, scarcity, cleanup, and finding behavior | `openspec/specs/test-compatibility/spec.md` |
 | public/private boundary, evidence layering, stable identity, and future runner seam | `openspec/specs/test-compatibility/architecture.md` |
 | operator commands, result claims, and no-live boundary | `docs/development/ISSUE_DISCOVERY.md` and `tools/issue-discovery/README.md` |
+| harness jurisdiction relative to the four repository test levels | `docs/development/TESTING.md` |
 
 ## Scope Freeze
 
