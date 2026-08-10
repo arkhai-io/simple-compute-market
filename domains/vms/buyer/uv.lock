@@ -165,6 +165,8 @@ version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-policy" },
     { name = "pydantic" },
 ]
 wheels = [
