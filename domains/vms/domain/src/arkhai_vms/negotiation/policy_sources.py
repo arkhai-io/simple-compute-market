@@ -26,7 +26,7 @@ from market_policy import (
     PolicyRole,
 )
 
-from domains.vms.negotiation.policies import (
+from arkhai_vms.negotiation.policies import (
     has_matching_inventory_guard,
     round_zero_opening_guard,
 )
@@ -64,7 +64,7 @@ VM_DEFAULT_SELLER_CHAIN = (
 class TorchStrategySource:
     """The reinforcement-learning strategy, under each escrow-kind alias.
 
-    Loading imports :mod:`domains.vms.negotiation.rl.torch_arkhai_strategy` and
+    Loading imports :mod:`arkhai_vms.negotiation.rl.torch_arkhai_strategy` and
     its checkpoint-loading machinery, so this source is offered only when a chain
     names one of :data:`RL_POLICY_NAMES`.
 
@@ -81,7 +81,7 @@ class TorchStrategySource:
         return "vm-torch-strategy"
 
     def load(self) -> Mapping[str, NegotiationMiddleware]:
-        from domains.vms.negotiation.rl.torch_arkhai_strategy import rl_middleware
+        from arkhai_vms.negotiation.rl.torch_arkhai_strategy import rl_middleware
 
         return {name: rl_middleware for name in sorted(RL_POLICY_NAMES)}
 

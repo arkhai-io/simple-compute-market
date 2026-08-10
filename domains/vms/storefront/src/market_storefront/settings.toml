@@ -206,7 +206,7 @@ publish_priceless            = false
 # Whether a resource pool's own projected `sla` hint
 # is consulted at all when resolving a listing's advertised SLA (the
 # middle tier of a storefront override > pool hint > this default
-# precedence chain -- see domains.vms.listings.pool_descriptors).
+# precedence chain -- see market_storefront.listings.pool_descriptors).
 # Off by default: publishing a site's self-reported SLA claim is new
 # capability a storefront operator must opt into, not something already
 # trusted today.
@@ -217,7 +217,7 @@ default_sla                  = 0.0
 
 # Per-GPU-model pricing defaults (tier 1 of the
 # storefront-override > pool-hint > this-default precedence chain --
-# see domains.vms.listings.pricing_resolution). Structured to mirror
+# see market_storefront.listings.pricing_resolution). Structured to mirror
 # the structured-capacity-requirements change's own family-grouped
 # requirement shape, reserving room for non-GPU families (cpu/memory/
 # storage) once that change's vocabulary has landed and a pricing

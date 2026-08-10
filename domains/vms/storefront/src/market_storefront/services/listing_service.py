@@ -8,6 +8,7 @@ the only input the storefront needs to act on.
 Startup validation: config prerequisites for escrow operations are checked
 at construction time so failures are visible immediately rather than per-call.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,14 +26,17 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
-from domains.vms.listings.resources import parse_resource_from_dict
 from core_storefront.stage_log import stage_event
+
+from market_storefront.listings.resources import parse_resource_from_dict
 
 logger = logging.getLogger(__name__)
 
 
 class ListingService:
-    def __init__(self, *, sqlite_client, alkahest_clients: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, *, sqlite_client, alkahest_clients: dict[str, Any] | None = None
+    ) -> None:
         from market_storefront.utils.config import CHAINS, settings
 
         self._db = sqlite_client
@@ -53,7 +57,9 @@ class ListingService:
                 "wallet.private_key and at least one [chains.<name>] entry must be set."
             )
 
-    async def _resolve_chain_for_escrow(self, escrow_uid: str) -> tuple[str | None, Any]:
+    async def _resolve_chain_for_escrow(
+        self, escrow_uid: str
+    ) -> tuple[str | None, Any]:
         """Look up an escrow's chain_name + matching AlkahestClient.
 
         Returns ``(chain_name, alkahest_client)`` or ``(None, None)`` if the
@@ -69,7 +75,8 @@ class ListingService:
         return chain_name, self._alkahest_clients.get(chain_name)
 
     async def _resolve_escrow_context(
-        self, escrow_uid: str,
+        self,
+        escrow_uid: str,
     ) -> tuple[dict[str, Any] | None, str | None, Any, Any]:
         """Return stored escrow row, chain name, client, and matching codec."""
         row = await self._db.load_escrow(escrow_uid=escrow_uid)
@@ -82,14 +89,13 @@ class ListingService:
         alkahest = self._alkahest_clients.get(chain_name)
         if alkahest is None:
             return row, chain_name, None, None
-        from market_storefront.utils.config import CHAINS
         from market_alkahest.alkahest import get_escrow_codec_for
+
+        from market_storefront.utils.config import CHAINS
 
         chain_cfg = CHAINS.get(chain_name)
         config_path = (
-            chain_cfg.alkahest_address_config_path
-            if chain_cfg is not None
-            else None
+            chain_cfg.alkahest_address_config_path if chain_cfg is not None else None
         )
         codec = get_escrow_codec_for(
             chain_name,
@@ -130,6 +136,7 @@ class ListingService:
         display is best-effort via the chain-resolved cache.
         """
         from market_alkahest.token import resolve_token_cached
+
         if "token" not in resource_payload:
             return resource_payload
         token_value = resource_payload.get("token")
@@ -212,7 +219,8 @@ class ListingService:
     def _parse_offer_and_escrows(
         self, request: CreateListingRequest
     ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]]]:
-        from domains.vms.listings.models import ComputeResource
+        from arkhai_vms.listing_models import ComputeResource
+
         try:
             normalized_offer = self._normalize_token_resource(request.offer)
             from market_storefront.domain_runtime import (
@@ -250,8 +258,11 @@ class ListingService:
         ``POST /api/v1/listings/{id}/resume`` which clears the flag and runs
         the same ``publish_order_to_registry`` path.
         """
-        from domains.vms.listings.models import Listing
-        from market_storefront.services.publication_service import publish_order_to_registry
+        from arkhai_vms.listing_models import Listing
+
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
         offer, accepted_escrows, demands = self._parse_offer_and_escrows(request)
@@ -316,7 +327,8 @@ class ListingService:
 
         result = await close_order({"listing_id": listing_id})
         return CloseListingResponse(
-            status=result.get("status", "closed"), listing_id=listing_id,
+            status=result.get("status", "closed"),
+            listing_id=listing_id,
         )
 
     async def evaluate_negotiate(
@@ -335,9 +347,12 @@ class ListingService:
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
+        from arkhai_vms.listing_models import Listing
         from market_policy.scalar_policies import _amount_from_proposal
-        from domains.vms.listings.models import Listing
-        from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
+
+        from market_storefront.utils.sync_negotiation import (
+            _compute_round_zero_decision,
+        )
 
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
@@ -349,13 +364,17 @@ class ListingService:
                 "proposal must include fields.amount (absolute amount in base units)"
             )
         their_amount = int(their_amount_raw)
-        our_amount, _strategy_label, direction, strategy_name, decision = (
-            await _compute_round_zero_decision(
-                sqlite_client=self._db,
-                listing=listing,
-                their_proposal=proposal,
-                requested_duration_seconds=requested_duration_seconds,
-            )
+        (
+            our_amount,
+            _strategy_label,
+            direction,
+            strategy_name,
+            decision,
+        ) = await _compute_round_zero_decision(
+            sqlite_client=self._db,
+            listing=listing,
+            their_proposal=proposal,
+            requested_duration_seconds=requested_duration_seconds,
         )
         decision_amount = _amount_from_proposal(decision.proposal)
         return EvaluateNegotiateResponse(
@@ -365,7 +384,9 @@ class ListingService:
             direction=direction,
             strategy=strategy_name,
             decision=decision.action,
-            decision_amount=int(decision_amount) if decision_amount is not None else None,
+            decision_amount=int(decision_amount)
+            if decision_amount is not None
+            else None,
             decision_proposal=decision.proposal,
             decision_reason=decision.reason,
             would_negotiate=(decision.action != "exit"),
@@ -378,7 +399,8 @@ class ListingService:
                 "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
             }
         order = await self._db.load_listing(listing_id=listing_id)
-        from market_alkahest.token import resolve_token_cached, ERC20TokenMetadata
+        from market_alkahest.token import ERC20TokenMetadata, resolve_token_cached
+
         def _resolve_token(address: str) -> dict:
             """Resolve a 0x address to metadata for the refund transfer.
 
@@ -387,9 +409,7 @@ class ListingService:
             transfer_erc20 can still execute (it only needs the address).
             """
             if not isinstance(address, str) or not address.startswith("0x"):
-                raise ValueError(
-                    f"token must be a 0x address, got {address!r}"
-                )
+                raise ValueError(f"token must be a 0x address, got {address!r}")
             meta = resolve_token_cached(address)
             if meta is None:
                 meta = ERC20TokenMetadata(
@@ -398,11 +418,17 @@ class ListingService:
                     decimals=0,
                 )
             return meta.model_dump()
+
         from market_storefront.utils.refund import derive_refund_params
+
         outcome = derive_refund_params(
             order=order,
-            payload={"listing_id": listing_id, "buyer_address": payload.buyer_address,
-                     "amount": payload.amount, "token": payload.token},
+            payload={
+                "listing_id": listing_id,
+                "buyer_address": payload.buyer_address,
+                "amount": payload.amount,
+                "token": payload.token,
+            },
             resolve_token=_resolve_token,
         )
         if outcome[0] == "error":
@@ -433,25 +459,37 @@ class ListingService:
         except RuntimeError as exc:
             return 502, {"error": "Token transfer failed", "detail": str(exc)}
         await self._db.update_listing(
-            listing_id=listing_id, status="refunded",
+            listing_id=listing_id,
+            status="refunded",
             updated_at=datetime.now().isoformat(),
         )
-        stage_event("post_settlement", "refund_transferred",
-                    listing_id=listing_id, tx_hash=result["tx_hash"])
+        stage_event(
+            "post_settlement",
+            "refund_transferred",
+            listing_id=listing_id,
+            tx_hash=result["tx_hash"],
+        )
         return 200, {
-            "status": "refunded", "listing_id": listing_id,
-            "tx_hash": result["tx_hash"], "from_address": result["from_address"],
+            "status": "refunded",
+            "listing_id": listing_id,
+            "tx_hash": result["tx_hash"],
+            "from_address": result["from_address"],
             "to_address": result["to_address"],
-            "token": {"symbol": params["token_meta"].get("symbol"),
-                      "contract_address": params["token_meta"].get("contract_address"),
-                      "decimals": params.get("decimals")},
-            "amount_raw": params["amount_raw"], "block_number": result["block_number"],
+            "token": {
+                "symbol": params["token_meta"].get("symbol"),
+                "contract_address": params["token_meta"].get("contract_address"),
+                "decimals": params.get("decimals"),
+            },
+            "amount_raw": params["amount_raw"],
+            "block_number": result["block_number"],
         }
 
     async def claim(self, listing_id: str, payload: ClaimRequest) -> tuple[int, dict]:
         if not self._alkahest_available:
-            return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+            return 503, {
+                "error": "On-chain escrow operations not configured",
+                "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
+            }
         try:
             row, chain_name, alkahest, codec = await self._resolve_escrow_context(
                 payload.escrow_uid,
@@ -479,24 +517,44 @@ class ListingService:
             }
         try:
             collect_result = await codec.collect(
-                alkahest, payload.escrow_uid, payload.fulfillment_uid,
+                alkahest,
+                payload.escrow_uid,
+                payload.fulfillment_uid,
             )
         except Exception as exc:
-            return 502, {"error": "Escrow collect failed on-chain", "detail": str(exc),
-                         "listing_id": listing_id}
-        await self._db.update_listing(listing_id=listing_id, status="closed",
-                                       updated_at=datetime.now().isoformat())
-        stage_event("post_settlement", "escrow_claimed",
-                    listing_id=listing_id, escrow_uid=payload.escrow_uid)
-        return 200, {"status": "claimed", "listing_id": listing_id,
-                     "escrow_uid": payload.escrow_uid, "fulfillment_uid": payload.fulfillment_uid,
-                     "escrow_kind": codec.kind,
-                     "collect_result": str(collect_result)}
+            return 502, {
+                "error": "Escrow collect failed on-chain",
+                "detail": str(exc),
+                "listing_id": listing_id,
+            }
+        await self._db.update_listing(
+            listing_id=listing_id,
+            status="closed",
+            updated_at=datetime.now().isoformat(),
+        )
+        stage_event(
+            "post_settlement",
+            "escrow_claimed",
+            listing_id=listing_id,
+            escrow_uid=payload.escrow_uid,
+        )
+        return 200, {
+            "status": "claimed",
+            "listing_id": listing_id,
+            "escrow_uid": payload.escrow_uid,
+            "fulfillment_uid": payload.fulfillment_uid,
+            "escrow_kind": codec.kind,
+            "collect_result": str(collect_result),
+        }
 
-    async def reclaim(self, listing_id: str, payload: ReclaimRequest) -> tuple[int, dict]:
+    async def reclaim(
+        self, listing_id: str, payload: ReclaimRequest
+    ) -> tuple[int, dict]:
         if not self._alkahest_available:
-            return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+            return 503, {
+                "error": "On-chain escrow operations not configured",
+                "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
+            }
         try:
             row, chain_name, alkahest, codec = await self._resolve_escrow_context(
                 payload.escrow_uid,
@@ -526,22 +584,42 @@ class ListingService:
             from market_alkahest.txlock import chain_tx_lock
 
             async with chain_tx_lock(None):
-                reclaim_result = await codec.reclaim_expired(alkahest, payload.escrow_uid)
+                reclaim_result = await codec.reclaim_expired(
+                    alkahest, payload.escrow_uid
+                )
         except Exception as exc:
-            return 502, {"error": "Escrow reclaim failed on-chain", "detail": str(exc),
-                         "listing_id": listing_id}
-        await self._db.update_listing(listing_id=listing_id, status="reclaimed",
-                                       updated_at=datetime.now().isoformat())
-        stage_event("post_settlement", "escrow_reclaimed",
-                    listing_id=listing_id, escrow_uid=payload.escrow_uid)
-        return 200, {"status": "reclaimed", "listing_id": listing_id,
-                     "escrow_uid": payload.escrow_uid, "escrow_kind": codec.kind,
-                     "reclaim_result": str(reclaim_result)}
+            return 502, {
+                "error": "Escrow reclaim failed on-chain",
+                "detail": str(exc),
+                "listing_id": listing_id,
+            }
+        await self._db.update_listing(
+            listing_id=listing_id,
+            status="reclaimed",
+            updated_at=datetime.now().isoformat(),
+        )
+        stage_event(
+            "post_settlement",
+            "escrow_reclaimed",
+            listing_id=listing_id,
+            escrow_uid=payload.escrow_uid,
+        )
+        return 200, {
+            "status": "reclaimed",
+            "listing_id": listing_id,
+            "escrow_uid": payload.escrow_uid,
+            "escrow_kind": codec.kind,
+            "reclaim_result": str(reclaim_result),
+        }
 
-    async def arbitrate(self, listing_id: str, payload: ArbitrateRequest) -> tuple[int, dict]:
+    async def arbitrate(
+        self, listing_id: str, payload: ArbitrateRequest
+    ) -> tuple[int, dict]:
         if not self._alkahest_available:
-            return 503, {"error": "On-chain escrow operations not configured",
-                         "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config."}
+            return 503, {
+                "error": "On-chain escrow operations not configured",
+                "detail": "wallet.private_key and at least one [chains.<name>] entry must be set in storefront config.",
+            }
         # Arbitration acts against a fulfillment_uid, not an escrow_uid, so
         # we derive the chain from the listing's primary accepted_escrow
         # rather than from an escrows DB row.
@@ -558,21 +636,36 @@ class ListingService:
             }
         try:
             from alkahest_py import ArbitrationMode
-            async def decision_function(_a, _d): return bool(payload.decision)
+
+            async def decision_function(_a, _d):
+                return bool(payload.decision)
+
             from market_alkahest.txlock import chain_tx_lock
 
             async with chain_tx_lock(None):
                 decisions = await alkahest.oracle.arbitrate_many(
-                decision_function, lambda _d: None,
-                ArbitrationMode.PastUnarbitrated, timeout_seconds=5.0)
+                    decision_function,
+                    lambda _d: None,
+                    ArbitrationMode.PastUnarbitrated,
+                    timeout_seconds=5.0,
+                )
         except Exception as exc:
-            return 502, {"error": "Oracle arbitration failed on-chain", "detail": str(exc),
-                         "listing_id": listing_id}
-        stage_event("post_settlement", "oracle_arbitrated",
-                    listing_id=listing_id, decision=payload.decision)
+            return 502, {
+                "error": "Oracle arbitration failed on-chain",
+                "detail": str(exc),
+                "listing_id": listing_id,
+            }
+        stage_event(
+            "post_settlement",
+            "oracle_arbitrated",
+            listing_id=listing_id,
+            decision=payload.decision,
+        )
         return 200, {
-            "status": "arbitrated", "listing_id": listing_id,
-            "fulfillment_uid": payload.fulfillment_uid, "decision": payload.decision,
+            "status": "arbitrated",
+            "listing_id": listing_id,
+            "fulfillment_uid": payload.fulfillment_uid,
+            "decision": payload.decision,
             "decisions_count": len(decisions or []) if decisions is not None else 0,
             "note": "Under RecipientArbiter use /api/v1/listings/{listing_id}/claim to release funds.",
         }

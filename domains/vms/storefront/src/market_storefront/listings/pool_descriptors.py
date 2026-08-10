@@ -17,10 +17,13 @@ claim, independent of whether any specific pool happens to have one.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
-def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> str | None:
+def resolve_region(
+    policy_tags: Mapping[str, Any], *, fallback: str | None
+) -> str | None:
     """The pool's region: its declared hint if present, else ``fallback``
     (the storefront's local `compute_capacity_pools.region` value).
 
@@ -30,7 +33,7 @@ def resolve_region(policy_tags: Mapping[str, Any], *, fallback: str | None) -> s
     text falls back rather than propagating a malformed value.
     """
     # Local import -- see resolve_vm_listing_mode's own comment in
-    # domains.vms.listings.listing_mode for the reason (kept out of any
+    # market_storefront.listings.listing_mode for the reason (kept out of any
     # consumer that imports this module's signatures without calling it).
     from market_resource_pools.hints import raw_region
 

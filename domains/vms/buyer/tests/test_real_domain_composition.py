@@ -14,15 +14,15 @@ component test passed.
 from __future__ import annotations
 
 import pytest
+from arkhai_vms.negotiation.policy_sources import (
+    RL_POLICY_NAMES,
+    VM_SELLER_POLICIES,
+)
 from core_buyer.negotiation_composition import compose_buyer_negotiation_catalogue
 from market_core import DomainCapability
 from market_policy import UnknownCatalogueEntryError
 
 from domains.vms.buyer.cli import domain
-from domains.vms.negotiation.policy_sources import (
-    RL_POLICY_NAMES,
-    VM_SELLER_POLICIES,
-)
 
 
 def test_the_published_contract_declares_the_negotiation_capability() -> None:

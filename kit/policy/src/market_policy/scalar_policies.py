@@ -13,7 +13,7 @@ same way domain modules register theirs. ``market_alkahest`` is a lazy
 call-path import — kit-policy does not hard-depend on kit-alkahest; the
 composition roots that load these chains always ship both.
 
-History: extracted verbatim from ``domains.vms.negotiation.policies``
+History: extracted verbatim from ``arkhai_vms.negotiation.policies``
 when the API-credits domain became the second plugin; the VM module
 re-exports every name from here, so existing import paths keep working.
 """

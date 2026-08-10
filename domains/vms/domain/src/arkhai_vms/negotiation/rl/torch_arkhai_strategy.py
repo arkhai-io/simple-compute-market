@@ -32,7 +32,6 @@ from market_policy.negotiation_middleware import (
     NegotiationStep,
     their_last_proposal,
 )
-
 from market_policy.scalar_policies import (
     our_previous_counters,
     their_proposed_amount,
@@ -118,7 +117,7 @@ class TorchArkhaiStrategy:
         if direction in self._models:
             return self._models[direction]
 
-        from domains.vms.negotiation.rl.arkhai_common import (
+        from arkhai_vms.negotiation.rl.arkhai_common import (
             get_model,
             obs_dim,
             parse_node_types,
@@ -159,7 +158,7 @@ class TorchArkhaiStrategy:
             return None
         import time as _time
 
-        from domains.vms.negotiation.rl.arkhai_common import obs_dim
+        from arkhai_vms.negotiation.rl.arkhai_common import obs_dim
 
         obs = torch.zeros((1, obs_dim(node_types)), dtype=torch.float32)
 
@@ -214,7 +213,7 @@ class TorchArkhaiStrategy:
         try:
             import torch
 
-            from domains.vms.negotiation.rl.arkhai_common import (
+            from arkhai_vms.negotiation.rl.arkhai_common import (
                 extract_actions_from_logits,
                 parse_node_types,
             )

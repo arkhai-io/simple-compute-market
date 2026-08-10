@@ -1,17 +1,17 @@
 # Compute Domain Policy Notes
 
 Core-generic policy authoring and evaluation guidance:
-- `domains/vms/negotiation/rl/policy-making.md`
+- `domains/vms/domain/src/arkhai_vms/negotiation/rl/policy-making.md`
 
 ## Compute-specific modules
 
 | File | Role |
 |------|------|
-| `domains/vms/negotiation/policies.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
-| `domains/vms/negotiation/rl/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
-| `domains/vms/negotiation/rl/torch_arkhai_strategy.py` | Active negotiation callable — puffer bilateral model inference |
-| `domains/vms/negotiation/storefront_round.py` | Compute default policy seeding by trigger type |
-| `domains/vms/listings/models.py` | Compute event/resource enums and models |
+| `arkhai_vms/negotiation/policies.py` | All active compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions) |
+| `arkhai_vms/negotiation/rl/arkhai_common.py` | Shared RL utils: obs builder, model loader, action extraction |
+| `arkhai_vms/negotiation/rl/torch_arkhai_strategy.py` | Active negotiation callable — puffer bilateral model inference |
+| `market_storefront/negotiation/storefront_round.py` | Compute default policy seeding by trigger type |
+| `arkhai_vms/listing_models.py` | Compute event/resource enums and models |
 | `domains/vms/storefront/src/market_storefront/utils/action_executor.py` | Compute-domain action execution |
 
 ## Active policy chains
@@ -36,8 +36,8 @@ negotiation.action.safe_default_reject
 ```
 
 Model paths (configurable via env vars):
-- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt`
-- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`
+- `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` → `arkhai_vms/negotiation/rl/models/arkhai_negotiator_seller.pt`
+- `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH` → `arkhai_vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`
 
 Train new models: `market policy train --total-timesteps 10000000 --wandb`
 Eval models: `market policy eval --episodes 20`
@@ -57,4 +57,4 @@ Eval models: `market policy eval --episodes 20`
 3. Return `None` to pass through to the next callable in the chain.
 4. Keep action payloads serializable (`model_dump(mode="json")`).
 5. Seed in `seeding.py` via `save_policy_composite(components=[...])`.
-6. Add/update tests in `domains/vms/tests/`.
+6. Add/update tests in `domains/vms/domain/tests/`.

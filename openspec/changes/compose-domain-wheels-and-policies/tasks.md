@@ -186,29 +186,82 @@ application stack or a typed client, so none is integration coverage.
 
 ### 7. Split by consumer
 
-- [ ] 7.1 Move storefront-only modules from
-  `domains/vms/{listings,negotiation,settlement}` into `market_storefront`,
-  confirming each has no other production consumer at move time.
-- [ ] 7.2 Move the buyer's formatting helpers — the six symbols it imports
-  from `listings/buyer_cli` — into `domains/vms/buyer`.
-- [ ] 7.3 Move genuinely shared modules, `listings/models` and its transitive
-  needs, into `arkhai_vms`. Move the RL strategy and its model checkpoints
-  with the `[rl]` extra and the PyTorch CPU index intact.
-- [ ] 7.4 Inline or relocate `settlement/proposals`, a pass-through
-  re-exporting from `market_alkahest`.
-- [ ] 7.5 Rewrite every affected import to the owning distribution. Remove the
-  eager cross-package facades; nothing re-exports across a package boundary
-  after the split.
+Consumer sets re-derived after section 5, which moved many imports to their real
+owners. Of the modules remaining under `domains/vms/{listings,negotiation,settlement}`:
+fifteen have no consumer outside the storefront; one, `negotiation/policy_sources`,
+is reached by both roles; the rest are facades and helpers reached through them.
+
+The buyer-reachable subset is narrow and its boundary is what determines the
+split: `policy_sources` needs `negotiation/policies` directly and
+`negotiation/rl/*` lazily, and `rl/arkhai_common` needs one enum from
+`listings/models`. So the shared set is the negotiation tree plus the VM domain
+models — which is what `arkhai_vms` already describes itself as owning — and
+everything else is storefront-local.
+
+- [x] 7.1 Move the twelve storefront-only modules into `market_storefront` as
+  `listings/`, `settlement/`, and `negotiation/`, each confirmed to have no
+  consumer outside the storefront at move time.
+- [x] 7.2 Move the buyer's formatting helpers into `domains/vms/buyer` as
+  `listing_helpers.py`. The module is presentation only — filter-parameter
+  construction and the row formatting the `listing` and `buy` verbs print — so
+  it belongs to the package that renders it rather than to a listings module the
+  storefront also imports. Removed from the `listings` facade and from the
+  buyer's wheel manifest's `../listings/` group; added under its own directory.
+- [x] 7.3a Move `listings/models` into `arkhai_vms` as `listing_models`. It is
+  shared VM-domain vocabulary — the listing shape, its resources, and the GPU
+  enum — and depends only on stdlib, pydantic, and `market_alkahest`, so it moves
+  into the distribution both roles already declare. 19 import sites rewritten;
+  the `listings` facade stops re-exporting its eleven names. The buyer needs it
+  because `rl/arkhai_common` reads `GPUModel`.
+- [x] 7.3b Move the negotiation tree — `policies`, `policy_sources`, `rl/*`, and
+  the two checkpoints — into `arkhai_vms`. It is the buyer-reachable subset, and
+  it needs nothing outside `market_policy` and `arkhai_vms.listing_models`. The
+  storefront keeps `storefront_round`, which reads storefront-local listing and
+  settlement state; the `domains.vms.negotiation` facade narrows to that. The
+  policy-source suite moves to the package that now owns it.
+- [x] 7.3c Carry the `[rl]` extra, the PyTorch CPU index, and the checkpoint
+  `artifacts` entry onto `arkhai_vms`. The checkpoints are data rather than
+  modules, so package discovery does not find them and the extra would otherwise
+  install a strategy with no weights. The buyer's own `[rl]` extra now defers to
+  `arkhai-vms[rl]` instead of restating the torch pin.
+- [x] 7.3d Test that the strategy module does not import torch at module scope.
+  `arkhai_common` reads `GPUModel` at module scope and the strategy imports
+  `arkhai_common` only inside its functions; that chain is what keeps torch out of
+  a process that merely composes a catalogue, and hoisting the import fails the
+  test.
+- [x] 7.4 Delete `settlement/proposals`. It re-exported four names from
+  `market_alkahest.proposals` and its own docstring called itself a
+  compatibility shim; seven consumers across the buyer, the storefront, and the
+  settlement facade now import the owner directly.
+- [x] 7.5 Rewrite every affected import to the owning distribution: 49 files.
+  `domains/vms/{listings,negotiation,settlement}` is tombstoned in full,
+  facades included — after the split nothing re-exports across a package
+  boundary, so a facade whose only purpose was to be imported from outside has
+  no purpose. `grep` for `domains.vms.{listings,settlement,negotiation}` returns
+  zero.
 
 ### 8. Remove the assembly mechanisms
 
-- [ ] 8.1 Remove `[tool.hatch.build.targets.wheel.force-include]` from
-  `domains/vms/buyer/pyproject.toml`.
-- [ ] 8.2 Remove `COPY domains/ ./domains/` from the VM storefront Dockerfile
-  and the reliance on `PYTHONPATH=/app` for domain resolution. Update
-  `compose.yml` where it assumes the copied tree.
-- [ ] 8.3 Add a repository check rejecting a Python package under `domains/`
-  that no `pyproject.toml` owns, so an unowned namespace cannot reappear.
+- [x] 8.1 Reduce the buyer's manifest from 38 entries to 23. Every entry
+  reaching into another project directory is gone except the two namespace
+  anchors the flat `domains.vms.buyer` import path needs. The table is retained
+  rather than removed because the buyer's own layout still puts its modules at
+  the project root; converting it to package discovery is a layout change
+  outside this section.
+- [x] 8.2 Remove `COPY domains/ ./domains/` and `ENV PYTHONPATH=/app` from the
+  VM storefront Dockerfile, and drop `/app` from both storefront services'
+  `PYTHONPATH` in `compose.yml`. The image no longer resolves any module from a
+  source tree on the interpreter path.
+- [x] 8.3 Add a repository check rejecting a Python package under `domains/`
+  that no distribution owns. A directory whose only live module is its
+  `__init__.py` is a namespace anchor rather than a package, and is owned when
+  some project's manifest ships that file — so the check distinguishes the two
+  and both branches are exercised.
+- [x] 8.3a Teach `check_wheel_manifests.py` about tombstones. A file whose
+  contents are a tombstone comment is a pending deletion, not a module: it must
+  not be added to a manifest, and a manifest still listing it is stale. Both
+  branches are exercised — the check caught a stale entry left by this section's
+  own tombstones.
 - [ ] 8.4 Bring `domains/apicredits` to the same ownership rule: split
   `listings`, `negotiation`, and `settlement` by consumer, remove the
   `force-include` table from `domains/apicredits/pyproject.toml`, and remove
@@ -226,11 +279,30 @@ application stack or a typed client, so none is integration coverage.
 
 ### 9. Commit 2 verification
 
-- [ ] 9.1 Build `arkhai-vms-buyer` and assert every `domains`/`arkhai_vms`
-  import in its shipped code resolves inside the wheel.
-- [ ] 9.2 Assert no shipped file originates outside its own project directory.
+One obsolete test was found by auditing what a static import rewrite could not
+see. `domains/vms/buyer/tests/test_no_resource_pools_dependency.py` guarded a
+shared listings package the buyer could reach; the rewrite pointed it at
+`market_storefront.listings`, which the buyer does not depend on, so it would
+have raised `ModuleNotFoundError` in a real buyer environment while passing in
+one where every package is installed. The guarantee it asserted is now
+structural — the buyer cannot reach that package at all — so it is tombstoned
+rather than repaired.
+
+- [x] 9.1 Build all seventeen internal wheels into a clean virtual environment
+  with no repository source tree and no `PYTHONPATH`, then import every module
+  each ships. `arkhai-vms-storefront` 77 modules, `arkhai-vms-buyer` 21,
+  `arkhai-vms` 13 — zero failures. Also ran the scenario the original CI failure
+  came from: buyer domain discovery returns `compute.v1` and the composed
+  catalogue resolves `rl`, entirely from installed wheels.
+- [x] 9.2 Assert no shipped file originates outside its own project directory.
+  The only remaining cross-project manifest entries are the two namespace
+  anchors the flat `domains.vms.buyer` import path requires, which `8.3`'s check
+  now distinguishes from an unowned package.
 - [ ] 9.3 Start the VM storefront from an image built without `COPY domains/`
-  and assert its configured chain resolves.
+  and assert its configured chain resolves. The import half is covered by `9.1`
+  — every module in the storefront wheel imports with no source tree present —
+  so what remains unproven is the image build and container startup themselves,
+  which need a Docker daemon.
 - [ ] 9.4 Run the E2E buyer CLI scenario that currently fails at stage B4 and
   record the resulting failure count and skip count. A reduced skip count
   indicates tests previously skipped because the domain was unloadable.

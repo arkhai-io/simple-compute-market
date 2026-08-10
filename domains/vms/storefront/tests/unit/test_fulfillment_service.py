@@ -4,11 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from market_fulfillment import VersionedEnvelope
-from market_storefront.services import publication_service
-from market_storefront.services import fulfillment_service
-from domains.vms.listings.reconciler import record_derived_listing
+
+from market_storefront.listings.reconciler import record_derived_listing
+from market_storefront.services import fulfillment_service, publication_service
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests.fake_site import FakeSite, pump_events, site_capacity
 
@@ -108,8 +107,13 @@ async def test_fulfill_compute_obligation_reports_error_when_onchain_fulfillment
     await _seed_compute_pool(client)
     fake = FakeSite()
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
@@ -185,8 +189,13 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
     await _seed_compute_listings(client, max_gpu_count=4)
     fake = FakeSite()
     fake.add_resource(
-        "pool-h200-1", 4,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        4,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: client)
     monkeypatch.setattr(publication_service, "get_sqlite_client", lambda: client)
@@ -325,7 +334,8 @@ async def test_terminate_vm_lease_calls_the_same_client_as_registration(monkeypa
 
 @pytest.mark.asyncio
 async def test_do_provision_end_to_end_delivers_credentials_for_storage(
-    client, monkeypatch,
+    client,
+    monkeypatch,
 ):
     """Exercises the real _do_provision (schedule_resource -> begin_fulfillment
     -> poll -> get_fulfillment_result) through fulfill_vm_obligation's
@@ -338,13 +348,20 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
 
     await _seed_compute_pool(client)
     await client.insert_escrow(
-        escrow_uid="escrow-e2e-1", negotiation_id="neg-e2e-1",
-        chain_name="anvil", escrow_address="0x" + "11" * 20,
+        escrow_uid="escrow-e2e-1",
+        negotiation_id="neg-e2e-1",
+        chain_name="anvil",
+        escrow_address="0x" + "11" * 20,
     )
     fake = FakeSite()
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
 
     fulfillment_client = SimpleNamespace(
@@ -352,7 +369,9 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
             return_value=SimpleNamespace(settlement_resource_id="host-1")
         ),
         begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(fulfillment_id="fulfillment-e2e-1", state="dispatching")
+            return_value=SimpleNamespace(
+                fulfillment_id="fulfillment-e2e-1", state="dispatching"
+            )
         ),
         get_fulfillment_status=AsyncMock(
             return_value=SimpleNamespace(state="active", failure_message=None)
@@ -363,27 +382,37 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
                 schema_version=1,
                 payload={
                     "provisioned_resources": [
-                        {"provisioned_resource_id": "provisioned-vm-e2e-1", "status": "active"}
+                        {
+                            "provisioned_resource_id": "provisioned-vm-e2e-1",
+                            "status": "active",
+                        }
                     ],
                     "domain_result": {
                         "kind": "vm.fulfillment.result.v1",
                         "schema_version": 1,
                         "payload": {
-                            "connection_info": {"vm_name": "vm-e2e-1", "host": "host-1"},
+                            "connection_info": {
+                                "vm_name": "vm-e2e-1",
+                                "host": "host-1",
+                            },
                             "credentials": [
                                 {
                                     "role": "root",
                                     "password": "root-pw",
                                     "ssh_commands": {"internal": "ssh root@host-1"},
                                     "ssh_key_path_host": "/root/.ssh/id_ed25519",
-                                    "provisioned_resource_ids": ["provisioned-vm-e2e-1"],
+                                    "provisioned_resource_ids": [
+                                        "provisioned-vm-e2e-1"
+                                    ],
                                 },
                                 {
                                     "role": "tenant",
                                     "password": "tenant-pw",
                                     "ssh_commands": {"external": "ssh tenant@host-1"},
                                     "key_type": "generated",
-                                    "provisioned_resource_ids": ["provisioned-vm-e2e-1"],
+                                    "provisioned_resource_ids": [
+                                        "provisioned-vm-e2e-1"
+                                    ],
                                 },
                             ],
                         },
@@ -411,7 +440,9 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
+    monkeypatch.setattr(
+        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
+    )
     monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
     monkeypatch.setattr(
         fulfillment_service.settings,
@@ -474,13 +505,20 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
 
     await _seed_compute_pool(client)
     await client.insert_escrow(
-        escrow_uid="escrow-dup-1", negotiation_id="neg-dup-1",
-        chain_name="anvil", escrow_address="0x" + "11" * 20,
+        escrow_uid="escrow-dup-1",
+        negotiation_id="neg-dup-1",
+        chain_name="anvil",
+        escrow_address="0x" + "11" * 20,
     )
     fake = FakeSite()
     fake.add_resource(
-        "pool-h200-1", 1,
-        attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-1"},
+        "pool-h200-1",
+        1,
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "host-1",
+        },
     )
 
     envelope = VersionedEnvelope(
@@ -512,7 +550,9 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
             return_value=SimpleNamespace(settlement_resource_id="host-1")
         ),
         begin_fulfillment=AsyncMock(
-            return_value=SimpleNamespace(fulfillment_id="fulfillment-dup-1", state="dispatching")
+            return_value=SimpleNamespace(
+                fulfillment_id="fulfillment-dup-1", state="dispatching"
+            )
         ),
         get_fulfillment_status=AsyncMock(
             return_value=SimpleNamespace(state="active", failure_message=None)
@@ -538,29 +578,40 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
+    monkeypatch.setattr(
+        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
+    )
     monkeypatch.setattr(fulfillment_service, "_do_shutdown", AsyncMock())
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
         SimpleNamespace(
-            timeout=5.0, poll_interval=0.001, service_url="http://provisioning",
-            frp_server_addr="", frp_domain="", frp_dashboard_password="",
+            timeout=5.0,
+            poll_interval=0.001,
+            service_url="http://provisioning",
+            frp_server_addr="",
+            frp_domain="",
+            frp_dashboard_password="",
         ),
         raising=False,
     )
 
     with site_capacity(fake, sqlite_client_factory=lambda: client):
         first = await fulfillment_service.fulfill_compute_obligation(
-            client=None, escrow_uid="escrow-dup-1", ssh_public_key="ssh-ed25519 AAAA",
-            order=_compute_listing(), duration_seconds=3600, listing_id="listing-1",
+            client=None,
+            escrow_uid="escrow-dup-1",
+            ssh_public_key="ssh-ed25519 AAAA",
+            order=_compute_listing(),
+            duration_seconds=3600,
+            listing_id="listing-1",
         )
         # A second, independent get_fulfillment_result read for the same
         # fulfillment (e.g. a caller re-checking status/result) must be
         # side-effect-free.
         escrow = await client.load_escrow(escrow_uid="escrow-dup-1")
         second_envelope = await fulfillment_client.get_fulfillment_result(
-            "fulfillment-dup-1", capacity_reservation_id=escrow["capacity_reservation_id"],
+            "fulfillment-dup-1",
+            capacity_reservation_id=escrow["capacity_reservation_id"],
         )
 
     assert first["status"] == "fulfilled"

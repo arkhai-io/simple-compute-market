@@ -14,15 +14,16 @@ pufferlib version on the existing ``.pt`` files.
 Training still uses pufferlib's C env + trainer (``domains/vms/training/``);
 runtime callers (storefront, buyer) only need torch.
 """
+
 from __future__ import annotations
 
 import importlib
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from domains.vms.listings.models import GPUModel
+from arkhai_vms.listing_models import GPUModel
 
 try:  # Torch is optional at runtime; fail gracefully if unavailable.
     torch: Any = importlib.import_module("torch")
@@ -43,14 +44,15 @@ logger = logging.getLogger(__name__)
 # Three nn.Linear layers + GELU; sum of action_nvec = 11 output logits split
 # into two heads (price_idx ∈ {0..8}, sell_flag ∈ {0, 1}) plus a value head.
 
-def _build_inference_policy(obs_dim_val: int) -> Optional[Any]:
+
+def _build_inference_policy(obs_dim_val: int) -> Any | None:
     """Construct the inference model class lazily so this module imports
     cleanly when torch is absent (``policy_mode = bisection`` deployments).
     """
     if torch is None:
         return None
 
-    import torch.nn as nn
+    from torch import nn
 
     action_nvec = (9, 2)
     hidden_size = 128
@@ -80,6 +82,7 @@ def _build_inference_policy(obs_dim_val: int) -> Optional[Any]:
 # ---------------------------------------------------------------------------
 # Config parsing helpers
 # ---------------------------------------------------------------------------
+
 
 def parse_node_types() -> int:
     try:
@@ -137,11 +140,7 @@ def parse_gpu_slot_map(node_types: int) -> dict[str, int]:
     }
     raw = os.getenv("ARKHAI_GPU_SLOT_MAP", "").strip()
     if not raw:
-        return {
-            key: slot
-            for key, slot in mapping.items()
-            if 0 <= slot < node_types
-        }
+        return {key: slot for key, slot in mapping.items() if 0 <= slot < node_types}
 
     parsed: dict[str, int] = {}
     for pair in raw.split(","):
@@ -162,11 +161,7 @@ def parse_gpu_slot_map(node_types: int) -> dict[str, int]:
         "[ARKHAI COMMON] Invalid ARKHAI_GPU_SLOT_MAP='%s'; using defaults",
         raw,
     )
-    return {
-        key: slot
-        for key, slot in mapping.items()
-        if 0 <= slot < node_types
-    }
+    return {key: slot for key, slot in mapping.items() if 0 <= slot < node_types}
 
 
 def obs_dim(node_types: int) -> int:
@@ -179,7 +174,8 @@ def obs_dim(node_types: int) -> int:
 # Model creation and checkpoint loading
 # ---------------------------------------------------------------------------
 
-def create_model(obs_dim: int) -> Optional[Any]:
+
+def create_model(obs_dim: int) -> Any | None:
     """Build a fresh inference policy with random weights.
 
     The caller (``load_state_dict`` below) overwrites those weights from
@@ -189,7 +185,7 @@ def create_model(obs_dim: int) -> Optional[Any]:
     return _build_inference_policy(obs_dim)
 
 
-def load_state_dict(model_file: Path, obs_dim_val: int) -> Optional[Any]:
+def load_state_dict(model_file: Path, obs_dim_val: int) -> Any | None:
     if torch is None:
         return None
 
@@ -200,7 +196,9 @@ def load_state_dict(model_file: Path, obs_dim_val: int) -> Optional[Any]:
     try:
         raw_state = torch.load(str(model_file), map_location="cpu")
     except Exception as exc:
-        logger.error("[ARKHAI COMMON] Failed reading model file %s: %s", model_file, exc)
+        logger.error(
+            "[ARKHAI COMMON] Failed reading model file %s: %s", model_file, exc
+        )
         return None
 
     if not isinstance(raw_state, dict):
@@ -237,7 +235,7 @@ def get_model(
     obs_dim_val: int,
     *,
     _cache: dict[str, Any] | None = None,
-) -> Optional[Any]:
+) -> Any | None:
     """Lazily load an Arkhai model checkpoint.
 
     Uses a module-level cache keyed by (env_var_name, obs_dim) to avoid
@@ -288,6 +286,7 @@ MAX_GPU = 10.0
 # Action extraction from model output
 # ---------------------------------------------------------------------------
 
+
 def extract_actions_from_logits(output: Any) -> tuple[int, int]:
     """Extract (price_idx, sell_flag) from puffer policy outputs."""
     if torch is None:
@@ -295,7 +294,9 @@ def extract_actions_from_logits(output: Any) -> tuple[int, int]:
 
     try:
         if not isinstance(output, tuple) or len(output) != 2:
-            logger.warning("[ARKHAI COMMON] Unexpected model output type: %s", type(output))
+            logger.warning(
+                "[ARKHAI COMMON] Unexpected model output type: %s", type(output)
+            )
             return 4, 0
 
         logits = output[0]
@@ -304,7 +305,9 @@ def extract_actions_from_logits(output: Any) -> tuple[int, int]:
         if isinstance(logits, (tuple, list)) and len(logits) >= 2:
             price_logits = logits[0][0] if len(logits[0].shape) > 1 else logits[0]
             sell_logits = logits[1][0] if len(logits[1].shape) > 1 else logits[1]
-            return int(torch.argmax(price_logits).item()), int(torch.argmax(sell_logits).item())
+            return int(torch.argmax(price_logits).item()), int(
+                torch.argmax(sell_logits).item()
+            )
 
         # Optional concatenated fallback: tensor (B,11)
         if isinstance(logits, torch.Tensor):
@@ -320,4 +323,3 @@ def extract_actions_from_logits(output: Any) -> tuple[int, int]:
     except Exception as exc:
         logger.error("[ARKHAI COMMON] Failed parsing actions: %s", exc)
         return 4, 0
-

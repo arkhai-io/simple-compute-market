@@ -37,6 +37,7 @@ from decimal import Decimal
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from arkhai_vms.negotiation.policy_sources import VM_DEFAULT_SELLER_CHAIN
 from core_storefront.negotiation_composition import compose_negotiation_catalogue
 from core_storefront.negotiation_sync import (
     LIVE_LISTING_STATUSES,
@@ -64,15 +65,7 @@ from core_storefront.negotiation_sync import (
 from core_storefront.negotiation_sync import (
     record_seller_decision_message as _record_seller_decision_message,
 )
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.negotiation import storefront_round as vm_storefront_round
-from market_policy.scalar_policies import _amount_from_proposal
-from domains.vms.negotiation.policy_sources import VM_DEFAULT_SELLER_CHAIN
-from domains.vms.negotiation.storefront_round import (  # noqa: F401
-    SellerRoundHook,
-    SellerRoundResult,  # re-exported: tests and callers import it from here
-)
-from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core.schemas import EscrowProposal
 from market_policy import (
     NegotiationCatalogue,
@@ -82,6 +75,14 @@ from market_policy import (
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
+)
+from market_policy.scalar_policies import _amount_from_proposal
+
+from market_storefront.listings import extract_compute_from_order
+from market_storefront.negotiation import storefront_round as vm_storefront_round
+from market_storefront.negotiation.storefront_round import (  # noqa: F401
+    SellerRoundHook,
+    SellerRoundResult,  # re-exported: tests and callers import it from here
 )
 
 logger = logging.getLogger(__name__)
@@ -294,11 +295,10 @@ def lookup_pool_policy_tags(
     if not listing_id:
         return {}
     try:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             pool_id_for_listing,
             site_id_for_listing,
         )
-
         from market_storefront.services.site_projection_cache import (
             projection_caches,
         )
@@ -371,9 +371,9 @@ async def _place_capacity_hold(
     if ttl <= 0:
         return
     try:
-        from domains.vms.listings.reconciler import site_id_for_listing
         from market_resource_pools.hints import capped_hold_seconds
 
+        from market_storefront.listings.reconciler import site_id_for_listing
         from market_storefront.services.capacity_client import build_capacity_client
         from market_storefront.services.vm_job_spec_service import (
             compute_capacity_claim_from_order,
@@ -535,8 +535,8 @@ async def start_sync_negotiation(
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
+    from arkhai_vms.listing_models import Listing
     from core_storefront.stage_log import stage_event
-    from domains.vms.listings.models import Listing
 
     # Check global pause flag and per-order pause flag before doing any work.
     from market_storefront.server import is_globally_paused
@@ -723,9 +723,10 @@ async def continue_sync_negotiation(
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
+    from arkhai_vms.listing_models import Listing
     from core_storefront.stage_log import stage_event
-    from domains.vms.listings import determine_strategy_from_order
-    from domains.vms.listings.models import Listing
+
+    from market_storefront.listings import determine_strategy_from_order
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)
     if not thread:

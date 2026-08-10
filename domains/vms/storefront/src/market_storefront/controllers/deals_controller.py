@@ -13,17 +13,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi_utils.cbv import cbv
-
-import market_storefront.container as _container
-from market_storefront.middleware import buyer_auth
 from core_storefront.heartbeats import HeartbeatError, record_heartbeat
 from core_storefront.models.deal_models import (
     DealHeartbeatRequest,
     DealHeartbeatResponse,
 )
 from core_storefront.stage_log import stage_event
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi_utils.cbv import cbv
+
+import market_storefront.container as _container
+from market_storefront.middleware import buyer_auth
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class DealsController:
         body: DealHeartbeatRequest,
         request: Request,
     ) -> DealHeartbeatResponse:
-        from domains.vms.settlement.heartbeats import (
+        from market_storefront.settlement.heartbeats import (
             VmHeartbeatError,
             validate_vm_heartbeat_payload,
         )
@@ -109,7 +109,8 @@ class DealsController:
 
         count = await self._db.count_heartbeats(escrow_uid)
         stage_event(
-            "service", "heartbeat_recorded",
+            "service",
+            "heartbeat_recorded",
             deal_ref=escrow_uid,
             signer=body.buyer_address,
             count=count,

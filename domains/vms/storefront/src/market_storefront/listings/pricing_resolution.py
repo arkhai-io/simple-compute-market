@@ -21,8 +21,9 @@ others from falling through to a lower tier:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 GPU_FAMILY_KEY = "gpu"
 
@@ -65,9 +66,7 @@ def resolve_gpu_pricing(
     failure mode this resolver invents.
     """
     hint_fields = _hint_fields_for_model(policy_tags, gpu_model)
-    config_fields = (
-        config_defaults_by_model.get(gpu_model) if gpu_model else None
-    )
+    config_fields = config_defaults_by_model.get(gpu_model) if gpu_model else None
 
     def _resolve(field: str) -> Any:
         override_value = getattr(storefront_override, field)
@@ -106,12 +105,13 @@ _VALID_HINT_FIELD: Mapping[str, Any] = {
 
 
 def _hint_fields_for_model(
-    policy_tags: Mapping[str, Any], gpu_model: str | None,
+    policy_tags: Mapping[str, Any],
+    gpu_model: str | None,
 ) -> Mapping[str, Any] | None:
     if not gpu_model:
         return None
     # Local import -- see resolve_vm_listing_mode's own comment in
-    # domains.vms.listings.listing_mode for the reason (kept out of any
+    # market_storefront.listings.listing_mode for the reason (kept out of any
     # consumer that imports this module's signatures without calling it).
     from market_resource_pools.hints import raw_pricing
 

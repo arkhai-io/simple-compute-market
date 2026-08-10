@@ -4,6 +4,7 @@ require_admin_key is applied via __init__ Depends (not router-level) to avoid
 a fastapi_utils @cbv + router-level dependencies interaction issue that causes
 routes to return 404.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from core_storefront.models.system_models import AdminPauseResponse
+from core_storefront.stage_log import stage_event
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from core_storefront.models.system_models import AdminPauseResponse
 from market_storefront.models.capacity_admin_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
@@ -36,15 +38,14 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from market_storefront.server import _set_globally_paused
+from market_storefront.services.capacity_client import remote_site_clients
+from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.failure_policy import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
     configured_failure_actions,
 )
-from market_storefront.server import _set_globally_paused
-from market_storefront.utils.config import ESCROW_TEMPLATES
-from core_storefront.stage_log import stage_event
-from market_storefront.services.capacity_client import remote_site_clients
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
+
 @cbv(router)
 class AdminController:
     def __init__(
@@ -68,16 +70,22 @@ class AdminController:
     ) -> None:
         self._db = db
 
-    @router.post("/pause", response_model=AdminPauseResponse,
-                 summary="Pause new negotiations globally (admin)")
+    @router.post(
+        "/pause",
+        response_model=AdminPauseResponse,
+        summary="Pause new negotiations globally (admin)",
+    )
     async def pause(self) -> AdminPauseResponse:
         _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True, message="Storefront paused. New negotiations will receive 503."
         )
 
-    @router.post("/resume", response_model=AdminPauseResponse,
-                 summary="Resume new negotiations globally (admin)")
+    @router.post(
+        "/resume",
+        response_model=AdminPauseResponse,
+        summary="Resume new negotiations globally (admin)",
+    )
     async def resume(self) -> AdminPauseResponse:
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
@@ -88,7 +96,9 @@ class AdminController:
         summary="Interrupt an active interruptible compute deal (admin)",
     )
     async def interrupt_deal(
-        self, escrow_uid: str, body: InterruptDealRequest,
+        self,
+        escrow_uid: str,
+        body: InterruptDealRequest,
     ) -> InterruptDealResponse:
         """End an interruptible deal's capacity lease early.
 
@@ -101,11 +111,10 @@ class AdminController:
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:
             raise HTTPException(
-                status_code=404, detail=f"Unknown escrow {escrow_uid!r}",
+                status_code=404,
+                detail=f"Unknown escrow {escrow_uid!r}",
             )
-        listing_id = await self._db.get_listing_id_by_escrow_uid(
-            escrow_uid=escrow_uid
-        )
+        listing_id = await self._db.get_listing_id_by_escrow_uid(escrow_uid=escrow_uid)
         if not listing_id:
             raise HTTPException(
                 status_code=404,
@@ -114,7 +123,8 @@ class AdminController:
         listing = await self._db.load_listing(listing_id=listing_id)
         if listing is None:
             raise HTTPException(
-                status_code=404, detail=f"Listing {listing_id!r} not found",
+                status_code=404,
+                detail=f"Listing {listing_id!r} not found",
             )
         thread = await self._db.load_negotiation_thread_row(
             negotiation_id=escrow["negotiation_id"]
@@ -157,7 +167,8 @@ class AdminController:
                 reason=body.reason or "interruptible_preemption",
             )
             stage_event(
-                "admin", "deal_interrupted",
+                "admin",
+                "deal_interrupted",
                 escrow_uid=escrow_uid,
                 listing_id=listing_id,
                 capacity_reservation_id=capacity_reservation_id,
@@ -212,7 +223,9 @@ class AdminController:
         try:
             csv_content = (await file.read()).decode("utf-8")
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
+            raise HTTPException(
+                status_code=400, detail=f"Could not read uploaded file: {exc}"
+            )
         try:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_content,
@@ -231,7 +244,9 @@ class AdminController:
         # Surface up to 50 per-row failures so operators can see what's
         # wrong without shell access. The full report.rows[] is also
         # logged below, capped lower per line.
-        failed_rows = [row for row in report.get("rows") or [] if not row.get("imported")]
+        failed_rows = [
+            row for row in report.get("rows") or [] if not row.get("imported")
+        ]
         errors_payload = [
             ImportRowError(
                 row_number=int(row.get("row_number") or 0),
@@ -385,13 +400,16 @@ class AdminController:
             set_state=new_state if state_changed else None,
             set_attribute=(
                 {f"$.{k}": v for k, v in body.attributes.items()}
-                if body.attributes is not None else None
+                if body.attributes is not None
+                else None
             ),
         )
         applied = bool(result.get("applied"))
 
         if state_changed and applied:
-            logger.info("[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state)
+            logger.info(
+                "[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state
+            )
         if attrs_changed and applied:
             logger.info("[ADMIN] Resource %s attributes patched", resource_id)
 
@@ -402,7 +420,12 @@ class AdminController:
         # /lifecycle/check-leases response returns. Other state
         # transitions (manual ops, init bookkeeping) don't produce this
         # event — it's specifically the leased→available edge.
-        if applied and state_changed and old_state == "leased" and new_state == "available":
+        if (
+            applied
+            and state_changed
+            and old_state == "leased"
+            and new_state == "available"
+        ):
             stage_event(
                 "lease_lifecycle",
                 "resource_released",
@@ -476,7 +499,8 @@ class AdminController:
         if not isinstance(proposal, dict):
             return False
         try:
-            from domains.vms.settlement.proposals import proposal_is_splitter_gated
+            from market_alkahest.proposals import proposal_is_splitter_gated
+
             from market_storefront.utils.config import CHAINS
 
             chain_config_paths = {
@@ -484,7 +508,8 @@ class AdminController:
                 for name, chain in CHAINS.items()
             }
             return proposal_is_splitter_gated(
-                proposal, chain_config_paths=chain_config_paths,
+                proposal,
+                chain_config_paths=chain_config_paths,
             )
         except Exception as exc:
             logger.warning(
@@ -494,7 +519,8 @@ class AdminController:
             return False
 
     async def _find_live_reservation_for_escrow(
-        self, escrow_uid: str,
+        self,
+        escrow_uid: str,
     ) -> dict[str, Any] | None:
 
         capacity = self._capacity()
@@ -504,12 +530,12 @@ class AdminController:
             except Exception as exc:
                 logger.warning(
                     "[ADMIN] Could not list reservations for escrow %s: %s",
-                    escrow_uid, exc,
+                    escrow_uid,
+                    exc,
                 )
                 continue
             held = [
-                row for row in rows
-                if row.get("state") in _INTERRUPTIBLE_HELD_STATES
+                row for row in rows if row.get("state") in _INTERRUPTIBLE_HELD_STATES
             ]
             if held:
                 return held[0]
@@ -564,7 +590,7 @@ class AdminController:
                 raise HTTPException(
                     status_code=502,
                     detail=f"Could not release reservation {capacity_reservation_id!r} "
-                           f"at the site authority: {exc}",
+                    f"at the site authority: {exc}",
                 )
             if released is not None:
                 result = released
@@ -623,16 +649,18 @@ class AdminController:
 
         try:
             return await member_availability_view(
-                self._capacity(), self._db.db_path,
+                self._capacity(),
+                self._db.db_path,
             )
         except Exception as exc:
             logger.warning(
-                "[ADMIN] Could not snapshot site-authority capacity: %s", exc,
+                "[ADMIN] Could not snapshot site-authority capacity: %s",
+                exc,
             )
             return None
 
     async def _close_oversized_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             mark_derived_listings_closed,
             record_derived_listing,
             site_id_for_listing,
@@ -646,7 +674,8 @@ class AdminController:
         if availability is None:
             return []
         closed_listing_ids = stale_open_listing_ids(
-            self._db.db_path, home_site=home_site,
+            self._db.db_path,
+            home_site=home_site,
             configured_site_count=configured_site_count,
             member_availability=availability,
         )
@@ -701,13 +730,15 @@ class AdminController:
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
         mark_derived_listings_closed(
-            self._db.db_path, closed_listing_ids,
-            home_site=home_site, configured_site_count=configured_site_count,
+            self._db.db_path,
+            closed_listing_ids,
+            home_site=home_site,
+            configured_site_count=configured_site_count,
         )
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             closed_available_listing_ids,
             mark_derived_listings_open,
         )
@@ -719,7 +750,9 @@ class AdminController:
         if availability is None:
             return []
         reopened_listing_ids = closed_available_listing_ids(
-            self._db.db_path, home_site=home_site, member_availability=availability,
+            self._db.db_path,
+            home_site=home_site,
+            member_availability=availability,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")
@@ -732,7 +765,8 @@ class AdminController:
         summary="Record provisioning fulfillment start (admin)",
     )
     async def fulfillment_started(
-        self, body: FulfillmentStartedEventRequest,
+        self,
+        body: FulfillmentStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -750,7 +784,8 @@ class AdminController:
         summary="Record compute usage start (admin)",
     )
     async def usage_started(
-        self, body: UsageStartedEventRequest,
+        self,
+        body: UsageStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -771,7 +806,8 @@ class AdminController:
         summary="Record compute release start (admin)",
     )
     async def release_started(
-        self, body: ReleaseStartedEventRequest,
+        self,
+        body: ReleaseStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -788,7 +824,8 @@ class AdminController:
         summary="Record compute capacity release (admin)",
     )
     async def capacity_released(
-        self, body: CapacityReleasedEventRequest,
+        self,
+        body: CapacityReleasedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -808,7 +845,8 @@ class AdminController:
         summary="Record provisioning fulfillment failure (admin)",
     )
     async def fulfillment_failed(
-        self, body: FulfillmentFailedEventRequest,
+        self,
+        body: FulfillmentFailedEventRequest,
     ) -> FulfillmentEventResponse:
         result = await apply_fulfillment_failure_policy(
             self._db,
@@ -831,7 +869,8 @@ class AdminController:
                 detail=f"Reservation {body.capacity_reservation_id!r} not found",
             )
         return FulfillmentEventResponse(
-            capacity_reservation_id=result.capacity_reservation_id or body.capacity_reservation_id,
+            capacity_reservation_id=result.capacity_reservation_id
+            or body.capacity_reservation_id,
             state=result.state or "unchanged",
             resource_id=result.resource_id,
             gpu_count=result.gpu_count,
@@ -876,7 +915,8 @@ class AdminController:
         summary="Reserve compute capacity without negotiation (admin)",
     )
     async def reserve_capacity(
-        self, body: ReserveCapacityRequest,
+        self,
+        body: ReserveCapacityRequest,
     ) -> ReserveCapacityResponse:
         """Force-reserve compute capacity using the reservation model.
 
@@ -885,12 +925,13 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
-        from domains.vms.listings.reconciler import site_id_for_listing
+        from market_storefront.listings.reconciler import site_id_for_listing
 
         open_listing_ids = self._open_derived_compute_listing_ids()
         site_id = (
             site_id_for_listing(self._db.db_path, body.listing_id)
-            if body.listing_id else None
+            if body.listing_id
+            else None
         )
         try:
             reserved = await self._capacity().reserve(
@@ -910,7 +951,7 @@ class AdminController:
             raise HTTPException(
                 status_code=500,
                 detail=f"Listing {body.listing_id!r} is mapped to site "
-                       f"{site_id!r}, which is not currently configured",
+                f"{site_id!r}, which is not currently configured",
             )
         except Exception as exc:
             if site_id is None:
@@ -920,7 +961,7 @@ class AdminController:
             raise HTTPException(
                 status_code=502,
                 detail=f"Could not reach site {site_id!r} for listing "
-                       f"{body.listing_id!r}: {exc}",
+                f"{body.listing_id!r}: {exc}",
             )
         if not reserved:
             raise HTTPException(
@@ -951,9 +992,8 @@ class AdminController:
         )
         # Pools are the aggregator's concept, not the ledger's — surface
         # the membership from the resource attributes the sync mirrored.
-        pool_id = (
-            reserved.get("pool_id")
-            or (reserved.get("attributes") or {}).get("pool_id")
+        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
+            "pool_id"
         )
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
@@ -1014,7 +1054,8 @@ class AdminController:
         if released:
             logger.info(
                 "[ADMIN] Released %d held resource(s): %s",
-                len(released), released,
+                len(released),
+                released,
             )
         return ReleaseReservationsResponse(
             released_count=len(released),
@@ -1033,7 +1074,9 @@ class AdminController:
                 for state in ("reserved", "provisioning", "leased", "releasing"):
                     for reservation in await client.list_reservations(state=state):
                         done = await client.release(
-                            capacity_reservation_id=reservation.get("capacity_reservation_id"),
+                            capacity_reservation_id=reservation.get(
+                                "capacity_reservation_id"
+                            ),
                         )
                         if done:
                             released.append(
@@ -1042,6 +1085,7 @@ class AdminController:
                             )
         except Exception as exc:
             logger.warning(
-                "[ADMIN] Could not release site-ledger holds: %s", exc,
+                "[ADMIN] Could not release site-ledger holds: %s",
+                exc,
             )
         return released

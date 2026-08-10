@@ -9,11 +9,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from core_storefront.settlement_lifecycle import ClaimRecord
-from domains.vms.settlement.claims import AlkahestClaimHooks
 from market_alkahest.alkahest import get_trusted_oracle_arbiter
 from market_alkahest.claims import TrustedOracleArbiterCodec
+
+from market_storefront.settlement.claims import AlkahestClaimHooks
 
 ORACLE = "0x" + "cd" * 20
 
@@ -35,6 +35,7 @@ class FakeOracle:
     async def wait_for_arbitration(self, obligation, demand, oracle, from_block):
         if self.event is None:
             import asyncio
+
             await asyncio.sleep(3600)  # probe times out → None
         return self.event
 

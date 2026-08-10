@@ -1,27 +1,28 @@
-"""VM-domain buyer/listing CLI helpers.
+"""VM listing display helpers for the buyer CLI.
 
-VM listing semantics live here: named filter flags and rendering of VM
-offer resources, accepted escrows, and demands.
+Presentation only: filter-parameter construction and the row/column formatting
+the ``listing`` and ``buy`` verbs print. It carries no VM domain semantics, so it
+belongs to the package that renders it rather than to a shared listings module
+the storefront also imports.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any
 
 
 def build_vm_filter_params(
     *,
     gpu_model: str | None = None,
-    gpu_count_min: int | float | None = None,
-    vcpu_count_min: int | float | None = None,
-    ram_gb_min: int | float | None = None,
-    disk_gb_min: int | float | None = None,
+    gpu_count_min: float | None = None,
+    vcpu_count_min: float | None = None,
+    ram_gb_min: float | None = None,
+    disk_gb_min: float | None = None,
     region: str | None = None,
     virtualization_type: str | None = None,
     cpu_type: str | None = None,
-    host_cpu_cores_min: int | float | None = None,
-    host_ram_gb_min: int | float | None = None,
+    host_cpu_cores_min: float | None = None,
+    host_ram_gb_min: float | None = None,
     gpu_interconnect: str | None = None,
     datacenter_grade: bool | None = None,
     static_ip: bool | None = None,
@@ -81,7 +82,7 @@ def format_resource(resource: dict) -> str:
             "gpu_interconnect",
         )
         lines = [f"{key}={resource[key]}" for key in ordered_keys if key in resource]
-        extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
+        extra_keys = sorted(k for k in resource if k not in ordered_keys)
         lines.extend(f"{key}={resource[key]}" for key in extra_keys)
         return "\n".join(lines) if lines else "-"
     if "token" in resource:
@@ -94,7 +95,9 @@ def format_resource(resource: dict) -> str:
             if symbol:
                 lines.append(f"symbol={symbol}")
             if contract:
-                lines.append(f"contract_address={short_contract_address(str(contract))}")
+                lines.append(
+                    f"contract_address={short_contract_address(str(contract))}"
+                )
         if amount is not None:
             lines.append(f"amount={amount}")
         return "\n".join(lines) if lines else "-"

@@ -1,4 +1,5 @@
 """HTTP request/response models for the deal-servicing endpoints."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -17,7 +18,7 @@ class DealHeartbeatRequest(BaseModel):
 
     ``payload`` is schema-tagged and opaque to core, like every other
     domain envelope: what a VM heartbeat attests is
-    ``domains.vms.settlement.heartbeats``' business.
+    ``market_storefront.settlement.heartbeats``' business.
     """
 
     buyer_address: str = Field(description="Buyer wallet address (EIP-191 signer).")

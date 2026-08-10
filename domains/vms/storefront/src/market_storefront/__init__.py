@@ -11,7 +11,7 @@ def _add_checkout_root_to_path() -> None:
 
     Docker sets ``PYTHONPATH=/app`` before importing the storefront. Host-side
     ``uv run market-storefront`` from this package does not, so domain imports
-    like ``domains.vms.listings`` need the monorepo root on ``sys.path``.
+    like ``market_storefront.listings`` need the monorepo root on ``sys.path``.
     """
 
     for parent in Path(__file__).resolve().parents:

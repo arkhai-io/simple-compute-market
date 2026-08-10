@@ -2,7 +2,7 @@
 
 The middlewares that interpret VM market content: the round-zero duration guard
 and the inventory guard. Both are offered to a composing role through
-``domains.vms.negotiation.policy_sources``.
+``arkhai_vms.negotiation.policy_sources``.
 
 The alkahest-scalar vocabulary — bisection, listed_price, the escrow shape
 guards, the per-kind dispatch — is escrow vocabulary rather than VM vocabulary

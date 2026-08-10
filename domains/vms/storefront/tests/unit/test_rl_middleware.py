@@ -24,8 +24,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import domains.vms.negotiation.rl.torch_arkhai_strategy as strat_mod
-from domains.vms.negotiation.rl import arkhai_common
+import arkhai_vms.negotiation.rl.torch_arkhai_strategy as strat_mod
+from arkhai_vms.negotiation.rl import arkhai_common
 from market_policy import (
     NegotiationPolicyRequest,
     PolicyRole,
@@ -131,7 +131,7 @@ def _rl_chain(names):
     The VM domain offers its torch strategy only when the requested set names an
     RL alias, so the request is what makes the strategy resolvable here.
     """
-    from domains.vms.negotiation.policy_sources import vm_policy_sources
+    from arkhai_vms.negotiation.policy_sources import vm_policy_sources
 
     request = NegotiationPolicyRequest(
         role=PolicyRole.STOREFRONT, requested_policies=frozenset(names)

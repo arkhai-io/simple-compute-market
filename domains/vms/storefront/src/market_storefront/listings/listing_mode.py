@@ -9,7 +9,8 @@ encodes VM's specific accepted values.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping
+from collections.abc import Mapping
+from typing import Any, Literal
 
 VmListingMode = Literal["fungible", "specific_resource"]
 
@@ -43,9 +44,9 @@ def resolve_vm_listing_mode(
     """
     # Local import: `market_resource_pools` stays out of any consumer that
     # merely imports this module's types/signatures without ever calling
-    # this resolver (e.g. `domains.vms.listings.reconciler` importing
+    # this resolver (e.g. `market_storefront.listings.reconciler` importing
     # `resolve_vm_listing_mode` at its own module level) -- notably the
-    # buyer distribution, which imports `domains.vms.listings` for
+    # buyer distribution, which imports `market_storefront.listings` for
     # unrelated helpers and has no reason to depend on `kit/resource-pools`.
     from market_resource_pools.hints import raw_listing_mode
 

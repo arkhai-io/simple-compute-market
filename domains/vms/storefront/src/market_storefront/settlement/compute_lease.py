@@ -7,7 +7,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from domains.vms.listings.models import (
+from arkhai_vms.listing_models import (
     ComputeResource,
     TokenResource,
 )
@@ -94,8 +94,8 @@ def encode_compute_lease(
     total_price = hourly_rate.amount * duration_seconds // 3600
     total_payment_resource = TokenResource(token=token_meta, amount=total_price)
 
-    human_total_payment = (
-        Decimal(total_payment_resource.amount) / Decimal(10**token_meta.decimals)
+    human_total_payment = Decimal(total_payment_resource.amount) / Decimal(
+        10**token_meta.decimals
     )
     human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
 

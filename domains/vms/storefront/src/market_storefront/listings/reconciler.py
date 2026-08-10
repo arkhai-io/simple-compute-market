@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
-from domains.vms.listings.listing_mode import resolve_vm_listing_mode
-from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
-from domains.vms.listings.pricing_resolution import GpuPricingFields, resolve_gpu_pricing
-
+from market_storefront.listings.listing_mode import resolve_vm_listing_mode
+from market_storefront.listings.pool_descriptors import resolve_region, resolve_sla
+from market_storefront.listings.pricing_resolution import (
+    GpuPricingFields,
+    resolve_gpu_pricing,
+)
 
 HELD_ALLOCATION_STATES = {
     "reserved",
@@ -35,7 +38,9 @@ def _length_prefixed(value: str) -> str:
 
 
 def listing_resource_key(
-    site_id: str, resource_id: str, gpu_count: int | str | None,
+    site_id: str,
+    resource_id: str,
+    gpu_count: int | str | None,
 ) -> str:
     if not site_id or not site_id.strip():
         raise ValueError("site_id must be non-empty")
@@ -46,7 +51,9 @@ def listing_resource_key(
 
 
 def listing_pool_key(
-    site_id: str, pool_id: str, gpu_count: int | str | None,
+    site_id: str,
+    pool_id: str,
+    gpu_count: int | str | None,
 ) -> str:
     if not site_id or not site_id.strip():
         raise ValueError("site_id must be non-empty")
@@ -56,7 +63,9 @@ def listing_pool_key(
     )
 
 
-def ensure_derived_compute_listings_table(conn: sqlite3.Connection | sqlite3.Cursor) -> None:
+def ensure_derived_compute_listings_table(
+    conn: sqlite3.Connection | sqlite3.Cursor,
+) -> None:
     """Create/upgrade derived_compute_listings and its indexes.
 
     The single source of truth for this table's schema -- called both
@@ -241,11 +250,14 @@ def _accumulate_capacity_pool_member(
     member_total = int(row["gpu_count"] or 0)
     member_site = str(row["site"]) if row["site"] else None
     member_key = (member_site, str(row["resource_id"]))
-    member_available = _member_available_units(member_total, member_key, member_availability)
+    member_available = _member_available_units(
+        member_total, member_key, member_availability
+    )
     pool["total_gpu_count"] += member_total
     pool["available_gpu_count"] += member_available
     pool["max_member_available_gpu_count"] = max(
-        int(pool["max_member_available_gpu_count"]), member_available,
+        int(pool["max_member_available_gpu_count"]),
+        member_available,
     )
     pool["member_count"] += 1
     pool["single_resource_id"] = (
@@ -263,21 +275,24 @@ def _pool_rows_from_capacity_pools(
     by_pool: dict[str, dict[str, Any]] = {}
     for row in _capacity_pool_member_rows(conn):
         pool_id = str(row["pool_id"])
-        pool = by_pool.setdefault(pool_id, {
-            "pool_id": pool_id,
-            "gpu_model": row["gpu_model"],
-            "region": row["region"],
-            "sla": row["sla"] if row["sla"] is not None else 0.0,
-            "total_gpu_count": 0,
-            "available_gpu_count": 0,
-            "max_member_available_gpu_count": 0,
-            "min_price": row["min_price"],
-            "token": row["token"],
-            "accepted_escrows": row["accepted_escrows"],
-            "max_duration_seconds": row["max_duration_seconds"],
-            "single_resource_id": None,
-            "member_count": 0,
-        })
+        pool = by_pool.setdefault(
+            pool_id,
+            {
+                "pool_id": pool_id,
+                "gpu_model": row["gpu_model"],
+                "region": row["region"],
+                "sla": row["sla"] if row["sla"] is not None else 0.0,
+                "total_gpu_count": 0,
+                "available_gpu_count": 0,
+                "max_member_available_gpu_count": 0,
+                "min_price": row["min_price"],
+                "token": row["token"],
+                "accepted_escrows": row["accepted_escrows"],
+                "max_duration_seconds": row["max_duration_seconds"],
+                "single_resource_id": None,
+                "member_count": 0,
+            },
+        )
         _accumulate_capacity_pool_member(pool, row, member_availability)
     return list(by_pool.values())
 
@@ -306,7 +321,9 @@ def _project_legacy_resource_row(
         attrs = {}
     total_gpu_count = int(row["value"]) if row["value"] is not None else 1
     available_gpu_count = _member_available_units(
-        total_gpu_count, (None, str(row["resource_id"])), member_availability,
+        total_gpu_count,
+        (None, str(row["resource_id"])),
+        member_availability,
     )
     return {
         "pool_id": str(attrs.get("pool_id") or row["resource_id"]),
@@ -347,7 +364,9 @@ def _pool_rows_from_legacy_resources(
     ).fetchall()
     return [
         _project_legacy_resource_row(
-            row, has_accepted=has_accepted, has_max_duration=has_max_duration,
+            row,
+            has_accepted=has_accepted,
+            has_max_duration=has_max_duration,
             member_availability=member_availability,
         )
         for row in rows
@@ -363,12 +382,18 @@ def _pool_rows_from_local_tables(
     table. One of the two capacity sources `available_compute_slices`
     can choose between, alongside `_pool_rows_from_projection`.
     """
-    has_pools = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
-    ).fetchone() is not None
-    has_members = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
-    ).fetchone() is not None
+    has_pools = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
+        ).fetchone()
+        is not None
+    )
+    has_members = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
+        ).fetchone()
+        is not None
+    )
     if has_pools and has_members:
         return _pool_rows_from_capacity_pools(conn, member_availability)
     return _pool_rows_from_legacy_resources(conn, member_availability)
@@ -389,9 +414,12 @@ def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
     multi-site-aware, and a non-home_site pool simply has no pricing
     source through this table at all.
     """
-    has_pools = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
-    ).fetchone() is not None
+    has_pools = (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
+        ).fetchone()
+        is not None
+    )
     if not has_pools:
         return {}
     return {
@@ -420,7 +448,7 @@ def _projected_resource_usage(
     *,
     site_id: str,
     member_availability: dict[tuple[str | None, str], int] | None,
-) -> "_ProjectedResourceUsage | None":
+) -> _ProjectedResourceUsage | None:
     """Derive one projected resource's identity, GPU model, and usage --
     or None if it has no physical_resource_id to key on. Pure and
     independently testable: no dict mutation, no accumulation, just this
@@ -441,10 +469,14 @@ def _projected_resource_usage(
         # authoritative data from the projection itself, not a
         # fallback source to be skipped whenever a different fallback
         # (member_availability) happens to be present or absent.
-        available = max(0, min(total, int((available_field or {}).get("gpu_count") or 0)))
+        available = max(
+            0, min(total, int((available_field or {}).get("gpu_count") or 0))
+        )
     elif member_availability is not None:
         available = _member_available_units(
-            total, (site_id, resource_id), member_availability,
+            total,
+            (site_id, resource_id),
+            member_availability,
         )
     else:
         available = total
@@ -473,7 +505,8 @@ def _bucket_gpu_count(bucket: Mapping[str, Any]) -> int | None:
 
 
 def _fungible_availability_from_buckets(
-    pool_id: str, capacity_buckets: list[Mapping[str, Any]] | None,
+    pool_id: str,
+    capacity_buckets: list[Mapping[str, Any]] | None,
 ) -> tuple[int, int, str | None] | None:
     """(max_member_available, available_gpu_count, gpu_model) from this
     pool's matching capacity buckets, or None if the caller should fall
@@ -554,7 +587,7 @@ class PoolHintResolutionSettings:
 
     `gpu_pricing_defaults_by_model`/`gpu_pricing_flat_default` are tier 1
     of the pricing precedence chain (see
-    `domains.vms.listings.pricing_resolution`) -- no trust decision
+    `market_storefront.listings.pricing_resolution`) -- no trust decision
     involved, since config defaults are the storefront operator's own
     values, not a site's; defaulted here only so every caller doesn't
     need to construct empty ones.
@@ -636,7 +669,9 @@ def _projected_pool_rows(
         if not resource.get("enabled", True):
             continue
         usage = _projected_resource_usage(
-            resource, site_id=site_id, member_availability=member_availability,
+            resource,
+            site_id=site_id,
+            member_availability=member_availability,
         )
         if usage is not None:
             usages.append(usage)
@@ -646,7 +681,8 @@ def _projected_pool_rows(
 
     structural_default = "specific_resource" if len(usages) == 1 else "fungible"
     mode, explanation = resolve_vm_listing_mode(
-        policy_tags, structural_default=structural_default,
+        policy_tags,
+        structural_default=structural_default,
     )
 
     region = resolve_region(policy_tags, fallback=local_region)
@@ -692,19 +728,21 @@ def _projected_pool_rows(
         for usage in usages:
             resolved_gpu_model = usage.gpu_model or local_gpu_model
             resolved_pricing = _resolved_pricing(resolved_gpu_model)
-            rows.append({
-                **base_fields,
-                "gpu_model": resolved_gpu_model,
-                "min_price": resolved_pricing.min_price,
-                "token": resolved_pricing.token,
-                "accepted_escrows": resolved_pricing.accepted_escrows,
-                "max_duration_seconds": resolved_pricing.max_duration_seconds,
-                "total_gpu_count": usage.total,
-                "available_gpu_count": usage.available,
-                "max_member_available_gpu_count": usage.available,
-                "single_resource_id": usage.resource_id,
-                "member_count": 1,
-            })
+            rows.append(
+                {
+                    **base_fields,
+                    "gpu_model": resolved_gpu_model,
+                    "min_price": resolved_pricing.min_price,
+                    "token": resolved_pricing.token,
+                    "accepted_escrows": resolved_pricing.accepted_escrows,
+                    "max_duration_seconds": resolved_pricing.max_duration_seconds,
+                    "total_gpu_count": usage.total,
+                    "available_gpu_count": usage.available,
+                    "max_member_available_gpu_count": usage.available,
+                    "single_resource_id": usage.resource_id,
+                    "member_count": 1,
+                }
+            )
         return rows
 
     # fungible: exactly one aggregated row.
@@ -727,19 +765,21 @@ def _projected_pool_rows(
     resolved_gpu_model = gpu_model or local_gpu_model
     resolved_pricing = _resolved_pricing(resolved_gpu_model)
 
-    return [{
-        **base_fields,
-        "gpu_model": resolved_gpu_model,
-        "min_price": resolved_pricing.min_price,
-        "token": resolved_pricing.token,
-        "accepted_escrows": resolved_pricing.accepted_escrows,
-        "max_duration_seconds": resolved_pricing.max_duration_seconds,
-        "total_gpu_count": total_gpu_count,
-        "available_gpu_count": available_gpu_count,
-        "max_member_available_gpu_count": max_member_available,
-        "single_resource_id": None,
-        "member_count": len(usages),
-    }]
+    return [
+        {
+            **base_fields,
+            "gpu_model": resolved_gpu_model,
+            "min_price": resolved_pricing.min_price,
+            "token": resolved_pricing.token,
+            "accepted_escrows": resolved_pricing.accepted_escrows,
+            "max_duration_seconds": resolved_pricing.max_duration_seconds,
+            "total_gpu_count": total_gpu_count,
+            "available_gpu_count": available_gpu_count,
+            "max_member_available_gpu_count": max_member_available,
+            "single_resource_id": None,
+            "member_count": len(usages),
+        }
+    ]
 
 
 def _pool_rows_from_projection(
@@ -758,7 +798,7 @@ def _pool_rows_from_projection(
     projection's own `pool_metadata.policy_tags` hint; pricing and SLA's
     storefront-override tier still come from the local
     `compute_capacity_pools` table -- see `_local_pool_pricing` and
-    `domains.vms.listings.pool_descriptors`. That local table is only
+    `market_storefront.listings.pool_descriptors`. That local table is only
     ever consulted for home_site's own pools; a non-home_site pool, or a
     home_site pool with no local row, simply has no storefront-override
     tier -- region/SLA/pricing still resolve through the pool's own
@@ -793,13 +833,17 @@ def _pool_rows_from_projection(
         for pool in pools:
             pool_rows.extend(
                 _projected_pool_rows(
-                    pool, site_id=site_id, home_site=home_site,
-                    local_pricing=local_pricing, member_availability=member_availability,
+                    pool,
+                    site_id=site_id,
+                    home_site=home_site,
+                    local_pricing=local_pricing,
+                    member_availability=member_availability,
                     capacity_buckets=buckets_for_site,
                     hint_resolution=hint_resolution,
                 )
             )
     return pool_rows
+
 
 def available_compute_slices(
     db_path: str,
@@ -859,7 +903,7 @@ def available_compute_slices(
     ``hint_resolution`` controls how much a pool's own
     projected ``region``/``sla`` hints are trusted relative to the
     storefront's local `compute_capacity_pools` fallback/override values
-    -- see `domains.vms.listings.pool_descriptors`. Only takes effect on
+    -- see `market_storefront.listings.pool_descriptors`. Only takes effect on
     the projection path, the same as ``site_pool_projection``/
     ``site_capacity_buckets`` above; the local-table fallback has no hint
     source to resolve against.
@@ -869,8 +913,10 @@ def available_compute_slices(
     try:
         if site_pool_projection:
             pool_rows = _pool_rows_from_projection(
-                conn, site_pool_projection,
-                home_site=home_site, member_availability=member_availability,
+                conn,
+                site_pool_projection,
+                home_site=home_site,
+                member_availability=member_availability,
                 site_capacity_buckets=site_capacity_buckets,
                 hint_resolution=hint_resolution,
             )
@@ -896,33 +942,37 @@ def available_compute_slices(
             pool_id = str(row["pool_id"])
             single_resource_id = row.get("single_resource_id")
             is_fungible_pool = not single_resource_id
-            out.append({
-                "site_id": site_id,
-                "pool_id": pool_id,
-                "resource_id": single_resource_id,
-                "resource_key": (
-                    listing_pool_key(site_id, pool_id, gpu_count)
-                    if is_fungible_pool
-                    else listing_resource_key(site_id, str(single_resource_id), gpu_count)
-                ),
-                "legacy_resource_key": (
-                    listing_resource_key(site_id, single_resource_id, gpu_count)
-                    if single_resource_id
-                    else None
-                ),
-                "gpu_model": row.get("gpu_model"),
-                "gpu_count": gpu_count,
-                "total_gpu_count": row.get("total_gpu_count"),
-                "available_gpu_count": row.get("available_gpu_count"),
-                "sla": row.get("sla", 0.0),
-                "region": row.get("region"),
-                "min_price": row.get("min_price"),
-                "token": row.get("token"),
-                "accepted_escrows": accepted_escrows,
-                "max_duration_seconds": row.get("max_duration_seconds"),
-                "listing_mode": row.get("listing_mode"),
-                "listing_mode_explanation": row.get("listing_mode_explanation"),
-            })
+            out.append(
+                {
+                    "site_id": site_id,
+                    "pool_id": pool_id,
+                    "resource_id": single_resource_id,
+                    "resource_key": (
+                        listing_pool_key(site_id, pool_id, gpu_count)
+                        if is_fungible_pool
+                        else listing_resource_key(
+                            site_id, str(single_resource_id), gpu_count
+                        )
+                    ),
+                    "legacy_resource_key": (
+                        listing_resource_key(site_id, single_resource_id, gpu_count)
+                        if single_resource_id
+                        else None
+                    ),
+                    "gpu_model": row.get("gpu_model"),
+                    "gpu_count": gpu_count,
+                    "total_gpu_count": row.get("total_gpu_count"),
+                    "available_gpu_count": row.get("available_gpu_count"),
+                    "sla": row.get("sla", 0.0),
+                    "region": row.get("region"),
+                    "min_price": row.get("min_price"),
+                    "token": row.get("token"),
+                    "accepted_escrows": accepted_escrows,
+                    "max_duration_seconds": row.get("max_duration_seconds"),
+                    "listing_mode": row.get("listing_mode"),
+                    "listing_mode_explanation": row.get("listing_mode_explanation"),
+                }
+            )
     return out
 
 
@@ -955,7 +1005,9 @@ def current_available_resource_keys(
     # bounded this way; noted as a candidate cleanup, not a defect.
     keys: set[str] = set()
     for row in available_compute_slices(
-        db_path, home_site=home_site, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     ):
@@ -978,17 +1030,25 @@ def _has_derived_listings_site_column(conn: sqlite3.Connection) -> bool:
     specific column here, not just the table, is what protects a query
     against reading that pre-migration state.
     """
-    if conn.execute(
-        "SELECT 1 FROM sqlite_master "
-        "WHERE type='table' AND name='derived_compute_listings'"
-    ).fetchone() is None:
+    if (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='derived_compute_listings'"
+        ).fetchone()
+        is None
+    ):
         return False
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")}
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
+    }
     return "site_id" in cols
 
 
 def open_listing_resource_keys(
-    db_path: str, *, home_site: str, configured_site_count: int,
+    db_path: str,
+    *,
+    home_site: str,
+    configured_site_count: int,
 ) -> set[str]:
     """Return site-scoped keys already covered by open listings.
 
@@ -1003,7 +1063,8 @@ def open_listing_resource_keys(
         site_select = "d.site_id" if has_derived else "NULL AS site_id"
         join_clause = (
             "LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id"
-            if has_derived else ""
+            if has_derived
+            else ""
         )
         rows = conn.execute(
             f"""
@@ -1034,11 +1095,15 @@ def open_listing_resource_keys(
             continue
         pool_id = parsed.get("pool_id")
         if pool_id:
-            covered.add(listing_pool_key(site_id, str(pool_id), parsed.get("gpu_count")))
+            covered.add(
+                listing_pool_key(site_id, str(pool_id), parsed.get("gpu_count"))
+            )
             continue
         rid = parsed.get("resource_id")
         if rid:
-            covered.add(listing_resource_key(site_id, str(rid), parsed.get("gpu_count")))
+            covered.add(
+                listing_resource_key(site_id, str(rid), parsed.get("gpu_count"))
+            )
     return covered
 
 
@@ -1067,7 +1132,9 @@ def stale_open_listing_ids(
     without needing a code change.
     """
     available_keys = current_available_resource_keys(
-        db_path, home_site=home_site, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
@@ -1077,7 +1144,8 @@ def stale_open_listing_ids(
         site_select = "d.site_id" if has_derived else "NULL AS site_id"
         join_clause = (
             "LEFT JOIN derived_compute_listings d ON d.listing_id = l.listing_id"
-            if has_derived else ""
+            if has_derived
+            else ""
         )
         rows = conn.execute(
             f"""
@@ -1115,7 +1183,10 @@ def stale_open_listing_ids(
         rid = parsed.get("resource_id")
         if not rid:
             continue
-        if listing_resource_key(site_id, str(rid), parsed.get("gpu_count")) not in available_keys:
+        if (
+            listing_resource_key(site_id, str(rid), parsed.get("gpu_count"))
+            not in available_keys
+        ):
             stale.append(str(listing_id))
     return stale
 
@@ -1130,7 +1201,9 @@ def closed_available_listing_ids(
 ) -> list[str]:
     """Closed derived listing IDs whose requested slice fits capacity again."""
     available_keys = current_available_resource_keys(
-        db_path, home_site=home_site, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
@@ -1186,7 +1259,9 @@ def record_derived_listing(
     derivation_key = (
         listing_pool_key(site_id, resolved_pool_id, gpu_count)
         if use_pool_key
-        else listing_resource_key(site_id, str(resource_id or resolved_pool_id), gpu_count)
+        else listing_resource_key(
+            site_id, str(resource_id or resolved_pool_id), gpu_count
+        )
     )
     conn = sqlite3.connect(db_path)
     try:
@@ -1245,7 +1320,8 @@ def load_derived_listing_for_slice(
         if row_exists is None:
             return None
         cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
+            row[1]
+            for row in conn.execute("PRAGMA table_info(derived_compute_listings)")
         }
         pool_select = "d.pool_id" if "pool_id" in cols else "NULL AS pool_id"
         site_select = "d.site_id" if "site_id" in cols else "NULL AS site_id"
@@ -1350,7 +1426,9 @@ def reopen_local_derived_listing(
                 int(gpu_count),
                 listing_pool_key(site_id, pool_id, gpu_count)
                 if pool_id and (resource_id is None or pool_id != resource_id)
-                else listing_resource_key(site_id, str(resource_id or pool_id), gpu_count),
+                else listing_resource_key(
+                    site_id, str(resource_id or pool_id), gpu_count
+                ),
             ),
         )
         conn.commit()
@@ -1359,7 +1437,11 @@ def reopen_local_derived_listing(
 
 
 def mark_derived_listings_closed(
-    db_path: str, listing_ids: list[str], *, home_site: str, configured_site_count: int,
+    db_path: str,
+    listing_ids: list[str],
+    *,
+    home_site: str,
+    configured_site_count: int,
 ) -> None:
     """Mark listings closed, defensively backfilling a missing mapping row.
 

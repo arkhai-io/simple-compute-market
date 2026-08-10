@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.listings.models import Listing
+from arkhai_vms.listing_models import Listing
 
+from market_storefront.listings import extract_compute_from_order
 
 _REQUIRED_COMPUTE_KEYS = (
     "pool_id",
@@ -33,7 +34,9 @@ _VM_RESOURCE_TYPE = "compute.gpu"
 # what.
 
 
-def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict[str, Any]:
+def compute_capacity_claim_from_order(
+    order_dict: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Extract inventory-matching attributes from a VM listing/order.
 
     ``offer_resource`` may arrive as a JSON string, a plain dict, or a

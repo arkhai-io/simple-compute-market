@@ -13,6 +13,7 @@ Operator workflow (mirrors provisioning-service's two-step flow):
      host by name and the buyer-facing wire format gets the full host
      context denormalized at publish time.
 """
+
 from __future__ import annotations
 
 import csv
@@ -23,8 +24,7 @@ from typing import Any, Protocol
 
 
 class HostStore(Protocol):
-    async def upsert_host(self, **kwargs: Any) -> Any:
-        ...
+    async def upsert_host(self, **kwargs: Any) -> Any: ...
 
 
 CORE_COLUMNS = {
@@ -155,7 +155,7 @@ def _build_host_kwargs(row: dict[str, Any]) -> dict[str, Any]:
     for key, raw_val in row.items():
         if not isinstance(key, str) or not key.startswith(ATTRIBUTE_PREFIX):
             continue
-        attr_key = key[len(ATTRIBUTE_PREFIX):].strip()
+        attr_key = key[len(ATTRIBUTE_PREFIX) :].strip()
         if not attr_key:
             continue
         cell = _clean(raw_val)
@@ -199,7 +199,9 @@ async def upsert_hosts_from_csv(
                 if not dry_run:
                     await sqlite_client.upsert_host(**kwargs)
                 else:
-                    row_result.warnings.append("Dry-run: row validated but not persisted.")
+                    row_result.warnings.append(
+                        "Dry-run: row validated but not persisted."
+                    )
                 row_result.imported = True
                 report.imported_count += 1
             except Exception as exc:

@@ -101,21 +101,20 @@ EXPOSE 9993/udp
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
-# /app is the WORKDIR; domains/ is copied here. Console-script entry points
-# don't inherit CWD on sys.path, so we set PYTHONPATH explicitly.
-ENV PYTHONPATH="/app"
 # Dynaconf-driven config layering looks for the storefront TOML under
 # $XDG_CONFIG_HOME/arkhai/. Bind-mount the operator's TOML at
 # /etc/arkhai/storefront.toml.
 ENV XDG_CONFIG_HOME="/etc"
 
 # Copy application code. The market_storefront package is shipped at
-# /app/src/market_storefront so it's importable via the venv-installed
-# package; the domains/ tree is copied in for compute-domain policy
-# callables that the storefront's PolicyManager discovers at startup.
+# /app/src/market_storefront so it's importable via the venv-installed package.
+#
+# The domains/ tree is deliberately not copied. Listing, settlement, and
+# storefront-side negotiation code now lives inside market_storefront, and the
+# negotiation policies both roles share come from the installed arkhai-vms
+# wheel — so nothing here resolves from a source tree on the interpreter path.
 COPY --chown=appuser:appuser domains/vms/storefront/src ./src
 COPY --chown=appuser:appuser domains/vms/storefront/scripts ./scripts
-COPY --chown=appuser:appuser domains/ ./domains/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);

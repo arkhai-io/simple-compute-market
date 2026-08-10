@@ -1,13 +1,25 @@
-from enum import Enum
+"""VM listing and resource models.
+
+Shared VM-domain vocabulary: the listing shape, its compute and offer resources,
+and the GPU model enum. Both roles need them — the storefront to derive and
+publish listings, the buyer's negotiation strategy to read one — so they live in
+the distribution both already depend on rather than in a module one role owns
+and the other reaches across a package boundary for.
+"""
+
 import re
-from datetime import datetime
-from typing import Any, Literal, Union
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
-import uuid
+from enum import Enum
+from typing import Any
 
 from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
-
 from market_alkahest.token import ERC20TokenMetadata
+from pydantic import (
+    BaseModel,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -96,31 +108,55 @@ class Host(BaseModel):
     ``tag.*`` namespace (e.g. ``attributes["tag.datacenter_tier"]``).
     """
 
-    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'kvm1').")
-    cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
-    host_cpu_cores: int | None = Field(default=None, description="Total physical CPU cores on host")
+    name: str = Field(
+        description="Host alias (matches provisioning-service host alias, e.g. 'kvm1')."
+    )
+    cpu_type: str | None = Field(
+        default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'"
+    )
+    host_cpu_cores: int | None = Field(
+        default=None, description="Total physical CPU cores on host"
+    )
     host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
-    host_disk_gb: int | None = Field(default=None, description="Host total disk capacity in GB")
+    host_disk_gb: int | None = Field(
+        default=None, description="Host total disk capacity in GB"
+    )
     host_disk_type: str | None = Field(
         default=None,
         description="Disk model string of the host's storage, e.g. 'Samsung MZTL3T8HEFK'",
     )
-    motherboard: str | None = Field(default=None, description="Motherboard model string")
-    total_gpu_count: int | None = Field(default=None, description="Total GPUs on the host")
-    gpu_model: str | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
+    motherboard: str | None = Field(
+        default=None, description="Motherboard model string"
+    )
+    total_gpu_count: int | None = Field(
+        default=None, description="Total GPUs on the host"
+    )
+    gpu_model: str | None = Field(
+        default=None, description="GPU model (assumes homogeneous GPUs per host in v1)"
+    )
     gpu_interconnect: GpuInterconnect | None = Field(
         default=None,
         description="Host GPU-to-GPU interconnect (set by BIOS/NVSwitch domain; uniform across slices)",
     )
-    nic_speed_gbps: int | None = Field(default=None, description="Host NIC link speed in Gbps")
-    internet_download_mbps: int | None = Field(default=None, description="Host internet downlink in Mbps")
-    internet_upload_mbps: int | None = Field(default=None, description="Host internet uplink in Mbps")
-    static_ip: bool | None = Field(default=None, description="Whether the host has a static public IP")
+    nic_speed_gbps: int | None = Field(
+        default=None, description="Host NIC link speed in Gbps"
+    )
+    internet_download_mbps: int | None = Field(
+        default=None, description="Host internet downlink in Mbps"
+    )
+    internet_upload_mbps: int | None = Field(
+        default=None, description="Host internet uplink in Mbps"
+    )
+    static_ip: bool | None = Field(
+        default=None, description="Whether the host has a static public IP"
+    )
     open_ports_count: int | None = Field(
         default=None,
         description="Number of externally-routable TCP ports the host exposes",
     )
-    region: str | None = Field(default=None, description="Geographic region of the host")
+    region: str | None = Field(
+        default=None, description="Geographic region of the host"
+    )
     datacenter_grade: bool | None = Field(
         default=None,
         description="True for commercial datacenter hosting (vs home/colo)",
@@ -154,15 +190,12 @@ class ComputeDomainResource(Resource):
             return token_value
         if isinstance(token_value, dict):
             if not token_value.get("contract_address"):
-                raise ValueError(
-                    "Token dict must include 'contract_address' (0x...)"
-                )
+                raise ValueError("Token dict must include 'contract_address' (0x...)")
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
             if not token_value.startswith("0x"):
                 raise ValueError(
-                    f"Token string must be a 0x-prefixed address, got "
-                    f"{token_value!r}"
+                    f"Token string must be a 0x-prefixed address, got {token_value!r}"
                 )
             from market_alkahest.token import resolve_token_cached
 
@@ -210,6 +243,7 @@ class ComputeDomainResource(Resource):
         # Deserialize JSON strings — SQLite stores resources as JSON text
         if isinstance(data, str):
             import json as _json
+
             try:
                 data = _json.loads(data)
             except (ValueError, TypeError):
@@ -251,8 +285,7 @@ def _parse_uint256_str(v: Any, field_name: str) -> int | None:
             )
         return int(s)
     raise ValueError(
-        f"{field_name}: must be int, decimal string, or None; got "
-        f"{type(v).__name__}"
+        f"{field_name}: must be int, decimal string, or None; got {type(v).__name__}"
     )
 
 
@@ -319,8 +352,8 @@ class ComputeResource(ComputeDomainResource):
     # ---- Slice fields (per-listing; the seller's split of the host) ----
     gpu_model: str = Field(
         description="GPU model identifier. The indexer's filter-spec.yaml "
-                    "is the authoritative vocabulary; the storefront accepts "
-                    "any string."
+        "is the authoritative vocabulary; the storefront accepts "
+        "any string."
     )
     gpu_count: int = Field(description="Number of GPUs in this slice")
     sla: float = Field(description="The SLA of this slice")
@@ -331,33 +364,58 @@ class ComputeResource(ComputeDomainResource):
         default=None,
         description="FK to hosts.name — which host this slice is allocated from",
     )
-    vcpu_count: int | None = Field(default=None, description="vCPUs allocated to this slice")
-    ram_gb: int | None = Field(default=None, description="RAM allocated to this slice in GB")
-    disk_gb: int | None = Field(default=None, description="Disk allocated to this slice in GB")
+    vcpu_count: int | None = Field(
+        default=None, description="vCPUs allocated to this slice"
+    )
+    ram_gb: int | None = Field(
+        default=None, description="RAM allocated to this slice in GB"
+    )
+    disk_gb: int | None = Field(
+        default=None, description="Disk allocated to this slice in GB"
+    )
     virtualization_type: VirtualizationType | None = Field(
         default=None,
         description="How this slice is exposed: bare_metal | vm | container",
     )
 
     # ---- Host context (denormalized at publish; sourced from hosts table) ----
-    cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
-    host_cpu_cores: int | None = Field(default=None, description="Total physical cores on host")
+    cpu_type: str | None = Field(
+        default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'"
+    )
+    host_cpu_cores: int | None = Field(
+        default=None, description="Total physical cores on host"
+    )
     host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
-    host_disk_gb: int | None = Field(default=None, description="Host total disk capacity in GB")
+    host_disk_gb: int | None = Field(
+        default=None, description="Host total disk capacity in GB"
+    )
     host_disk_type: str | None = Field(
         default=None,
         description="Host disk model string, e.g. 'Samsung MZTL3T8HEFK'",
     )
-    motherboard: str | None = Field(default=None, description="Host motherboard model string")
-    total_gpu_count: int | None = Field(default=None, description="Total GPUs on host (slice fraction = gpu_count / total_gpu_count)")
+    motherboard: str | None = Field(
+        default=None, description="Host motherboard model string"
+    )
+    total_gpu_count: int | None = Field(
+        default=None,
+        description="Total GPUs on host (slice fraction = gpu_count / total_gpu_count)",
+    )
     gpu_interconnect: GpuInterconnect | None = Field(
         default=None,
         description="Host GPU-to-GPU interconnect topology",
     )
-    nic_speed_gbps: int | None = Field(default=None, description="Host primary NIC link speed in Gbps")
-    internet_download_mbps: int | None = Field(default=None, description="Host internet downlink in Mbps")
-    internet_upload_mbps: int | None = Field(default=None, description="Host internet uplink in Mbps")
-    static_ip: bool | None = Field(default=None, description="Whether the host has a static public IP")
+    nic_speed_gbps: int | None = Field(
+        default=None, description="Host primary NIC link speed in Gbps"
+    )
+    internet_download_mbps: int | None = Field(
+        default=None, description="Host internet downlink in Mbps"
+    )
+    internet_upload_mbps: int | None = Field(
+        default=None, description="Host internet uplink in Mbps"
+    )
+    static_ip: bool | None = Field(
+        default=None, description="Whether the host has a static public IP"
+    )
     open_ports_count: int | None = Field(
         default=None,
         description="Number of externally-routable TCP ports the host exposes",
@@ -371,7 +429,9 @@ class ComputeResource(ComputeDomainResource):
 class ComputeResourcePortfolio(BaseModel):
     """Describes the resource portfolio of an Agent."""
 
-    resources: list[ComputeResource] = Field(description="The resources in the portfolio")
+    resources: list[ComputeResource] = Field(
+        description="The resources in the portfolio"
+    )
 
     def total_gpu_count(self, gpu_model: str | None = None) -> int:
         """Calculate total GPU gpu_count, optionally filtered by model"""
@@ -482,7 +542,7 @@ class Listing(BaseModel):
         default="",
         description="The card URL of the agent that took the listing",
     )
-    offer_resource: Union[ComputeResource, TokenResource] = Field(
+    offer_resource: ComputeResource | TokenResource = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
     accepted_escrows: list[AcceptedEscrow] | None = Field(
@@ -570,6 +630,8 @@ class Listing(BaseModel):
             return data
 
         if "offer_resource" in data:
-            data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
+            data["offer_resource"] = ComputeDomainResource.parse_from_dict(
+                data["offer_resource"]
+            )
 
         return data

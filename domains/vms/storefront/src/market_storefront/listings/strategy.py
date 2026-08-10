@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domains.vms.listings.models import (
+from arkhai_vms.listing_models import (
     ComputeDomainResource,
     ComputeResource,
     Listing,

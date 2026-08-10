@@ -16,14 +16,14 @@ from market_policy.negotiation_middleware import (
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain_with_context,
 )
-
-from domains.vms.listings import (
-    determine_strategy_from_order,
-    extract_initial_price_from_order,
-)
 from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
+)
+
+from market_storefront.listings import (
+    determine_strategy_from_order,
+    extract_initial_price_from_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ async def _run_default_seller_round_policy(
     default_min_price: Any = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
-    from domains.vms.listings.models import Listing
+    from arkhai_vms.listing_models import Listing
 
     if not strategy_label:
         strategy_label = determine_strategy_from_order(listing)

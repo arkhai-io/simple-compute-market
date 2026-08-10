@@ -64,7 +64,7 @@ def register(app: typer.Typer) -> None:
 
 def _buyer_market_domain() -> MarketDomainContract:
     base = market_domain()
-    from domains.vms.negotiation.policy_sources import vm_policy_sources
+    from arkhai_vms.negotiation.policy_sources import vm_policy_sources
 
     from .policy_surface import configured_buyer_policy
 

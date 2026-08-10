@@ -411,6 +411,12 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+prune-tombstones: ## Delete every file whose contents are a tombstone comment
+	@python3 scripts/prune_tombstones.py
+
+prune-tombstones-dry-run: ## List tombstoned files without deleting them
+	@python3 scripts/prune_tombstones.py --dry-run
+
 check-wheel-manifests: ## Fail if a wheel file manifest has drifted from its source tree
 	@python3 scripts/check_wheel_manifests.py
 

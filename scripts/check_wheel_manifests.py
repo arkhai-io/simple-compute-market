@@ -23,6 +23,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+#: A file whose contents are a tombstone comment is a pending deletion, not a
+#: module. It must not be added to a manifest, and a manifest that still lists
+#: it is stale rather than correct.
+TOMBSTONE_MARKER = "# TOMBSTONE:"
+
 import tomllib
 
 FORCE_INCLUDE = ("tool", "hatch", "build", "targets", "wheel", "force-include")
@@ -42,6 +47,14 @@ def _only_include(config: dict) -> set[str]:
     if not wheel:
         return set()
     return {Path(entry).name for entry in wheel.get("only-include", [])}
+
+
+def _is_tombstone(path: Path) -> bool:
+    try:
+        head = path.read_text(encoding="utf-8").lstrip()
+    except OSError:
+        return False
+    return head.startswith(TOMBSTONE_MARKER)
 
 
 def audit(project: Path) -> list[str]:
@@ -64,7 +77,22 @@ def audit(project: Path) -> list[str]:
         resolved = (project / directory).resolve()
         if not resolved.is_dir():
             continue
-        on_disk = {item.name for item in resolved.iterdir() if item.suffix == ".py"}
+        on_disk = {
+            item.name
+            for item in resolved.iterdir()
+            if item.suffix == ".py" and not _is_tombstone(item)
+        }
+        tombstoned = {
+            item.name
+            for item in resolved.iterdir()
+            if item.suffix == ".py" and _is_tombstone(item)
+        }
+        for stale in sorted(names & tombstoned):
+            findings.append(
+                f"{project}/pyproject.toml: {directory}/{stale} is tombstoned "
+                "for deletion but still listed in the wheel manifest; remove "
+                "the entry"
+            )
         for missing in sorted(on_disk - names - exempt):
             findings.append(
                 f"{project}/pyproject.toml: {directory}/{missing} exists in the "
@@ -80,9 +108,68 @@ def audit(project: Path) -> list[str]:
     return findings
 
 
+def audit_unowned_packages(root: Path) -> list[str]:
+    """Reject a Python package under ``domains/`` that no distribution owns.
+
+    An unowned namespace is what produced the defect this check exists for: two
+    consumers reached the same directory by different means, one by a wheel file
+    manifest and one by copying the tree onto the interpreter path, and neither
+    was answerable for its contents.
+
+    A directory is owned when it sits inside a project directory — one holding a
+    ``pyproject.toml`` — or under that project's ``src``. A directory holding only
+    tombstones is a pending deletion and is not a package.
+    """
+    projects = set()
+    shipped_sources = set()
+    for pyproject in root.glob("domains/**/pyproject.toml"):
+        if any(x in pyproject.parts for x in (".venv", "node_modules")):
+            continue
+        projects.add(pyproject.parent)
+        with pyproject.open("rb") as handle:
+            manifest = _table(tomllib.load(handle), FORCE_INCLUDE) or {}
+        for source in manifest:
+            shipped_sources.add((pyproject.parent / source).resolve())
+
+    findings: list[str] = []
+    for init in sorted((root / "domains").rglob("__init__.py")):
+        if any(x in init.parts for x in (".venv", "node_modules", "build")):
+            continue
+        directory = init.parent
+        live = [
+            item
+            for item in directory.iterdir()
+            if item.suffix == ".py" and not _is_tombstone(item)
+        ]
+        if not live:
+            continue
+        if any(directory == p or p in directory.parents for p in projects):
+            continue
+        # A directory whose only live module is its ``__init__.py`` is a
+        # namespace anchor rather than a package of its own. It is owned when
+        # some project's manifest ships that file, which is how a flat
+        # ``domains.<x>.<y>`` import path is assembled inside one wheel.
+        if [item.name for item in live] == ["__init__.py"]:
+            if init.resolve() in shipped_sources:
+                continue
+            findings.append(
+                f"{directory.relative_to(root)}: namespace anchor shipped by no "
+                "distribution; the wheel that assembles this import path must "
+                "list its __init__.py"
+            )
+            continue
+        findings.append(
+            f"{directory.relative_to(root)}: Python package owned by no "
+            "distribution; every shipped module must belong to exactly one "
+            "project directory"
+        )
+    return findings
+
+
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     findings: list[str] = []
+    findings.extend(audit_unowned_packages(root))
     for pyproject in sorted(root.glob("domains/**/pyproject.toml")):
         if ".venv" in pyproject.parts or "node_modules" in pyproject.parts:
             continue
@@ -92,7 +179,7 @@ def main() -> int:
         findings.extend(audit(pyproject.parent))
 
     if findings:
-        print("Wheel manifests have drifted from their source trees:\n")
+        print("Packaging ownership problems found:\n")
         for finding in findings:
             print(f"  {finding}")
         print("\nAdd one force-include entry per file, or remove the stale entry.")

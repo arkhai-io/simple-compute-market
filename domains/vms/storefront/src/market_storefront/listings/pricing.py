@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from domains.vms.listings.models import Listing
+from arkhai_vms.listing_models import Listing
 
 
 def _resource_is_compute(resource: Any) -> bool:
@@ -27,8 +27,7 @@ def extract_compute_from_order(order: dict[str, Any]) -> dict[str, Any]:
         offer_resource = json.loads(offer_resource)
     if not _resource_is_compute(offer_resource):
         raise ValueError(
-            f"Order offer_resource is not compute: "
-            f"listing_id={order.get('listing_id')}"
+            f"Order offer_resource is not compute: listing_id={order.get('listing_id')}"
         )
     return offer_resource
 

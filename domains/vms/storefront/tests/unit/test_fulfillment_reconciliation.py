@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from domains.vms.settlement.fulfillment import (
+from market_storefront.settlement.fulfillment import (
     FulfillmentReconciliationUnavailable,
     reconcile_or_submit_compute_fulfillment,
 )
@@ -26,7 +26,9 @@ async def test_reconciliation_adopts_matching_attestation_without_submission():
 
 @pytest.mark.asyncio
 async def test_recovery_without_query_surface_refuses_blind_submission():
-    client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=AsyncMock()))
+    client = SimpleNamespace(
+        string_obligation=SimpleNamespace(do_obligation=AsyncMock())
+    )
     with pytest.raises(FulfillmentReconciliationUnavailable):
         await reconcile_or_submit_compute_fulfillment(
             client=client,

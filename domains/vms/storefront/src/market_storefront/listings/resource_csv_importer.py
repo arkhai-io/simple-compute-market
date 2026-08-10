@@ -3,16 +3,16 @@ from __future__ import annotations
 import csv
 import json
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
-from domains.vms.listings.resources import get_resource_adapter
+from market_storefront.listings.resources import get_resource_adapter
 
 
 class ResourceStore(Protocol):
-    async def upsert_resource(self, **kwargs: Any) -> Any:
-        ...
+    async def upsert_resource(self, **kwargs: Any) -> Any: ...
 
 
 class EscrowTemplateRateSlot(Protocol):
@@ -146,11 +146,13 @@ def _materialize_entry(
 
     rates: list[dict[str, Any]] = []
     for slot_name, slot in rate_slots.items():
-        rates.append({
-            "field": slot.field,
-            "per": slot.per,
-            "value": slot_values[slot_name],
-        })
+        rates.append(
+            {
+                "field": slot.field,
+                "per": slot.per,
+                "value": slot_values[slot_name],
+            }
+        )
     return {
         "chain_name": template.chain,
         "escrow_address": template.escrow_address.lower(),
@@ -344,7 +346,8 @@ def _build_db_resource_from_csv_row(
                 "storefront config or drop the column"
             )
         accepted_escrows = parse_accepted_escrows_cell(
-            accepted_escrows_raw, templates,
+            accepted_escrows_raw,
+            templates,
         )
 
     return {
@@ -452,7 +455,9 @@ async def upsert_resources_from_csv_content(
                     accepted_escrows=db_resource.get("accepted_escrows"),
                 )
             else:
-                row_result.warnings.append("Dry-run mode: row validated but not persisted.")
+                row_result.warnings.append(
+                    "Dry-run mode: row validated but not persisted."
+                )
             row_result.imported = True
             report.imported_count += 1
         except Exception as exc:

@@ -6,9 +6,9 @@ These wire the new ``MultiRegistryClient.publish_listing_per_registry``
 The fan-out client is mocked; the SQLite layer is real so the test
 asserts on actual rows.
 """
+
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -53,8 +53,10 @@ class TestPublishOrderRecordsPublications:
             "listing_id": "legacy-invalid",
             "seller": "http://seller.test",
             "offer_resource": {
-                "gpu_model": "H200", "gpu_count": 1,
-                "sla": 99.9, "region": "test",
+                "gpu_model": "H200",
+                "gpu_count": 1,
+                "sla": 99.9,
+                "region": "test",
             },
             "accepted_escrows": [],
         }
@@ -68,17 +70,22 @@ class TestPublishOrderRecordsPublications:
 
     @pytest.mark.asyncio
     async def test_mutated_listing_model_is_revalidated_before_publish(self):
-        from domains.vms.listings.models import Listing
+        from arkhai_vms.listing_models import Listing
 
-        listing = Listing.model_validate({
-            "listing_id": "mutated-listing",
-            "seller": "http://seller.test",
-            "offer_resource": {
-                "resource_id": "res-before-mutation", "gpu_model": "H200",
-                "gpu_count": 1, "sla": 99.9, "region": "test",
-            },
-            "accepted_escrows": [],
-        })
+        listing = Listing.model_validate(
+            {
+                "listing_id": "mutated-listing",
+                "seller": "http://seller.test",
+                "offer_resource": {
+                    "resource_id": "res-before-mutation",
+                    "gpu_model": "H200",
+                    "gpu_count": 1,
+                    "sla": 99.9,
+                    "region": "test",
+                },
+                "accepted_escrows": [],
+            }
+        )
         listing.offer_resource.resource_id = None
         listing.offer_resource.pool_id = None
 
@@ -92,41 +99,56 @@ class TestPublishOrderRecordsPublications:
 
     @pytest.mark.asyncio
     async def test_successful_fanout_writes_one_row_per_registry(
-        self, patched_sqlite,
+        self,
+        patched_sqlite,
     ):
         order = {
             "listing_id": "L1",
             "seller": "http://seller.test",
             "offer_resource": {
-                "resource_id": "res-L1", "gpu_model": "H200",
-                "gpu_count": 1, "sla": 99.9, "region": "test",
+                "resource_id": "res-L1",
+                "gpu_model": "H200",
+                "gpu_count": 1,
+                "sla": 99.9,
+                "region": "test",
             },
-            "accepted_escrows": [{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": "0x" + "22" * 20},
-                "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
-            }],
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": "0x" + "22" * 20},
+                    "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
+                }
+            ],
             "max_duration_seconds": 3600,
         }
         results = [
             PublishResult(
-                registry_url="http://r1", success=True,
-                response={"listing_id": "r1-id"}, error=None,
-                payload={"listing_id": "L1"}, registry_assigned_id="r1-id",
+                registry_url="http://r1",
+                success=True,
+                response={"listing_id": "r1-id"},
+                error=None,
+                payload={"listing_id": "L1"},
+                registry_assigned_id="r1-id",
             ),
             PublishResult(
-                registry_url="http://r2", success=True,
-                response={"listing_id": "r2-id"}, error=None,
-                payload={"listing_id": "L1"}, registry_assigned_id="r2-id",
+                registry_url="http://r2",
+                success=True,
+                response={"listing_id": "r2-id"},
+                error=None,
+                payload={"listing_id": "L1"},
+                registry_assigned_id="r2-id",
             ),
         ]
         cm, _client = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.services.publication_service._make_registry_client",
-                  return_value=cm),
-            settings_overrides(enable_registry_discovery=True,
-                               **{"wallet.private_key": "0xkey"}),
+            patch(
+                "market_storefront.services.publication_service._make_registry_client",
+                return_value=cm,
+            ),
+            settings_overrides(
+                enable_registry_discovery=True, **{"wallet.private_key": "0xkey"}
+            ),
         ):
             out = await publication_service.publish_order_to_registry(order)
         assert out["status"] == "published"
@@ -146,37 +168,49 @@ class TestPublishOrderRecordsPublications:
             "listing_id": "Lpartial",
             "seller": "http://seller.test",
             "offer_resource": {
-                "resource_id": "res-Lpartial", "gpu_model": "H200",
-                "gpu_count": 1, "sla": 99.9, "region": "test",
+                "resource_id": "res-Lpartial",
+                "gpu_model": "H200",
+                "gpu_count": 1,
+                "sla": 99.9,
+                "region": "test",
             },
-            "accepted_escrows": [{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": "0x" + "22" * 20},
-                "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
-            }],
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": "0x" + "22" * 20},
+                    "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
+                }
+            ],
             "max_duration_seconds": 3600,
         }
         results = [
             PublishResult(
-                registry_url="http://r1", success=False,
-                response=None, error="connection refused",
+                registry_url="http://r1",
+                success=False,
+                response=None,
+                error="connection refused",
                 payload={"listing_id": "Lpartial"},
                 registry_assigned_id=None,
             ),
             PublishResult(
-                registry_url="http://r2", success=True,
-                response={"listing_id": "r2-id"}, error=None,
+                registry_url="http://r2",
+                success=True,
+                response={"listing_id": "r2-id"},
+                error=None,
                 payload={"listing_id": "Lpartial"},
                 registry_assigned_id="r2-id",
             ),
         ]
         cm, _ = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.services.publication_service._make_registry_client",
-                  return_value=cm),
-            settings_overrides(enable_registry_discovery=True,
-                               **{"wallet.private_key": "0xkey"}),
+            patch(
+                "market_storefront.services.publication_service._make_registry_client",
+                return_value=cm,
+            ),
+            settings_overrides(
+                enable_registry_discovery=True, **{"wallet.private_key": "0xkey"}
+            ),
         ):
             out = await publication_service.publish_order_to_registry(order)
         # At least one OK → overall status is 'published'.
@@ -198,24 +232,31 @@ class TestRegistriesToTarget:
     @pytest.mark.asyncio
     async def test_returns_active_publications(self, patched_sqlite):
         await patched_sqlite.upsert_publication(
-            listing_id="L1", registry_url="http://r1",
-            payload={}, status="published",
+            listing_id="L1",
+            registry_url="http://r1",
+            payload={},
+            status="published",
         )
         await patched_sqlite.upsert_publication(
-            listing_id="L1", registry_url="http://r2",
-            payload={}, status="published",
+            listing_id="L1",
+            registry_url="http://r2",
+            payload={},
+            status="published",
         )
         urls = await publication_service._registries_to_target(
-            "L1", ["http://r1", "http://r2", "http://r3"],
+            "L1",
+            ["http://r1", "http://r2", "http://r3"],
         )
         assert sorted(urls) == ["http://r1", "http://r2"]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_all_urls_when_no_publications(
-        self, patched_sqlite,
+        self,
+        patched_sqlite,
     ):
         urls = await publication_service._registries_to_target(
-            "no-such-listing", ["http://r1", "http://r2"],
+            "no-such-listing",
+            ["http://r1", "http://r2"],
         )
         assert urls == ["http://r1", "http://r2"]
 
@@ -224,14 +265,19 @@ class TestRegistriesToTarget:
         """A tombstoned (status='unpublished') row should not be targeted
         by subsequent updates — the listing is gone from that registry."""
         await patched_sqlite.upsert_publication(
-            listing_id="L1", registry_url="http://r1",
-            payload={}, status="published",
+            listing_id="L1",
+            registry_url="http://r1",
+            payload={},
+            status="published",
         )
         await patched_sqlite.upsert_publication(
-            listing_id="L1", registry_url="http://r2",
-            payload={}, status="unpublished",
+            listing_id="L1",
+            registry_url="http://r2",
+            payload={},
+            status="unpublished",
         )
         urls = await publication_service._registries_to_target(
-            "L1", ["http://r1", "http://r2"],
+            "L1",
+            ["http://r1", "http://r2"],
         )
         assert urls == ["http://r1"]

@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 import pytest
-from domains.vms.negotiation.policy_sources import (
+from arkhai_vms.negotiation.policy_sources import (
     RL_POLICY_NAMES,
     VM_DEFAULT_SELLER_CHAIN,
     VM_SELLER_POLICIES,
@@ -75,12 +75,12 @@ def test_composing_the_default_surface_does_not_import_the_strategy_module() -> 
     Run in a subprocess because an unrelated test in this process may already
     have imported the module, which would make an in-process check vacuous.
     """
-    strategy = "domains.vms.negotiation.rl.torch_arkhai_strategy"
+    strategy = "arkhai_vms.negotiation.rl.torch_arkhai_strategy"
     program = (
         "import sys;"
         "from market_policy import (negotiation_catalogue_builder,"
         " scalar_escrow_policies, NegotiationPolicyRequest, PolicyRole);"
-        "from domains.vms.negotiation.policy_sources import"
+        "from arkhai_vms.negotiation.policy_sources import"
         " vm_policy_sources, VM_DEFAULT_SELLER_CHAIN, RL_POLICY_NAMES;"
         "import os;"
         "wanted = frozenset([os.environ['REQUESTED']]) if os.environ['REQUESTED']"
@@ -183,3 +183,66 @@ def test_the_strategy_is_offered_to_a_buyer_but_the_guards_are_not() -> None:
 
 def test_a_buyer_asking_for_no_rl_receives_nothing_from_this_domain() -> None:
     assert vm_policy_sources(_request(role=PolicyRole.BUYER)) == ()
+
+
+def test_the_strategy_module_does_not_import_torch_at_module_scope() -> None:
+    """Torch must stay behind the strategy's forward passes.
+
+    ``arkhai_common`` reads ``GPUModel`` at module scope and the strategy imports
+    ``arkhai_common`` only inside its own functions. That chain is what keeps
+    torch out of a process that merely composes a catalogue, and it is exactly the
+    kind of arrangement a later refactor hoists to the top of a file.
+    """
+    program = (
+        "import sys;"
+        "import arkhai_vms.negotiation.rl.torch_arkhai_strategy as strategy;"
+        "assert strategy.rl_middleware is not None;"
+        "print('torch' in sys.modules, 'arkhai_vms.negotiation.rl.arkhai_common' in sys.modules)"
+    )
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [path for path in sys.path if path] + [env.get("PYTHONPATH", "")]
+    ).strip(os.pathsep)
+
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+
+    torch_loaded, common_loaded = result.stdout.split()
+    assert torch_loaded == "False", result.stderr
+    assert common_loaded == "False", result.stderr
+
+
+def test_arkhai_common_is_what_would_pull_torch_in() -> None:
+    """The control: importing the helpers directly does reach GPUModel.
+
+    Without this, the test above could pass because the strategy module is
+    unimportable for some unrelated reason rather than because the import is
+    deferred.
+    """
+    program = (
+        "import sys;"
+        "import arkhai_vms.negotiation.rl.arkhai_common as common;"
+        "assert common.obs_dim is not None;"
+        "print('arkhai_vms.listing_models' in sys.modules)"
+    )
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [path for path in sys.path if path] + [env.get("PYTHONPATH", "")]
+    ).strip(os.pathsep)
+
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+
+    assert result.stdout.strip() == "True", result.stderr

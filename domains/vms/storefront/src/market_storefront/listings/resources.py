@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final, Protocol
 
-from domains.vms.listings.models import (
+from arkhai_vms.listing_models import (
     ComputeResource,
     ERC20TokenMetadata,
     GpuInterconnect,
@@ -12,7 +12,6 @@ from domains.vms.listings.models import (
     VirtualizationType,
 )
 from market_alkahest.token import resolve_token_cached
-
 
 # Slice fields stored directly on the resource row's ``attributes`` JSON.
 # These are per-listing values the seller sets when publishing a slice.
@@ -131,7 +130,9 @@ class ComputeGpuResourceAdapter:
             host_kwargs[field_name] = coerce(raw) if coerce is not None else raw
 
         return ComputeResource(
-            resource_id=str(db_resource.get("resource_id")) if db_resource.get("resource_id") is not None else None,
+            resource_id=str(db_resource.get("resource_id"))
+            if db_resource.get("resource_id") is not None
+            else None,
             gpu_model=gpu_model,
             gpu_count=int(gpu_count),
             sla=float(sla),
@@ -296,9 +297,7 @@ class TokenErc20ResourceAdapter:
         elif isinstance(token_value, dict):
             address = token_value.get("contract_address")
             if not address or not isinstance(address, str):
-                raise ValueError(
-                    "token dict must include 'contract_address' (0x...)"
-                )
+                raise ValueError("token dict must include 'contract_address' (0x...)")
             decimals = token_value.get("decimals")
             if decimals is None:
                 looked_up = resolve_token_cached(address)
@@ -329,7 +328,9 @@ class TokenErc20ResourceAdapter:
                     decimals=0,
                 )
         else:
-            raise ValueError(f"Unsupported token value type: {type(token_value).__name__}")
+            raise ValueError(
+                f"Unsupported token value type: {type(token_value).__name__}"
+            )
         amount_raw = data.get("amount")
         amount = None if amount_raw is None else int(amount_raw)
         return TokenResource(token=token_meta, amount=amount)

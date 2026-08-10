@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from market_config.config_loader import EscrowTemplate, RateSlot
 
-from domains.vms.listings.resource_csv_importer import (
+from market_storefront.listings.resource_csv_importer import (
     parse_accepted_escrows_cell,
 )
-from market_config.config_loader import EscrowTemplate, RateSlot
 
 
 def _template(
@@ -65,10 +65,13 @@ def test_multi_slot_template_preserves_template_order():
     )
     # CSV order differs from template order — output follows template.
     result = parse_accepted_escrows_cell(
-        "bundle:eth=0,credits=10,usdc=180", {"bundle": template},
+        "bundle:eth=0,credits=10,usdc=180",
+        {"bundle": template},
     )
     assert [r["field"] for r in result[0]["rates"]] == [
-        "erc20Amounts[0]", "erc20Amounts[1]", "nativeAmount",
+        "erc20Amounts[0]",
+        "erc20Amounts[1]",
+        "nativeAmount",
     ]
     assert [r["value"] for r in result[0]["rates"]] == ["180", "10", "0"]
 
@@ -92,9 +95,7 @@ def test_single_slot_sugar_resolves_to_sole_slot():
         rates={"amount": RateSlot(field="amount", per="hour")},
     )
     result = parse_accepted_escrows_cell("usdc=150", {"usdc": template})
-    assert result[0]["rates"] == [
-        {"field": "amount", "per": "hour", "value": "150"}
-    ]
+    assert result[0]["rates"] == [{"field": "amount", "per": "hour", "value": "150"}]
 
 
 def test_single_slot_sugar_fails_on_multi_slot_template():
@@ -125,7 +126,8 @@ def test_bare_template_name_for_zero_slot_attestation():
         rates={},
     )
     result = parse_accepted_escrows_cell(
-        "service_attestation", {"service_attestation": template},
+        "service_attestation",
+        {"service_attestation": template},
     )
     assert result == [
         {
@@ -139,7 +141,8 @@ def test_bare_template_name_for_zero_slot_attestation():
 
 def test_bare_template_name_fails_on_rate_bearing_template():
     template = _template(
-        "usdc", rates={"amount": RateSlot(field="amount")},
+        "usdc",
+        rates={"amount": RateSlot(field="amount")},
     )
     with pytest.raises(ValueError, match="bare template form"):
         parse_accepted_escrows_cell("usdc", {"usdc": template})
@@ -155,7 +158,8 @@ def test_unknown_template_errors():
 
 def test_unknown_slot_errors():
     template = _template(
-        "usdc", rates={"amount": RateSlot(field="amount")},
+        "usdc",
+        rates={"amount": RateSlot(field="amount")},
     )
     with pytest.raises(ValueError, match="unknown slot"):
         parse_accepted_escrows_cell("usdc:creditz=1", {"usdc": template})
@@ -175,7 +179,8 @@ def test_missing_slot_errors():
 
 def test_duplicate_slot_errors():
     template = _template(
-        "usdc", rates={"amount": RateSlot(field="amount")},
+        "usdc",
+        rates={"amount": RateSlot(field="amount")},
     )
     with pytest.raises(ValueError, match="specified more than once"):
         parse_accepted_escrows_cell("usdc:amount=1,amount=2", {"usdc": template})
@@ -183,7 +188,8 @@ def test_duplicate_slot_errors():
 
 def test_colon_with_no_slots_errors():
     template = _template(
-        "usdc", rates={"amount": RateSlot(field="amount")},
+        "usdc",
+        rates={"amount": RateSlot(field="amount")},
     )
     with pytest.raises(ValueError, match="no slot assignments"):
         parse_accepted_escrows_cell("usdc:", {"usdc": template})
@@ -191,7 +197,8 @@ def test_colon_with_no_slots_errors():
 
 def test_slot_missing_equals_errors():
     template = _template(
-        "usdc", rates={"amount": RateSlot(field="amount")},
+        "usdc",
+        rates={"amount": RateSlot(field="amount")},
     )
     with pytest.raises(ValueError, match="missing '='"):
         parse_accepted_escrows_cell("usdc:amount150", {"usdc": template})

@@ -28,18 +28,18 @@ ALKAHEST_MECHANISM = "alkahest.v1"
 
 def build_claims_engine(sqlite_client: Any) -> ClaimsEngine:
     """Assemble the engine over this storefront's store, clients, config."""
-    from domains.vms.settlement.claims import AlkahestClaimHooks
     from market_storefront import container
+    from market_storefront.settlement.claims import AlkahestClaimHooks
     from market_storefront.utils.config import CHAINS, settings
 
     hooks = AlkahestClaimHooks(
         get_client=lambda chain: container.get_alkahest_client(chain or ""),
         chain_config_paths={
-            name: chain.alkahest_address_config_path
-            for name, chain in CHAINS.items()
+            name: chain.alkahest_address_config_path for name, chain in CHAINS.items()
         },
         default_chain=getattr(settings, "chain_name", None),
     )
+
     def _on_event(event: str, **fields: Any) -> None:
         stage_event("claims", event, **fields)
         if event == "claim_abandoned":
@@ -89,9 +89,14 @@ async def truncate_lease_for_abandoned_claim(
         for client in remote_site_clients(capacity).values():
             rows = await client.list_reservations(escrow_uid=escrow_uid)
             held = [
-                a for a in rows
-                if a.get("state") in (
-                    "reserved", "provisioning", "leased", "releasing",
+                a
+                for a in rows
+                if a.get("state")
+                in (
+                    "reserved",
+                    "provisioning",
+                    "leased",
+                    "releasing",
                 )
             ]
             if held:
@@ -99,17 +104,19 @@ async def truncate_lease_for_abandoned_claim(
                 break
         if not capacity_reservation_id:
             logger.info(
-                "[CLAIMS] No live reservation to truncate for abandoned "
-                "claim %s", escrow_uid,
+                "[CLAIMS] No live reservation to truncate for abandoned claim %s",
+                escrow_uid,
             )
             return None
 
         lease_end = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
         truncated = await capacity.truncate_lease(
-            capacity_reservation_id=capacity_reservation_id, lease_end_utc=lease_end,
+            capacity_reservation_id=capacity_reservation_id,
+            lease_end_utc=lease_end,
         )
         stage_event(
-            "claims", "lease_truncated_after_abandonment",
+            "claims",
+            "lease_truncated_after_abandonment",
             escrow_uid=escrow_uid,
             capacity_reservation_id=capacity_reservation_id,
             lease_end_utc=lease_end,
@@ -120,7 +127,8 @@ async def truncate_lease_for_abandoned_claim(
     except Exception as exc:
         logger.warning(
             "[CLAIMS] Could not truncate lease for abandoned claim %s: %s",
-            escrow_uid, exc,
+            escrow_uid,
+            exc,
         )
         return None
 
@@ -181,7 +189,8 @@ async def submit_claim(
     )
     await sqlite_client.upsert_claim(claim.model_dump())
     stage_event(
-        "claims", "claim_submitted",
+        "claims",
+        "claim_submitted",
         claim_ref=escrow_uid,
         mechanism=obligation.get("mechanism"),
         negotiation_id=negotiation_id,
