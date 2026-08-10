@@ -30,7 +30,6 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
-    register_negotiation_middleware,
     run_negotiation_chain,
     their_last_proposal,
 )
@@ -172,7 +171,6 @@ def _opening_proposal(context: NegotiationContext) -> dict[str, Any]:
     return dict(base)
 
 
-@register_negotiation_middleware("bisection")
 def bisection_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -250,9 +248,6 @@ def bisection_middleware(
     )
 
 
-@register_negotiation_middleware("erc20_bisection")
-@register_negotiation_middleware("native_token_bisection")
-@register_negotiation_middleware("erc1155_bisection")
 def amount_bisection_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -261,7 +256,6 @@ def amount_bisection_middleware(
     return bisection_middleware(history, context)
 
 
-@register_negotiation_middleware("listed_price")
 def listed_price_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -575,7 +569,6 @@ def proposal_uses_scalar_amount(
     return _accepted_entry_uses_scalar_amount(matched)
 
 
-@register_negotiation_middleware("buyer_counter_guard")
 def buyer_counter_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -626,7 +619,6 @@ def _peer_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
     return their_last_proposal(history)
 
 
-@register_negotiation_middleware("escrow_shape_guard")
 def escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -716,7 +708,6 @@ def escrow_shape_guard(
     return None, context
 
 
-@register_negotiation_middleware("accept_exact_listing")
 def accept_exact_listing_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -872,7 +863,6 @@ def accept_exact_listing_middleware(
     )
 
 
-@register_negotiation_middleware("buyer_escrow_shape_guard")
 def buyer_escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from domains.vms.negotiation.policies import (
-    buyer_counter_guard,
-    round_zero_opening_guard,
-)
+from market_policy.scalar_policies import buyer_counter_guard
+from domains.vms.negotiation.policies import round_zero_opening_guard
 from market_alkahest.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationContext, NegotiationRound
 

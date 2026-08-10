@@ -66,10 +66,11 @@ from core_storefront.negotiation_sync import (
 )
 from domains.vms.listings import extract_compute_from_order
 from domains.vms.negotiation import storefront_round as vm_storefront_round
-from domains.vms.negotiation.policies import _amount_from_proposal
+from market_policy.scalar_policies import _amount_from_proposal
 from domains.vms.negotiation.policy_sources import VM_DEFAULT_SELLER_CHAIN
-from domains.vms.negotiation.storefront_round import (
+from domains.vms.negotiation.storefront_round import (  # noqa: F401
     SellerRoundHook,
+    SellerRoundResult,  # re-exported: tests and callers import it from here
 )
 from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_core.schemas import EscrowProposal

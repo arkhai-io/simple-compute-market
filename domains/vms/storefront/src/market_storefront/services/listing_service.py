@@ -335,7 +335,7 @@ class ListingService:
         Raises ``ValueError`` if the listing doesn't exist or has no usable
         negotiation strategy. The controller converts these to HTTP 404.
         """
-        from domains.vms.negotiation.policies import _amount_from_proposal
+        from market_policy.scalar_policies import _amount_from_proposal
         from domains.vms.listings.models import Listing
         from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
 

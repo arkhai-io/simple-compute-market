@@ -1,5 +1,14 @@
 """Shared negotiation machinery for buyer + seller."""
 
+from market_policy.buyer_policy import (
+    BUYER_POLICY_KIND,
+    DEFAULT_BUYER_POLICY,
+    BuyerPolicy,
+    PolicyParam,
+    buyer_policy_catalogue_builder,
+    inject_policy_cli_params,
+    require_buyer_policy,
+)
 from market_policy.catalogue import (
     Catalogue,
     CatalogueBuilder,
@@ -27,11 +36,9 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
-    load_negotiation_chain,
     max_rounds_guard,
     normalize_policies_by_escrow_kind_config,
     normalize_policy_chain_config,
-    register_negotiation_middleware,
     run_negotiation_chain,
 )
 from market_policy.sources import (
@@ -43,8 +50,11 @@ from market_policy.sources import (
 )
 
 __all__ = [
+    "BUYER_POLICY_KIND",
+    "DEFAULT_BUYER_POLICY",
     "NEGOTIATION_MIDDLEWARE_GROUP",
     "NEGOTIATION_POLICY_KIND",
+    "BuyerPolicy",
     "Catalogue",
     "CatalogueBuilder",
     "CatalogueConflictError",
@@ -63,16 +73,18 @@ __all__ = [
     "NegotiationPolicySource",
     "NegotiationRound",
     "NegotiationStep",
+    "PolicyParam",
     "PolicyRole",
     "UnknownCatalogueEntryError",
+    "buyer_policy_catalogue_builder",
     "configured_policy_names",
     "default_policy_root",
-    "load_negotiation_chain",
+    "inject_policy_cli_params",
     "max_rounds_guard",
     "negotiation_catalogue_builder",
     "normalize_policies_by_escrow_kind_config",
     "normalize_policy_chain_config",
-    "register_negotiation_middleware",
+    "require_buyer_policy",
     "require_callable_item",
     "run_negotiation_chain",
     "scalar_escrow_policies",

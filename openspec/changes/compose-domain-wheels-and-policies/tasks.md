@@ -80,22 +80,61 @@ necessary.
   matching `core_storefront.publication_plugins`, so a broken install fails
   instead of reporting that no domain is installed.
 
+### 4b. Buyer-role composition
+
+- [x] 4b.1 Compose the buyer's catalogue in `core_buyer`. The buyer role owns
+  its own composition rather than sharing the storefront's: composition is where
+  a role decides which mechanisms may contribute, and the buyer's answer differs.
+  Kit cannot own it either, because composition reads market-domain contracts.
+- [x] 4b.2 The buyer authorizes no filesystem or entry-point mechanism, so
+  nothing in `buyer.toml` can cause a policy to be loaded from disk.
+- [x] 4b.3 Offer the VM torch strategy to both roles and its inventory guards to
+  the storefront only. A buyer resolving an inventory guard would name a policy
+  about inventory it does not own; both sides of a negotiation may run the
+  strategy.
+- [x] 4b.4 Remove the buyer's RL registrar hook — a module-level callable a
+  domain installed by import side effect, then invoked from inside chain
+  resolution. The domain capability supersedes it.
+- [x] 4b.5 Compose per invocation rather than caching at module scope. The buyer
+  CLI is short-lived and a cached catalogue would be built before the
+  configuration selecting its policies is read.
+
 ### 5. Remove the superseded mechanisms
 
-- [ ] 5.1 Remove the module-level negotiation `_REGISTRY`, the decorator's
-  cross-package discovery path, the entry-point cache write during
-  resolution, and the stub file-discovery trigger. Remove the error message
-  instructing the operator to import a domain package.
+- [x] 5.1 Remove the module-level negotiation `_REGISTRY`, the decorator itself,
+  `load_negotiation_chain`, `list_negotiation_middlewares`, the entry-point cache
+  write during resolution, and the stub file-discovery trigger. Remove the error
+  message instructing the operator to import a domain package. Zero references
+  to any of them remain in the repository. The decorator is not retained as a
+  marker: the source mappings are the declaration, and two ways to declare one
+  policy is worse than either.
+- [x] 5.1a Convert every test that resolved through the registry to compose its
+  own catalogue: the kit strategy suite, both VM storefront suites, the VM buyer
+  client suite, and the API-credit buyer negotiation flow. Delete the VM buyer
+  conftest's global `rl` alias — a test that needs a policy now offers it to its
+  own catalogue instead of mutating state every other test inherits.
+- [x] 5.1b Pass the resolver at the two remaining escrow-kind dispatch call
+  sites in tests. All five call sites across production and tests now supply it.
 - [ ] 5.2 Delete `_backfill_market_policy_compat_exports` and its call. No
   caller reads the attributes it sets on `market_policy.negotiation_middleware`.
-- [ ] 5.3 Reduce the VM negotiation policies module to the two guards it
-  defines, removing the compatibility re-export block — 30 imported symbols
-  across 15 `__all__` entries, retained only so older import paths keep
-  working. Only `bisection_middleware` is imported through that path, by two
-  test fixtures, which move to importing kit directly.
-- [ ] 5.4 Convert `market_policy.buyer_policy`'s registry to the same composed
-  form. Preserve both modes of `configured_buyer_policy`: tolerant when
-  rendering `market --help`, strict when loading a chain.
+- [x] 5.3 Reduce the VM negotiation policies module to the two guards it
+  defines. The compatibility block re-exported 36 names; nine files imported
+  eleven of them through that path and now import
+  `market_policy.scalar_policies` directly, which is where they live. Five
+  names the module body itself uses are retained as a real import rather than a
+  re-export. `__all__` drops from 15 entries to the 2 the module defines.
+- [x] 5.4 Convert `market_policy.buyer_policy`'s registry to the same composed
+  form: a builder validating `BuyerPolicy` rather than callability, composed by
+  `core_buyer` which is its only offering package. Both modes of
+  `configured_buyer_policy` are preserved — tolerant when rendering
+  `market --help`, strict when loading a chain — because silently negotiating
+  under a policy the user never chose is worse than failing.
+- [x] 5.4a Duplicate buyer policy names now fail composition. The superseded
+  registry documented last-write-wins registration, so a second offering of one
+  name silently replaced the first.
+- [x] 5.4b Remove the lookup failure's guess that the reader should check
+  whether a domain plugin is installed. No domain offers a buyer policy; the
+  message named a cause it could not know, from inside the generic layer.
 - [ ] 5.5 Make `listings/strategy.determine_strategy_from_resources` and
   `listings/pricing.resource_is_compute` private and remove them from the
   `listings` facade. Each has one caller, in its own module, and was reachable

@@ -30,18 +30,18 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 from market_core.schemas import ProvisionTerms, SettlementPlan
+from market_policy import NegotiationCatalogue
 from market_policy.negotiation_middleware import (
     NegotiationChainExhausted,
     NegotiationContext,
     NegotiationMiddleware,
     NegotiationRound,
-    load_negotiation_chain,
     normalize_policies_by_escrow_kind_config,
     run_negotiation_chain,
 )
@@ -49,7 +49,6 @@ from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
 
 DEFAULT_MAX_ROUNDS = 10
 logger = logging.getLogger(__name__)
-_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 DEFAULT_CHAIN_GUARDS: tuple[str, ...] = ("buyer_escrow_shape_guard",)
 
@@ -57,33 +56,25 @@ DEFAULT_CHAIN_GUARDS: tuple[str, ...] = ("buyer_escrow_shape_guard",)
 #: accepted-escrows synthesizer) so the chain loader can trigger
 #: self-registration of optional middlewares the core cannot import —
 #: today the VM plugin's torch RL strategy. Best-effort by contract.
-_RL_MIDDLEWARE_REGISTRAR: Callable[[], None] | None = None
 
 
-def set_rl_middleware_registrar(fn: Callable[[], None] | None) -> None:
-    global _RL_MIDDLEWARE_REGISTRAR
-    _RL_MIDDLEWARE_REGISTRAR = fn
+def _compose_catalogue(requested_policies: Iterable[str]) -> NegotiationCatalogue:
+    """Compose this buyer invocation's policy catalogue.
 
+    Composed per call rather than cached at module scope. The buyer CLI is a
+    short-lived process that loads a chain once or twice, and a cached catalogue
+    would be built before the configuration that selects its policies is read.
 
-def _maybe_register_rl_middleware() -> None:
-    """Trigger self-registration of the RL middleware, if a domain
-    package installed a registrar. Best-effort — if the strategy's
-    dependencies aren't installed, the chain loader raises its own
-    actionable KeyError pointing at the extras."""
-    if _RL_MIDDLEWARE_REGISTRAR is None:
-        return
-    try:
-        _RL_MIDDLEWARE_REGISTRAR()
-    except Exception:
-        pass
+    Discovery is fatal on a broken plugin, so a domain that advertises policies
+    it cannot supply fails here rather than yielding a catalogue missing names
+    the configuration goes on to request.
+    """
+    from .negotiation_composition import compose_buyer_negotiation_catalogue
+    from .plugins import discover_domains
 
-
-def _policy_names_need_rl(policy_names: list[str]) -> bool:
-    return any(name in _RL_POLICY_NAMES for name in policy_names)
-
-
-def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
-    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
+    return compose_buyer_negotiation_catalogue(
+        discover_domains(), requested_policies=requested_policies
+    )
 
 
 def _load_buyer_chain(
@@ -108,8 +99,6 @@ def _load_buyer_chain(
     """
     policies_by_kind = normalize_policies_by_escrow_kind_config(policies)
     if policies_by_kind:
-        if _policy_map_needs_rl(policies_by_kind):
-            _maybe_register_rl_middleware()
         try:
             from .buyer_config import buyer_chains
 
@@ -119,14 +108,14 @@ def _load_buyer_chain(
         chain_config_paths = {
             name: chain.alkahest_address_config_path for name, chain in chains.items()
         }
-        return load_negotiation_chain(list(default_guards)) + [
+        requested = {*default_guards}
+        for chain in policies_by_kind.values():
+            requested.update(str(name).strip() for name in chain if str(name).strip())
+        catalogue = _compose_catalogue(requested)
+        return catalogue.resolve(list(default_guards)) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
-                # The buyer chain still resolves through the module registry;
-                # it composes a catalogue when its own registry is replaced.
-                # Passing the resolver explicitly keeps the dispatcher unable
-                # to reach anything its caller did not resolve with.
-                resolve=load_negotiation_chain,
+                resolve=catalogue.resolve,
                 chain_config_paths=chain_config_paths,
             )
         ]
@@ -148,9 +137,7 @@ def _load_buyer_chain(
         except KeyError as exc:
             raise RuntimeError(str(exc)) from exc
         names = [*default_guards, *policy.middlewares]
-    if _policy_names_need_rl(names):
-        _maybe_register_rl_middleware()
-    return load_negotiation_chain(names)
+    return _compose_catalogue(names).resolve(names)
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0

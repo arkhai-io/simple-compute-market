@@ -1,11 +1,12 @@
 """VM-domain negotiation middlewares.
 
-The alkahest-scalar vocabulary (bisection, listed_price, the escrow
-shape guards, the per-kind dispatch) moved to
-``market_policy.scalar_policies`` — it is escrow vocabulary, not VM
-vocabulary — and is re-exported here so existing import paths keep
-working. This module keeps the middlewares that interpret VM market
-content: the round-zero duration guard and the inventory guard.
+The middlewares that interpret VM market content: the round-zero duration guard
+and the inventory guard. Both are offered to a composing role through
+``domains.vms.negotiation.policy_sources``.
+
+The alkahest-scalar vocabulary — bisection, listed_price, the escrow shape
+guards, the per-kind dispatch — is escrow vocabulary rather than VM vocabulary
+and lives in ``market_policy.scalar_policies``. Import it from there.
 """
 
 from __future__ import annotations
@@ -18,41 +19,13 @@ from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
-    register_negotiation_middleware,
 )
-from market_policy.scalar_policies import (  # noqa: F401 — re-exports
-    DEFAULT_CONVERGENCE_RATIO,
-    DEFAULT_REASONABLE_MULTIPLIER,
-    _ZERO_ADDRESS,
-    _accepted_entry_uses_scalar_amount,
-    _accepted_escrow_for_proposal,
+from market_policy.scalar_policies import (
     _amount_from_proposal,
-    _escrow_kind_lookup_keys,
     _is_round_zero,
     _loads_json_list,
-    _normalize_demands_for_chain,
-    _normalize_escrow_field,
-    _normalize_exact_value,
-    _normalize_rate,
-    _opening_amount,
-    _opening_proposal,
     _peer_proposal,
-    _proposal_requires_exact_amount,
-    _set_proposal_amount,
-    accept_exact_listing_middleware,
-    amount_bisection_middleware,
-    bisection_middleware,
-    buyer_counter_guard,
-    buyer_escrow_shape_guard,
-    escrow_shape_guard,
-    escrow_shape_uses_scalar_amount,
-    listed_price_middleware,
-    make_escrow_kind_dispatch_middleware,
-    our_first_proposal,
-    our_previous_counters,
-    proposal_escrow_kind,
     proposal_uses_scalar_amount,
-    their_proposed_amount,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +45,6 @@ def _coerce_resource_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-@register_negotiation_middleware("round_zero_opening_guard")
 def round_zero_opening_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -85,10 +57,7 @@ def round_zero_opening_guard(
     requested_duration_seconds = context.intermediate.get(
         "requested_duration_seconds",
     )
-    if (
-        requested_duration_seconds is not None
-        and int(requested_duration_seconds) <= 0
-    ):
+    if requested_duration_seconds is not None and int(requested_duration_seconds) <= 0:
         return (
             NegotiationDecision(
                 action="reject",
@@ -144,14 +113,14 @@ def round_zero_opening_guard(
             )
 
     accepted_proposal_dict = (
-        accepted_proposal.model_dump()
-        if accepted_proposal is not None
-        else None
+        accepted_proposal.model_dump() if accepted_proposal is not None else None
     )
     if accepted_proposal_dict is not None:
         context.intermediate["accepted_escrow_proposal"] = accepted_proposal_dict
 
-    proposal_for_scalar = accepted_proposal_dict if accepted_proposal_dict is not None else proposal
+    proposal_for_scalar = (
+        accepted_proposal_dict if accepted_proposal_dict is not None else proposal
+    )
     uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
     if uses_scalar_amount and _amount_from_proposal(proposal_for_scalar) is None:
@@ -166,7 +135,6 @@ def round_zero_opening_guard(
     return None, context
 
 
-@register_negotiation_middleware("has_matching_inventory_guard")
 def has_matching_inventory_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -205,20 +173,8 @@ def has_matching_inventory_guard(
         context,
     )
 
+
 __all__ = [
-    "_amount_from_proposal",
-    "accept_exact_listing_middleware",
-    "amount_bisection_middleware",
-    "bisection_middleware",
-    "buyer_counter_guard",
-    "buyer_escrow_shape_guard",
-    "escrow_shape_guard",
     "has_matching_inventory_guard",
-    "make_escrow_kind_dispatch_middleware",
-    "our_first_proposal",
-    "our_previous_counters",
-    "proposal_escrow_kind",
-    "proposal_uses_scalar_amount",
     "round_zero_opening_guard",
-    "their_proposed_amount",
 ]

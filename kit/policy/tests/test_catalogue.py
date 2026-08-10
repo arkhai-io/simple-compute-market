@@ -294,3 +294,80 @@ def test_a_non_callable_catalogue_needs_no_callable_validator() -> None:
     )
 
     assert catalogue.resolve(["high", "low"]) == [99, 1]
+
+
+# --- buyer policy catalogue -------------------------------------------------
+
+
+def test_a_buyer_policy_catalogue_validates_its_item_type() -> None:
+    """The second registry converted: buyer policies are objects, not callables.
+
+    Proves the injected validator is what makes a catalogue item-appropriate —
+    `require_callable_item` would have accepted anything callable here.
+    """
+    from market_policy import CatalogueItemTypeError, buyer_policy_catalogue_builder
+
+    builder = buyer_policy_catalogue_builder().add_loader(
+        InlineSource({"not_a_policy": lambda: None}, label="confused")
+    )
+
+    with pytest.raises(CatalogueItemTypeError) as caught:
+        builder.build()
+
+    message = str(caught.value)
+    assert "buyer policy source" in message
+    assert "not a BuyerPolicy" in message
+
+
+def test_a_buyer_policy_catalogue_accepts_a_real_policy() -> None:
+    from market_policy import BuyerPolicy, buyer_policy_catalogue_builder
+
+    policy = BuyerPolicy(name="thrifty", middlewares=("bisection",))
+    catalogue = (
+        buyer_policy_catalogue_builder()
+        .add_loader(InlineSource({policy.name: policy}, label="test"))
+        .build()
+    )
+
+    assert catalogue["thrifty"] is policy
+    assert catalogue.names() == ("thrifty",)
+
+
+def test_duplicate_buyer_policy_names_fail_instead_of_last_write_winning() -> None:
+    """The superseded registry documented "last registration wins"."""
+    from market_policy import BuyerPolicy, buyer_policy_catalogue_builder
+
+    first = BuyerPolicy(name="contested", middlewares=("listed_price",))
+    second = BuyerPolicy(name="contested", middlewares=("bisection",))
+
+    builder = (
+        buyer_policy_catalogue_builder()
+        .add_loader(InlineSource({"contested": first}, label="alpha"))
+        .add_loader(InlineSource({"contested": second}, label="beta"))
+    )
+
+    with pytest.raises(CatalogueConflictError) as caught:
+        builder.build()
+
+    assert "alpha" in str(caught.value)
+    assert "beta" in str(caught.value)
+
+
+def test_an_unknown_buyer_policy_names_no_package_to_install() -> None:
+    """The superseded message guessed: "is the domain plugin installed?"."""
+    from market_policy import BuyerPolicy, buyer_policy_catalogue_builder
+
+    policy = BuyerPolicy(name="present", middlewares=())
+    catalogue = (
+        buyer_policy_catalogue_builder()
+        .add_loader(InlineSource({"present": policy}, label="test"))
+        .build()
+    )
+
+    with pytest.raises(UnknownCatalogueEntryError) as caught:
+        catalogue.resolve(["absent"])
+
+    message = str(caught.value)
+    assert "unknown buyer policy" in message
+    assert "present" in message
+    assert "installed" not in message

@@ -165,3 +165,21 @@ def test_the_torch_source_offers_every_alias_under_one_middleware() -> None:
 
     assert set(offered) == set(RL_POLICY_NAMES)
     assert len(set(offered.values())) == 1
+
+
+def test_the_strategy_is_offered_to_a_buyer_but_the_guards_are_not() -> None:
+    """A buyer resolving an inventory guard would name a policy it does not own.
+
+    The strategy is different: both sides of a negotiation may run it, and the
+    buyer previously reached it through a registrar hook installed by import
+    side effect.
+    """
+    buyer = vm_policy_sources(_request(role=PolicyRole.BUYER, requested=["rl"]))
+    offered = {name for source in buyer for name in source.load()}
+
+    assert offered == set(RL_POLICY_NAMES)
+    assert not offered & set(VM_SELLER_POLICIES)
+
+
+def test_a_buyer_asking_for_no_rl_receives_nothing_from_this_domain() -> None:
+    assert vm_policy_sources(_request(role=PolicyRole.BUYER)) == ()

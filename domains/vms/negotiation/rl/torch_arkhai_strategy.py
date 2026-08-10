@@ -23,18 +23,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
-    register_negotiation_middleware,
     their_last_proposal,
 )
-from domains.vms.negotiation.policies import (
-    _amount_from_proposal,
+
+from market_policy.scalar_policies import (
     our_previous_counters,
     their_proposed_amount,
 )
@@ -67,6 +66,7 @@ class _RoundInput:
     payment token; the middleware framework converts any per-hour rate
     to absolute at round 0 by multiplying by duration / 3600.
     """
+
     direction: str
     our_reference_amount: float
     their_proposed_amount: float | None
@@ -100,8 +100,12 @@ class TorchArkhaiStrategy:
         convergence_ratio: float = CONVERGENCE_RATIO,
         reasonable_multiplier: float = REASONABLE_MULTIPLIER,
     ) -> None:
-        self._seller_path = Path(seller_model_path) if seller_model_path else _DEFAULT_SELLER_MODEL_PATH
-        self._buyer_path = Path(buyer_model_path) if buyer_model_path else _DEFAULT_BUYER_MODEL_PATH
+        self._seller_path = (
+            Path(seller_model_path) if seller_model_path else _DEFAULT_SELLER_MODEL_PATH
+        )
+        self._buyer_path = (
+            Path(buyer_model_path) if buyer_model_path else _DEFAULT_BUYER_MODEL_PATH
+        )
         self._conv = convergence_ratio
         self._reasonable = reasonable_multiplier
         self._models: dict[str, Any] = {}  # cache: direction → loaded model
@@ -110,7 +114,7 @@ class TorchArkhaiStrategy:
     # Model loading (lazy; one model per direction, cached)
     # ------------------------------------------------------------------
 
-    def _get_model(self, direction: str) -> Optional[Any]:
+    def _get_model(self, direction: str) -> Any | None:
         if direction in self._models:
             return self._models[direction]
 
@@ -148,14 +152,14 @@ class TorchArkhaiStrategy:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_observation(ri: _RoundInput, node_types: int) -> Optional[Any]:
+    def _build_observation(ri: _RoundInput, node_types: int) -> Any | None:
         try:
             import torch
         except ImportError:
             return None
         import time as _time
 
-        from domains.vms.negotiation.rl.arkhai_common import obs_dim, MAX_GPU
+        from domains.vms.negotiation.rl.arkhai_common import obs_dim
 
         obs = torch.zeros((1, obs_dim(node_types)), dtype=torch.float32)
 
@@ -196,7 +200,9 @@ class TorchArkhaiStrategy:
         if ri.their_proposed_amount is None:
             return NegotiationDecision(
                 action="counter",
-                proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(ri.our_reference_amount))),
+                proposal=_proposal_with_amount(
+                    ri.their_pinned_proposal, int(round(ri.our_reference_amount))
+                ),
             )
 
         our_counters = ri.our_previous_counters
@@ -207,17 +213,22 @@ class TorchArkhaiStrategy:
 
         try:
             import torch
+
             from domains.vms.negotiation.rl.arkhai_common import (
                 extract_actions_from_logits,
                 parse_node_types,
             )
         except ImportError as exc:
-            logger.warning("[NEGOTIATION][RL] torch / arkhai_common unavailable: %s", exc)
+            logger.warning(
+                "[NEGOTIATION][RL] torch / arkhai_common unavailable: %s", exc
+            )
             return NegotiationDecision(action="exit", reason="torch_unavailable")
 
         model = self._get_model(ri.direction)
         if model is None:
-            logger.warning("[NEGOTIATION][RL] Model unavailable for direction=%s", ri.direction)
+            logger.warning(
+                "[NEGOTIATION][RL] Model unavailable for direction=%s", ri.direction
+            )
             return NegotiationDecision(action="exit", reason="rl_model_unavailable")
 
         node_types = parse_node_types()
@@ -244,13 +255,17 @@ class TorchArkhaiStrategy:
             if their >= proposed * (1 - self._conv):
                 return NegotiationDecision(
                     action="accept",
-                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(their))),
+                    proposal=_proposal_with_amount(
+                        ri.their_pinned_proposal, int(round(their))
+                    ),
                     reason="convergence",
                 )
             if their >= our / self._reasonable:
                 return NegotiationDecision(
                     action="counter",
-                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(proposed))),
+                    proposal=_proposal_with_amount(
+                        ri.their_pinned_proposal, int(round(proposed))
+                    ),
                 )
             return NegotiationDecision(action="exit", reason="price_unreasonable")
 
@@ -259,23 +274,29 @@ class TorchArkhaiStrategy:
             if their <= proposed * (1 + self._conv):
                 return NegotiationDecision(
                     action="accept",
-                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(their))),
+                    proposal=_proposal_with_amount(
+                        ri.their_pinned_proposal, int(round(their))
+                    ),
                     reason="convergence",
                 )
             if their <= our * self._reasonable:
-                if proposed > our:
-                    proposed = our
+                proposed = min(proposed, our)
                 return NegotiationDecision(
                     action="counter",
-                    proposal=_proposal_with_amount(ri.their_pinned_proposal, int(round(proposed))),
+                    proposal=_proposal_with_amount(
+                        ri.their_pinned_proposal, int(round(proposed))
+                    ),
                 )
             return NegotiationDecision(action="exit", reason="price_unreasonable")
 
-        return NegotiationDecision(action="reject", reason=f"unknown_direction:{ri.direction!r}")
+        return NegotiationDecision(
+            action="reject", reason=f"unknown_direction:{ri.direction!r}"
+        )
 
 
 def _proposal_with_amount(
-    skeleton: dict[str, Any] | None, amount: int,
+    skeleton: dict[str, Any] | None,
+    amount: int,
 ) -> dict[str, Any]:
     """Build a proposal dict by overlaying ``amount`` on the peer's
     skeleton.
@@ -288,7 +309,9 @@ def _proposal_with_amount(
     """
     if not isinstance(skeleton, dict):
         return {"fields": {"amount": int(amount)}}
-    pinned_fields = skeleton.get("fields") if isinstance(skeleton.get("fields"), dict) else {}
+    pinned_fields = (
+        skeleton.get("fields") if isinstance(skeleton.get("fields"), dict) else {}
+    )
     merged = dict(pinned_fields) if isinstance(pinned_fields, dict) else {}
     merged["amount"] = int(amount)
     return {**skeleton, "fields": merged}
@@ -306,10 +329,6 @@ def _get_singleton() -> TorchArkhaiStrategy:
     return _singleton
 
 
-@register_negotiation_middleware("rl")
-@register_negotiation_middleware("erc20_rl")
-@register_negotiation_middleware("native_token_rl")
-@register_negotiation_middleware("erc1155_rl")
 def rl_middleware(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -323,7 +342,8 @@ def rl_middleware(
         direction=context.direction,
         our_reference_amount=context.our_reference_amount,
         their_proposed_amount=their_proposed_amount(history),
-        their_pinned_proposal=their_last_proposal(history) or context.our_escrow_proposal,
+        their_pinned_proposal=their_last_proposal(history)
+        or context.our_escrow_proposal,
         history=history,
         max_rounds=context.max_rounds,
     )

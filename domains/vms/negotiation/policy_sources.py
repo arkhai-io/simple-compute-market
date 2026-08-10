@@ -1,9 +1,10 @@
 """The VM domain's negotiation policies, offered per role.
 
 The domain owns two seller-side guards and, when a chain asks for it, a
-reinforcement-learning strategy. It offers no buyer-side policies. The generic
-escrow vocabulary its chains interleave with is offered by the policy kit and
-is not restated here.
+reinforcement-learning strategy. The guards are seller-side only; the strategy
+serves both roles, because a buyer may negotiate with it too. The generic escrow
+vocabulary its chains interleave with is offered by the policy kit and is not
+restated here.
 
 The RL strategy is a separate source because loading it pulls in the strategy
 module and its model-checkpoint handling. A storefront that never negotiates with
@@ -88,12 +89,15 @@ class TorchStrategySource:
 def vm_policy_sources(
     request: NegotiationPolicyRequest,
 ) -> tuple[NegotiationPolicySource, ...]:
-    """The policies this domain offers to the requesting role."""
-    if request.role is not PolicyRole.STOREFRONT:
-        return ()
-    sources: list[NegotiationPolicySource] = [
-        InlineSource(VM_SELLER_POLICIES, label="vm-domain[storefront]"),
-    ]
+    """The policies this domain offers to the requesting role.
+
+    The guards are seller-side: a buyer resolving ``has_matching_inventory_guard``
+    would be naming a policy about inventory it does not own. The strategy is
+    offered to either role, since both sides of a negotiation may run it.
+    """
+    sources: list[NegotiationPolicySource] = []
+    if request.role is PolicyRole.STOREFRONT:
+        sources.append(InlineSource(VM_SELLER_POLICIES, label="vm-domain[storefront]"))
     if request.wants_any(RL_POLICY_NAMES):
         sources.append(TorchStrategySource())
     return tuple(sources)

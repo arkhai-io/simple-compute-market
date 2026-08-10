@@ -21,7 +21,7 @@ from domains.vms.listings import (
     determine_strategy_from_order,
     extract_initial_price_from_order,
 )
-from domains.vms.negotiation.policies import (
+from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )

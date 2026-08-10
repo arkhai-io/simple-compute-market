@@ -27,20 +27,24 @@ same names would silently shadow each other).
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import typer
-from rich.console import Console
-from rich.table import Table
-
+from market_policy import (
+    Catalogue,
+    InlineSource,
+    UnknownCatalogueEntryError,
+)
 from market_policy.buyer_policy import (
     BuyerPolicy,
     PolicyParam,
-    register_buyer_policy,
+    buyer_policy_catalogue_builder,
 )
+from rich.console import Console
+from rich.table import Table
 
 
-def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
+def extract_seller_min_price(listing: dict[str, Any]) -> float | None:
     """Pull the seller's per-unit floor out of a registry listing dict.
 
     Reads the primary rate on ``accepted_escrows[0]`` — the per-unit
@@ -85,9 +89,7 @@ def entry_uses_scalar_amount(entry: dict[str, Any]) -> bool:
     if not isinstance(literals, dict):
         return False
     return (
-        "token" in literals
-        and "tokenId" not in literals
-        and "token_id" not in literals
+        "token" in literals and "tokenId" not in literals and "token_id" not in literals
     )
 
 
@@ -95,24 +97,24 @@ _SCALAR_PARAMS = (
     PolicyParam(
         name="initial_price",
         help="Opening bid per negotiation in human / whole-token units, "
-             "per-unit rate (per hour for compute, per token for API "
-             "credits). Scaled by the token's on-chain decimals "
-             "before being sent. Optional — when omitted, opens at the "
-             "seller's advertised price.",
+        "per-unit rate (per hour for compute, per token for API "
+        "credits). Scaled by the token's on-chain decimals "
+        "before being sent. Optional — when omitted, opens at the "
+        "seller's advertised price.",
     ),
     PolicyParam(
         name="max_price",
         help="Ceiling per negotiation in human / whole-token units, "
-             "per-unit rate. Optional — when omitted, equals the "
-             "advertised price.",
+        "per-unit rate. Optional — when omitted, equals the "
+        "advertised price.",
     ),
     PolicyParam(
         name="price_markup",
         annotation=float,
         default=1.5,
         help="Ceiling headroom when --initial-price alone is given "
-             "(max = advertised × markup). The listed_price default "
-             "needs none.",
+        "(max = advertised × markup). The listed_price default "
+        "needs none.",
     ),
 )
 
@@ -123,7 +125,7 @@ def derive_scalar_prices(
     matches: list[dict],
     console: Console,
     interactive: bool = False,
-) -> tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     """Fill missing (initial_price, max_price) from the advertised price.
 
     The scalar policies' shared derivation: with no explicit flags both
@@ -146,14 +148,14 @@ def derive_scalar_prices(
     because no candidate carries a usable advertised rate
     (hidden-reserve listings).
     """
-    initial_price: Optional[float] = params.get("initial_price")
-    max_price: Optional[float] = params.get("max_price")
+    initial_price: float | None = params.get("initial_price")
+    max_price: float | None = params.get("max_price")
     price_markup = float(params.get("price_markup") or 1.5)
 
     if initial_price is not None and max_price is not None:
         return initial_price, max_price
 
-    anchor: Optional[int] = None
+    anchor: int | None = None
     priced = [(extract_seller_min_price(m), m) for m in matches]
     # Keep listings with amount=0 (free) as legitimate anchors; only filter
     # out None (hidden reserve) where we genuinely have no price signal.
@@ -164,9 +166,7 @@ def derive_scalar_prices(
 
     if max_price is None and anchor is not None:
         max_price = (
-            int(round(anchor * price_markup))
-            if initial_price is not None
-            else anchor
+            int(round(anchor * price_markup)) if initial_price is not None else anchor
         )
     if initial_price is None and anchor is not None:
         initial_price = anchor
@@ -175,7 +175,8 @@ def derive_scalar_prices(
         typer.secho(
             "No matched listing carries an advertised price (all hidden-reserve); "
             "pass --initial-price / --max-price explicitly.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         return None, None
 
@@ -198,27 +199,54 @@ def derive_scalar_prices(
         + (f" (anchored on advertised={anchor})" if anchor is not None else "")
     )
     if interactive and not typer.confirm(
-        "Proceed with these listings at these prices?", default=True,
+        "Proceed with these listings at these prices?",
+        default=True,
     ):
         return None, None
     return initial_price, max_price
 
 
-LISTED_PRICE_POLICY = register_buyer_policy(BuyerPolicy(
+LISTED_PRICE_POLICY = BuyerPolicy(
     name="listed_price",
     middlewares=("listed_price",),
     cli_params=_SCALAR_PARAMS,
     compatible=entry_uses_scalar_amount,
     derive_prices=derive_scalar_prices,
-))
+)
 
-BISECTION_POLICY = register_buyer_policy(BuyerPolicy(
+BISECTION_POLICY = BuyerPolicy(
     name="bisection",
     middlewares=("bisection",),
     cli_params=_SCALAR_PARAMS,
     compatible=entry_uses_scalar_amount,
     derive_prices=derive_scalar_prices,
-))
+)
+
+#: The buyer policies this package implements, offered as a source.
+CORE_BUYER_POLICIES = {
+    LISTED_PRICE_POLICY.name: LISTED_PRICE_POLICY,
+    BISECTION_POLICY.name: BISECTION_POLICY,
+}
+
+
+def buyer_policy_catalogue() -> Catalogue[BuyerPolicy]:
+    """Compose the buyer policies available to this invocation.
+
+    Composed per call rather than at import. No domain currently offers a buyer
+    policy; when one does, its source joins here and a duplicate name becomes a
+    composition error instead of silently overwriting, which is what the
+    superseded registry's last-write-wins registration allowed.
+    """
+    return (
+        buyer_policy_catalogue_builder()
+        .add_loader(InlineSource(CORE_BUYER_POLICIES, label="core-buyer"))
+        .build()
+    )
+
+
+def buyer_policy_names() -> list[str]:
+    """Every buyer policy name this invocation can resolve."""
+    return list(buyer_policy_catalogue().names())
 
 
 def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
@@ -237,21 +265,26 @@ def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
     negotiating under a policy the user never chose is worse than
     failing.
     """
-    from market_policy.buyer_policy import DEFAULT_BUYER_POLICY, get_buyer_policy
+    from market_policy.buyer_policy import DEFAULT_BUYER_POLICY
 
     from .buyer_config import resolve_config_value
 
+    catalogue = buyer_policy_catalogue()
     try:
-        name = resolve_config_value(
-            toml_path="negotiation.policy", default=DEFAULT_BUYER_POLICY,
-        ).strip() or DEFAULT_BUYER_POLICY
+        name = (
+            resolve_config_value(
+                toml_path="negotiation.policy",
+                default=DEFAULT_BUYER_POLICY,
+            ).strip()
+            or DEFAULT_BUYER_POLICY
+        )
     except Exception:
         if strict:
             raise
         name = DEFAULT_BUYER_POLICY
     try:
-        return get_buyer_policy(name)
-    except KeyError:
+        return catalogue[name]
+    except UnknownCatalogueEntryError:
         if strict:
             raise
-        return get_buyer_policy(DEFAULT_BUYER_POLICY)
+        return catalogue[DEFAULT_BUYER_POLICY]

@@ -5,21 +5,19 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-
+from core_buyer.escrow_selection import select_escrow_entry
 from market_policy.buyer_policy import (
     BuyerPolicy,
-    buyer_policy_names,
-    get_buyer_policy,
 )
 
 from domains.vms.buyer.policy_surface import (
     BISECTION_POLICY,
     LISTED_PRICE_POLICY,
+    buyer_policy_catalogue,
+    buyer_policy_names,
     configured_buyer_policy,
     entry_uses_scalar_amount,
 )
-from core_buyer.escrow_selection import select_escrow_entry
-
 
 _TOKEN = "0x" + "22" * 20
 
@@ -43,14 +41,16 @@ def _exact_entry(chain: str = "anvil") -> dict:
 
 
 def test_scalar_policies_are_registered():
+    catalogue = buyer_policy_catalogue()
+    assert {"listed_price", "bisection"} <= set(catalogue.names())
+    assert catalogue["listed_price"] is LISTED_PRICE_POLICY
+    assert catalogue["bisection"] is BISECTION_POLICY
     assert {"listed_price", "bisection"} <= set(buyer_policy_names())
-    assert get_buyer_policy("listed_price") is LISTED_PRICE_POLICY
-    assert get_buyer_policy("bisection") is BISECTION_POLICY
 
 
 def test_unknown_policy_names_the_registered_ones():
-    with pytest.raises(KeyError, match="listed_price"):
-        get_buyer_policy("haggle-3000")
+    with pytest.raises(KeyError, match="listed_price"):  # UnknownCatalogueEntryError
+        buyer_policy_catalogue()["haggle-3000"]
 
 
 def test_configured_policy_defaults_to_listed_price():
@@ -69,12 +69,14 @@ def test_entry_compatibility_is_shape_based():
     assert entry_uses_scalar_amount(_scalar_entry())
     assert not entry_uses_scalar_amount(_exact_entry())
     # Fungible token literal without rates still counts as scalar.
-    assert entry_uses_scalar_amount({
-        "chain_name": "anvil",
-        "escrow_address": "0x" + "11" * 20,
-        "literal_fields": {"token": _TOKEN},
-        "rates": [],
-    })
+    assert entry_uses_scalar_amount(
+        {
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "literal_fields": {"token": _TOKEN},
+            "rates": [],
+        }
+    )
 
 
 def test_selection_offers_only_compatible_formats():
@@ -107,11 +109,12 @@ def test_selection_refuses_incompatible_only_listings():
 
 
 def test_chain_terminal_follows_the_configured_policy():
-    from domains.vms.buyer.buyer_client import _load_buyer_chain
-    from domains.vms.negotiation.policies import (
+    from market_policy.scalar_policies import (
         bisection_middleware,
         listed_price_middleware,
     )
+
+    from domains.vms.buyer.buyer_client import _load_buyer_chain
 
     assert _load_buyer_chain()[-1] is listed_price_middleware
     with patch(
@@ -122,8 +125,9 @@ def test_chain_terminal_follows_the_configured_policy():
 
 
 def test_policy_without_derivation_passes_explicit_values_through():
-    from domains.vms.buyer.cli_helpers import resolve_prices_from_matches
     from rich.console import Console
+
+    from domains.vms.buyer.cli_helpers import resolve_prices_from_matches
 
     opaque = BuyerPolicy(name="opaque-test", middlewares=("listed_price",))
     with patch(
@@ -131,7 +135,8 @@ def test_policy_without_derivation_passes_explicit_values_through():
         return_value=opaque,
     ):
         assert resolve_prices_from_matches(
-            matches=[], console=Console(),
+            matches=[],
+            console=Console(),
             params={"initial_price": 7, "max_price": 9},
         ) == (7, 9)
 
@@ -141,26 +146,35 @@ def test_interactive_derivation_confirms_and_honors_decline():
 
     from domains.vms.buyer.policy_surface import derive_scalar_prices
 
-    listing = {"listing_id": "lst-1", "seller": "http://s:8001",
-               "accepted_escrows": [_scalar_entry()]}
+    listing = {
+        "listing_id": "lst-1",
+        "seller": "http://s:8001",
+        "accepted_escrows": [_scalar_entry()],
+    }
 
     with patch("typer.confirm", return_value=True) as confirm:
         assert derive_scalar_prices(
-            params={}, matches=[listing], console=Console(),
+            params={},
+            matches=[listing],
+            console=Console(),
             interactive=True,
         ) == (100, 100)
     confirm.assert_called_once()
 
     with patch("typer.confirm", return_value=False):
         assert derive_scalar_prices(
-            params={}, matches=[listing], console=Console(),
+            params={},
+            matches=[listing],
+            console=Console(),
             interactive=True,
         ) == (None, None)
 
     # Non-interactive runs never prompt.
     with patch("typer.confirm") as confirm:
         derive_scalar_prices(
-            params={}, matches=[listing], console=Console(),
+            params={},
+            matches=[listing],
+            console=Console(),
         )
     confirm.assert_not_called()
 

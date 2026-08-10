@@ -16,41 +16,28 @@ Importing this module also installs the RL middleware registrar so
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
+from arkhai_vms import VmProvisionTerms
 from core_buyer.negotiation_client import (  # noqa: F401 — re-exports
     DEFAULT_MAX_ROUNDS,
     DEFAULT_TIMEOUT_SECONDS,
-    NegotiationOutcome as CoreNegotiationOutcome,
     ResumeState,
     _load_buyer_chain,
     _parse_accepted_terms_from_reply,
     _post,
     _sign,
-    set_rl_middleware_registrar,
+)
+from core_buyer.negotiation_client import (
+    NegotiationOutcome as CoreNegotiationOutcome,
 )
 from core_buyer.negotiation_client import (
     negotiate_with_seller as _core_negotiate_with_seller,
 )
 from market_alkahest.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationMiddleware
-
-from arkhai_vms import VmProvisionTerms
-
-
-def _register_rl_middleware() -> None:
-    """Trigger self-registration of the torch RL middleware.
-
-    Imports ``domains.vms.negotiation.rl.torch_arkhai_strategy`` so its
-    ``register_negotiation_middleware("rl")`` call fires. Best-effort —
-    if torch / pufferlib aren't installed, the chain loader raises its
-    own actionable KeyError pointing at the [rl] extras.
-    """
-    import domains.vms.negotiation.rl.torch_arkhai_strategy  # noqa: F401
-
-
-set_rl_middleware_registrar(_register_rl_middleware)
 
 
 @dataclass
@@ -62,7 +49,7 @@ class NegotiationOutcome(CoreNegotiationOutcome):
     (hours × 3600).
     """
 
-    duration_seconds: Optional[float] = None
+    duration_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = super().to_dict()
@@ -79,13 +66,13 @@ def negotiate_with_seller(
     listing_id: str,
     initial_price: float,
     max_price: float,
-    provision_terms: Optional[VmProvisionTerms] = None,
-    escrow_proposal: Optional[EscrowProposal] = None,
+    provision_terms: VmProvisionTerms | None = None,
+    escrow_proposal: EscrowProposal | None = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
-    on_round: Optional[Callable[[int, dict, dict], None]] = None,
-    chain: Optional[list[NegotiationMiddleware]] = None,
-    resume: Optional[ResumeState] = None,
-    policy_params: Optional[dict[str, Any]] = None,
+    on_round: Callable[[int, dict, dict], None] | None = None,
+    chain: list[NegotiationMiddleware] | None = None,
+    resume: ResumeState | None = None,
+    policy_params: dict[str, Any] | None = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -94,7 +81,7 @@ def negotiate_with_seller(
     absolute amounts by the lease duration fixed in
     ``provision_terms.duration_seconds``.
     """
-    duration_seconds: Optional[float] = None
+    duration_seconds: float | None = None
     if resume is None:
         if provision_terms is None:
             raise RuntimeError(
@@ -124,9 +111,7 @@ def negotiate_with_seller(
         initial_price=initial_price,
         max_price=max_price,
         unit_count=(
-            float(duration_seconds) / 3600.0
-            if duration_seconds is not None
-            else None
+            float(duration_seconds) / 3600.0 if duration_seconds is not None else None
         ),
         provision_terms=provision_terms,
         escrow_proposal=escrow_proposal,
