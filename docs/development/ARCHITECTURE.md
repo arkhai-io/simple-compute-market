@@ -1,6 +1,6 @@
 # Arkhai Market Stack — Architecture Reference
 
-> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog.
+> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## Document map
 
@@ -18,6 +18,8 @@
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
 | [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
+
+Directional context — which goals are being pursued, the value each delivers, and which change owns each open gap — lives in [`ROADMAP.md`](ROADMAP.md). This document states what is true now; the roadmap states where it is going.
 
 ## System overview
 
@@ -160,7 +162,9 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 ### Site authority
 
-A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites, and one site may serve several storefronts.
+A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
+
+The reverse relationship is currently one-to-one: a compute provisioner binds to a single storefront through a global `storefront_url`, and one shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so there is no per-storefront identity or isolation at that boundary. The lifecycle event sink accepts a per-deal storefront URL override, but no storefront populates it, so delivery always resolves to the configured global. Serving several storefronts from one site authority requires a trusted per-storefront identity that does not exist yet.
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
@@ -299,7 +303,7 @@ The current round-robin scheduling policy is deterministic for the same candidat
 
 A caller observes fulfillment progress by pulling `GET /fulfillment/{fulfillment_id}/status` and `GET /fulfillment/{fulfillment_id}/result` from the durable aggregate — there is no push channel from provisioning to the storefront today. `status` is a plain read with no provider call. `result` returns a provider-neutral `fulfillment.result.v1` envelope; for a fulfillment in `active` state it also performs a live, uncached credential fetch against the provider (never persisted) outside any open database transaction, so every read reflects current provider-reported credentials rather than a value captured once at creation. A live credential-fetch failure on an otherwise-healthy `active` fulfillment is its own stable error category (`credential_fetch_failed`), distinct from a create/status/teardown failure.
 
-Push-based result delivery (provisioning notifying the storefront rather than the storefront polling) is planned future work, tracked as `provisioning-result-push-delivery`, and requires a new provisioning→storefront authenticated channel that does not exist yet. It does not change the durable persistence this section describes, only the delivery transport.
+Push-based result delivery (provisioning notifying the storefront rather than the storefront polling) is planned future work, tracked as `replace-polling-with-authenticated-push`, and requires a new provisioning→storefront authenticated channel that does not exist yet. It does not change the durable persistence this section describes, only the delivery transport.
 
 ### Release
 

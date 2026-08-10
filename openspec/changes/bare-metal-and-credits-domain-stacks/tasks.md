@@ -1,0 +1,73 @@
+# Implementation Tasks
+
+## 1. Generalize the e2e fixtures
+
+- [ ] 1.1 Re-verify that no e2e file references bare metal or API credits, and inventory
+      the VM assumptions in shared fixtures and helpers.
+- [ ] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
+      provisioning, and teardown assumptions.
+- [ ] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
+      reproduces, one layer up, exactly the duplication this goal removes.
+
+## 2. Recompose API credits
+
+- [ ] 2.1 Remove every remaining local implementation of a concern the kit extractions
+      own, so the domain is configuration and codecs over kit.
+- [ ] 2.2 Confirm no extracted concern retains an API-credits copy. The domain already
+      completes deals with its own implementations, so a passing scenario is not evidence
+      of recomposition.
+- [ ] 2.3 Add the API-credits end-to-end deal path.
+- [ ] 2.4 Sequenced first deliberately: there is a working implementation to compare
+      against, so a failure here is a recomposition defect rather than an unknown.
+
+## 3. Bare-metal deployable stack
+
+- [ ] 3.1 Add the stack definition, following the topology conventions
+      `domains/vms/compose.yml` and `domains/apicredits/compose.yml` already use.
+- [ ] 3.2 Write it so the deployment shape can change — standalone service or a second
+      contract inside a shared storefront process — without rewriting the scenarios.
+- [ ] 3.3 Update `docs/bare-metal-seller-quickstart.md` with standing the stack up.
+
+## 4. Bare-metal deal path
+
+- [ ] 4.1 Add the end-to-end scenario: discovery, negotiation, settlement, delivery,
+      teardown.
+- [ ] 4.2 Treat defects this surfaces in bare metal's own behavior as bare-metal
+      findings, recorded against its owning change rather than absorbed here.
+- [ ] 4.3 Decide and record whether bare-metal teardown semantics differ from VM's, since
+      whole-machine release is not VM destruction.
+
+## 5. Validation
+
+- [ ] 5.1 Run both new end-to-end paths against a live service stack. This repository has
+      previously recorded e2e work validated only statically because no stack was
+      available; treat a live run as an explicit gate, not a formality.
+- [ ] 5.2 Confirm the goal's completion test: each domain runs a full deal through a
+      composed storefront with no domain-local copy of an extracted concern.
+- [ ] 5.3 Run `openspec validate --all --strict` against the baseline current at
+      implementation time.
+
+## 6. Closeout
+
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`.
+- [ ] 6.2 **Import placement.** Review imports this change adds or touches.
+- [ ] 6.3 **Documentation compliance.** Confirm the per-domain deal path landed in
+      `test-compatibility`, the stack requirement in `deployment-state`, and that
+      `TESTING.md` states what an end-to-end deal path proves.
+- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior and
+      validation evidence, including whether the live run happened.
+- [ ] 6.5 **Roadmap currency.** Update Goal 4's current-state description in
+      `docs/development/ROADMAP.md`. If every gap is closed, remove the goal — its
+      durable result belongs in the specs and `ARCHITECTURE.md`.
+- [ ] 6.6 **Promotion.** Complete the design-promotion record below.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| An end-to-end deal path is proven per domain, exercising shared fixtures rather than copied scenarios | `openspec/specs/test-compatibility/spec.md` — "Per-domain end-to-end deal path" |
+| Every domain intended for deployment has a stack definition | `openspec/specs/deployment-state/spec.md` — "Deployable stack per market domain" |
+| What an end-to-end deal path proves | `docs/development/TESTING.md` |
+| Why API credits is recomposed rather than merely made to pass, and why fixtures generalize instead of scenarios copying | This change's `design.md` |

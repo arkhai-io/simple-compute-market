@@ -43,6 +43,9 @@ fail_on_unreachable = true
 # Authority defaults to credits.service_url. Poll fast — the suite waits
 # on delta-driven listing reconciliation (close on exhaustion).
 poll_interval    = 1
+# Deliberately overrides the shipped default of 0; see storefront.bob.toml.
+# Local compose profile with no untrusted buyers, kept on so the
+# two-phase reserve path stays under e2e coverage.
 hold_ttl_seconds = 900
 
 [negotiation]

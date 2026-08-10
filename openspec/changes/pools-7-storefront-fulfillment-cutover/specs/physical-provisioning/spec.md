@@ -132,7 +132,7 @@ delivery-acknowledgement mechanism, since a read reflects current state
 on demand rather than requiring retry-until-acknowledged delivery.
 
 Push-based delivery of `SettlementResult` to the storefront is out of
-scope for this requirement — see `provisioning-result-push-delivery`
+scope for this requirement — see `replace-polling-with-authenticated-push`
 (separate change, not yet started). This requirement's durability
 guarantee is unaffected by that change's absence: a terminal or
 otherwise reportable fulfillment transition commits atomically with the

@@ -50,7 +50,10 @@ urls                      = ["http://registry:8080", "http://registry-b:8080"]
 poll_interval    = 1
 # Two-phase reserve: acceptance holds capacity until the buyer settles
 # (the e2e deals settle within seconds; 900s is headroom, and unsettled
-# holds lapse on their own).
+# holds lapse on their own). Deliberately overrides the shipped default
+# of 0 — this local profile has no untrusted buyers, and keeping holds
+# on here is what keeps the two-phase reserve path under e2e coverage
+# while production defaults to placing no pre-settlement hold.
 hold_ttl_seconds = 900
 
 [provisioning]

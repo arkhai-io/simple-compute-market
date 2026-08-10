@@ -65,7 +65,7 @@ Implementation therefore resumes at the durable lifecycle/persistence work in ta
   direction. A push-based delivery transport was designed but requires a
   new provisioning→storefront authenticated channel that doesn't exist
   in this codebase yet — designing that channel is split out to a
-  separate change, `provisioning-result-push-delivery`, rather than
+  separate change, `replace-polling-with-authenticated-push`, rather than
   built inside this one. See `design.md`, "`SettlementResult` delivery:
   pull for v1, push deferred to a separate change."
 - Resolve `pools-3`'s deferred release-path wiring: give
@@ -210,9 +210,9 @@ reservation states were never shipped and do not require compatibility handling.
 - Follows the implemented `market-platform-compute-30-extract-service`
   package layout. Compute-30 did not create `kit/fulfillment` or
   implement this change's durable lifecycle.
-- Related, nonblocking follow-on: `provisioning-result-push-delivery` hardens the existing provisioning→storefront callback transport and adds durable result delivery on top of this change's pull-correct durable state.
+- Related, nonblocking follow-on: `replace-polling-with-authenticated-push` hardens the existing provisioning→storefront callback transport and adds durable result delivery on top of this change's pull-correct durable state.
 - `market-platform-bare-metal-10-storefront-composition` consumes the selected-site lifecycle after it lands; it does not block VM cutover.
-- `market-platform-compute-40-multi-domain-proof` is the post-cutover regression/topology gate for two storefronts and two provisioning authorities.
+- `market-platform-compute-40-multi-domain-proof` is the post-cutover regression/topology gate. **Amended 2026-08-06:** it was rewritten and its topology is now one multi-domain storefront against two provisioning authorities, exercising both compute domains at each — not two storefronts. Many-to-many storefront-to-authority ownership was removed from its scope rather than deferred.
 
 ## Impact
 
@@ -220,7 +220,7 @@ Touches `kit/site` (`site_resource_pools`/`CapacityReservation` reshape),
 `kit/resource-pools` (removal of fulfillment-provider responsibilities),
 `kit/fulfillment` (scheduler/policy and provider-contract consolidation,
 settlement persistence, recovery, and pull-based result/status query contracts —
-push delivery is `provisioning-result-push-delivery`'s scope, not this
+push delivery is `replace-polling-with-authenticated-push`'s scope, not this
 change's),
 the extracted compute provisioning service (models, migrations, generic
 services, API and workers), the VM provisioning adapter (Ansible provider and

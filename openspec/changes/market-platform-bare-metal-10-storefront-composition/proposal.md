@@ -10,7 +10,7 @@ Bare metal already has deterministic domain codecs, publication semantics, and a
 - Configure the storefront to consume one or more trusted provisioning-site bindings and route fulfillment through the site selected by the Capacity Reservation.
 - Package and deploy the composition independently from the VM storefront while allowing one seller or gateway to operate both roles.
 - Add focused contract, integration, packaging, and deployment-render evidence for a complete bare-metal seller lifecycle.
-- Preserve one market-domain contract per storefront process; multiplexing VM and bare-metal semantics inside one process is not part of this change.
+- ~~Preserve one market-domain contract per storefront process; multiplexing VM and bare-metal semantics inside one process is not part of this change.~~ **Superseded 2026-08-06** by `multi-domain-storefront-composition`, which hosts several compute-family contracts in one storefront process. Struck rather than deleted, per the repository's documentation-history conventions. This was a scope fence, not an acceptance boundary: relaxing it does not change what this change delivers, and multiplexing remains out of *this* change's scope — it is simply no longer a preserved architectural position.
 
 ## Capabilities
 
@@ -38,7 +38,7 @@ None.
 - `pools-7-storefront-fulfillment-cutover` owns the durable selected-site fulfillment path. Composition and protocol work may begin earlier, but production cutover and final lifecycle evidence depend on its public scheduling, fulfillment, result, and teardown contracts.
 - This change owns the bare-metal-specific per-resource projection producer/consumer contract needed for publication. POOLS-8 continues to own generic durable projection consumption, commercial mapping, and advisory listing hints. **Added 2026-08-03:** POOLS-8's Section 4 also now supplies the site-targeted reservation-routing mechanism (`AggregateCapacityClient.reserve(site=...)`) this change's Section 3.2 depends on directly — see `design.md`'s "Treat selected-site routing as trusted storefront state" addendum and Open Questions.
 - `market-platform-compute-40-multi-domain-proof` follows this change and POOLS-7 to prove VM and bare-metal storefronts across shared provisioning authorities.
-- `provisioning-result-push-delivery` owns authenticated reverse delivery and is not required for the pull-based lifecycle baseline.
+- `replace-polling-with-authenticated-push` owns authenticated reverse delivery and is not required for the pull-based lifecycle baseline.
 
 ## Impact
 
