@@ -11,6 +11,24 @@ from .schema import BareMetalListing
 BARE_METAL_PUBLICATION_VIEW = "bare_metal.v1"
 
 
+def _length_prefixed(value: str) -> str:
+    """Encode a field so its boundary is unambiguous regardless of its
+    own content -- ``site_id``/``physical_resource_id`` are operator-
+    chosen strings with no character restrictions (``physical_resource_id``
+    is a bare ``pydantic`` ``str`` field, ``min_length=1`` only), so naive
+    delimiter-joining these fields is not collision-free:
+    ``site_id="a", physical_resource_id="b:c"`` and
+    ``site_id="a:b", physical_resource_id="c"`` would otherwise produce
+    an identical key. A decimal length prefix followed by exactly that
+    many characters fixes each field's boundary exactly, independent of
+    its contents, making the overall key injective (different inputs
+    always produce different keys). Kept local to this module rather
+    than shared with the VM domain's equivalent -- domains do not
+    depend on each other for this.
+    """
+    return f"{len(value)}:{value}"
+
+
 def bare_metal_listing_key(
     *,
     site_id: str,
@@ -21,7 +39,10 @@ def bare_metal_listing_key(
         raise ValueError("site_id must be non-empty")
     if not physical_resource_id.strip():
         raise ValueError("physical_resource_id must be non-empty")
-    return f"bare-metal:{site_id}:{physical_resource_id}"
+    return (
+        f"bare-metal:{_length_prefixed(site_id)}"
+        f":{_length_prefixed(physical_resource_id)}"
+    )
 
 
 def trusted_bare_metal_projection(

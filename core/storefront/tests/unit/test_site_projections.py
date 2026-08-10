@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 from core_storefront.site_projections import (
     ProjectionCache,
@@ -108,3 +109,48 @@ def test_refresh_after_topology_error_falls_back_to_current_identity_when_none_o
         drifted = await cache.refresh_after_topology_error(None)
         assert drifted is False
     asyncio.run(run())
+
+
+def test_fetched_at_is_none_before_any_successful_load():
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        assert cache.view().fetched_at is None
+    asyncio.run(run())
+
+
+def test_fetched_at_set_on_successful_load():
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        before = datetime.now(timezone.utc)
+        view = await cache.load()
+        assert view.fetched_at is not None
+        assert before <= view.fetched_at
+    asyncio.run(run())
+
+
+def test_fetched_at_advances_on_unchanged_poll_confirmation():
+    """An unchanged poll_once() is still a successful confirmation -- the
+    operator-visible 'last confirmed' time should advance even when the
+    generation itself didn't change."""
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        first = (await cache.load()).fetched_at
+        await asyncio.sleep(0.01)
+        second = (await cache.poll_once()).fetched_at
+        assert second is not None and second > first
+    asyncio.run(run())
+
+
+def test_fetched_at_unchanged_on_failed_poll():
+    """A failed poll must not advance fetched_at -- it did not confirm anything."""
+    async def run():
+        client = FakeClient()
+        cache = ProjectionCache(client)
+        loaded_at = (await cache.load()).fetched_at
+        client.fail_version = True
+        view = await cache.poll_once()
+        assert view.state == ProjectionState.stale
+        assert view.fetched_at == loaded_at

@@ -148,7 +148,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Reserve/commit/release, hold TTL, versioned anonymous events, and cross-mode conflicts: `kit/site/tests/unit/test_ledger.py`.
 - Multidimensional capacity, including declared-dimension fit, concurrent per-dimension holds, legacy-claim compatibility, and per-dimension event deltas: `kit/site/tests/unit/test_ledger.py`.
 - Site-tagged soft-state aggregation and failure isolation: `core/storefront/tests/unit/test_aggregation.py`.
-- Storefront-to-site HTTP contract: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`.
+- Storefront-to-site HTTP contract: `kit/site-client/tests/unit/test_client.py`, `kit/site-client/tests/unit/test_opacity.py`.
 - “Do not close on ignorance” reconciliation: `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py`.
 - Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`.
 - Session-scoped settlement assignment, locked reservation reads, and in-session backing-resource lookup: `kit/site/tests/unit/test_settlement_assignment.py`.
@@ -156,6 +156,9 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 - Listing identity normalization and validation: `domains/vms/storefront/tests/unit/test_listing_model_capacity_identity.py`.
 - Claim identity precedence and fail-closed construction: `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, `domains/vms/storefront/tests/unit/test_vm_fulfillment_planner.py`, and `domains/vms/storefront/tests/unit/test_fulfill_vm_obligation_error_handling.py`.
 - Listing publication and legacy-invalid remediation: `domains/vms/storefront/tests/integration/test_listings_api.py`.
+- Per-site/family projection load-state reporting, including partial multi-site failure isolation, never-loaded retry, and `fetched_at` tracking: `core/storefront/tests/unit/test_site_projections.py`, `domains/vms/storefront/tests/unit/services/test_site_projection_cache.py`, and `domains/vms/storefront/tests/unit/services/test_system_service.py`. A genuinely-loaded-empty site is distinguished from a never-loaded one, at both the producer and consumer level, rather than the empty case silently falling back to a different source: `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. A projected resource's own `available` field is used even when a separately-sourced fallback value is present: `domains/vms/storefront/tests/unit/test_reconciler.py`.
+- Resource-pool projection metadata: allowlisting/redaction, deep-copy isolation, digest advancement, and old-shape preservation: `kit/site/tests/unit/test_projections.py` and `kit/site/tests/unit/test_projection_router.py`. Composition (`ResourcePool`/`AnsiblePoolConfig` -> allowlisted metadata, including the provider/mechanism gate): `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`. VM size defaults reachable through the real pool admin API end to end (`ProvisioningClient.create_pool` -> `AnsiblePoolConfigHandler` -> DB -> read-back): `provisioning/compute/service/tests/integration/test_pools_api.py`. The same defaults surfacing through the real projection consumer (`SiteCapacityClient.resource_pool_projection()` over the real in-process app): `provisioning/compute/service/tests/integration/test_capacity_api.py`. Schema migration column addition and idempotency: `provisioning/compute/service/tests/unit/test_database.py`. A host's GPU model reaching the projected resource's `attributes`, omitted rather than null when unset: `provisioning/compute/service/tests/unit/services/test_host_service.py`, `provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`, `provisioning/compute/service/tests/integration/test_hosts_api.py`, and `provisioning/compute/service/tests/integration/test_capacity_api.py`.
+- The real HTTP contract (`HealthResponse` server model through the actual `/api/v1/system/status` route to the real `StorefrontClient`) surfacing this state intact: `domains/vms/storefront/tests/integration/test_admin_api.py`.
 
 Job-kind dispatch and deal-event routing across multiple storefront domains are not established by this capacity baseline.
 
@@ -164,6 +167,8 @@ Job-kind dispatch and deal-event routing across multiple storefront domains are 
 A **Capacity Reservation** records accepted capacity, the agreement/deal relationship, requested shape or units, lifecycle state, and any hold expiry. A reservation is not itself a concrete provisioning decision.
 
 A **Capacity Settlement Assignment** is the idempotent scheduling decision that maps one unchanged Capacity Reservation to one concrete pooled Settlement Resource. Retrying assignment for the same unchanged reservation returns the existing decision rather than rerunning scheduling policy. An assignment alone does not imply that physical settlement succeeded or that a workload is active.
+
+<a id="relationship-to-fulfillment-scheduling"></a>
 
 **Relationship to fulfillment scheduling**
 
@@ -220,6 +225,52 @@ The site authority publishes two independent pull projections:
 
 Each projection family has its own monotonic revision and canonical snapshot digest. Storefront caches replace complete generations atomically and retain the last complete generation when a refresh fails; unavailable projection state is distinct from an authoritative empty projection.
 
+### Requirement: Resource-pool projection metadata
+The `site_resource_pools` projection MAY carry allowlisted, additive pool-level metadata alongside per-resource inventory: `label`, `enabled`, `mechanism` (the pool's configured provider kind, e.g. `"ansible"` -- never provider credentials or connection configuration), opaque `policy_tags`, and a generic `pool_views` map. A projection producer omitting pool metadata, or a pool absent from a supplied metadata source, MUST yield a resource-pool row with no `pool_metadata` key at all, not an empty one -- older producers and consumers observe no behavioral change. Any change to projected pool metadata MUST advance that projection's existing revision and digest identically to a resource-level change.
+
+`pool_views` is domain-neutral at this layer: the site-capacity projection carries it as an opaque `dict[str, Any]` and MUST NOT interpret its contents or require any provider-specific key names. Domain-owned content lives under a versioned key inside it (mirroring the existing per-resource `publication_views` convention) -- for example, an Ansible-provider pool's configured VM size defaults are published as `pool_views["vm.ansible_pool_defaults.v1"]`, a mapping shaped and populated entirely by the VM provisioning domain, never by the generic site-capacity or resource-pool packages. A view keyed by a domain/mechanism name (for example `vm.*`) MUST only be published for a pool whose `mechanism` actually matches that domain -- a stale or orphaned provider-specific configuration row for a pool that no longer uses that provider MUST NOT surface that provider's view.
+
+A resource-pool row's per-resource `attributes` MAY carry allowlisted, additive host-level facts alongside a pool's own inventory accounting -- for example a VM host's configured GPU model. Such a field MUST be omitted from `attributes`, not published as null, when the underlying value is unset.
+
+#### Scenario: Older producer omits pool metadata
+- **WHEN** a resource-pool projection is produced with no pool-metadata source configured
+- **THEN** every resource-pool row is emitted with the same shape as before pool metadata existed, with no `pool_metadata` key
+
+#### Scenario: Pool metadata changes with unchanged resource inventory
+- **WHEN** only a pool's `label`, `enabled` state, `policy_tags`, or `pool_views` content changes and its resource inventory does not
+- **THEN** the resource-pool projection's revision and digest advance, identically to a resource-level change
+
+#### Scenario: Provider credentials never enter the projection
+- **WHEN** a pool's provider-specific configuration contains connection details or credentials alongside allowlisted fields
+- **THEN** the projected `pool_metadata` and `pool_views` contain only the allowlisted fields; credentials and connection configuration are never present
+
+#### Scenario: A stale provider-specific configuration row does not leak its view
+- **WHEN** a pool's `mechanism` no longer matches the provider that a leftover provider-specific configuration row belongs to
+- **THEN** that provider's versioned view is absent from `pool_views`, regardless of whether the stale row still exists
+
+#### Scenario: An unset host-level attribute is omitted, not published as null
+- **WHEN** a host's GPU model is not configured
+- **THEN** the corresponding resource-pool row's `attributes` carries no key for it, rather than a null value
+
+### Requirement: Per-site projection load-state visibility
+A storefront MUST report, per configured site and per independent projection family (resource-pool, capacity-bucket), whether that projection has never loaded, is currently loaded, is stale, or is unavailable. This state MUST be visible on the storefront's operator status surface, scoped per site and family — one site's load failure MUST NOT present as broad storefront degradation while other configured sites are healthy. A storefront MUST NOT persist projection generations durably across restart; retry-until-success plus this observable status is the accepted mechanism for a site being unreachable at storefront startup. Any future reader of these caches MUST treat a never-loaded or unavailable state as unknown, not as authoritative zero capacity — the same principle "Site authority is unavailable" already states for the legacy reconciliation path applies equally here.
+
+#### Scenario: A configured site is unreachable at storefront startup
+- **WHEN** the storefront starts and one configured site's projection load has not yet succeeded
+- **THEN** operator status reports that site/family as not-yet-loaded rather than presenting an empty projection as authoritative, and the storefront continues retrying without blocking readiness for other configured sites
+
+#### Scenario: One projection family fails to refresh after a successful load
+- **WHEN** a resource-pool refresh fails while the capacity-bucket family advances
+- **THEN** the storefront retains the previous resource-pool generation in memory as stale, reports that state on the status surface, and commits the capacity-bucket replacement independently
+
+#### Scenario: A site's projection has genuinely loaded with zero pools
+- **WHEN** a site's resource-pool projection has successfully loaded and that site currently has no pools
+- **THEN** a projection consumer treats that site as an authoritative empty answer, distinct from a site whose projection has never loaded — it MUST NOT fall back to a different capacity source for that site on the theory that an empty result might mean the projection is unavailable
+
+#### Scenario: A projected resource's own availability is authoritative
+- **WHEN** a projected resource carries its own `available` field alongside a separately-sourced fallback availability value for the same resource
+- **THEN** a consumer uses the projection's own `available` field regardless of whether the fallback value is present or absent — the projection's own live data is never conditionally discarded in favor of a fallback source
+
 ### Requirement: Capacity accounting is private to the site authority
 The site authority SHALL account reservable capacity with `CapacityBucket` rows and SHALL store each active reservation's current backing in `CapacityReservationDebit`. A storefront-facing capacity reservation SHALL NOT expose a bucket identifier or backing physical-resource identifier. This extends to domain-specific physical-placement fields carried on the reservation (for example the VM domain's `vm_host`), not only the site authority's own generic accounting identifiers -- any field that identifies which concrete physical resource is serving a reservation is a backing physical-resource identifier for the purposes of this requirement, regardless of which domain named it. Scheduling MAY atomically replace the current debit when it selects a different eligible bucket.
 
@@ -237,3 +288,11 @@ A site authority SHALL expose `site_resource_pools` from authoritative domain in
 ### Requirement: Committed dimensions remain authoritative through scheduling
 
 Scheduling MUST NOT admit a dimension shape exceeding what the capacity reservation declares. Within that bound, a scheduling request MAY be narrower than the reservation — reflecting, for example, a negotiated shape change not yet expressed as a reservation resize, or a placement/pricing check against a candidate shape. The dimensions actually scheduled — not the reservation's own dimensions unconditionally — are the authoritative admitted resource shape carried with the selected settlement resource, so the domain fulfillment provider can interpret them without the caller retransmitting an independently computed shape. A negotiated shape change that is meant to persist resizes the reservation itself (supersede, never mutate) rather than relying on an implicit narrower scheduling request to represent it.
+
+#### Scenario: Scheduling request narrower than the reservation is permitted
+- **WHEN** a scheduling request asks for less of a dimension than the reservation holds
+- **THEN** scheduling admits the narrower shape and records the dimensions actually scheduled, not the reservation's full dimensions, on the selected settlement resource
+
+#### Scenario: Scheduling request exceeding the reservation is rejected
+- **WHEN** a scheduling request asks for more of a governed dimension than the reservation holds
+- **THEN** scheduling rejects the request before assignment or provider execution

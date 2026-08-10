@@ -50,6 +50,9 @@ class HostCreate(BaseModel):
         )
     )
     gpu_count: int = Field(default=0, ge=0, description="Number of GPU cards on the host.")
+    gpu_model: Optional[str] = Field(
+        default=None, description="Descriptive GPU model, e.g. 'H100', 'A100'.",
+    )
     enabled: bool = Field(default=True, description="Whether this host is available for jobs.")
     pool_id: Optional[str] = Field(
         default=None,
@@ -66,6 +69,7 @@ class HostUpdate(BaseModel):
     ssh_key_type: Optional[Literal["path", "embedded"]] = Field(default=None)
     ssh_key_value: Optional[str] = Field(default=None, description="Updated key path or material.")
     gpu_count: Optional[int] = Field(default=None, ge=0)
+    gpu_model: Optional[str] = Field(default=None, description="Updated descriptive GPU model.")
     enabled: Optional[bool] = Field(default=None)
     pool_id: Optional[str] = Field(default=None, description="Reassign this host to a different pool.")
 
@@ -83,6 +87,7 @@ class HostResponse(BaseModel):
     ssh_user: str
     ssh_key_type: str
     gpu_count: int
+    gpu_model: Optional[str] = None
     enabled: bool
     pool_id: str
     created_at: datetime

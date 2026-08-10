@@ -48,8 +48,10 @@ scope (cutting over fulfillment dispatch), so it is split out here.
   of from storefront settings, once available. Falls back to the existing
   storefront-configured default when a buyer supplies no connectivity terms
   of their own, preserving today's behavior as the default.
-- State: **New capability. Not yet planned — see `design.md`'s Open
-  Questions before task planning begins.**
+- State: **Not yet planned — see `design.md`'s Open Questions before task
+  planning begins.** (**Corrected 2026-08-06:** previously read "New
+  capability," contradicting the "New Capabilities: None" declaration below.
+  This change modifies existing capabilities.)
 
 ## Capabilities
 
@@ -61,8 +63,10 @@ None.
 
 - `negotiation-protocol`: the VM domain's versioned provision envelope gains
   an optional connectivity payload.
-- `buyer-orchestration` / VM domain negotiation strategy: validates
-  buyer-supplied connectivity terms before acceptance.
+- `buyer-orchestration`: the VM domain's negotiation strategy validates
+  buyer-supplied connectivity terms before acceptance. **Corrected
+  2026-08-06:** previously written as two entries joined by a slash, which
+  does not resolve to a capability.
 - `physical-provisioning`: VM fulfillment request's `connectivity` field
   (introduced by `pools-7-storefront-fulfillment-cutover` as
   storefront-configured) gains a negotiated-terms source.
@@ -89,6 +93,14 @@ None.
 - Candidate starting shape and the scope-split rationale are recorded in
   `pools-7-storefront-fulfillment-cutover/design.md`'s Section 9 design
   review (FRP forwarding discussion, 2026-07-26).
+- **Added 2026-08-06:** two changes now reshape the same negotiation envelope
+  this change extends. `capacity-shape-pricing` makes the negotiated quantity
+  a rate multiplier rather than an absolute amount, and
+  `negotiation-driven-capacity-resize` Section 2 adds a revised-terms field as
+  a child of `proposal`. Connectivity terms are round-zero provision payload
+  rather than per-round terms, so no direct conflict is expected — but the
+  envelope's shape should be settled with those changes rather than extended
+  independently.
 
 ## Impact
 

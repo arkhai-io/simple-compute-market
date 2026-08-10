@@ -13,6 +13,7 @@ directly (same as production).
 from __future__ import annotations
 
 import sqlite3
+from unittest.mock import patch
 from typing import AsyncIterator
 
 import httpx
@@ -32,6 +33,7 @@ from domains.vms.listings.reconciler import (
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
+from tests._settings_overrides import settings_overrides
 
 ADMIN_KEY = "test-admin-key"
 
@@ -134,6 +136,117 @@ class TestHealthEndpoint:
         assert "exit_on_probe" not in strat_check, (
             f"Negotiation strategy would exit on every round: {strat_check!r}"
         )
+
+    async def test_system_status_surfaces_site_projection_state(self, db):
+        """End-to-end: a populated projection status summary must survive
+        SystemService -> HealthResponse (server, pydantic) -> HTTP JSON ->
+        HealthResponse (client, dataclass) intact. Exercises the real route
+        through the real StorefrontClient, not SystemService in isolation --
+        this is exactly the layer a service-level unit test cannot prove.
+        """
+        summary = {
+            "site-a": {
+                "resource_pool": {
+                    "state": "loaded",
+                    "revision": 3,
+                    "digest": "abc123",
+                    "last_error": None,
+                    "fetched_at": "2026-08-03T12:00:00+00:00",
+                },
+                "capacity_bucket": {
+                    "state": "unavailable",
+                    "revision": None,
+                    "digest": None,
+                    "last_error": "connection refused",
+                    "fetched_at": None,
+                },
+            },
+        }
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            projection_status_provider=lambda: summary,
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_system_status()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.site_projections == summary
+        assert result.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
+        assert result.site_projections["site-a"]["capacity_bucket"]["state"] == "unavailable"
+
+    async def test_health_omits_site_projections(self, db):
+        """The fast liveness probe (/health) must not carry this field at all."""
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            projection_status_provider=lambda: {"site-a": {}},
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_health()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.site_projections is None
+
+    async def test_system_status_surfaces_listing_mode_explanations(self, db):
+        """Same real end-to-end round trip as
+        test_system_status_surfaces_site_projection_state (above), for the
+        sibling field -- this is exactly the layer that hid the original
+        site_projections bug (Pydantic v2's default extra="ignore" silently
+        dropping a field the server model hadn't declared), so the new
+        field gets the same real-HTTP proof rather than only a
+        SystemService-level unit test.
+        """
+        explanations = {
+            "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
+        }
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            listing_mode_explanation_provider=lambda: explanations,
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_system_status()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.listing_mode_explanations == explanations
+
+    async def test_health_omits_listing_mode_explanations(self, db):
+        """The fast liveness probe (/health) must not carry this field either."""
+        _container.resolved_sqlite_client = db
+        _container.resolved_system_service = SystemService(
+            sqlite_client=db,
+            listing_mode_explanation_provider=lambda: {"site-a": {}},
+        )
+        try:
+            app = FastAPI()
+            app.include_router(system_router)
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient("http://test", transport=transport) as c:
+                result = await c.get_health()
+        finally:
+            _container.resolved_sqlite_client = None
+            _container.resolved_system_service = None
+
+        assert result.listing_mode_explanations is None
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +417,7 @@ async def _seed_dynamic_listing_pool_rows(
             record_derived_listing(
                 db.db_path,
                 listing_id=listing_id,
+                site_id="default",
                 resource_id="pool-h200-1",
                 gpu_count=gpu_count,
             )
@@ -349,23 +463,19 @@ class TestFulfillmentEvents:
         await _seed_dynamic_listing_pool_rows(db)
 
         with site_capacity(_fake_pool_site()):
-            response = await c._post(
-                "/api/v1/admin/portfolio/reservations",
-                {
-                    "required_attributes": {
-                        "resource_id": "pool-h200-1",
-                        "gpu_count": 2,
-                    },
-                    "listing_id": "listing-2x-manual",
-                    "escrow_uid": "manual-escrow-2x",
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
                 },
-                extra_headers=c._admin_headers(),
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-2x",
             )
 
-        assert response["capacity_reservation_id"]
-        assert response["resource_id"] == "pool-h200-1"
-        assert response["gpu_count"] == 2
-        assert sorted(response["closed_listing_ids"]) == ["listing-3x", "listing-4x"]
+        assert response.capacity_reservation_id
+        assert response.resource_id == "pool-h200-1"
+        assert response.gpu_count == 2
+        assert sorted(response.closed_listing_ids) == ["listing-3x", "listing-4x"]
         statuses = {
             gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
                 "status"
@@ -378,6 +488,106 @@ class TestFulfillmentEvents:
             3: "closed",
             4: "closed",
         }
+
+    async def test_admin_reserve_capacity_for_a_mapped_listing_pins_to_its_site(
+        self, client,
+    ):
+        """A listing already mapped to a site (derived_compute_listings)
+        must reserve there -- proves the site_id lookup and threading
+        through reserve(site=...) doesn't break the ordinary case where
+        the mapped site is also the only site configured. The collision
+        case (a mapped site preferred over placement's own choice) is
+        covered at the AggregateCapacityClient unit level
+        (test_aggregation.py), where a real multi-site setup exists.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        record_derived_listing(
+            db.db_path, listing_id="listing-2x-manual", site_id="default",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+
+        with site_capacity(_fake_pool_site()):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
+                },
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-2x",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.resource_id == "pool-h200-1"
+
+    async def test_admin_reserve_capacity_honors_a_live_refusal_over_a_cached_projection(
+        self, client,
+    ):
+        """A fresh, valid cached site_resource_pools projection showing
+        abundant capacity must not override what the site's live
+        reservations endpoint actually says. reserve() has no code path
+        that reads the projection cache at all today (confirmed
+        directly against aggregation.py -- zero references); this test
+        proves the *observable* consequence of that fact, so it fails
+        immediately if a future change ever adds such a shortcut.
+        """
+        from core_storefront.site_projections import (
+            ProjectionCache, ProjectionIdentity, ProjectionState,
+        )
+        from market_storefront.services import site_projection_cache as spc
+        from tests.fake_site import FakeSite, site_capacity
+
+        c, db = client
+        # The live site genuinely has zero capacity for this resource.
+        fake = FakeSite()
+        fake.add_resource(
+            "pool-h200-1", 0,
+            attributes={"gpu_model": "H200", "vm_host": "host-1"},
+        )
+        # Mapped listing -- routes reserve() through _reserve_at_site
+        # (the pinned-site path), not the placement fan-out; without a
+        # mapping this test would exercise a different code path than
+        # the one it's meant to guard.
+        record_derived_listing(
+            db.db_path, listing_id="listing-refused-mapped", site_id="default",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+
+        # A cached projection for the same site, same pool, claiming
+        # abundant capacity -- fresh, loaded, not stale.
+        resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
+        resource_pools_cache._value = [{
+            "resource_pool_id": "pool-h200-1",
+            "resources": [{
+                "physical_resource_id": "res-1",
+                "capacity": {"gpu_count": 8},
+                "available": {"gpu_count": 8},
+                "attributes": {"gpu_model": "H200"},
+                "enabled": True,
+            }],
+        }]
+        resource_pools_cache._state = ProjectionState.loaded
+        resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
+        caches = spc.SiteProjectionCaches(
+            resource_pools=resource_pools_cache,
+            capacity_buckets=ProjectionCache(client=None),
+        )
+
+        with site_capacity(fake), \
+             patch.dict(spc._caches, {"default": caches}, clear=True):
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    listing_id="listing-refused-mapped",
+                    escrow_uid="manual-escrow-refused",
+                )
+
+        assert "409" in str(exc_info.value)
 
     async def test_admin_reserve_reports_listings_closed_by_delta_race(self, client):
         from tests.fake_site import site_capacity
@@ -402,25 +612,23 @@ class TestFulfillmentEvents:
                     conn.commit()
                 finally:
                     conn.close()
-                mark_derived_listings_closed(db.db_path, ["listing-3x"])
+                mark_derived_listings_closed(
+                    db.db_path, ["listing-3x"], home_site="default", configured_site_count=1,
+                )
             return response
 
         fake._handle = handle_with_delta_reconciliation
         with site_capacity(fake):
-            response = await c._post(
-                "/api/v1/admin/portfolio/reservations",
-                {
-                    "required_attributes": {
-                        "resource_id": "pool-h200-1",
-                        "gpu_count": 2,
-                    },
-                    "listing_id": "listing-2x-manual",
-                    "escrow_uid": "manual-escrow-2x",
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
                 },
-                extra_headers=c._admin_headers(),
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-2x",
             )
 
-        assert sorted(response["closed_listing_ids"]) == [
+        assert sorted(response.closed_listing_ids) == [
             "listing-3x",
             "listing-4x",
         ]
@@ -434,20 +642,84 @@ class TestFulfillmentEvents:
         with site_capacity(_fake_pool_site()) as capacity:
             await _ledger_hold(capacity, gpu_count=2)
             with pytest.raises(StorefrontClientError) as exc_info:
-                await c._post(
-                    "/api/v1/admin/portfolio/reservations",
-                    {
-                        "required_attributes": {
-                            "resource_id": "pool-h200-1",
-                            "gpu_count": 3,
-                        },
-                        "listing_id": "listing-3x-manual",
-                        "escrow_uid": "manual-escrow-3x",
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 3,
                     },
-                    extra_headers=c._admin_headers(),
+                    listing_id="listing-3x-manual",
+                    escrow_uid="manual-escrow-3x",
                 )
 
         assert "409" in str(exc_info.value)
+
+    async def test_admin_reserve_capacity_returns_500_for_a_stale_site_mapping(
+        self, client,
+    ):
+        """A listing mapped to a site that isn't currently configured is
+        a data-integrity problem, not a capacity answer -- must not be
+        collapsed into the same 409 a genuine refusal returns."""
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        record_derived_listing(
+            db.db_path, listing_id="listing-stale-mapping", site_id="ghost-site",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+
+        with site_capacity(_fake_pool_site()):
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    listing_id="listing-stale-mapping",
+                    escrow_uid="manual-escrow-stale",
+                )
+
+        assert "500" in str(exc_info.value)
+
+    async def test_admin_reserve_capacity_returns_502_when_the_mapped_site_is_unreachable(
+        self, client,
+    ):
+        """The mapped site itself failing to respond is also distinct
+        from a genuine "no capacity" refusal -- must surface as an
+        upstream-communication failure, not a 409."""
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        record_derived_listing(
+            db.db_path, listing_id="listing-unreachable", site_id="default",
+            pool_id="pool-h200-1", resource_id=None, gpu_count=2,
+        )
+        fake = _fake_pool_site()
+
+        def handle_reservation_failure(request):
+            if (
+                request.method == "POST"
+                and request.url.path == "/api/v1/capacity/reservations"
+            ):
+                raise ConnectionError("site unreachable")
+            return original_handle(request)
+
+        original_handle = fake._handle
+        fake._handle = handle_reservation_failure
+
+        with site_capacity(fake):
+            with pytest.raises(StorefrontClientError) as exc_info:
+                await c.admin_reserve_capacity(
+                    required_attributes={
+                        "resource_id": "pool-h200-1",
+                        "gpu_count": 2,
+                    },
+                    listing_id="listing-unreachable",
+                    escrow_uid="manual-escrow-unreachable",
+                )
+
+        assert "502" in str(exc_info.value)
 
     async def test_usage_started_closes_oversized_listings(self, client):
         from tests.fake_site import site_capacity
@@ -458,19 +730,15 @@ class TestFulfillmentEvents:
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            response = await c._post(
-                "/api/v1/admin/fulfillment/events/usage-started",
-                {
-                    "capacity_reservation_id": capacity_reservation_id,
-                    "escrow_uid": "escrow-2x",
-                    "provider_id": "provider-a",
-                    "provider_lease_id": "lease-2x",
-                    "resource_id": "provider-resource-2x",
-                    "vm_host": "kvm1",
-                    "vm_target": "tenant-2x",
-                    "lease_end_utc": "2026-01-01T00:00:00Z",
-                },
-                extra_headers=c._admin_headers(),
+            response = await c.notify_usage_started(
+                capacity_reservation_id,
+                escrow_uid="escrow-2x",
+                provider_id="provider-a",
+                provider_lease_id="lease-2x",
+                resource_id="provider-resource-2x",
+                vm_host="kvm1",
+                vm_target="tenant-2x",
+                lease_end_utc="2026-01-01T00:00:00Z",
             )
 
         assert response["capacity_reservation_id"] == capacity_reservation_id
@@ -490,20 +758,14 @@ class TestFulfillmentEvents:
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            closed = await c._post(
-                "/api/v1/admin/fulfillment/events/usage-started",
-                {"capacity_reservation_id": capacity_reservation_id, "escrow_uid": "escrow-2x"},
-                extra_headers=c._admin_headers(),
+            closed = await c.notify_usage_started(
+                capacity_reservation_id, escrow_uid="escrow-2x",
             )
             assert sorted(closed["closed_listing_ids"]) == [
                 "listing-3x", "listing-4x",
             ]
 
-            response = await c._post(
-                "/api/v1/admin/fulfillment/events/capacity-released",
-                {"capacity_reservation_id": capacity_reservation_id},
-                extra_headers=c._admin_headers(),
-            )
+            response = await c.notify_capacity_released(capacity_reservation_id)
 
         assert response["capacity_reservation_id"] == capacity_reservation_id
         assert response["state"] == "released"
@@ -532,20 +794,14 @@ class TestFulfillmentEvents:
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            closed = await c._post(
-                "/api/v1/admin/fulfillment/events/usage-started",
-                {"capacity_reservation_id": capacity_reservation_id, "escrow_uid": "escrow-2x"},
-                extra_headers=c._admin_headers(),
+            closed = await c.notify_usage_started(
+                capacity_reservation_id, escrow_uid="escrow-2x",
             )
             assert sorted(closed["closed_listing_ids"]) == [
                 "listing-3x", "listing-4x",
             ]
 
-            response = await c._post(
-                "/api/v1/admin/fulfillment/events/capacity-released",
-                {"capacity_reservation_id": capacity_reservation_id},
-                extra_headers=c._admin_headers(),
-            )
+            response = await c.notify_capacity_released(capacity_reservation_id)
 
         assert sorted(response["reopened_listing_ids"]) == [
             "listing-3x", "listing-4x",
@@ -572,18 +828,14 @@ class TestFulfillmentEvents:
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            response = await c._post(
-                "/api/v1/admin/fulfillment/events/failed",
-                {
-                    "capacity_reservation_id": capacity_reservation_id,
-                    "provider_id": "provider-a",
-                    "provider_job_id": "job-create-1",
-                    "resource_id": "provider-resource-2x",
-                    "reason": "provisioning_error",
-                    "message": "host rejected request",
-                    "logs_ref": "s3://logs/job-create-1",
-                },
-                extra_headers=c._admin_headers(),
+            response = await c.notify_fulfillment_failed(
+                capacity_reservation_id,
+                provider_id="provider-a",
+                provider_job_id="job-create-1",
+                resource_id="provider-resource-2x",
+                reason="provisioning_error",
+                message="host rejected request",
+                logs_ref="s3://logs/job-create-1",
             )
 
         assert response["capacity_reservation_id"] == capacity_reservation_id
@@ -608,6 +860,84 @@ class TestFulfillmentEvents:
             )
         assert response["capacity_reservation_id"] == "ledger-only-alloc"
         assert response["state"] == "released"
+
+
+# ---------------------------------------------------------------------------
+# Real orchestration: a cached projection reaches the real reconciler and
+# produces real storefront DB/listing state, using the real
+# close_stale_compute_listings_after_capacity_change /
+# reopen_available_compute_listings_after_capacity_change functions rather
+# than a mocked reconciliation boundary.
+# ---------------------------------------------------------------------------
+
+class TestRealOrchestrationCacheToReconciliation:
+    async def test_cached_projection_closes_real_oversized_listings(self, client):
+        from core_storefront.capacity import CapacityDelta
+        from core_storefront.site_projections import (
+            ProjectionCache, ProjectionIdentity, ProjectionState,
+        )
+        from market_storefront.services.capacity_client import (
+            _make_listing_reconcile_subscriber,
+        )
+        from market_storefront.services import site_projection_cache as spc
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        # The projection's own "available" field takes precedence over the
+        # live snapshot (see _projected_resource_usage) -- 2 of the pool's
+        # 4 GPUs available, authoritative, not derived from a reservation.
+        resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
+        resource_pools_cache._value = [{
+            "resource_pool_id": "pool-h200-1",
+            "resources": [{
+                "physical_resource_id": "pool-h200-1",
+                "capacity": {"gpu_count": 4},
+                "available": {"gpu_count": 2},
+                "attributes": {"gpu_model": "H200"},
+                "enabled": True,
+            }],
+        }]
+        resource_pools_cache._state = ProjectionState.loaded
+        resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
+        caches = spc.SiteProjectionCaches(
+            resource_pools=resource_pools_cache,
+            capacity_buckets=ProjectionCache(client=None),
+        )
+
+        with site_capacity(_fake_pool_site()) as capacity, \
+             patch.dict(spc._caches, {"default": caches}, clear=True), \
+             settings_overrides(**{"capacity.use_site_projection_for_listings": True}), \
+             patch(
+                 "market_storefront.services.publication_service.get_sqlite_client",
+                 return_value=db,
+             ):
+            # close_order (called for each stale listing) is registry-
+            # backed and has no real registry server here -- it falls
+            # back to get_sqlite_client() to confirm the DB-side close
+            # landed even when the registry push failed. That global
+            # singleton defaults to settings.db_path, not this test's
+            # own db fixture, so it must be patched here or the
+            # fallback check silently finds nothing.
+            subscriber = _make_listing_reconcile_subscriber(lambda: db, capacity)
+            await subscriber(CapacityDelta(kind="reserved", version=1))
+
+        # Real DB state, not a fake's captured call arguments: listing-3x
+        # and listing-4x (3 and 4 GPUs) no longer fit under the cached
+        # projection's 2-GPU answer and must be genuinely closed.
+        statuses = {
+            gpu_count: (await db.load_listing(listing_id=f"listing-{gpu_count}x"))[
+                "status"
+            ]
+            for gpu_count in range(1, 5)
+        }
+        assert statuses == {
+            1: "open",
+            2: "open",
+            3: "closed",
+            4: "closed",
+        }
 
 
 # ---------------------------------------------------------------------------

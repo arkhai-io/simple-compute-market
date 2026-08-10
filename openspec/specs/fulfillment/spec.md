@@ -178,13 +178,13 @@ Scheduling errors distinguish a missing or expired reservation, a request that c
 - **WHEN** `POST /fulfillment/begin` is called for a capacity reservation that has never been scheduled
 - **THEN** it responds 404 `fulfillment_not_found` rather than scheduling implicitly
 
-## Fulfillment convergence worker
+<a id="fulfillment-convergence-worker"></a>
 
-The compute provisioning composition runs a periodic fulfillment convergence worker alongside its other lifecycle workers. Each pass claims a bounded batch in a short SQLite write transaction, closes that transaction before provider I/O, and applies the provider outcome in a second transaction only while the same worker still owns the claim and the aggregate remains in the expected source state. Create dispatch, create-status convergence, teardown dispatch, and teardown-status convergence are independently callable passes so recovery behavior can be tested and operated without coupling all work to one monolithic cycle. There is no attempt-count ceiling: a row that keeps failing keeps retrying with backoff rather than being abandoned to a terminal state on its own, and durable claim state (not worker-local memory) is what a fresh worker instance resumes from after a restart. The one exception is unresolvable persisted resource identity on a provider-reported create success: since the metadata that failed to resolve is already durable and will not change on a later retry, that specific condition transitions directly to `failed` rather than retrying indefinitely behind diagnostics indistinguishable from a healthy in-progress row. The worker emits exactly one structured recovery-diagnostics event after each completed cycle rather than logging diagnostics per row. The snapshot contains a stable entry for every recovery lifecycle state, including states with zero rows. Each state reports total rows, actively claimed rows, expired claims eligible for reclamation, oldest-row age, and maximum attempt count. Provider-reported `failed` and `teardown_failed` rows are reported as separate counts. Age and attempt metrics are calculated per lifecycle state; the contract does not expose global oldest-age or maximum-attempt fields.
+**Fulfillment convergence worker.** The compute provisioning composition runs a periodic fulfillment convergence worker alongside its other lifecycle workers. Each pass claims a bounded batch in a short SQLite write transaction, closes that transaction before provider I/O, and applies the provider outcome in a second transaction only while the same worker still owns the claim and the aggregate remains in the expected source state. Create dispatch, create-status convergence, teardown dispatch, and teardown-status convergence are independently callable passes so recovery behavior can be tested and operated without coupling all work to one monolithic cycle. There is no attempt-count ceiling: a row that keeps failing keeps retrying with backoff rather than being abandoned to a terminal state on its own, and durable claim state (not worker-local memory) is what a fresh worker instance resumes from after a restart. The one exception is unresolvable persisted resource identity on a provider-reported create success: since the metadata that failed to resolve is already durable and will not change on a later retry, that specific condition transitions directly to `failed` rather than retrying indefinitely behind diagnostics indistinguishable from a healthy in-progress row. The worker emits exactly one structured recovery-diagnostics event after each completed cycle rather than logging diagnostics per row. The snapshot contains a stable entry for every recovery lifecycle state, including states with zero rows. Each state reports total rows, actively claimed rows, expired claims eligible for reclamation, oldest-row age, and maximum attempt count. Provider-reported `failed` and `teardown_failed` rows are reported as separate counts. Age and attempt metrics are calculated per lifecycle state; the contract does not expose global oldest-age or maximum-attempt fields.
 
-## Durable settlement persistence
+<a id="durable-settlement-persistence"></a>
 
-One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
+**Durable settlement persistence.** One durable `SettlementRecord` aggregate exists per `capacity_reservation_id`, which is its primary key. There is no separate scheduler-owned assignment table and no separate fulfillment record: scheduling creates the row, `begin_fulfillment` accepts it in place, and provider dispatch/teardown converge the same row. `fulfillment_id` is a distinct, nullable-until-accepted, unique column on that row — not a second primary key or a second row — generated the first time the aggregate is accepted past `assigned`. Whole-fulfillment status and teardown are addressed by `fulfillment_id`; scheduling and acceptance idempotency are addressed by `capacity_reservation_id`.
 
 The aggregate's lifecycle states are `assigned`, `dispatch_pending`, `dispatching`, `active`, `failed`, `teardown_dispatch_pending`, `tearing_down`, `torn_down`, `teardown_failed`, and `abandoned`. `failed`, `torn_down`, and `abandoned` are terminal; `teardown_failed` is not, since recovery may retry teardown. Transitions are checked against one compact table-driven validator shared by every caller (scheduler, fulfillment acceptance, provider recovery, teardown, and abandonment) rather than a bespoke check per edge. A retry that finds the row already at its target state is a no-op return, not a transition-table lookup — self-transitions are intentionally absent from the table so it describes only real state changes.
 
@@ -341,25 +341,9 @@ The aggregate kit build/test flow MUST build prerequisite site and resource-pool
 - **WHEN** the wheel is built
 - **THEN** it contains the public modules and `market_fulfillment/py.typed`
 
-## Evidence
-
-- Identifier generation and ordering: `kit/fulfillment/tests/unit/test_ids.py`.
-- Request and multidimensional validation: `kit/fulfillment/tests/unit/test_settlement_types.py`.
-- Deterministic scheduler behavior: `kit/fulfillment/tests/unit/test_scheduler.py`.
-- Envelope constraints and round trips: `kit/fulfillment/tests/unit/test_envelopes.py`.
-- Dependency boundaries: `kit/fulfillment/tests/unit/test_import_boundaries.py` and repository-level architecture tests as introduced.
-- Provider contracts and registry behavior: `kit/fulfillment/tests/unit/test_provider.py` and compute provisioning service tests.
-- Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`; scheduling-time exceeds-reservation rejection: `kit/fulfillment/tests/unit/test_scheduler.py`.
-- Durable aggregate schema and constraints: `kit/fulfillment/tests/unit/test_settlement_db.py`.
-- State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
-- Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_settlement_repository.py`.
-- Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
-- Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`. `POST /fulfillment/schedule`'s HTTP contract (assignment, idempotent retry, unknown-reservation rejection, and schedule-then-begin using the assigned resource): `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestScheduleEndpoint`.
-- Status/result read paths (no-provider-call status reads, active-only provisioned-resource and credential projection, empty outputs/credentials across all non-active states, unknown-identifier rejection, live credential-fetch failure isolation): `kit/fulfillment/tests/unit/test_fulfillment.py`. `fulfillment.result.v1` envelope shape and round-trip: `kit/fulfillment/tests/unit/test_results.py`. End-to-end HTTP coverage against a real SQLite-backed repository and a real `AnsibleFulfillmentProvider.fetch_credentials` read: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
-
 ### Requirement: Fulfillment validation
 
-The fulfillment validation endpoint accepts the same reservation, market, and fulfillment-request signature as acceptance. It uses the same internal preparation path to load the already-scheduled aggregate, selected resource, current pool configuration, and provider, but runs in a read-only session without reserving SQLite's writer slot and performs no lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
+The fulfillment validation endpoint MUST accept the same reservation, market, and fulfillment-request signature as acceptance. It MUST use the same internal preparation path to load the already-scheduled aggregate, selected resource, current pool configuration, and provider, but MUST run in a read-only session without reserving SQLite's writer slot and MUST NOT perform a lifecycle transition, prepared-operation write, provider dispatch, or other durable mutation. The result is provider-neutral and non-binding because pool configuration may change before acceptance.
 
 #### Scenario: Validation succeeds without acceptance
 
@@ -368,7 +352,7 @@ The fulfillment validation endpoint accepts the same reservation, market, and fu
 
 ### Requirement: Fulfillment status and result queries
 
-`get_fulfillment_status(fulfillment_id)` and `get_fulfillment_result(fulfillment_id)` are storefront-callable pull reads over the durable aggregate (see "Durable settlement persistence" above), addressed by `fulfillment_id` rather than `capacity_reservation_id`. Neither performs a lifecycle transition, prepared-operation write, or other durable mutation; both use a read-only session that does not reserve SQLite's writer slot. There is no separate outbox or delivery-acknowledgement state for either read: a call reflects current durable state on demand, and the caller decides when to call again.
+`get_fulfillment_status(fulfillment_id)` and `get_fulfillment_result(fulfillment_id)` MUST be storefront-callable pull reads over the durable aggregate (see "Durable settlement persistence" above), addressed by `fulfillment_id` rather than `capacity_reservation_id`. Neither MUST perform a lifecycle transition, prepared-operation write, or other durable mutation; both MUST use a read-only session that does not reserve SQLite's writer slot. There is no separate outbox or delivery-acknowledgement state for either read: a call reflects current durable state on demand, and the caller decides when to call again.
 
 `get_fulfillment_status` returns the aggregate's identity, current state, and failure reason/message only. It never calls a `FulfillmentProvider` method.
 
@@ -435,13 +419,6 @@ The cutover SHALL NOT submit a replacement create operation merely because an ex
 - **WHEN** the cutover enumerates a population of nonterminal legacy leases and one candidate fails validation
 - **THEN** no candidate's settlement or provisioned-resource rows are committed, and a rerun against the same unmodified population is idempotent
 
-## Evidence
-
-- Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
-- Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
-- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
-
-
 ### Requirement: Fulfillment teardown is available through the provisioning client
 
 The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfillment_id)` over `POST /fulfillment/{fulfillment_id}/begin-teardown`. Repeated requests for an already-started or completed teardown SHALL return the durable aggregate acceptance without creating a second teardown operation. Unknown identifiers and conflicting aggregate states SHALL retain the endpoint's documented HTTP error classification.
@@ -452,3 +429,26 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 - **WHEN** the provisioning client begins teardown more than once
 - **THEN** every accepted response SHALL identify the same fulfillment aggregate
 - **AND** only one durable teardown operation SHALL exist
+
+## Evidence
+
+
+- Identifier generation and ordering: `kit/fulfillment/tests/unit/test_ids.py`.
+- Request and multidimensional validation: `kit/fulfillment/tests/unit/test_settlement_types.py`.
+- Deterministic scheduler behavior: `kit/fulfillment/tests/unit/test_scheduler.py`.
+- Envelope constraints and round trips: `kit/fulfillment/tests/unit/test_envelopes.py`.
+- Dependency boundaries: `kit/fulfillment/tests/unit/test_import_boundaries.py` and repository-level architecture tests as introduced.
+- Provider contracts and registry behavior: `kit/fulfillment/tests/unit/test_provider.py` and compute provisioning service tests.
+- Shared feasibility predicate: `kit/site/tests/unit/test_resource_satisfies_requirement.py`; scheduling-time exceeds-reservation rejection: `kit/fulfillment/tests/unit/test_scheduler.py`.
+- Durable aggregate schema and constraints: `kit/fulfillment/tests/unit/test_settlement_db.py`.
+- State transition validation: `kit/fulfillment/tests/unit/test_transitions.py`.
+- Repository equivalence scopes, conflict rejection, provisioned resources, and recovery claims: `kit/fulfillment/tests/unit/test_settlement_repository.py`.
+- Session-scoped ledger entry points consumed by cross-package transactions: `kit/site/tests/unit/test_settlement_assignment.py`.
+- Durable, atomic `schedule_resource` (equivalent/conflicting retry, explicit-resource cursor bypass, full-transaction rollback) and resource_kind-scoped cursor durability/isolation: `kit/fulfillment/tests/unit/test_scheduler.py`. `POST /fulfillment/schedule`'s HTTP contract (assignment, idempotent retry, unknown-reservation rejection, and schedule-then-begin using the assigned resource): `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestScheduleEndpoint`.
+- Status/result read paths (no-provider-call status reads, active-only provisioned-resource and credential projection, empty outputs/credentials across all non-active states, unknown-identifier rejection, live credential-fetch failure isolation): `kit/fulfillment/tests/unit/test_fulfillment.py`. `fulfillment.result.v1` envelope shape and round-trip: `kit/fulfillment/tests/unit/test_results.py`. End-to-end HTTP coverage against a real SQLite-backed repository and a real `AnsibleFulfillmentProvider.fetch_credentials` read: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
+
+- Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
+- Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
+- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
+
+

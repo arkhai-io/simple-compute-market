@@ -1,5 +1,3 @@
-# Add attestation reference lookup for fulfillment recovery
-
 ## Why
 
 The VM storefront can recover physical fulfillment and all local post-provisioning work after restart, but one chain boundary remains intentionally incomplete. If `string_obligation.do_obligation(...)` succeeds on-chain and the process loses the response before persisting the returned fulfillment UID, the storefront cannot determine whether the obligation was already submitted.
@@ -64,10 +62,14 @@ Until the upstream capability exists, the VM storefront must not blindly resubmi
 
 ## Capabilities
 
+### New Capabilities
+
+None.
+
 ### Modified Capabilities
 
 - `vm-storefront-fulfillment`: ambiguous on-chain submissions become automatically reconcilable when a supported reference-query capability is available.
-- `alkahest-integration`: gains a bounded, authoritative attestation lookup by reference UID.
+- `settlement-servicing`: the mechanism codec gains a bounded, authoritative attestation lookup by reference UID, consistent with that capability's rule that mechanism codecs own chain vocabulary. **Corrected 2026-08-06:** this previously named `alkahest-integration`, which is not a capability in `openspec/specs/` and would have failed capability resolution.
 
 ## Non-Goals
 
@@ -76,10 +78,18 @@ Until the upstream capability exists, the VM storefront must not blindly resubmi
 - Do not change the accepted rule that commercial delivery takes priority over local bookkeeping durability.
 - Do not permit blind resubmission when chain outcome is unknown.
 
-## Dependencies
+## Impact
 
-- Requires an upstream Alkahest release that exposes the supported query contract.
+- No runtime change until the upstream capability exists; the current safe-pending behavior is unaffected.
+- Once available: a narrow `kit/alkahest` adapter, an injected reconciliation dependency in VM storefront fulfillment, a persisted chain scan cursor written before first submission, and integration coverage against the real Alkahest test environment.
+- Removes an operator-only reconciliation path; adds no new operator surface.
+
+## Dependencies and Related Changes
+
+- **Externally blocked.** Requires an upstream Alkahest release exposing the supported query contract; nothing in this repository can unblock it.
 - Depends on the existing Section 9 versioned recovery envelope and ambiguous-submission checkpoint.
+- Related: `add-settlement-plan-shapes` reworks obligation materialization and claim construction over the same mechanism codec. Reconcile the adapter's placement with that change's per-obligation lifecycle rather than assuming today's single-escrow shape.
+- Related: `kit-owned-settlement-runtime` moves storefront settlement machinery into the kit layer. If it lands first, the injection point for this adapter is the kit-owned runtime rather than the VM storefront.
 
 ## Permanent documentation impact
 

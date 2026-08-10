@@ -376,6 +376,7 @@ async def fulfill_compute_obligation(
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     negotiation_id: str | None = None,
+    site_id: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
 
@@ -423,4 +424,5 @@ async def fulfill_compute_obligation(
         register_lease=_register_vm_lease_with_settings,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,
+        site_id=site_id,
     )

@@ -2,19 +2,17 @@
 
 Covers `ComputeProvisioningClient` -- the client class this same package
 defines -- proving `schedule_resource`/`begin_fulfillment` never *send* a
-placement field. Lives here, not in `core/storefront`, because fulfillment
+placement field. Lives here, not in `kit/site-client`, because fulfillment
 scheduling is a physical-resource-domain concept (VM, bare-metal today),
-not a universal one `core` should know about. See the companion
-`RemoteCapacityClient` test in
-`core/storefront/tests/integration/test_capacity_client_opacity.py` for
+not a universal one that package should know about. See the companion
+`SiteCapacityClient` test in
+`kit/site-client/tests/unit/test_opacity.py` for
 the capacity-reservation half of this same boundary, and that test's
 docstring for why the two were split apart.
 
 What this test does *not* prove: that a real server actually implements
 this contract correctly end to end. That is a genuine two-real-services
-proof and belongs in the e2e suite
-(`refactor-e2e-fulfillment-lifecycle` Section 3) -- see
-`openspec/changes/refactor-e2e-fulfillment-lifecycle/design.md`.
+proof and belongs in the e2e suite.
 """
 
 from __future__ import annotations
@@ -88,14 +86,10 @@ def _fulfillment_request(**overrides: Any) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_schedule_begin_send_no_placement_fields() -> None:
-    """The opaque fulfillment boundary holds from the client side.
-
-    Proves `ComputeProvisioningClient` never *sends* `resource_id` as a
-    required or populated field across schedule/begin -- the same
-    invariant the retired cross-service test proved by exercising a real
-    server, now proved from the client's own request bodies against a
-    mock instead.
-    """
+    """`ComputeProvisioningClient` never sends `resource_id` as a required
+    or populated field across schedule/begin -- proved from the client's
+    own request bodies against a mock, since the point is what the client
+    actually transmits, not just what it receives back."""
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
 

@@ -4,7 +4,7 @@ The aggregator answers the design doc's "two machines in two
 datacenters, one listing, depletes only when both are depleted"
 (docs/development/ARCHITECTURE.md, "Capacity and the Site Authority"):
 a soft-state view over N hard-state site ledgers, reached only through
-their ``CapacityClient`` interfaces. It holds no capacity itself —
+their ``SiteCapacityAuthority`` interfaces. It holds no capacity itself —
 availability is a union over member sites, a reserve is routed to one
 site and falls back to the next on refusal, and there are no
 distributed transactions to invent: cross-site contention resolves at
@@ -16,11 +16,13 @@ service, because pooling/placement is a commercial judgment per seller
 attribute distinguishes them — only the seller's market schema knows
 which attributes those are).
 
-``AggregateCapacityClient`` implements the same ``CapacityClient``
-protocol it consumes, so a storefront wired against one site and one
-wired against five run identical code. Every payload and delta is
-tagged with the site name it came from; pool members reference
-``(site, resource_id)``.
+``AggregateCapacityClient`` implements the broader ``CapacityClient``
+protocol (every ``SiteCapacityAuthority`` operation plus a local
+subscription point for capacity deltas), so a storefront wired against
+one site and one wired against five run identical code. A per-site
+client has no bus of its own to subscribe against -- only the aggregate
+does. Every payload and delta is tagged with the site name it came
+from; pool members reference ``(site, resource_id)``.
 """
 
 from __future__ import annotations
@@ -29,10 +31,10 @@ import logging
 from typing import Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from core_storefront.capacity import (
-    CapacityClient,
     CapacityDelta,
     CapacityEventBus,
     CapacitySubscriber,
+    SiteCapacityAuthority,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ A ranking hint, not an enforcement point — ``probe()``/``reserve()`` on
 the chosen site remain the real, authoritative check (see
 ARCHITECTURE.md's layered-ownership model). This package deliberately
 does not import ``kit/site``: it must stay usable against any
-``CapacityClient`` implementation, not just the one that happens to
+``SiteCapacityAuthority`` implementation, not just the one that happens to
 exist today, so its own default (``_coarse_resource_matches_claim``)
 only understands a small, explicitly-documented claim subset. Domains
 whose backing site needs exact claim semantics (matching every
@@ -192,7 +194,8 @@ def _tagged(site: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class AggregateCapacityClient:
-    """``CapacityClient`` over N named site clients.
+    """``CapacityClient`` over N named per-site (``SiteCapacityAuthority``)
+    clients.
 
     Reads union, writes route. A site that errors is skipped (logged):
     the aggregator is a soft-state view and one site's outage must not
@@ -202,7 +205,7 @@ class AggregateCapacityClient:
 
     def __init__(
         self,
-        sites: Mapping[str, CapacityClient],
+        sites: Mapping[str, SiteCapacityAuthority],
         *,
         placement: PlacementPolicy | None = None,
         bus: CapacityEventBus | None = None,
@@ -239,7 +242,7 @@ class AggregateCapacityClient:
         """
         return self._reservation_sites
 
-    def site(self, name: str) -> CapacityClient:
+    def site(self, name: str) -> SiteCapacityAuthority:
         return self._sites[name]
 
     # -- reads ----------------------------------------------------------
@@ -283,12 +286,87 @@ class AggregateCapacityClient:
         ttl_seconds: float | None = None,
         lease_start_utc: str | None = None,
         lease_duration_seconds: int | None = None,
+        site: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve capacity, pinned to one site or routed by placement.
+
+        ``site`` given: reserve at exactly that site, no fallback -- see
+        ``_reserve_at_site``. This is the only correct behavior for a
+        listing already mapped to a site (``derived_compute_listings``):
+        the storefront has already committed to that site, and trying
+        another on refusal would silently satisfy the claim from a site
+        the buyer never negotiated with.
+
+        ``site`` omitted (``None``): placement-ordered fan-out, for a
+        listing with no site mapping -- see ``_reserve_by_placement``.
+        """
+        if site is not None:
+            return await self._reserve_at_site(
+                site,
+                claim=claim,
+                deal_ref=deal_ref,
+                ttl_seconds=ttl_seconds,
+                lease_start_utc=lease_start_utc,
+                lease_duration_seconds=lease_duration_seconds,
+            )
+        return await self._reserve_by_placement(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+
+    async def _reserve_at_site(
+        self,
+        name: str,
+        *,
+        claim: Mapping[str, Any] | None,
+        deal_ref: Mapping[str, Any] | None,
+        ttl_seconds: float | None,
+        lease_start_utc: str | None,
+        lease_duration_seconds: int | None,
+    ) -> dict[str, Any] | None:
+        """Reserve at exactly one site. No fallback, no swallowed errors.
+
+        An unknown ``name`` raises ``KeyError`` (``self._sites`` is a
+        plain dict) -- a mapped listing pointing at a site that no
+        longer exists is a data-integrity problem, not "no capacity",
+        and must not look like a normal refusal. A real error from the
+        site (network failure, 5xx) propagates rather than being caught
+        here: there is no next site to fall back to, so swallowing it
+        would only hide the failure from the caller, not recover from
+        it -- the caller decides how to handle it.
+        """
+        reserved = await self._sites[name].reserve(
+            claim=claim,
+            deal_ref=deal_ref,
+            ttl_seconds=ttl_seconds,
+            lease_start_utc=lease_start_utc,
+            lease_duration_seconds=lease_duration_seconds,
+        )
+        if reserved is None:
+            return None
+        capacity_reservation_id = reserved.get("capacity_reservation_id")
+        if capacity_reservation_id:
+            self._reservation_sites[str(capacity_reservation_id)] = name
+        return _tagged(name, reserved)
+
+    async def _reserve_by_placement(
+        self,
+        *,
+        claim: Mapping[str, Any] | None,
+        deal_ref: Mapping[str, Any] | None,
+        ttl_seconds: float | None,
+        lease_start_utc: str | None,
+        lease_duration_seconds: int | None,
     ) -> dict[str, Any] | None:
         """Route to one site in placement order; fall back on refusal.
 
         A refusal is a None (no capacity) or an error; either way the
         next site gets the claim. Returns None only when every member
-        refused.
+        refused. Only for a listing with no known site mapping -- see
+        ``reserve``.
         """
         snapshots = await self._snapshots()
         for name in self._placement(self.site_names, snapshots, claim=claim):

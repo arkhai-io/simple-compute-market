@@ -9,13 +9,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from bare_metal_provisioning_adapter.runtime import project_bare_metal_resource
+from market_resource_pools import ResourcePool
+from vm_provisioning_adapter.runtime import project_ansible_pool_defaults
 
-from compute_provisioning_service.db.models import Host
+from compute_provisioning_service.db.models import AnsiblePoolConfig, Host
 
 
 SessionFactory = Callable[[], Session]
 BARE_METAL_PUBLICATION_ATTR = "bare_metal_publication"
 BARE_METAL_PUBLICATION_VIEW = "bare_metal.v1"
+VM_ANSIBLE_POOL_DEFAULTS_VIEW = "vm.ansible_pool_defaults.v1"
 
 
 def load_capacity_resource_inventory(
@@ -68,17 +71,20 @@ def _project_host(
     gpu_count = int(host.gpu_count or 0)
     resource = dict(capacity_resource or {})
     capacity = dict(resource.get("capacity") or {"gpu_count": gpu_count})
+    attributes: dict[str, Any] = {
+        "vm_host": host.name,
+        "public_host": host.public_host or host.kvm_host,
+        "gpu_count": gpu_count,
+    }
+    if host.gpu_model:
+        attributes["gpu_model"] = host.gpu_model
     projected: dict[str, Any] = {
         "resource_id": str(resource.get("resource_id") or host.name),
         "pool_id": str(resource.get("pool_id") or host.pool_id),
         "resource_type": resource.get("resource_type") or "compute.gpu",
         "resource_subtype": resource.get("resource_subtype"),
         "capacity": capacity,
-        "attributes": {
-            "vm_host": host.name,
-            "public_host": host.public_host or host.kvm_host,
-            "gpu_count": gpu_count,
-        },
+        "attributes": attributes,
         "enabled": bool(host.enabled and resource.get("enabled", True)),
     }
     if capacity_resource is not None:
@@ -142,3 +148,48 @@ def _whole_resource_available(
             if remaining < total:
                 return False
     return compared
+
+
+def load_capacity_pool_metadata(
+    session_factory: SessionFactory,
+) -> dict[str, dict[str, Any]]:
+    """Return allowlisted per-pool metadata for the resource-pool projection.
+
+    Only `ResourcePool`'s own columns and the Ansible provider's VM size
+    defaults are projected. `provider_config` (which may carry
+    credentials) is never read here -- a future provider-config field
+    needing projection must be added to this allowlist explicitly, not by
+    widening what this function reads.
+
+    The Ansible view is additionally gated on `pool.provider == "ansible"`,
+    not merely on an `ansible_pool_configs` row existing. Pool mutation
+    already deletes the old provider's config row when a pool's provider
+    changes (`ResourcePoolService`), so a stale row shouldn't normally
+    exist -- but this is a zero-cost structural guarantee that the
+    `vm.ansible_pool_defaults.v1` view can never be published for a pool
+    whose declared `mechanism` says otherwise.
+    """
+    with session_factory() as db:
+        pools = db.query(ResourcePool).all()
+        ansible_configs = {
+            row.pool_id: row for row in db.query(AnsiblePoolConfig).all()
+        }
+        metadata: dict[str, dict[str, Any]] = {}
+        for pool in pools:
+            projected: dict[str, Any] = {
+                "label": pool.label,
+                "enabled": bool(pool.enabled),
+                "mechanism": pool.provider,
+                "policy_tags": dict(pool.policy_tags or {}),
+            }
+            config = ansible_configs.get(pool.id)
+            if pool.provider == "ansible" and config is not None:
+                defaults = project_ansible_pool_defaults({
+                    "default_vm_ram": config.default_vm_ram,
+                    "default_vm_vcpus": config.default_vm_vcpus,
+                    "default_vm_disk_size": config.default_vm_disk_size,
+                })
+                if defaults:
+                    projected["pool_views"] = {VM_ANSIBLE_POOL_DEFAULTS_VIEW: defaults}
+            metadata[pool.id] = projected
+        return metadata

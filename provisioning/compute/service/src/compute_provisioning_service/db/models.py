@@ -107,6 +107,14 @@ class AnsiblePoolConfig(Base):
     )
     inventory_group = Column(String, nullable=False)
     extra_vars = Column(JSON, nullable=False, default=dict)
+    # Fulfillment-time fallback shape, read only by AnsibleFulfillmentProvider's
+    # three-tier precedence (derived > requirements > pool default) when
+    # neither the negotiated requirements nor a requirement delegate
+    # supplies a dimension. Nullable: a pool with no configured default
+    # simply contributes nothing at that tier.
+    default_vm_ram = Column(Integer, nullable=True)
+    default_vm_vcpus = Column(Integer, nullable=True)
+    default_vm_disk_size = Column(String, nullable=True)
 
 
 class Host(Base):
@@ -152,6 +160,11 @@ class Host(Base):
     ssh_key_type = Column(String, nullable=False, default="path")  # "path" | "embedded"
     ssh_key_value = Column(String, nullable=False)  # path string or encrypted PEM
     gpu_count = Column(Integer, nullable=False, default=0)
+    # Descriptive hardware identity (e.g. "H100", "A100") -- categorical,
+    # matched by equality, not by sufficiency like gpu_count. Nullable: a
+    # host with gpu_count=0 has no GPU model to report, and an operator
+    # may not have recorded one yet for an existing host.
+    gpu_model = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(
         String,

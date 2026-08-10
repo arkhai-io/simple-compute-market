@@ -58,6 +58,7 @@ async def _seed_compute_listings(client: SQLiteClient, *, max_gpu_count: int) ->
         record_derived_listing(
             client.db_path,
             listing_id=listing_id,
+            site_id="default",
             resource_id="pool-h200-1",
             gpu_count=gpu_count,
         )

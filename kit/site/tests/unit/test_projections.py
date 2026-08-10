@@ -123,3 +123,118 @@ def test_resource_pool_revision_tracks_publication_view_changes():
 
     assert changed.revision == first.revision + 1
     assert changed.digest != first.digest
+
+
+# ---------------------------------------------------------------------------
+# Pool metadata (label/enabled/mechanism/policy_tags/pool_views)
+# ---------------------------------------------------------------------------
+
+def test_pool_metadata_omitted_by_default():
+    """No pool_metadata argument reproduces exactly what this function
+    returned before pool metadata existed -- no `pool_metadata` key at all."""
+    rows = resource_pool_projection(_resources())
+    assert "pool_metadata" not in rows[0]
+
+
+def test_pool_metadata_explicit_none_matches_omitted_default():
+    with_default = resource_pool_projection(_resources())
+    with_explicit_none = resource_pool_projection(_resources(), pool_metadata=None)
+    assert with_default == with_explicit_none
+
+
+def test_pool_absent_from_directory_has_no_pool_metadata_key():
+    """A pool directory covering some but not all pools leaves the
+    uncovered pool exactly as if no directory were supplied -- not an
+    empty `pool_metadata: {}`, no key at all."""
+    resources = _resources()
+    resources.append({
+        "resource_id": "host-c",
+        "pool_id": "pool-2",
+        "resource_type": "compute.vm",
+        "resource_subtype": "h100",
+        "capacity": {"gpu_count": 8},
+        "available": {"gpu_count": 8},
+        "attributes": {},
+        "enabled": True,
+    })
+    rows = resource_pool_projection(
+        resources, pool_metadata={"pool-1": {"label": "Pool One", "enabled": True}},
+    )
+    by_pool = {row["resource_pool_id"]: row for row in rows}
+    assert by_pool["pool-1"]["pool_metadata"] == {"label": "Pool One", "enabled": True}
+    assert "pool_metadata" not in by_pool["pool-2"]
+
+
+def test_pool_metadata_allowlist_drops_unknown_fields():
+    """Provider secrets/config must be structurally dropped, not merely
+    undocumented -- a field outside the allowlist never reaches the
+    projected row even if the caller's directory includes it."""
+    rows = resource_pool_projection(
+        _resources(),
+        pool_metadata={
+            "pool-1": {
+                "label": "Pool One",
+                "enabled": True,
+                "mechanism": "ansible",
+                "policy_tags": {"region": "eu"},
+                "provider_config": {"ssh_key": "top-secret"},
+                "extra_vars": {"api_token": "also-secret"},
+            },
+        },
+    )
+    meta = rows[0]["pool_metadata"]
+    assert set(meta) == {"label", "enabled", "mechanism", "policy_tags"}
+    assert "provider_config" not in meta
+    assert "extra_vars" not in meta
+
+
+def test_pool_metadata_policy_tags_and_pool_views_are_copied_not_aliased():
+    """The projection must not let a caller mutate cached state through
+    the dict it handed in, or through the dict it gets back."""
+    policy_tags = {"region": "eu"}
+    pool_views = {"vm.ansible_pool_defaults.v1": {"default_vm_ram": 65536}}
+    rows = resource_pool_projection(
+        _resources(),
+        pool_metadata={"pool-1": {"policy_tags": policy_tags, "pool_views": pool_views}},
+    )
+    meta = rows[0]["pool_metadata"]
+    meta["policy_tags"]["region"] = "us"
+    meta["pool_views"]["vm.ansible_pool_defaults.v1"]["default_vm_ram"] = 1
+    assert policy_tags == {"region": "eu"}
+    assert pool_views["vm.ansible_pool_defaults.v1"]["default_vm_ram"] == 65536
+
+
+def test_pool_metadata_change_advances_digest_with_identical_resources():
+    resources = _resources()
+    before = canonical_digest(
+        resource_pool_projection(resources, pool_metadata={"pool-1": {"enabled": True}}),
+    )
+    after = canonical_digest(
+        resource_pool_projection(resources, pool_metadata={"pool-1": {"enabled": False}}),
+    )
+    assert after != before
+
+
+def test_service_pool_directory_is_consulted_once_per_call():
+    resources = _resources()
+    calls = []
+
+    def pool_directory():
+        calls.append(1)
+        return {"pool-1": {"label": "Pool One"}}
+
+    service = SiteProjectionService(
+        object(),
+        resource_inventory=lambda: resources,
+        pool_directory=pool_directory,
+    )
+    _, rows = service.resource_pools()
+
+    assert rows[0]["pool_metadata"] == {"label": "Pool One"}
+    assert len(calls) == 1
+
+
+def test_service_without_pool_directory_omits_pool_metadata():
+    service = SiteProjectionService(object(), resource_inventory=lambda: _resources())
+    _, rows = service.resource_pools()
+    assert "pool_metadata" not in rows[0]

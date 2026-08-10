@@ -20,8 +20,10 @@
 
 ## 3. Trusted multi-site composition
 
+**Note (2026-08-03, added during POOLS-8 Section 5 discussion; see `design.md`'s "Treat selected-site routing as trusted storefront state" addendum): this section now depends on POOLS-8's Section 4 (`AggregateCapacityClient.reserve(site=...)`), not only on POOLS-7. Open question recorded in `design.md` on whether that's a hard implementation-order dependency or can proceed against POOLS-8's design behind injected ports, matching this change's existing POOLS-7 pattern.**
+
 - [ ] 3.1 Add bare-metal storefront configuration for stable `site_id` to provisioning authority URL and credential bindings, including startup validation and redacted diagnostics.
-- [ ] 3.2 Reuse or extract schema-opaque aggregate capacity/projection wiring so the bare-metal storefront can load, poll, reserve, and retain independent generations from several sites.
+- [ ] 3.2 Consume `core_storefront.aggregation.AggregateCapacityClient.reserve(site=...)` (POOLS-8 Section 4) directly for site-targeted reservation routing, rather than extracting or reinventing equivalent wiring; retain and poll independent per-site projection generations via the existing `site_projections.py`/`aggregation.py` primitives this change's Implementation Inventory already scopes for reuse.
 - [ ] 3.3 Persist the selected trusted site with agreement lifecycle correlation and reject buyer-controlled URL, credential, or conflicting site assertions as routing authority.
 - [ ] 3.4 Add focused tests for placement across two sites, selected-site write routing after restart, projection staleness, and conflicting untrusted routing data.
 

@@ -256,11 +256,14 @@ async def _run_settlement_job_bg(
     claim_escrow_address: str | None = None,
 ) -> None:
     """Background coroutine: run fulfillment, patch the job row."""
+    from domains.vms.listings.reconciler import site_id_for_listing
     from market_storefront.domain_runtime import get_market_domain_contract
     from market_storefront.utils.config import settings
 
     fulfillment = get_market_domain_contract().fulfillment
     assert fulfillment is not None
+
+    site_id = site_id_for_listing(sqlite_client.db_path, listing_id)
 
     try:
         result = await fulfillment.fulfill(
@@ -272,6 +275,7 @@ async def _run_settlement_job_bg(
             start_utc=provision.start_utc,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
+            site_id=site_id,
         )
     except Exception as exc:
         logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)

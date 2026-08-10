@@ -583,8 +583,8 @@ class TestCreateListing:
     async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
         self, seller_auth_full_client,
     ):
-        """POOLS-4: a compute offer with no pool_id and no resource_id can't
-        be reliably matched to inventory at reservation time and must be
+        """A compute offer with no pool_id and no resource_id can't be
+        reliably matched to inventory at reservation time and must be
         rejected at creation rather than published."""
         c, _ = seller_auth_full_client
         offer_without_identity = {

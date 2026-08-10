@@ -23,14 +23,12 @@ Coverage:
   - Teardown preparation produces the same shape of typed, versioned input,
     with exact teardown identity derived from the durable create metadata.
 
-What is deliberately NOT covered here: there is no ``/fulfillment/teardown``
-HTTP endpoint yet. Dispatching teardown through the durable orchestrator is
-Section 10 scope (see ``design.md``, "Section 5 (fulfillment acceptance and
-provider preparation) -- resolved design decisions", scope boundary note).
-The teardown test below instead drives ``AnsibleFulfillmentProvider``
-directly against this fixture's real ``job_service``/session -- the actual
-provider-level contract Section 10 will call into -- rather than a
-placeholder for HTTP coverage that cannot exist until that endpoint does.
+Teardown dispatch through the durable orchestrator has its own HTTP
+endpoint, ``POST /fulfillment/{fulfillment_id}/begin-teardown``, covered by
+``test_compute_contract_api.py``. The teardown test below instead drives
+``AnsibleFulfillmentProvider`` directly against this fixture's real
+``job_service``/session, proving the provider-level contract the endpoint
+calls into.
 """
 
 from __future__ import annotations
@@ -474,9 +472,10 @@ class TestAcknowledgementFailureRecovery:
     """Proves that if the provider accepts a job but the acknowledgement
     transaction (transaction 2) fails before recording it, a subsequent
     retry rediscovers the same job through the deterministic idempotency
-    key rather than dispatching a duplicate -- the crash window this
-    section's two-transaction design deliberately accepts, per design.md's
-    "Accepted Section 5 lifecycle clarifications".
+    key rather than dispatching a duplicate -- the crash window the
+    two-transaction acceptance design deliberately accepts (see
+    `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement`,
+    "the acknowledgement gap is intentional").
     """
 
     async def test_retry_after_failed_acknowledgement_reuses_the_same_job(

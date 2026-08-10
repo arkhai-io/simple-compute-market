@@ -1023,8 +1023,10 @@ database authority and does not duplicate the storefront-owned identity on
 every pool, resource, or reservation row. See
 `openspec/specs/storefront-publication/spec.md`, "Trusted provisioning-site
 identity," for the enforced requirement and scenario, and
-`docs/development/ARCHITECTURE.md`, "Site inventory, capacity accounting,
-and projections," for where this sits repository-wide.
+`openspec/specs/site-capacity/spec.md`, "Storefront projection families,"
+for where this sits repository-wide (this content was consolidated there
+during Section 2's post-review cleanup, not kept in
+`docs/development/ARCHITECTURE.md`).
 
 ### Shared package boundary and kit dependency layers
 
@@ -1139,7 +1141,7 @@ operated sites without lease-expiry coordination instructions.
    (`vm_host`, `vm_target`/`executor_target`, and executor identity).
 4. Historical create input may be absent for already-active backfilled
    fulfillments; this does not prevent status representation or teardown.
-5. Rows are marked as backfilled for auditability.
+5. **Superseded during implementation (task 7.5):** rows are *not* marked as backfilled. `AGENTS.md`'s rule against migration-provenance branches in production code/schema was applied here too — no origin/backfill field or runtime branch on migration provenance exists on `SettlementRecord`. A backfilled row is indistinguishable from a natively-created one once migrated, by design; historical create-input absence is handled structurally (fields are nullable and reads tolerate absence), not flagged.
 6. The migration fails loudly when an active reservation cannot be mapped
    unambiguously; it does not create a silently incomplete teardown record.
 7. Historical terminal/expired allocations need not be fabricated unless a
@@ -1182,7 +1184,7 @@ that new channel properly — including that one storefront authenticates
 pushes from *N* distinct provisioning services, not a single symmetric
 secret — is real scope on its own, and doing it inside POOLS-7 risked
 scope creep onto an already-large change. It's split into its own
-change: `provisioning-result-push-delivery` (not yet started). POOLS-7
+change: `replace-polling-with-authenticated-push` (not yet started). POOLS-7
 keeps the goal in view but ships pull for v1, on the existing, already-
 solved storefront→provisioning auth direction.
 
@@ -1219,7 +1221,7 @@ only the transport is:**
   generation counter to detect here. Shipping the field anyway (e.g. as a
   constant) would overclaim a capability this system doesn't have and
   invite a caller to build staleness logic against a signal that never
-  changes. If `provisioning-result-push-delivery` still needs a
+  changes. If `replace-polling-with-authenticated-push` still needs a
   `credential_generation` concept for its own retry-race problem (a stale
   push overwriting a newer one — a real problem pull doesn't have), it
   defines and justifies that field itself against its own transport, not
@@ -1236,7 +1238,7 @@ only the transport is:**
   `get_fulfillment_status`/`get_fulfillment_result` poll a normalized,
   durable, cross-domain fulfillment abstraction, not a raw Ansible job.
 
-When `provisioning-result-push-delivery` lands, it adds a push transport
+When `replace-polling-with-authenticated-push` lands, it adds a push transport
 *alongside* pull (pull is a reasonable permanent reconciliation backstop
 even after push exists, per point 2's earlier discussion of exactly this
 concern) — it does not need to redesign the durable persistence layer
@@ -1332,18 +1334,18 @@ This record maps accepted durable decisions to current-state documentation. It i
 |---|---|
 | Kit follows foundation → authority → fulfillment dependency layers | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
 | Scheduling and provider-neutral fulfillment contracts share `kit/fulfillment` | `openspec/specs/fulfillment/spec.md#ownership` |
-| Lower authority kits may not import fulfillment, including under `TYPE_CHECKING` | `openspec/specs/fulfillment/spec.md#dependency-boundary` |
-| Capacity reservation, fulfillment, settlement-resource, provisioned-resource, and result IDs are opaque UUIDv7 strings | `openspec/specs/fulfillment/spec.md#identities` |
-| Commercial agreement identity stays outside the generic physical settlement request | `openspec/specs/fulfillment/spec.md#physical-settlement-request` |
-| Multidimensional candidate fit treats missing dimensions as zero | `openspec/specs/fulfillment/spec.md#multidimensional-eligibility` |
-| Scheduling selects a resource before provider execution; providers do not substitute placement | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
-| Cross-domain/durable generic payloads use immutable versioned envelopes | `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
+| Lower authority kits may not import fulfillment, including under `TYPE_CHECKING` | `openspec/specs/fulfillment/spec.md#requirement-dependency-boundary` |
+| Capacity reservation, fulfillment, settlement-resource, provisioned-resource, and result IDs are opaque UUIDv7 strings | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-identities` |
+| Commercial agreement identity stays outside the generic physical settlement request | `openspec/specs/fulfillment/spec.md#requirement-physical-settlement-request` |
+| Multidimensional candidate fit treats missing dimensions as zero | `openspec/specs/fulfillment/spec.md#requirement-multidimensional-eligibility` |
+| Scheduling selects a resource before provider execution; providers do not substitute placement | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment` |
+| Cross-domain/durable generic payloads use immutable versioned envelopes | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
 | Internal dependencies are installed from `.dist`, not editable sibling paths | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |
 | Aggregate kit tests run every kit subproject suite | `openspec/specs/deployment-state/spec.md#internal-wheel-development-contract` |
 | Provisioning-private capacity buckets and current reservation debits back reservations without leaking placement identity | `openspec/specs/site-capacity/spec.md#requirement-capacity-accounting-is-private-to-the-site-authority` |
 | Physical inventory and vertically grouped capacity are independent pull projections | `openspec/specs/site-capacity/spec.md#requirement-physical-inventory-and-grouped-capacity-are-separate-projections` |
 | Storefront projection caches load at startup, poll independent identities, retain stale complete generations, and refresh reactively without automatic mutation retry | `openspec/specs/storefront-publication/spec.md#requirement-storefronts-cache-independent-site-projections` |
-| Repository-wide projection ownership and allocation boundary | `docs/development/ARCHITECTURE.md#site-inventory-and-capacity-projections` |
+| Repository-wide projection ownership and allocation boundary | `openspec/specs/site-capacity/spec.md` ("Storefront projection families"); consolidated there rather than kept in `ARCHITECTURE.md` during Section 2's post-review cleanup, which removed a duplicate `ARCHITECTURE.md` "Site inventory" section |
 | One settlement/fulfillment aggregate keyed by `capacity_reservation_id`; `fulfillment_id` is a generated column, not a second key | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Scheduling equivalence and fulfillment equivalence are two independent, separately-persisted checks | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | No persisted `SettlementResult`; results are a read-time projection over the aggregate and its provisioned resources | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
@@ -1583,7 +1585,7 @@ The "Requirements change under negotiation" section's `resize_reservation`
 sketch has the ledger call `self._mark_settlement_abandoned(db,
 old_allocation_id)` directly inside its own transaction. `market_site` MUST
 NOT import `market_fulfillment`, including under `TYPE_CHECKING` (see
-`openspec/specs/fulfillment/spec.md#dependency-boundary`) — "marking a
+`openspec/specs/fulfillment/spec.md#requirement-dependency-boundary`) — "marking a
 settlement record abandoned" is a fulfillment-layer concept, so a literal
 implementation of that pseudocode would introduce exactly the reverse
 dependency the layering rule exists to prevent.
@@ -1651,7 +1653,7 @@ Production code and stable tests must reference only permanent current-state doc
 | SQLite acceptance uses a database-wide immediate writer reservation rather than claimed row-lock semantics | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Recovery columns are durable, while the Section 3 selector is single-worker only and final acquisition semantics belong to provisioning recovery | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Generic lifecycle updates are limited to prepared operation payloads, provider metadata, and failure fields | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
-| Repository callers supply validated canonical models and envelopes | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
+| Repository callers supply validated canonical models and envelopes | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
 
 ## Section 4 scheduling implementation — design questions (discuss phase, opened 2026-07-23)
 
@@ -2247,7 +2249,7 @@ package, and because both `vm_provisioning_adapter` and
 `compute_provisioning_service` already depend on `kit/fulfillment` without
 depending on each other, making it the only location both a domain
 adapter's compiler and the generic service's migration can share without
-crossing the dependency boundary `openspec/specs/fulfillment/spec.md#dependency-boundary`
+crossing the dependency boundary `openspec/specs/fulfillment/spec.md#requirement-dependency-boundary`
 establishes. The module docstring was rewritten to state this directly
 rather than lead with generic "contracts for compiling" framing. If a
 second domain later needs an equivalent historical cutover, a shared
@@ -2297,14 +2299,14 @@ proving the tightened check — not just the original four-field comparison
 
 | Accepted decision | Permanent location |
 |---|---|
-| Legacy lease state mapping, known-job observation, state-based required inputs, and no speculative create fallback | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
-| A live target with no known create job identity is rejected rather than backfilled | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
-| Idempotent-rerun and conflict-rejection rules for the cutover | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
+| Legacy lease state mapping, known-job observation, state-based required inputs, and no speculative create fallback | `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover` |
+| A live target with no known create job identity is rejected rather than backfilled | `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover` |
+| Idempotent-rerun and conflict-rejection rules for the cutover | `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover` |
 | Whole-population validation-before-commit and atomic-transaction cutover | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
 | Active lease/provider-operation continuity outranks unused pre-release reservations | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
 | Per-candidate state derivation and provider-envelope preparation live in a pure, domain-owned compiler; the enumerating migration owns only enumeration, dedup, conflict comparison, and the atomic write | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover` |
-| Equivalent-rerun/conflict comparison covers every field a provider operation depends on for correctness (resource attributes, provider metadata including the tracked create job, teardown provider metadata including the active teardown job, the prepared teardown envelope) plus the corresponding `ProvisionedResource` population, not only state/resource/pool/provider | `openspec/specs/fulfillment/spec.md#existing-lease-continuity-during-fulfillment-cutover` |
-| VM target derivation, provider metadata preservation, and provider-owned teardown preparation | `openspec/specs/physical-provisioning/spec.md#vm-lease-migration-uses-current-provider-contracts` |
+| Equivalent-rerun/conflict comparison covers every field a provider operation depends on for correctness (resource attributes, provider metadata including the tracked create job, teardown provider metadata including the active teardown job, the prepared teardown envelope) plus the corresponding `ProvisionedResource` population, not only state/resource/pool/provider | `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover` |
+| VM target derivation, provider metadata preservation, and provider-owned teardown preparation | `openspec/specs/physical-provisioning/spec.md#requirement-vm-lease-migration-uses-current-provider-contracts` |
 | Provider job identifier as the durable correlation point migration cannot safely replace | `openspec/specs/physical-provisioning/architecture.md#preserving-provider-operations-across-schema-cutover` |
 | Repository-wide all-or-nothing workload lifecycle cutover rule | `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` |
 | Shared cutover row-draft/error types live in `kit/fulfillment` because they mirror `SettlementRecord`/`ProvisionedResource`'s own row shape and because the dependency graph gives a domain adapter and the generic service no other common location to share them, not because domain cutover compilation is itself a durable fulfillment concept | `kit/fulfillment/src/market_fulfillment/backfill.py` module docstring; no separate spec.md entry — this is a code-location rationale, not observable behavior |
@@ -2333,7 +2335,7 @@ Investigation found `deal_ref` on five contract classes in `provisioning/compute
 - The new fulfillment-dispatch code (`AnsibleFulfillmentProvider.dispatch_create`/`dispatch_teardown`, Section 5) constructs its own `ExecutorActionEnvelope` with `deal_ref={}`. No commercial or deal identity is read, forwarded, or newly threaded through the fulfillment-acceptance path, satisfying the boundary rule for the code this section actually writes.
 - The `deal_ref` field itself is **not** removed from `ExecutorActionEnvelope`, `JobAccepted`, `ProvisioningJob`, `LeaseRegistration`/`LeaseView`, or the `AnsibleJob.deal_ref` column in Section 5. Removing it now would break the still-active legacy path before its callers (`ComputeContractService.submit_action`, `BareMetalComputeAdapter.submit`, `register_lease`'s `body.deal_ref.get("escrow_uid")` read) are retired — the same class of premature-removal mistake this document already caught and reversed once for the `pool_id` attributes fallback (Section 4, item 5).
 - **Tracked explicitly for Section 11** ("Remove obsolete schema and compatibility paths," which already scopes "obsolete executor/provider fields"): once Section 9 retires the legacy callers, remove `deal_ref` from all five contract classes and drop `AnsibleJob.deal_ref`. `escrow_uid` already has an independent, non-`deal_ref` source everywhere checked (the reservation's own `escrow_uid` column; bare-metal's adapter already falls back to it), so this removal is mechanically safe once the legacy callers are gone.
-- `CapacityReservation.deal_ref` (`kit/site`) and `StorefrontLifecycleEventSink`/`notify_storefront_capacity_released` remain out of scope for POOLS-7 entirely — a pre-existing, separately-flagged transport seam this document already identifies as `provisioning-result-push-delivery`'s territory to properly redesign, not something to touch incidentally here.
+- `CapacityReservation.deal_ref` (`kit/site`) and `StorefrontLifecycleEventSink`/`notify_storefront_capacity_released` remain out of scope for POOLS-7 entirely — a pre-existing, separately-flagged transport seam this document already identifies as `replace-polling-with-authenticated-push`'s territory to properly redesign, not something to touch incidentally here.
 
 ### Envelope naming and payload ownership
 
@@ -2396,16 +2398,16 @@ Shared fulfillment orchestration does not know Ansible job IDs, targets, playboo
 | Accepted decision | Permanent location |
 |---|---|
 | `begin_fulfillment`, provider prepare/dispatch, and reservation/scheduling remain provisioning-service-internal; storefront sequencing is a separate concern | `openspec/specs/fulfillment/spec.md` |
-| The fulfillment-acceptance path carries no commercial/deal identity; `deal_ref` is excluded from new dispatch code | `openspec/specs/fulfillment/spec.md#physical-settlement-request` |
-| Versioned envelope kind naming embeds the provider axis (`vm.ansible.create.v1`/`vm.ansible.teardown.v1`) | `openspec/specs/fulfillment/spec.md#versioned-envelopes` |
-| `FulfillmentProvider.prepare_*` is pure; pool configuration is read in-session by the orchestrator and passed in, not fetched by the provider | `openspec/specs/fulfillment/spec.md#scheduling-and-assignment` |
+| The fulfillment-acceptance path carries no commercial/deal identity; `deal_ref` is excluded from new dispatch code | `openspec/specs/fulfillment/spec.md#requirement-physical-settlement-request` |
+| Versioned envelope kind naming embeds the provider axis (`vm.ansible.create.v1`/`vm.ansible.teardown.v1`) | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
+| `FulfillmentProvider.prepare_*` is pure; pool configuration is read in-session by the orchestrator and passed in, not fetched by the provider | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment` |
 | `ResourcePoolService.get_pool_in_session` closes the same live-re-read gap `list_pools_in_session` closed for scheduling | `openspec/specs/resource-pool-management/spec.md` |
 | Fulfillment acceptance uses a narrow `FulfillmentUnitOfWork`, mirroring `SchedulingUnitOfWork` | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Durable acceptance survives recoverable post-commit dispatch failure; successful submission is acknowledged in a second idempotent transaction | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md` |
-| Equivalent retries dispatch only while durable state shows acknowledgement is still required | `openspec/specs/fulfillment/spec.md#idempotency-and-retry` |
-| Dry run has the same signature and calculable validation path as `begin_fulfillment` but exposes no internal prepared envelope and causes no side effects | `openspec/specs/fulfillment/spec.md#fulfillment-validation` |
-| Teardown consumes a provider-neutral durable settlement result; concrete adapters own typed interpretation of provider metadata and exact teardown identity | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown`; `openspec/specs/fulfillment/architecture.md` |
-| `resource` names the full `SettlementResource` model; bare identities use `settlement_resource_id` | `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identifiers`; `openspec/specs/fulfillment/spec.md` |
+| Equivalent retries dispatch only while durable state shows acknowledgement is still required | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Dry run has the same signature and calculable validation path as `begin_fulfillment` but exposes no internal prepared envelope and causes no side effects | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-validation` |
+| Teardown consumes a provider-neutral durable settlement result; concrete adapters own typed interpretation of provider metadata and exact teardown identity | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md` |
+| `resource` names the full `SettlementResource` model; bare identities use `settlement_resource_id` | `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities`; `openspec/specs/fulfillment/spec.md` |
 | The durable fulfillment orchestrator lives in `kit/fulfillment`, alongside `PhysicalSettlementScheduler` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
 | `deal_ref` remains on legacy contract classes until Section 9/11 retire their callers | `openspec/changes/pools-7-storefront-fulfillment-cutover/tasks.md` (Section 11 scope; not a permanent-doc statement until removed) |
 
@@ -2595,9 +2597,9 @@ diagnostics event after each completed cycle and never one event per row.
 |---|---|
 | SQLite recovery claims serialize through short `BEGIN IMMEDIATE` transactions and expire durably | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Provider calls occur outside database transactions and outcomes are applied only by the current claim owner | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
-| Provisioned-resource identities are resolved only after confirmed create success and teardown updates existing rows | `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown` |
+| Provisioned-resource identities are resolved only after confirmed create success and teardown updates existing rows | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | The compute provisioning service composes one fulfillment convergence watchdog | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` (corrected 2026-07-24 from an incorrect `docs/development/ARCHITECTURE.md#runtime-service-map` reference recorded during implementation — this is subsystem-specific behavior, not a repository-wide concern) |
-| `(capacity_reservation_id, domain_resource_ref)` is a durable unique constraint, not just an application-level dedup check; a genuine concurrent-insert race is resolved by re-reading and returning the winning row, not raising | `kit/fulfillment/src/market_fulfillment/db.py` (`ProvisionedResource.__table_args__`) and `openspec/specs/fulfillment/spec.md#fulfillment-results-and-teardown` |
+| **Superseded by Section 8 (task 8.10):** `(capacity_reservation_id, domain_resource_ref)` was a durable unique constraint at Section 6 implementation time; `domain_resource_ref` was later removed entirely from `ProvisionedResource` and replaced by the globally unique `provisioned_resource_id`. The concurrent-insert-race-resolved-by-re-read behavior this row records is still accurate, just keyed differently now. | `kit/fulfillment/src/market_fulfillment/db.py` (`ProvisionedResource.__table_args__`) and `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
 | Provider-reported success with unresolvable persisted resource metadata is a non-recoverable `failed` transition, not an indefinite retry | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` |
 | Claim-lease backoff and executor job-resubmission backoff are deliberately separate settings namespaces | `provisioning/compute/service/src/compute_provisioning_service/config/config.yml` (comment); no spec.md change needed, this is operational configuration, not subsystem behavior |
 | Abandonment reconciliation was evaluated and intentionally not built as a periodic handler — `SettlementAbandonmentHook` (Section 4) already closes the case synchronously | No new spec.md text needed: Section 4's promotion already documents the hook firing unconditionally from every capacity-reclaiming path. This row exists so the "why isn't there a fifth handler" question has a recorded answer rather than looking like an oversight. |
@@ -2655,7 +2657,7 @@ below):
    per the existing "Versioned envelopes" requirement's own scope statement
    that it applies to "settlement/fulfillment result payloads once those
    values cross a durable or cross-domain boundary." Defining it now, not
-   deferred, so `provisioning-result-push-delivery` can reuse the same
+   deferred, so `replace-polling-with-authenticated-push` can reuse the same
    shape unchanged, matching what that change's proposal already assumes.
 
 6. **Credential/resource association is domain-specific and many-to-many.**
@@ -2716,7 +2718,7 @@ one shared `admin_api_key` with no per-request caller identity — by its
 own docstring, "the provisioning service is an internal dependency of a
 single storefront." An ownership check has no second caller identity to
 compare against under that model. Real per-caller enforcement is deferred
-to a new prerequisite change, `add-storefront-principal-authentication`
+to a new prerequisite change, `service-identity-signing`
 (proposed 2026-07-25; see its `proposal.md`/`design.md`), which gives the
 provisioning service real per-request principal identity and an
 `owner_principal` column on `SettlementRecord`. That change's candidate
@@ -2728,8 +2730,8 @@ its own accepted contracts before being treated as a starting point, per
 that note's own caveat. Section 8 ships task 8.5 as an existence-only
 check (reject unknown identifiers) structured so the later
 `owner_principal` comparison can replace it without reshaping the
-endpoint, and `provisioning-result-push-delivery` gains a second, direct
-dependency on `add-storefront-principal-authentication` alongside its
+endpoint, and `replace-polling-with-authenticated-push` gains a second, direct
+dependency on `service-identity-signing` alongside its
 existing dependency on this change.
 
 ### Section 8 completed design-promotion record
@@ -2742,7 +2744,7 @@ existing dependency on this change.
 | `credential_fetch_failed` stable error category | `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy` |
 | Many-to-many credential/output association via `provisioned_resource_id`; `VmFulfillmentCredential` VM-domain payload; `domain_resource_ref` removed | `openspec/specs/fulfillment/spec.md`; `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload` for the VM payload and credential fields |
 | No `credential_generation` field; rationale | `openspec/specs/fulfillment/spec.md` (state explicitly, so a future reader doesn't reintroduce it without re-deriving this reasoning) |
-| Ownership-check scope split between this change (existence-only) and `add-storefront-principal-authentication` (real enforcement) | `openspec/specs/fulfillment/spec.md`; `openspec/changes/add-storefront-principal-authentication/proposal.md` |
+| Ownership-check scope: this change keeps its existence-only check. **Amended 2026-08-06:** the successor change (`add-storefront-principal-authentication`, superseded by `service-identity-signing`) no longer supplies per-record ownership enforcement — with one storefront per authority the check is vacuous | `openspec/specs/fulfillment/spec.md` |
 
 ### Section 8 implementation confirmation (2026-07-25)
 
@@ -3383,7 +3385,7 @@ What changes is narrow, confined to the release-submission/completion seam:
 
 1. **Submission.** `VmReleaseExecutor.submit_release` stops submitting an Ansible `vm_remove` job directly. It resolves the durable `fulfillment_id` for the reservation's `capacity_reservation_id` and calls the new `begin_fulfillment_teardown(fulfillment_id)`, which durably prepares the teardown envelope and transitions `active → teardown_dispatch_pending` — no provider I/O inline, mirroring how `begin_fulfillment` separates durable acceptance from dispatch. It returns `fulfillment_id` as the tracked "job id." `FulfillmentConvergenceWatchdog` — already implemented, already running — owns dispatch, retry, and status convergence through to `torn_down`/`teardown_failed`, entirely independently of `LeaseLifecycleService`'s own polling cadence. This is what "entirely from provisioning-owned watchdog handlers" (task 10.3, as originally drafted) actually refers to: the convergence watchdog already is that owner; it needed a caller, not new mechanics.
 2. **Completion.** `LeaseLifecycleService`'s `_process_releasing_reservation` calls one shared `ReleaseJobPort.get_job(job_id)`. Bare-metal genuinely needs this to keep resolving real, polled Ansible job status (confirmed: `reclaim_access_for_reservation` submits a real job, not only a `"direct-release"` sentinel), so the shared port cannot simply be repointed at fulfillment state. Instead, `release_jobs` becomes a small kind-routed dispatcher — the same shape as the existing `ExecutorReleaseDispatcher` for submission — routing `get_job` by the reservation's `executor_kind`: bare-metal's route is byte-for-byte unchanged (`job_service`/`AsyncJobQueue`); VM's route answers by reading the `SettlementRecord`'s teardown state for the given `fulfillment_id` (`torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `pending`), via a thin adapter over `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly.
-3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `provisioning-result-push-delivery` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
+3. **Capacity release.** `_finish_release` is unchanged. It already performs the authoritative capacity-table update (`record_release_success` → `CapacityLedgerService.release`). The only actual gap it had was a trustworthy completion signal for the VM case, which (2) now supplies. The non-durable `notify_storefront_capacity_released` push stays as a best-effort nicety, unchanged — it already fails safe (logs and returns `False`) when it cannot reach or authenticate to the storefront, which is the expected outcome until `replace-polling-with-authenticated-push` lands. The storefront's authoritative view of freed capacity remains its own projection poll (POOLS-8), not this push.
 
 ### Accepted decision: no new API for early termination
 
@@ -3413,7 +3415,7 @@ Task 10.7 is therefore not a "confirm before dropping" placeholder: `_register_v
 | `LeaseLifecycleService` retained as sole VM/bare-metal release trigger and capacity-release owner; `ExecutorReleasePort`/`ReleaseJobPort` become the seam fulfillment-backed teardown crosses, not a replaced mechanism | `openspec/specs/physical-provisioning/spec.md`; `docs/development/ARCHITECTURE.md` only if the repository-wide service/worker map changes |
 | Kind-routed `ReleaseJobPort` dispatch (bare-metal via job queue, VM via fulfillment aggregate state) | `openspec/specs/physical-provisioning/spec.md` |
 | `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` (`ComputeProvisioningClient.terminate_lease`) as the storefront-facing early-termination call; no new endpoint | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/vm-storefront-fulfillment/spec.md` for the storefront-side call site |
-| Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `provisioning-result-push-delivery` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
+| Authoritative capacity release remains `CapacityLedgerService.release`, gated on confirmed fulfillment teardown for VM; storefront-facing notification remains poll-based (POOLS-8) until `replace-polling-with-authenticated-push` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/site-capacity/spec.md` if reservation-ledger release semantics need a stated precondition update |
 | `register_lease` field scope: `executor_kind`/`executor_target`/`lease_end_utc` retained (no independent write path exists for `vm_target`); `executor_ref` dropped (self-heals from the independently-written `vm_host`) | `openspec/specs/physical-provisioning/spec.md` |
 
 Implementation must confirm or correct each destination above against the actual accepted code shape before promotion; this table records intent, not a substitute for the design-promotion record task 12 requires at closure.
@@ -3684,10 +3686,15 @@ not documentation-vs-code mismatches, except where noted above.
 **Section 10 is complete under this record.** Section 11 may begin. The one
 carried-forward obligation is task 10.14, tracked explicitly rather than
 folded into "done" — deferred by direction, not discovered to be
-unnecessary. (Task 10.14 was subsequently completed by
-`refactor-e2e-fulfillment-lifecycle`, a separate change — see that change's
-`proposal.md`/`design.md`. Not Section 11 scope; noted here only so the
-"carried-forward obligation" language above isn't read as still open.)
+unnecessary. (`refactor-e2e-fulfillment-lifecycle`, a separate change,
+subsequently resolved 10.14's *static/structural* correctness — the stale
+Ansible-job/`vm_remove` assumptions and lack of a deterministic convergence
+control that 10.14 originally flagged are fixed on that change's account —
+but neither change has an actual passing run against live services to point
+to; that change's own task 1.12 records the same "no live docker-compose
+environment available" gap this one does. Do not read "10.14 was completed"
+as "an e2e result exists" — it does not, as of this review pass, and
+archival is blocked on that, not on documentation.)
 
 ## Section 11 design review (discuss phase, opened 2026-07-28, continued 2026-07-30)
 
@@ -4668,3 +4675,58 @@ be chasing a red herring: `capacity_reservation_debits.capacity_bucket_id`
 has its own separate foreign key to `capacity_buckets`, which the test
 simply never populated. Not a SQLAlchemy/pysqlite quirk at all — fixed
 by inserting a valid bucket row.
+
+## Section 8 correction tasks — fix-loop debugging record (2026-07-25)
+
+A code review of the diff that had marked 8.9/8.10/8.12/8.13 done found it did not
+actually run against the real service composition. Re-applying it to a clean
+checkout and running the affected suites (not inspection alone) surfaced four
+independent real bugs, all fixed in the same pass:
+
+1. **`vm_provisioning_adapter/fulfillment_results.py` was missing from the reviewed
+   diff** (present in the author's working tree, apparently lost to `make
+   review-diff` not picking up an untracked new file). Without it,
+   `AnsibleFulfillmentProvider` — and the whole `compute_provisioning_service`
+   composition root — failed to import, silently invalidating every 8.10/8.13
+   claim that depended on a real adapter or app instance (the full 13-test
+   integration suite, 16 of 17 `test_legacy_vm_lease_migration.py` tests, and two
+   convergence test files could not even collect). Only `kit/fulfillment`'s own
+   suite passed, because it mocks the provider — almost certainly why the break
+   went unnoticed. Fixed by adding the file.
+2. Two integration-test assertions were stale against the new nested
+   `domain_result` envelope shape (still reading a since-removed top-level
+   `payload["credentials"]`). Fixed to read
+   `payload["domain_result"]["payload"]["credentials"]`.
+3. **The legacy backfill conflict check was weakened, not preserved**:
+   `_existing_provisioned_resources_conflict` had changed from comparing actual
+   stored identity to comparing row count only, with the test that asserted a
+   mismatched identity is rejected flipped to assert it's accepted — a real loss
+   of the safety property the function's own docstring describes. Restored value
+   comparison and the original test assertion.
+4. `legacy_backfill.py` passed the raw VM target straight through as
+   `provisioned_resource_id`, contradicting the fulfillment-owned-opaque-identity
+   principle this same diff added to `architecture.md`. Replaced with a
+   deterministic derivation — first keyed on `fulfillment_id` (wrong: the
+   compiler generates a fresh random `fulfillment_id` per invocation, so this
+   isn't stable across a backfill re-run, caught by
+   `test_equivalent_rerun_is_idempotent_and_writes_nothing_new` failing),
+   re-keyed on `capacity_reservation_id`, which is genuinely stable across
+   re-runs of the same lease. Re-running the rerun scenario then surfaced a
+   fifth, independent bug: `_apply_legacy_vm_lease_backfill`'s `INSERT` never
+   used `draft.provisioned_resource_ref` at all — it inserted a fresh
+   `uuid.uuid4()` every time, disconnected from whatever the compiler derived.
+   Fixed the `INSERT` to use the derived value.
+
+Also restored `fetch_credentials`' docstring invariants (thinned to two sentences
+by the reviewed diff), fixed an incomplete-edit broken sentence in `spec.md`, and
+documented `VmFulfillmentCredential`/`vm.fulfillment.result.v1` in
+`openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload`
+— including that `provisioned_resource_ids` is not yet genuinely many-to-many
+(every credential today names the fulfillment's one and only output).
+
+**Root cause pattern common to bugs 1 and 3-5**: every one was invisible to the
+suite that had been run because that suite mocked the exact boundary the bug
+lived in (the real adapter import, the real backfill INSERT). This is why
+`tasks.md`'s validation notes for this and adjacent sections distinguish "runs
+against a real composition" from "passes with the boundary mocked" as different
+strength claims, not interchangeable ones.

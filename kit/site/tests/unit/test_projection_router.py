@@ -102,3 +102,41 @@ def test_public_reservation_rejects_invalid_unit_claims(value):
         json={"claim": {"units": value}, "deal_ref": {}},
     )
     assert response.status_code == 422
+
+
+def test_get_pool_directory_surfaces_pool_metadata_on_the_projection():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    ledger.register_resource(
+        resource_id="host-a", pool_id="pool-a", total_units=8,
+        attributes={"vm_host": "host-a"},
+    )
+    app = FastAPI()
+    app.include_router(
+        make_capacity_router(
+            lambda: ledger,
+            get_pool_directory=lambda: {
+                "pool-a": {"label": "Pool A", "enabled": True, "mechanism": "ansible"},
+            },
+        ),
+        prefix="/api/v1",
+    )
+    response = TestClient(app).get("/api/v1/capacity/site-resource-pools")
+    assert response.status_code == 200
+    row = response.json()["resource_pools"][0]
+    assert row["pool_metadata"] == {"label": "Pool A", "enabled": True, "mechanism": "ansible"}
+
+
+def test_omitting_get_pool_directory_reproduces_todays_response_exactly():
+    """No `get_pool_directory` argument -- the exact shape callers already
+    depend on today -- must be byte-identical, not merely close."""
+    client = _client()
+    response = client.get("/api/v1/capacity/site-resource-pools")
+    assert response.status_code == 200
+    row = response.json()["resource_pools"][0]
+    assert "pool_metadata" not in row

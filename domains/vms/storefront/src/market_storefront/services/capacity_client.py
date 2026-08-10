@@ -3,7 +3,7 @@
 The authoritative capacity ledger lives in site authorities (hosted by
 the provisioning service —
 docs/development/ARCHITECTURE.md, "Capacity and the Site Authority");
-the storefront is strictly a client. ``RemoteCapacityClient`` speaks
+the storefront is strictly a client. ``SiteCapacityClient`` speaks
 one authority's ``/api/v1/capacity`` HTTP surface;
 ``build_capacity_client`` assembles the configured authorities behind
 one ``AggregateCapacityClient``. Capacity deltas arrive by tailing each
@@ -43,12 +43,11 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
-from core_storefront.capacity_remote import (  # noqa: F401 — re-exported
-    RemoteCapacityClient,
-    site_events_poller,
-)
+from core_storefront.capacity_remote import site_events_poller  # noqa: F401 — re-exported
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
+from market_site_client import SiteCapacityClient
+from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +136,9 @@ async def member_availability_view(
 _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 
 # A mixed-direction capacity registration (e.g. GPU count grew while RAM
-# shrank -- POOLS-6 pass 1) can simultaneously strand some listings and
-# free up others; neither "consuming" nor "released" alone is safe, so
-# both reconciliation passes run.
+# shrank) can simultaneously strand some listings and free up others;
+# neither "consuming" nor "released" alone is safe, so both
+# reconciliation passes run.
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 
@@ -164,11 +163,27 @@ def _make_listing_reconcile_subscriber(
             reopen_available_compute_listings_after_capacity_change,
         )
 
+        sites = remote_site_clients(client)
+        home_site = next(iter(sites), None)
+        if home_site is None:
+            return
         db_path = sqlite_client_factory().db_path
         availability = await member_availability_view(client, db_path)
+        # Structural capacity source is local tables unless this site is
+        # explicitly opted into the projection-sourced path -- see
+        # reconciler.available_compute_slices' own docstring for what
+        # each source actually provides.
+        projection = (
+            site_pool_projection()
+            if bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False))
+            else None
+        )
+        buckets = site_capacity_buckets() if projection is not None else None
         if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path, member_availability=availability,
+                db_path, home_site=home_site, configured_site_count=len(sites),
+                member_availability=availability, site_pool_projection=projection,
+                site_capacity_buckets=buckets,
             )
             if closed:
                 stage_event(
@@ -180,7 +195,9 @@ def _make_listing_reconcile_subscriber(
                 )
         if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path, member_availability=availability,
+                db_path, home_site=home_site, member_availability=availability,
+                site_pool_projection=projection,
+                site_capacity_buckets=buckets,
             )
             if reopened:
                 stage_event(
@@ -235,7 +252,7 @@ def _aggregate_for(
         )
     aggregate = AggregateCapacityClient(
         {
-            name: RemoteCapacityClient(url, admin_key)
+            name: SiteCapacityClient(url, admin_key)
             for name, url in sites.items()
         },
         placement=placement,
@@ -264,7 +281,7 @@ def build_capacity_client(
 # Fulfillment (schedule/begin/status/result) aggregation.
 #
 # Sibling to ``AggregateCapacityClient`` above, not an extension of it:
-# ``CapacityClient``/``RemoteCapacityClient`` are deliberately scoped to the
+# ``CapacityClient``/``SiteCapacityClient`` are deliberately scoped to the
 # site authority's ``/api/v1/capacity`` surface (see their own docstrings),
 # while schedule/begin/status/result live on the compute-provisioning
 # service's ``/fulfillment`` surface, reached through
@@ -433,7 +450,7 @@ def build_fulfillment_client(
     return aggregate
 
 
-def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
+def remote_site_clients(client: Any) -> dict[str, SiteCapacityClient]:
     """The per-site remote clients behind a capacity client, by site name.
 
     Used by callers that need the beyond-the-protocol surface
@@ -444,11 +461,57 @@ def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
         return {
             name: client.site(name)
             for name in client.site_names
-            if isinstance(client.site(name), RemoteCapacityClient)
+            if isinstance(client.site(name), SiteCapacityClient)
         }
-    if isinstance(client, RemoteCapacityClient):
+    if isinstance(client, SiteCapacityClient):
         return {"default": client}
     return {}
+
+
+def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
+    """Resource-pool projection rows per site, from the storefront's own
+    background poller cache (``site_projection_cache``).
+
+    Only sites whose projection has ever loaded contribute -- ``None``
+    (never loaded, or currently unavailable/invalid) is excluded, but a
+    successfully loaded site is included *even when its own rows list is
+    empty* -- an authoritative "this site currently has zero pools"
+    answer, distinct from "this site's answer isn't known yet". Losing
+    that distinction (checking the rows list's truthiness instead of
+    whether it is ``None``) would make a site's genuine zero-pools state
+    indistinguishable from a site that hasn't loaded at all, and
+    `reconciler`'s projection-sourced path would then fall back to
+    stale local tables instead of correctly registering zero capacity --
+    the empty *result* mapping is meaningful too, and is what actually
+    signals "fall back to local data" one level up.
+    """
+    from market_storefront.services.site_projection_cache import projection_caches
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for site, caches in projection_caches().items():
+        value = caches.resource_pools.view().value
+        if value is not None:
+            result[site] = value
+    return result
+
+
+def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
+    """Grouped capacity-bucket rows per site, same cache/inclusion rule as
+    ``site_pool_projection`` (above) -- only a site whose capacity-bucket
+    family has ever loaded contributes, including an authoritative empty
+    list, for the same reason: `reconciler`'s fungible-mode row builder
+    (`_projected_pool_rows`) must be able to tell "no bucket data yet" from
+    "genuinely zero buckets" and falls back to its own resource-list
+    computation only in the former case.
+    """
+    from market_storefront.services.site_projection_cache import projection_caches
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for site, caches in projection_caches().items():
+        value = caches.capacity_buckets.view().value
+        if value is not None:
+            result[site] = value
+    return result
 
 
 async def capacity_events_poller_loop() -> None:

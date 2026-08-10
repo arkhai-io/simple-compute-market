@@ -322,6 +322,18 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-site-client"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_site_client-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../../../.dist" }
@@ -350,7 +362,9 @@ dependencies = [
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
+    { name = "arkhai-kit-site-client" },
     { name = "arkhai-vms" },
     { name = "dynaconf" },
     { name = "eth-account" },
@@ -406,7 +420,9 @@ requires-dist = [
     { name = "arkhai-kit-fulfillment", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.1.0" },
     { name = "arkhai-kit-site", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-site-client", specifier = ">=0.1.0" },
     { name = "arkhai-vms", specifier = ">=0.2.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },

@@ -101,12 +101,17 @@ class CapacityEventBus:
 
 
 @runtime_checkable
-class CapacityClient(Protocol):
-    """What a storefront may ask of a site authority.
+class SiteCapacityAuthority(Protocol):
+    """What a storefront may ask of one site authority, over its own
+    per-site HTTP client (``kit/site-client``'s ``SiteCapacityClient``).
 
-    ``claim`` and ``deal_ref`` are opaque mappings: the claim speaks the
-    site's resource-domain vocabulary (e.g. required attributes), the
-    deal ref carries the storefront's bookkeeping keys, recorded on the
+    Deliberately excludes ``subscribe()``: a per-site authority client
+    has no local event bus of its own to subscribe against -- capacity
+    deltas reach a storefront only through the event-feed poller into
+    the aggregate's own bus (``CapacityClient``, below). ``claim`` and
+    ``deal_ref`` are opaque mappings: the claim speaks the site's
+    resource-domain vocabulary (e.g. required attributes), the deal ref
+    carries the storefront's bookkeeping keys, recorded on the
     reservation at reserve time so deal-scoped events can be routed back
     to the owning storefront.
     """
@@ -179,6 +184,16 @@ class CapacityClient(Protocol):
     ) -> dict[str, Any] | None:
         """End a lease early (settlement lifecycle decided the deal is over)."""
         ...
+
+
+@runtime_checkable
+class CapacityClient(SiteCapacityAuthority, Protocol):
+    """What a storefront's aggregate capacity client exposes: every
+    ``SiteCapacityAuthority`` operation, plus a local subscription point
+    for capacity deltas. Only ``AggregateCapacityClient`` implements this
+    full protocol today -- a per-site client has no bus of its own to
+    subscribe against (see ``SiteCapacityAuthority``).
+    """
 
     def subscribe(self, subscriber: CapacitySubscriber) -> Callable[[], None]:
         """Register for capacity deltas; returns an unsubscribe handle."""

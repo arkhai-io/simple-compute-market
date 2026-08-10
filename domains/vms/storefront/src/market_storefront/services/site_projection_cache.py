@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from core_storefront.site_projections import ProjectionCache, ProjectionIdentity
+from core_storefront.site_projections import ProjectionCache, ProjectionCacheView, ProjectionIdentity
 from market_storefront.services.capacity_client import build_capacity_client, remote_site_clients
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
@@ -45,6 +45,84 @@ _caches: dict[str, SiteProjectionCaches] = {}
 
 def projection_caches() -> dict[str, SiteProjectionCaches]:
     return dict(_caches)
+
+
+def projection_status_summary() -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-site, per-family projection load state for operator status reporting.
+
+    Reports state and identity only, never the cached payload itself --
+    callers needing the projection value use `projection_caches()`
+    directly. A missing site or a `not_loaded`/`unavailable`/`invalid`
+    state here means the projection has not yet been confirmed; it must
+    never be read as authoritative empty capacity.
+    """
+    return {
+        site: {
+            "resource_pool": _view_summary(caches.resource_pools.view()),
+            "capacity_bucket": _view_summary(caches.capacity_buckets.view()),
+        }
+        for site, caches in projection_caches().items()
+    }
+
+
+def _view_summary(view: ProjectionCacheView[list[dict[str, Any]]]) -> dict[str, Any]:
+    return {
+        "state": view.state.value,
+        "revision": view.identity.revision if view.identity is not None else None,
+        "digest": view.identity.digest if view.identity is not None else None,
+        "last_error": view.last_error,
+        "fetched_at": view.fetched_at.isoformat() if view.fetched_at is not None else None,
+    }
+
+
+def listing_mode_explanations() -> dict[str, dict[str, str]]:
+    """Per-site, per-pool operator-visible explanation for any pool whose
+    projected `listing_mode` fell back to the VM domain's structural
+    default because the raw tag was present but unrecognized.
+
+    A pool's absence from this mapping means no explanation is owed --
+    either the tag is absent (ordinary default, nothing to explain) or it
+    resolved to a recognized value -- not that its site hasn't loaded;
+    a site whose resource-pool projection hasn't loaded yet simply
+    contributes no pools to walk, the same as it contributing none to
+    `projection_caches()` more generally. Cheap and independent of full
+    publication candidate generation: this only needs each pool's
+    projected `policy_tags`, not pricing or availability.
+    """
+    from domains.vms.listings.listing_mode import resolve_vm_listing_mode
+
+    result: dict[str, dict[str, str]] = {}
+    for site, caches in projection_caches().items():
+        pools = caches.resource_pools.view().value
+        if not pools:
+            continue
+        site_explanations: dict[str, str] = {}
+        for pool in pools:
+            pool_id = str(pool.get("resource_pool_id") or "")
+            if not pool_id:
+                continue
+            policy_tags = (pool.get("pool_metadata") or {}).get("policy_tags") or {}
+            # Same structural-default rule `_projected_pool_rows` uses
+            # (member_count == 1 -> specific_resource, backward
+            # compatibility for an untagged pool) -- an explanation is
+            # only owed when the raw tag was present but unrecognized,
+            # so the actual default value only matters for the message
+            # text, not for whether one is produced.
+            enabled_member_count = sum(
+                1 for resource in pool.get("resources") or []
+                if resource.get("enabled", True)
+            )
+            structural_default = (
+                "specific_resource" if enabled_member_count == 1 else "fungible"
+            )
+            _, explanation = resolve_vm_listing_mode(
+                policy_tags, structural_default=structural_default,
+            )
+            if explanation:
+                site_explanations[pool_id] = explanation
+        if site_explanations:
+            result[site] = site_explanations
+    return result
 
 
 async def load_site_projections() -> None:

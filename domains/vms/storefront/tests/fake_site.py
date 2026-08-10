@@ -252,13 +252,13 @@ def aggregate_over(
     subscriber is attached — drive it with ``pump_events``.
     """
     from core_storefront.aggregation import AggregateCapacityClient
+    from market_site_client import SiteCapacityClient
 
     from market_storefront.services.capacity_client import (
-        RemoteCapacityClient,
         _make_listing_reconcile_subscriber,
     )
 
-    remote = RemoteCapacityClient(
+    remote = SiteCapacityClient(
         "http://fake-site:8081", "test-key", transport=fake.transport(),
     )
     aggregate = AggregateCapacityClient({site_name: remote})

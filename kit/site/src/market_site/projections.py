@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import threading
@@ -57,8 +58,47 @@ class ProjectionRevisionTracker:
             return ProjectionIdentity(self._revision, self._digest)
 
 
-def resource_pool_projection(resources: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Project per-resource inventory grouped by authoritative resource pool."""
+_POOL_METADATA_FIELDS = ("label", "enabled", "mechanism", "policy_tags", "pool_views")
+
+
+def _project_pool_metadata(meta: Mapping[str, Any]) -> dict[str, Any]:
+    """Allowlist the pool-level fields a publication reader may see.
+
+    Provider credentials and other provider-specific configuration must
+    never reach a storefront cache. A field not in `_POOL_METADATA_FIELDS`
+    (e.g. a provider's raw config) is silently dropped, not merely
+    undocumented -- this allowlist is the structural enforcement, not the
+    caller's responsibility alone. `policy_tags`/`pool_views` are deep-
+    copied, not shallow-copied -- `pool_views` in particular nests a
+    second level (view name -> opaque content dict), and a shallow copy
+    would still let a caller mutate cached state through that inner dict.
+    """
+    projected: dict[str, Any] = {}
+    for field in _POOL_METADATA_FIELDS:
+        if field in meta and meta[field] is not None:
+            projected[field] = meta[field]
+    if "policy_tags" in projected:
+        projected["policy_tags"] = copy.deepcopy(projected["policy_tags"])
+    if "pool_views" in projected:
+        projected["pool_views"] = copy.deepcopy(projected["pool_views"])
+    return projected
+
+
+def resource_pool_projection(
+    resources: Iterable[Mapping[str, Any]],
+    *,
+    pool_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Project per-resource inventory grouped by authoritative resource pool.
+
+    `pool_metadata` is an optional `pool_id -> {label, enabled, mechanism,
+    policy_tags, pool_views}` mapping supplied by the mounting service. A
+    pool absent from `pool_metadata` (including when `pool_metadata` is
+    `None`, an older producer's default) is projected with inventory only
+    -- no `pool_metadata` key at all, not an empty one -- so omitting a
+    pool directory reproduces exactly what this function already returned
+    before pool metadata existed.
+    """
     pools: dict[str, list[dict[str, Any]]] = {}
     for raw in resources:
         resource = dict(raw)
@@ -82,7 +122,11 @@ def resource_pool_projection(resources: Iterable[Mapping[str, Any]]) -> list[dic
     result: list[dict[str, Any]] = []
     for pool_id in sorted(pools):
         inventory = sorted(pools[pool_id], key=lambda row: row["physical_resource_id"])
-        result.append({"resource_pool_id": pool_id, "resources": inventory})
+        row: dict[str, Any] = {"resource_pool_id": pool_id, "resources": inventory}
+        meta = (pool_metadata or {}).get(pool_id)
+        if meta is not None:
+            row["pool_metadata"] = _project_pool_metadata(meta)
+        result.append(row)
     return result
 
 
@@ -128,14 +172,17 @@ class SiteProjectionService:
         ledger: Any,
         *,
         resource_inventory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
+        pool_directory: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
     ) -> None:
         self._ledger = ledger
         self._resource_inventory = resource_inventory or ledger.list_resources
+        self._pool_directory = pool_directory
         self._resource_pools = ProjectionRevisionTracker()
         self._capacity_buckets = ProjectionRevisionTracker()
 
     def resource_pools(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
-        rows = resource_pool_projection(self._resource_inventory())
+        pool_metadata = self._pool_directory() if self._pool_directory else None
+        rows = resource_pool_projection(self._resource_inventory(), pool_metadata=pool_metadata)
         return self._resource_pools.observe(rows), rows
 
     def capacity_buckets(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:

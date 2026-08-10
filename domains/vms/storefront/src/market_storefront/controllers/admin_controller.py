@@ -44,6 +44,7 @@ from market_storefront.utils.failure_policy import (
 from market_storefront.server import _set_globally_paused
 from market_storefront.utils.config import ESCROW_TEMPLATES
 from core_storefront.stage_log import stage_event
+from market_storefront.services.capacity_client import remote_site_clients
 
 logger = logging.getLogger(__name__)
 
@@ -495,7 +496,6 @@ class AdminController:
     async def _find_live_reservation_for_escrow(
         self, escrow_uid: str,
     ) -> dict[str, Any] | None:
-        from market_storefront.services.capacity_client import remote_site_clients
 
         capacity = self._capacity()
         for client in remote_site_clients(capacity).values():
@@ -599,6 +599,17 @@ class AdminController:
 
         return build_capacity_client(lambda: self._db)
 
+    def _site_topology(self) -> tuple[str | None, int]:
+        """(home_site, configured_site_count) as of right now.
+
+        Computed fresh on every call rather than cached -- the count is
+        load-bearing for whether an unmapped listing's site may be
+        defaulted or must be left ambiguous, so it must reflect the
+        actual current configuration, not a value that could go stale.
+        """
+        sites = remote_site_clients(self._capacity())
+        return next(iter(sites), None), len(sites)
+
     async def _member_availability(self) -> dict | None:
         """Aggregated site availability, or None when unobtainable.
 
@@ -624,14 +635,20 @@ class AdminController:
         from domains.vms.listings.reconciler import (
             mark_derived_listings_closed,
             record_derived_listing,
+            site_id_for_listing,
             stale_open_listing_ids,
         )
 
+        home_site, configured_site_count = self._site_topology()
+        if home_site is None:
+            return []
         availability = await self._member_availability()
         if availability is None:
             return []
         closed_listing_ids = stale_open_listing_ids(
-            self._db.db_path, member_availability=availability,
+            self._db.db_path, home_site=home_site,
+            configured_site_count=configured_site_count,
+            member_availability=availability,
         )
         if closed_listing_ids:
             conn = sqlite3.connect(
@@ -662,9 +679,20 @@ class AdminController:
                 pool_id = offer.get("pool_id")
                 if not resource_id and not pool_id:
                     continue
+                # stale_open_listing_ids resolved a site for this listing
+                # either from its own mapping or (only with exactly one
+                # configured site) the home_site fallback -- re-derive
+                # the same way here rather than assuming a prior mapping
+                # row exists.
+                listing_site_id = site_id_for_listing(self._db.db_path, str(listing_id))
+                if listing_site_id is None:
+                    if configured_site_count != 1:
+                        continue
+                    listing_site_id = home_site
                 record_derived_listing(
                     self._db.db_path,
                     listing_id=str(listing_id),
+                    site_id=listing_site_id,
                     resource_id=str(resource_id) if resource_id else None,
                     pool_id=str(pool_id) if pool_id else None,
                     gpu_count=int(offer["gpu_count"]),
@@ -672,7 +700,10 @@ class AdminController:
                 )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
-        mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
+        mark_derived_listings_closed(
+            self._db.db_path, closed_listing_ids,
+            home_site=home_site, configured_site_count=configured_site_count,
+        )
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self) -> list[str]:
@@ -681,11 +712,14 @@ class AdminController:
             mark_derived_listings_open,
         )
 
+        home_site, _ = self._site_topology()
+        if home_site is None:
+            return []
         availability = await self._member_availability()
         if availability is None:
             return []
         reopened_listing_ids = closed_available_listing_ids(
-            self._db.db_path, member_availability=availability,
+            self._db.db_path, home_site=home_site, member_availability=availability,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")
@@ -851,15 +885,43 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
+        from domains.vms.listings.reconciler import site_id_for_listing
+
         open_listing_ids = self._open_derived_compute_listing_ids()
-        reserved = await self._capacity().reserve(
-            claim=body.required_attributes or None,
-            deal_ref={
-                "listing_id": body.listing_id,
-                "escrow_uid": body.escrow_uid,
-                "reserved_by": "admin",
-            },
+        site_id = (
+            site_id_for_listing(self._db.db_path, body.listing_id)
+            if body.listing_id else None
         )
+        try:
+            reserved = await self._capacity().reserve(
+                claim=body.required_attributes or None,
+                deal_ref={
+                    "listing_id": body.listing_id,
+                    "escrow_uid": body.escrow_uid,
+                    "reserved_by": "admin",
+                },
+                site=site_id,
+            )
+        except KeyError:
+            # The listing's own recorded site_id doesn't match any
+            # currently configured site -- a stale mapping, not a
+            # capacity answer. Distinct from "no capacity" so an
+            # operator debugging this doesn't chase the wrong problem.
+            raise HTTPException(
+                status_code=500,
+                detail=f"Listing {body.listing_id!r} is mapped to site "
+                       f"{site_id!r}, which is not currently configured",
+            )
+        except Exception as exc:
+            if site_id is None:
+                raise
+            # The mapped site itself could not be reached -- also
+            # distinct from a live "no capacity" refusal.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach site {site_id!r} for listing "
+                       f"{body.listing_id!r}: {exc}",
+            )
         if not reserved:
             raise HTTPException(
                 status_code=409,

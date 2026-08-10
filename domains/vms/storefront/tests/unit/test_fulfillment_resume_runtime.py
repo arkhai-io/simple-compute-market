@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import sqlite3
+
 import pytest
 
 from market_fulfillment import VersionedEnvelope
@@ -54,8 +56,10 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin():
     assert db.update_escrow.await_args.kwargs["fulfillment_phase"] == "physical_result_recorded"
 
 @pytest.mark.asyncio
-async def test_missing_identifiers_replay_exact_persisted_request():
-    db = SimpleNamespace(update_escrow=AsyncMock())
+async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
+    db_path = str(tmp_path / "test.db")
+    sqlite3.connect(db_path).close()  # a real, valid (if empty) sqlite file
+    db = SimpleNamespace(update_escrow=AsyncMock(), db_path=db_path)
     capacity = SimpleNamespace(
         reserve=AsyncMock(return_value={
             "capacity_reservation_id": "reservation-1",
@@ -109,6 +113,7 @@ async def test_missing_identifiers_replay_exact_persisted_request():
         deal_ref={"listing_id": "listing-1", "escrow_uid": "escrow-1"},
         lease_start_utc=None,
         lease_duration_seconds=7200,
+        site=None,
     )
     accepted_body = remote.begin_fulfillment.await_args.args[0]
     assert accepted_body.fulfillment_request.model_dump() == request

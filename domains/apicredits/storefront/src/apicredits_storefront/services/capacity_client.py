@@ -3,7 +3,7 @@
 The authoritative quota ledger lives in the credits service (it mounts
 the shared ``market_site`` ledger); the storefront is strictly a client.
 The composed shape mirrors the VM storefront: per-site
-``RemoteCapacityClient``s behind one ``AggregateCapacityClient``, with
+``SiteCapacityClient``s behind one ``AggregateCapacityClient``, with
 capacity deltas arriving by tailing each authority's versioned event
 feed, and the storefront's reaction — credit-listing close/reopen —
 subscribed on the aggregate bus.
@@ -21,10 +21,8 @@ from core_storefront.aggregation import (
     fill_first,
 )
 from core_storefront.capacity import CapacityDelta, CapacitySubscriber
-from core_storefront.capacity_remote import (
-    RemoteCapacityClient,
-    site_events_poller,
-)
+from core_storefront.capacity_remote import site_events_poller
+from market_site_client import SiteCapacityClient
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +129,7 @@ def _aggregate_for(
         placement = fill_first
     aggregate = AggregateCapacityClient(
         {
-            name: RemoteCapacityClient(url, admin_key)
+            name: SiteCapacityClient(url, admin_key)
             for name, url in sites.items()
         },
         placement=placement,
@@ -152,15 +150,15 @@ def build_capacity_client(
     return _aggregate_for(sqlite_client_factory, sites, admin_key, placement_name)
 
 
-def remote_site_clients(client: Any) -> dict[str, RemoteCapacityClient]:
+def remote_site_clients(client: Any) -> dict[str, SiteCapacityClient]:
     """Per-site remote clients behind a capacity client, by site name."""
     if isinstance(client, AggregateCapacityClient):
         return {
             name: client.site(name)
             for name in client.site_names
-            if isinstance(client.site(name), RemoteCapacityClient)
+            if isinstance(client.site(name), SiteCapacityClient)
         }
-    if isinstance(client, RemoteCapacityClient):
+    if isinstance(client, SiteCapacityClient):
         return {"default": client}
     return {}
 

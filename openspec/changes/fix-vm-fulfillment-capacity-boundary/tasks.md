@@ -56,6 +56,7 @@
 - [x] 6.5 Remove temporary, migration-oriented, speculative, and change-history comments from production code. Production comments describe current invariants and may reference only stable permanent documentation. **Verified:** the new delegate implementation uses present-tense contract documentation and contains no active-change references or speculative unit commentary.
 - [x] 6.6 Complete the design-promotion record below with exact headings after promotion and verify production code contains no `openspec/changes` references. **Verified:** repository production sources contain no reference to `openspec/changes/fix-vm-fulfillment-capacity-boundary`.
 - [x] 6.7 Update all task checkboxes to reflect actual implementation and validation status; preserve already-completed work and amend tasks whose delivered behavior changed during review.
+- [ ] 6.8 **Roadmap currency** (added 2026-08-06 by `add-development-roadmap`, which extended `openspec/README.md#plan-closeout-requirements` from five parts to six). Update this change's rows in `docs/development/ROADMAP.md` — it currently appears as an open gap under both Goal 1 (stale physical-placement fields on the current fulfillment path) and Goal 2 (accepted VM shape not reaching the provisioning request) — and record the update in the design-promotion record. Appended rather than folded into 6.6, per `AGENTS.md`'s rule to amend rather than replace implementation history.
 
 ### Design-promotion record
 

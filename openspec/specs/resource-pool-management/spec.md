@@ -117,7 +117,46 @@ Pool create, replace, patch, import, and validation operations MUST reject an un
 - **WHEN** an operator changes a pool's delegate or playbook after fulfillment has accepted and persisted prepared provider input
 - **THEN** retries and dispatch use the snapshotted prepared input rather than re-reading the live pool configuration
 
+### Requirement: Session-scoped pool reads
+
+Resource-pool management MUST expose a session-scoped pool lookup that loads provider configuration using the caller's open database session. Fulfillment uses this operation while freezing prepared provider input so the pool snapshot and aggregate write share one transaction.
+
+#### Scenario: Pool configuration is frozen with acceptance
+
+- **WHEN** fulfillment prepares provider input inside its acceptance transaction
+- **THEN** the pool and provider configuration are read through the same caller-owned session before the prepared operation is persisted
+
+### Requirement: Domain-neutral publication and hold hints
+
+Resource Pool policy metadata MUST support stable domain-neutral keys for `listing_mode`, `max_reservation_hold_seconds`, `region`, `sla`, and `pricing` without defining domain-specific listing-mode, region, SLA, or pricing values in this shared capability. Unknown policy tags MUST remain forward-compatible opaque metadata. `pool_id` is a site-local operator slug, never made globally unique; every durable or public reference to a pool keys on `(site_id, pool_id[, resource_id])`, never `pool_id` alone.
+
+#### Scenario: Domain interprets listing mode
+
+- **WHEN** VM, bare-metal, or API-credit publication reads a Resource Pool's `listing_mode`
+- **THEN** the selected domain validates and interprets the value without adding its enum or default rule to this shared package
+
+#### Scenario: Consumer does not support a hint
+
+- **WHEN** a storefront version does not recognize one projected policy tag
+- **THEN** it ignores that tag without rejecting the Resource Pool or changing authoritative admission
+
+### Requirement: Reservation hold and SLA preference validation
+
+A Resource Pool management surface that accepts `max_reservation_hold_seconds` MUST require a nonnegative integer, or `sla` MUST require a nonnegative number (integer or fractional), and MUST expose the normalized value as advisory metadata rather than an admission rule. This applies identically to every surface capable of persisting a Resource Pool's `policy_tags` — the bulk pool-document import path and the individual pool admin API (`create`/`replace`/`update`) both validate through the same shared check.
+
+#### Scenario: Operator supplies an invalid hold preference
+
+- **WHEN** an operator submits a negative, fractional, or nonnumeric hold preference through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy metadata
+
+#### Scenario: Operator supplies an invalid SLA value
+
+- **WHEN** an operator submits a negative or nonnumeric `sla` through any pool-write surface
+- **THEN** Resource Pool validation rejects the update without changing the stored policy metadata, the same as an invalid hold preference
+
 ## Evidence
+
+- Domain-neutral hint keys, generic read-side resolution, and write-side hold-preference and SLA-preference validation (both the bulk YAML import path and the individual pool admin API): `kit/resource-pools/tests/unit/test_hints.py`, `kit/resource-pools/tests/unit/test_resource_pool_service.py::TestHoldPreferenceValidationOnIndividualPoolWrites`.
 
 - Pool persistence, registered requirement-delegate validation, strict import, dry-run, idempotency, lifecycle, and provider replacement: `domains/vms/provisioning/service/src/tests/unit/services/test_resource_pool_service.py`.
 - Typed administrative API, default-pool invariant, canonical round trip, and host assignment: `domains/vms/provisioning/service/src/tests/integration/test_pools_api.py`.
@@ -134,13 +173,3 @@ Disabling a Resource Pool is a draining action. It blocks new Capacity Settlemen
 Resource-pool management owns administrative routing metadata: pool identity, enabled state, policy tags, provider kind, provider-specific configuration, and host/resource membership. It does not own fulfillment-provider protocols or settlement-resource assignment.
 
 The higher-layer [fulfillment capability](../fulfillment/spec.md) reads enabled pool and resource information when evaluating candidates. Disabling a pool prevents new scheduling assignments while preserving existing reservations, assignments, fulfillment records, and active workloads. `market_resource_pools` must not import `market_fulfillment`, including for type-only annotations.
-
-
-### Requirement: Session-scoped pool reads
-
-Resource-pool management exposes a session-scoped pool lookup that loads provider configuration using the caller's open database session. Fulfillment uses this operation while freezing prepared provider input so the pool snapshot and aggregate write share one transaction.
-
-#### Scenario: Pool configuration is frozen with acceptance
-
-- **WHEN** fulfillment prepares provider input inside its acceptance transaction
-- **THEN** the pool and provider configuration are read through the same caller-owned session before the prepared operation is persisted

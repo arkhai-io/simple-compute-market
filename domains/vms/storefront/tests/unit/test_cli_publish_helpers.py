@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from unittest.mock import patch
 
 import pytest
 
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
+    _site_pool_projection_sync,
     _available_resources,
     _open_listing_ids,
     _open_listing_resource_keys,
@@ -30,6 +32,11 @@ from market_storefront.cli_publish import (
     _publication_source_selection,
     _publish_round,
     _stale_open_listing_ids,
+)
+from domains.vms.listings.reconciler import (
+    ensure_derived_compute_listings_table,
+    listing_resource_key,
+    record_derived_listing,
 )
 from market_alkahest.token import ERC20TokenMetadata
 from tests._settings_overrides import settings_overrides
@@ -292,8 +299,8 @@ def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
         conn.close()
 
     assert _open_listing_resource_keys(db) == {
-        "compute-001:gpus:1",
-        "compute-002:gpus:2",
+        listing_resource_key("default", "compute-001", 1),
+        listing_resource_key("default", "compute-002", 2),
     }
 
 
@@ -384,10 +391,7 @@ def test_available_resources_derives_slices_from_gpu_capacity(tmp_path):
 
     assert [r["gpu_count"] for r in rows] == [1, 2, 3, 4]
     assert {r["resource_key"] for r in rows} == {
-        "compute-4x:gpus:1",
-        "compute-4x:gpus:2",
-        "compute-4x:gpus:3",
-        "compute-4x:gpus:4",
+        listing_resource_key("default", "compute-4x", n) for n in (1, 2, 3, 4)
     }
 
 
@@ -410,6 +414,61 @@ def test_available_resources_closes_oversized_slices_when_capacity_held(
     rows = _available_resources(db)
 
     assert [r["gpu_count"] for r in rows] == [1, 2]
+
+
+class TestPoolHintResolutionSettings:
+    """Unit coverage for cli_publish._pool_hint_resolution_settings --
+    confirms the real `[pricing]` config is actually read, not just that
+    the reconciler-side resolver logic (tested independently in
+    test_pool_descriptors.py / test_reconciler.py) is correct in
+    isolation."""
+
+    def test_reads_defaults_from_settings_toml(self):
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.accept_pool_declared_sla is False
+        assert settings.default_sla == 0.0
+
+    def test_reads_an_explicit_override(self):
+        with settings_overrides(**{
+            "pricing.accept_pool_declared_sla": True,
+            "pricing.default_sla": 42.0,
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.accept_pool_declared_sla is True
+        assert settings.default_sla == 42.0
+
+    def test_flat_pricing_defaults_become_the_tier_1_fallback(self):
+        with settings_overrides(**{
+            "pricing.default_min_price": "1.00",
+            "pricing.default_token_address": "0xflat",
+            "pricing.default_max_duration_seconds": 60,
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_flat_default.min_price == "1.00"
+        assert settings.gpu_pricing_flat_default.token == "0xflat"
+        assert settings.gpu_pricing_flat_default.max_duration_seconds == 60
+
+    def test_unset_flat_pricing_defaults_are_none_not_empty_string(self):
+        """An unset default_min_price/token/... must fall through as
+        None so lower-priority resolution tiers still have a chance --
+        propagating "" would be treated as a real (if empty) value."""
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_flat_default.min_price is None
+        assert settings.gpu_pricing_flat_default.token is None
+
+    def test_per_model_gpu_pricing_defaults_read_from_config(self):
+        with settings_overrides(**{
+            "pricing.defaults": {
+                "gpu": {"H100": {"min_price": "5.00"}, "A100": {"min_price": "3.00"}},
+            },
+        }):
+            settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_defaults_by_model["H100"].min_price == "5.00"
+        assert settings.gpu_pricing_defaults_by_model["A100"].min_price == "3.00"
+
+    def test_no_configured_gpu_defaults_is_an_empty_mapping_not_an_error(self):
+        settings = cli_publish._pool_hint_resolution_settings()
+        assert settings.gpu_pricing_defaults_by_model == {}
 
 
 def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monkeypatch):
@@ -453,10 +512,22 @@ def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monke
     finally:
         conn.close()
     assert rows == [
-        ("l-compute-4x-1x", "compute-4x", 1, "open", "compute-4x:gpus:1"),
-        ("l-compute-4x-2x", "compute-4x", 2, "open", "compute-4x:gpus:2"),
-        ("l-compute-4x-3x", "compute-4x", 3, "open", "compute-4x:gpus:3"),
-        ("l-compute-4x-4x", "compute-4x", 4, "open", "compute-4x:gpus:4"),
+        (
+            "l-compute-4x-1x", "compute-4x", 1, "open",
+            listing_resource_key("default", "compute-4x", 1),
+        ),
+        (
+            "l-compute-4x-2x", "compute-4x", 2, "open",
+            listing_resource_key("default", "compute-4x", 2),
+        ),
+        (
+            "l-compute-4x-3x", "compute-4x", 3, "open",
+            listing_resource_key("default", "compute-4x", 3),
+        ),
+        (
+            "l-compute-4x-4x", "compute-4x", 4, "open",
+            listing_resource_key("default", "compute-4x", 4),
+        ),
     ]
 
 
@@ -524,26 +595,14 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
                 "listing-3x-old",
             ),
         )
-        conn.execute(
-            """
-            CREATE TABLE derived_compute_listings (
-                listing_id TEXT PRIMARY KEY,
-                resource_id TEXT NOT NULL,
-                gpu_count INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                derivation_key TEXT NOT NULL UNIQUE,
-                last_reconciled_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.execute(
-            """INSERT INTO derived_compute_listings
-               (listing_id, resource_id, gpu_count, status, derivation_key)
-               VALUES ('listing-3x-old', 'compute-4x', 3, 'closed', 'compute-4x:gpus:3')"""
-        )
+        ensure_derived_compute_listings_table(conn)
         conn.commit()
     finally:
         conn.close()
+    record_derived_listing(
+        db, listing_id="listing-3x-old", site_id="default",
+        resource_id="compute-4x", gpu_count=3, status="closed",
+    )
 
     created: list[dict] = []
     monkeypatch.setattr(
@@ -558,9 +617,9 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
         published, failed, skipped = _publish_round(
             db_path=db,
             skip_ids={
-                "compute-4x:gpus:1",
-                "compute-4x:gpus:2",
-                "compute-4x:gpus:4",
+                listing_resource_key("default", "compute-4x", 1),
+                listing_resource_key("default", "compute-4x", 2),
+                listing_resource_key("default", "compute-4x", 4),
             },
             **_round_kwargs(),
         )
@@ -576,7 +635,8 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
             "SELECT status FROM listings WHERE listing_id = 'listing-3x-old'"
         ).fetchone()[0]
         derived_status = conn.execute(
-            "SELECT status FROM derived_compute_listings WHERE derivation_key = 'compute-4x:gpus:3'"
+            "SELECT status FROM derived_compute_listings WHERE derivation_key = ?",
+            (listing_resource_key("default", "compute-4x", 3),),
         ).fetchone()[0]
     finally:
         conn.close()
@@ -925,3 +985,132 @@ def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
     assert len(failed) == 1
     assert "token" in failed[0][1]
     validate_failed_resource(failed[0])
+
+
+# ---------------------------------------------------------------------------
+# _site_pool_projection_sync -- CLI's own synchronous projection fetch
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    def __init__(self, json_data, status_code=200):
+        self._json_data = json_data
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._json_data
+
+
+class _FakeHttpxClient:
+    """Stands in for httpx.Client: supports the `with ... as http` usage
+    and routes .get(url) to a per-test-configured outcome by URL prefix."""
+
+    _responses_by_prefix: dict[str, object] = {}
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url, headers=None):
+        for prefix, outcome in self._responses_by_prefix.items():
+            if url.startswith(prefix):
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+        raise AssertionError(f"unexpected URL in test: {url}")
+
+
+def _fake_httpx_client_class(responses_by_prefix):
+    return type(
+        "_FakeHttpxClient", (_FakeHttpxClient,),
+        {"_responses_by_prefix": responses_by_prefix},
+    )
+
+
+class TestSitePoolProjectionSync:
+    def test_one_site_succeeds(self):
+        rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": _FakeResponse({"resource_pools": rows}),
+        })
+        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
+             patch("httpx.Client", fake_client):
+            result = _site_pool_projection_sync()
+        assert result == {"site-a": rows}
+
+    def test_successful_empty_resource_pools_is_kept_not_dropped(self):
+        """A site that answers with genuinely zero pools must still be
+        present in the result as an empty list -- same distinction that
+        matters for the server-side site_pool_projection()."""
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": _FakeResponse({"resource_pools": []}),
+        })
+        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
+             patch("httpx.Client", fake_client):
+            result = _site_pool_projection_sync()
+        assert result == {"site-a": []}
+
+    def test_one_site_fails_others_still_reported(self):
+        rows_b = [{"resource_pool_id": "gpu-pool-b", "resources": []}]
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": RuntimeError("connection refused"),
+            "http://site-b": _FakeResponse({"resource_pools": rows_b}),
+        })
+        with settings_overrides(**{
+            "capacity.sites": {"site-a": "http://site-a", "site-b": "http://site-b"},
+        }), patch("httpx.Client", fake_client):
+            result = _site_pool_projection_sync()
+        assert result == {"site-b": rows_b}
+        assert "site-a" not in result
+
+    def test_all_sites_fail_returns_none(self):
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": RuntimeError("connection refused"),
+        })
+        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
+             patch("httpx.Client", fake_client):
+            result = _site_pool_projection_sync()
+        assert result is None
+
+    def test_no_sites_configured_returns_none(self):
+        with settings_overrides(**{
+            "capacity.sites": {}, "capacity.authority_url": "",
+            "provisioning.service_url": "",
+        }):
+            result = _site_pool_projection_sync()
+        assert result is None
+
+    def test_http_error_status_treated_as_failure(self):
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": _FakeResponse({}, status_code=500),
+        })
+        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
+             patch("httpx.Client", fake_client):
+            result = _site_pool_projection_sync()
+        assert result is None
+
+
+class TestSitePoolProjectionIfEnabled:
+    def test_flag_disabled_returns_none_without_fetching(self):
+        with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
+            assert cli_publish._site_pool_projection_if_enabled() is None
+
+    def test_flag_enabled_fetches(self):
+        rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
+        fake_client = _fake_httpx_client_class({
+            "http://site-a": _FakeResponse({"resource_pools": rows}),
+        })
+        with settings_overrides(**{
+            "capacity.use_site_projection_for_listings": True,
+            "capacity.sites": {"site-a": "http://site-a"},
+        }), patch("httpx.Client", fake_client):
+            result = cli_publish._site_pool_projection_if_enabled()
+        assert result == {"site-a": rows}

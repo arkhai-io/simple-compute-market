@@ -1,6 +1,6 @@
 # Arkhai Market Stack — Architecture Reference
 
-> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog.
+> **Purpose:** Current repository-wide architecture for implementation and review. Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). This document describes what the system is and why its major boundaries exist. It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## Document map
 
@@ -15,8 +15,11 @@
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | Internal wheels, images, migrations, and reinit rules |
-| [Testing strategy](#testing-strategy) | Test levels and boundary validation |
+| [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
+| [Testing strategy](#testing-strategy) | Test levels; see `TESTING.md` for methodology |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
+
+Directional context — which goals are being pursued, the value each delivers, and which change owns each open gap — lives in [`ROADMAP.md`](ROADMAP.md). This document states what is true now; the roadmap states where it is going.
 
 ## System overview
 
@@ -119,6 +122,7 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
                                       │ resource pools      │
                                       │ scheduler/providers │
                                       │ jobs/lease release  │
+                                      │ recovery watchdogs  │
                                       └─────────┬──────────┘
                                                 │
                                       ┌─────────▼──────────┐
@@ -127,7 +131,11 @@ Within `market_fulfillment`, carrier modules such as identifiers, envelopes, req
                                       └────────────────────┘
 ```
 
-The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time. The API-credits seller stack instead composes a storefront with a credits service and quota authority; the credits service owns keys, balances, grants, and online consumption.
+The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time; it also runs the timer-driven recovery watchdogs described in "Recovery workers" below. The API-credits seller stack instead composes a storefront with a credits service and quota authority; the credits service owns keys, balances, grants, and online consumption.
+
+## Service Architecture
+
+Within a service, controllers stay thin: HTTP routing, request/response schemas, and translating exceptions into status codes. Business rules, orchestration, and I/O composition live in the 'service' layer beneath them. A per-service breakdown of its own layers belongs in that subsystem's `architecture.md`, not here.
 
 ## Authority boundaries
 
@@ -140,7 +148,7 @@ The buyer is normally a pure HTTP client. The registry is a shared discovery ser
 | Settlement-resource selection | Fulfillment scheduler | Placement occurs before provider execution |
 | Provider-specific create/status/teardown | Fulfillment provider | Executes against the selected resource and does not substitute placement |
 | Asynchronous infrastructure job state | Compute provisioner | Durable job identity with in-process execution queue |
-| Lease expiry and physical release | Provisioning lifecycle plus site authority | Capacity is released only after executor/provider success or explicit force release |
+| Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
 | On-chain/mechanism claim state | Settlement servicing engine | Mechanism-neutral core with kit/domain codecs and policies |
 | API keys, credit balances, grants, and consumption | API-credits service | Wallet authorization for purchase is distinct from bearer authorization for use |
 
@@ -154,11 +162,13 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 ### Site authority
 
-A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites, and one site may serve several storefronts.
+A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
+
+The reverse relationship is currently one-to-one: a compute provisioner binds to a single storefront through a global `storefront_url`, and one shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so there is no per-storefront identity or isolation at that boundary. The lifecycle event sink accepts a per-deal storefront URL override, but no storefront populates it, so delivery always resolves to the configured global. Serving several storefronts from one site authority requires a trusted per-storefront identity that does not exist yet.
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
-A site authority's client-facing surface splits into two separately typed clients: a buyer-facing read/reserve/commit client (`RemoteCapacityClient`) never used for operator writes, and a typed capacity-administration client (`kit/site-client`'s `SiteCapacityAdminClient`) for operator resource registration and update. Neither client depends on the other's implementation.
+A site authority's client-facing surface splits into two separately typed clients, both living in `kit/site-client`: a buyer-facing read/reserve/commit client (`SiteCapacityClient`) never used for operator writes, and a typed capacity-administration client (`SiteCapacityAdminClient`) for operator resource registration and update. Neither client depends on the other's implementation.
 
 ### Resource pools
 
@@ -197,11 +207,11 @@ Fulfillment lifecycle identifiers are opaque UUIDv7 strings. They are not encode
 | `provisioned_resource_id` | One provider-created output; one fulfillment may create several |
 | `result_id` | One durable settlement/fulfillment result |
 | `site_id` | Explicit authority/routing identity; never encoded into another ID |
+| `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
 `fulfillment_uid` is a distinct, older identifier predating `fulfillment_id`: the on-chain settlement-claim identity a storefront's settlement mechanism (Alkahest today) issues for escrow arbitration. It is not part of the fulfillment-lifecycle UUIDv7 family above, is owned by the settlement mechanism rather than the fulfillment capability, and MUST NOT be confused with `fulfillment_id` — a storefront workflow row may legitimately carry both, for the same deal, meaning two different things.
 
 `site_id` is owned at the storefront aggregation boundary and bound to a configured provisioning connection. Provisioning-local capacity persistence is already scoped by its database authority and does not duplicate that storefront-owned identity on every pool, resource, or reservation row. Counterparties cannot self-assert the routing identity used by the storefront.
-| `pool_id` | Globally unique pool identity with explicit site ownership where required |
 
 Commercial agreement identity does not cross the generic provisioning boundary merely for correlation. Storefronts retain commercial context and translate it into fulfillment requirements. The capacity reservation is the generic physical-lifecycle identity.
 
@@ -251,7 +261,19 @@ Negotiation-time availability is advisory. Authoritative reservation occurs at a
 
 A reservation whose negotiated shape changes is superseded, never mutated: `CapacityLedgerService.resize_reservation` atomically releases the old reservation and admits a new one under a new `capacity_reservation_id`, so the reservation's committed dimensions always reflect the shape actually being negotiated. Scheduling (see "Fulfillment" below) MAY further narrow within a reservation's bound for a placement or pricing check against a candidate shape; a scheduling narrower than the reservation reports back exactly what it scheduled, not the reservation's original shape, since that is what gets provisioned if accepted (`openspec/specs/site-capacity/spec.md`'s committed-dimensions-through-scheduling requirement). As of this writing, `resize_reservation` has no negotiation-side caller — this describes the intended negotiation model, not yet-implemented wiring between negotiation and reservation resizing.
 
+#### Layered placement ownership
 
+Which physical resource ultimately serves a deal is decided up to three separate times, by two different processes, and these decisions must not be conflated:
+
+| Decision | Owned by | When | Mechanism |
+|---|---|---|---|
+| Which pool/resource a listing represents | Storefront | Publish time | Baked into the listing's `offer_resource` at creation |
+| Which site to route a reserve/probe call to | Storefront (`AggregateCapacityClient`) | Reserve/negotiate time | `fill_first`/`most_available` ranking policies over a live per-request snapshot |
+| Which concrete host within that pool fulfills the reservation | Provisioning service (`PhysicalSettlementScheduler`) | Schedule time | Deterministic round-robin (or a replaceable fairness policy) |
+
+The second layer stays storefront-owned rather than moving into the provisioning service alongside the third: pooling/placement ranking is a commercial judgment a seller makes about their own sites, not a physical-fulfillment concern, so it lives in the storefront process. The second and third layers pick among fundamentally different things — sites versus hosts within one already-chosen site — and are correctly separated by process boundary, not merely by convention.
+
+The second layer's ranking policies (`fill_first`/`most_available`) read a live, per-request capacity snapshot, never a storefront's own advisory `CapacityProjection` cache — that cache is explicitly allowed to go stale for display/listing purposes, and routing a real reservation attempt through it would turn a display cache into a load-bearing admission input, defeating the reason it's allowed to be stale. The ranking policies' own claim-matching is deliberately a *coarse, best-effort hint*, not shared code with the enforcement-level predicates `kit/site` and fulfillment scheduling use: a wrong ranking costs one extra round-trip when the aggregator falls through to the next site, not an incorrect admission, so the two matchers are allowed to diverge in a way an actual eligibility gate never could.
 
 ### Fulfillment
 
@@ -277,9 +299,19 @@ Provider-specific dictionaries crossing domain or persistence boundaries use a v
 
 The current round-robin scheduling policy is deterministic for the same candidate order and state. Multidimensional fit checks every requested dimension; a candidate missing a requested dimension has zero availability for that dimension.
 
+### Fulfillment status and results
+
+A caller observes fulfillment progress by pulling `GET /fulfillment/{fulfillment_id}/status` and `GET /fulfillment/{fulfillment_id}/result` from the durable aggregate — there is no push channel from provisioning to the storefront today. `status` is a plain read with no provider call. `result` returns a provider-neutral `fulfillment.result.v1` envelope; for a fulfillment in `active` state it also performs a live, uncached credential fetch against the provider (never persisted) outside any open database transaction, so every read reflects current provider-reported credentials rather than a value captured once at creation. A live credential-fetch failure on an otherwise-healthy `active` fulfillment is its own stable error category (`credential_fetch_failed`), distinct from a create/status/teardown failure.
+
+Push-based result delivery (provisioning notifying the storefront rather than the storefront polling) is planned future work, tracked as `replace-polling-with-authenticated-push`, and requires a new provisioning→storefront authenticated channel that does not exist yet. It does not change the durable persistence this section describes, only the delivery transport.
+
 ### Release
 
-Physical release is proof-driven. The lifecycle invokes the selected provider or executor teardown. Capacity remains held on failure. Operators may retry release or explicitly force release after external verification, and the audit state distinguishes forced release from proven teardown.
+Physical release is proof-driven and split across two cooperating state machines with distinct retry ownership. Lease lifecycle (site/provisioning-lease layer) owns `releasing`/`released` and the final capacity-return decision; it never dispatches a second teardown operation itself. Fulfillment convergence (see "Recovery workers" below) owns dispatch, requeue, and recovery of the teardown states themselves (`teardown_dispatch_pending` → `tearing_down` → `torn_down`/`teardown_failed`). Lease-side retry re-observes the same fulfillment aggregate by its durable `fulfillment_id` rather than resubmitting a teardown.
+
+A kind-routed `ReleaseJobPort` connects the two: for VM-backed reservations it reads the fulfillment aggregate's teardown state (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending); other executor kinds continue to resolve through the shared job queue unchanged. Capacity is never returned to scheduling until the aggregate reaches `torn_down` or an operator explicitly force-releases after external verification; the audit state distinguishes forced release from proven teardown.
+
+`begin_fulfillment_teardown(fulfillment_id)` is the whole-fulfillment teardown entrypoint: it resolves the aggregate, reuses an already-prepared teardown operation when present (as legacy-backfilled rows carry) or prepares one via the provider when a native row reaches teardown for the first time, then hands off to convergence for dispatch — it never dispatches to the provider inline.
 
 ## Deployment topology
 
@@ -289,9 +321,9 @@ Compose is organized by market domain and includes the shared development chain.
 
 ### Production and staging
 
-The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components. Stateful services use independent persistence. SQLite-backed single-writer services use `Recreate` with ReadWriteOnce volumes. Service configuration is delivered through mounted profile files; environment variables are reserved for profile resolution and subprocess-required settings.
+The Helm umbrella chart composes registry, storefront, compute provisioning, and optional development/test components.
 
-The compute provisioner runs migrations before service startup and checks schema version on startup. Other services should follow the same separation as their migration work is completed.
+Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are covered in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md) and [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
 ## Build, packaging, and initialization
 
@@ -317,35 +349,25 @@ Schema changes are additive by default. Non-additive changes use expand/contract
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 
+## Recovery workers
+
+The compute provisioner runs three independent timer-driven workers, composed once at startup alongside the request-serving app, each owning a distinct slice of durable recovery:
+
+| Worker | Owns |
+|---|---|
+| `CapacityReservationWatchdog` | Expiring stale/unconfirmed capacity holds |
+| `FulfillmentConvergenceWatchdog` | Create and teardown dispatch/status convergence for the fulfillment aggregate (see "Fulfillment" and "Release" above) |
+| `LeaseWatchdog` | Lease expiry detection that triggers release |
+
+`FulfillmentConvergenceWatchdog` runs four handler passes each cycle — create-submission recovery, create-status convergence, teardown-submission recovery, teardown-status convergence — plus a `teardown_failed` requeue step, sharing one timer rather than one watchdog per pass. Each pass claims eligible rows durably (a short transaction reserving the row with a lease and worker identity), performs any provider call entirely outside a database transaction, and applies the outcome in a second short transaction only if the claim is still owned — a claim whose lease lapsed before the provider call returns is silently superseded, not double-applied. No attempt-count ceiling exists anywhere in this recovery path; a fresh worker instance resumes purely from durable claim state after a restart, with per-row exponential backoff and jitter between attempts.
+
 ## Operator lifecycle controls
 
 Long-running lifecycle workers may expose authenticated one-cycle controls when deterministic recovery, testability, or customer-issue diagnosis requires them. A manual cycle must invoke the same production handler as the timer-driven worker; it must not implement alternate lifecycle transitions. Diagnostic responses are bounded and may expose aggregate state counts, claim ages, and failure counts, but not credentials or unbounded provider payloads.
 
 ## Testing strategy
 
-Tests belong at the lowest level that can prove the behavior:
-
-1. **Unit tests** isolate a class or pure policy with injected collaborators.
-2. **Service integration tests** prove persistence, dependency wiring, HTTP mapping, or asynchronous state around one service.
-3. **Contract tests** share canonical producer/consumer fixtures across package boundaries.
-4. **System/e2e tests** run against deployed services over public/test HTTP seams and validate major lifecycle stages.
-
-Boundary changes require more than moved unit tests. Validation should cover:
-
-- package build and wheel contents;
-- typing markers and static type checks where contracts moved;
-- allowed dependency direction, including `TYPE_CHECKING` imports;
-- old import removal or explicit compatibility behavior;
-- changed consumer unit and integration suites;
-- composition startup and duplicate registration checks;
-- deterministic/idempotent retry behavior;
-- observable lifecycle events without arbitrary sleeps.
-
-The e2e test pod cannot import service internals. It uses typed clients, explicit test controllers, and stage/event APIs. Design new observability seams accordingly.
-
-Offline review validation uses scoped wheelhouses rather than copied virtual environments or shared package caches. The scope resolver accepts an explicit project list or review manifest and otherwise maps a Git diff to repository-owned project roots, then applies stable impact-expansion rules. Each project retains its own locked third-party requirements so independently locked projects are not forced into one synthetic environment. The producer builds current internal wheels, retains marker-specific locked dependencies needed for offline universal resolution, copies the current tracked repository into a clean verification tree, removes selected project environments, and runs each selected project's actual `make test` target with network and Python downloads disabled before packaging the artifact. Project Makefiles must keep interpreter selection configurable so the review environment can use the wheelhouse's declared Python version.
-
-See the [testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md).
+Tests belong at the lowest level that can prove the behavior: unit, integration, smoke, and end-to-end, each defending the narrowest observable contract appropriate to its level — no level should rely on end-to-end tests alone for behavior it could prove itself. See [`docs/development/TESTING.md`](TESTING.md) for the level definitions, coverage jurisdiction between them, the client-contract "no raw calls" rule, contract fixtures, boundary-change validation, cross-language conformance, and offline review validation, and [the testing and compatibility specification](../../openspec/specs/test-compatibility/spec.md) for the normative requirements.
 
 ## Capability documentation index
 
