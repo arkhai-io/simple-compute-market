@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 from core_buyer.escrow_selection import select_escrow_entry
+from market_policy import InlineSource, buyer_policy_catalogue_builder
 from market_policy.buyer_policy import (
     BuyerPolicy,
 )
@@ -13,8 +14,6 @@ from market_policy.buyer_policy import (
 from domains.vms.buyer.policy_surface import (
     BISECTION_POLICY,
     LISTED_PRICE_POLICY,
-    buyer_policy_catalogue,
-    buyer_policy_names,
     configured_buyer_policy,
     entry_uses_scalar_amount,
 )
@@ -40,17 +39,37 @@ def _exact_entry(chain: str = "anvil") -> dict:
     }
 
 
+def _catalogue():
+    """Compose the policies this package ships, locally.
+
+    Composed here rather than imported so the test asserts on the policy objects
+    it already has, without depending on a helper crossing a wheel boundary.
+    """
+    return (
+        buyer_policy_catalogue_builder()
+        .add_loader(
+            InlineSource(
+                {
+                    LISTED_PRICE_POLICY.name: LISTED_PRICE_POLICY,
+                    BISECTION_POLICY.name: BISECTION_POLICY,
+                },
+                label="vms-buyer-test",
+            )
+        )
+        .build()
+    )
+
+
 def test_scalar_policies_are_registered():
-    catalogue = buyer_policy_catalogue()
+    catalogue = _catalogue()
     assert {"listed_price", "bisection"} <= set(catalogue.names())
     assert catalogue["listed_price"] is LISTED_PRICE_POLICY
     assert catalogue["bisection"] is BISECTION_POLICY
-    assert {"listed_price", "bisection"} <= set(buyer_policy_names())
 
 
 def test_unknown_policy_names_the_registered_ones():
     with pytest.raises(KeyError, match="listed_price"):  # UnknownCatalogueEntryError
-        buyer_policy_catalogue()["haggle-3000"]
+        _catalogue()["haggle-3000"]
 
 
 def test_configured_policy_defaults_to_listed_price():

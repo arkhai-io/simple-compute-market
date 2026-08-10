@@ -6,11 +6,9 @@ re-registering the same names would silently shadow each other), and
 prices are per-unit — the VM plugin's unit is the lease hour."""
 
 from core_buyer.policy_surface import (  # noqa: F401
-    _SCALAR_PARAMS,
     BISECTION_POLICY,
     LISTED_PRICE_POLICY,
-    buyer_policy_catalogue,
-    buyer_policy_names,
+    _SCALAR_PARAMS,
     configured_buyer_policy,
     derive_scalar_prices,
     entry_uses_scalar_amount,

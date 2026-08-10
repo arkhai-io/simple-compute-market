@@ -244,11 +244,6 @@ def buyer_policy_catalogue() -> Catalogue[BuyerPolicy]:
     )
 
 
-def buyer_policy_names() -> list[str]:
-    """Every buyer policy name this invocation can resolve."""
-    return list(buyer_policy_catalogue().names())
-
-
 def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
     """The policy named by ``[negotiation] policy`` in buyer.toml.
 
