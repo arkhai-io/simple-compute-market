@@ -147,6 +147,15 @@ after the split nothing re-exports across a package boundary.
   module — and was reachable publicly only through a facade re-export. They are
   over-exported internal helpers, not dead code, and deleting them would break
   their callers. They become private and leave the facade instead.
+- **Keeping `_add_checkout_root_to_path()` in the storefront package
+  initializer:** rejected. It inserted the monorepo checkout root into `sys.path`
+  so `domains.vms.*` would resolve outside Docker. After the split the storefront
+  imports no `domains.*` module, and leaving the insertion would let an
+  undeclared dependency or an omitted wheel module work in a checkout and fail
+  once installed — the defect this layout exists to prevent.
+- **Proving packaging correctness by installing the whole internal wheel set:**
+  rejected as sufficient; retained as one of two checks. See the closure decision
+  above.
 - **Folding this into `remove-relative-uv-sources`:** rejected. That change
   targets parent-path `tool.uv.sources` entries and is unstarted; this targets
   an unowned namespace assembled by file manifests. Different mechanisms.
@@ -163,6 +172,46 @@ being composed names one of its aliases. The domain knows which of its own
 policies are expensive; the role only asks for what the domain permits. A chain
 that asks for it and cannot load it fails, because negotiating under a silently
 substituted strategy is worse than failing.
+
+### A wheel must stand on its own dependency metadata
+
+Installing the whole internal set and importing everything proves the set is
+consistent. It cannot prove any single distribution is self-describing: a package
+whose metadata omits a dependency still imports, because a sibling installed it.
+
+That is not hypothetical. Moving the listing models and the negotiation policies
+into `arkhai_vms` gave it module-scope imports of `market_alkahest` and
+`market_policy` while its metadata still declared only `pydantic` and
+`arkhai-core`. Every suite passed and an aggregate install imported cleanly.
+
+So closure is checked per wheel: one distribution installed alone, resolving only
+what it declares, then every module it ships imported. A module that cannot be
+imported that way names a dependency the package is not declaring.
+
+Internal dependencies are supplied as explicit file paths rather than resolved
+from the wheelhouse by name, because several internal distributions are also
+published publicly at the same version numbers — a resolver given an index and a
+version cannot distinguish a fresh local build from a stale published one, and
+would report a defect that is really a stale artifact or hide one behind a fresher
+published copy.
+
+### Deletions are tombstones, and pruning them is a repository operation
+
+A tombstone records why a file went, at the path it went from, which is what makes
+a deletion reviewable in a diff. It also means a fileset carrying a tombstone
+restores the tombstone rather than the deletion, so a tree can hold tombstones a
+reviewer has already actioned. `make prune-tombstones` makes that idempotent.
+
+Recognising one is deliberately strict: the whole file must be the comment. A file
+beginning with the marker above live code is not deleted, and the documents that
+define this convention show a tombstone inside a fenced example. One predicate
+serves both the manifest audit and the prune utility, because they diverged on
+exactly that case — one treated such a file as deleted, the other retained it.
+
+Pruning also removes directories left holding no source, recursively and scoped to
+the source roots. A package whose modules were all tombstoned is a deleted
+package, not an empty one; and a utility that deletes directories should not be
+able to reach an arbitrary path.
 
 ## Risks
 

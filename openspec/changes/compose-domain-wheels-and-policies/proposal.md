@@ -106,3 +106,19 @@ them as objects, touching no registry.
   resolution by removing parent-path `tool.uv.sources` entries. This change
   removes a different mechanism — an unowned namespace assembled by
   cross-project file manifests — and neither supersedes the other.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md` — wheel ownership, per-wheel dependency
+  closure, no interpreter-path restoration, and role-owned composition
+- [x] Existing subsystem specification — `market-composition` and
+  `negotiation-protocol`
+- [x] `docs/development/TESTING.md` — packaging validation as a distinct
+  jurisdiction from the four test levels
+- [x] `docs/configuration.md` — operator-facing policy configuration, including
+  correction of a file contract that had never matched the code
+- [ ] New subsystem specification — none owed
+
+### Knowledge to promote
+
+See the design-promotion record in `tasks.md`.

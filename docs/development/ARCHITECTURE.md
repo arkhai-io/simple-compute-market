@@ -74,6 +74,23 @@ kit capabilities
 core carrier and role contracts
 ```
 
+Names an operator may configure resolve against a catalogue the composing role
+builds once at startup and does not mutate thereafter, not against process-global
+state populated by import order. `market_policy.catalogue` is the reusable
+primitive: a caller supplies the sources, what a well-formed item is, and what to
+call the collection in errors. Composition fails before the role serves requests
+when a source cannot load, an item is malformed, or two sources offer one name —
+there is no precedence rule, because silent shadowing is what precedence
+reintroduces.
+
+Composition is the only place the layers meet. A role decides which mechanisms
+may contribute — its own built-ins, operator directories, installed entry points —
+and constructs those itself. A domain contributes only its own items and receives
+a narrow typed request, so a mistyped role setting fails at composition rather
+than being absorbed. Kit defines what a source is without knowing that domains
+exist; core declares the optional capability structurally, so neither package
+depends on the other.
+
 Core carrier packages must not import domain vocabulary. Domain packages may implement core hook shapes but should not make core depend on a concrete market. Composition roots own wiring and may depend on all lower layers.
 
 ### Kit layers
@@ -342,6 +359,12 @@ run focused tests
 ```
 
 Docker builds copy `.dist` from the build context in every stage that resolves internal packages. Using a sibling source path forces an unnecessarily broad Docker context and can allow local source layout to differ from packaged behavior.
+
+Every shipped Python module belongs to exactly one distribution, and that distribution's project directory contains it. A project does not enumerate another project's files, and a role does not obtain code by copying a source tree onto the interpreter path in place of declaring a dependency. The single exception is a namespace-anchor `__init__.py` carrying no implementation, which a wheel may ship to assemble a flat import path; `make check-wheel-manifests` validates that each anchor is shipped by some manifest and rejects any other unowned package under `domains/`.
+
+A distribution declares every dependency its shipped modules import at module scope, whether or not a sibling already installs it. `make check-wheel-closure` installs one wheel at a time with only its own declared dependencies and imports every module it ships, because an aggregate install cannot distinguish a self-describing package from one relying on a sibling. Optional capabilities go in extras, and a module reachable only through an extra is exempt with its reason recorded.
+
+Neither a package initializer nor a container image restores a source tree to the interpreter path. Doing so lets an undeclared dependency or an omitted wheel module work in a checkout and fail once installed.
 
 Aggregate Make targets must run every included subproject's default tests. A standalone subproject target remains useful for focused work, but the aggregate contract is complete coverage, not a curated subset.
 

@@ -249,10 +249,8 @@ everything else is storefront-local.
   the project root; converting it to package discovery is a layout change
   outside this section.
 - [x] 8.2a Remove `_add_checkout_root_to_path()` from `market_storefront`'s
-  package initializer. It inserted the monorepo checkout root into `sys.path` so
-  `domains.vms.*` would resolve outside Docker; the storefront now imports no
-  `domains.*` module at all. Leaving it would let an undeclared dependency or an
-  omitted wheel module work in a checkout and fail once installed.
+  package initializer; the storefront imports no `domains.*` module. Rationale in
+  `design.md`.
 - [x] 8.2 Remove `COPY domains/ ./domains/` and `ENV PYTHONPATH=/app` from the
   VM storefront Dockerfile, and drop `/app` from both storefront services'
   `PYTHONPATH` in `compose.yml`. The image no longer resolves any module from a
@@ -262,33 +260,32 @@ everything else is storefront-local.
   `__init__.py` is a namespace anchor rather than a package, and is owned when
   some project's manifest ships that file — so the check distinguishes the two
   and both branches are exercised.
-- [x] 8.3b Extract the tombstone predicate into `scripts/tombstones.py` so the
-  manifest audit and the prune utility cannot diverge. They had: one treated a
-  file beginning with the marker as deleted even with live code below, the other
-  required the whole file. The strict rule wins, and the divergent case is tested.
+- [x] 8.3b Extract the tombstone predicate into `scripts/tombstones.py`, shared by
+  the manifest audit and the prune utility. Rationale in `design.md`.
 - [x] 8.3c Add `scripts/tests/` and `make test-scripts` — 34 tests across the
   predicate, the manifest and ownership audits, and the prune utility. Every
   branch the earlier tasks claimed was "exercised" by a one-off run now has
   durable coverage, including the ones that must *not* fire.
-- [x] 8.3d Scope the prune utility's vacancy sweep to the source roots rather
-  than the whole repository. A utility that deletes directories should not be
-  able to reach an arbitrary path, and every namespace this convention applies to
-  lives under one.
+- [x] 8.3d Scope the prune utility's vacancy sweep to the source roots.
 - [x] 8.3a Teach `check_wheel_manifests.py` about tombstones. A file whose
   contents are a tombstone comment is a pending deletion, not a module: it must
   not be added to a manifest, and a manifest still listing it is stale. Both
   branches are exercised — the check caught a stale entry left by this section's
   own tombstones.
-- [ ] 8.4 Bring `domains/apicredits` to the same ownership rule: split
-  `listings`, `negotiation`, and `settlement` by consumer, remove the
-  `force-include` table from `domains/apicredits/pyproject.toml`, and remove
-  any reliance on an interpreter path for domain resolution. Its manifest
-  audited complete at proposal time; a complete hand-maintained manifest is
-  what `vms/buyer` had before the POOLS work.
-- [ ] 8.5 Confirm the repository check from 8.3 covers `domains/apicredits`
-  and that no package under either domain tree is unowned.
-- [ ] 8.6 Record, rather than fix here, that a manifest audit is a static check
-  and cannot detect a stale installed artifact. A built wheel whose contents
+- [x] 8.4 Re-scoped on measurement: `domains/apicredits` does not carry the
+  ownership defect. Its `pyproject.toml` sits at the domain root, so `listings`,
+  `negotiation`, and `settlement` are inside its own project directory — zero
+  manifest entries reach outside it, and the ownership check reports no findings.
+  The VM tree was different because its wheel lived at `domains/vms/buyer` and
+  reached up two levels. A consumer-split remains available inside that one owned
+  distribution — `settlement` has only a storefront consumer — but that is
+  tidiness within a distribution rather than the ownership violation this change
+  addresses, and the domain does not yet ship. Recorded for whoever completes it.
+- [x] 8.5 Confirm the repository check from 8.3 covers `domains/apicredits`: the
+  ownership audit walks every `__init__.py` under `domains/` and reports no
+  unowned package in either domain tree.
+- [x] 8.6 Record that a manifest audit is a static check and cannot detect a
+  stale installed artifact. A built wheel whose contents
   predate a source change produces the same class of failure as a drifted
   manifest — a symptom several modules from its cause. Build-and-import
   validation across every domain wheel and its advertised entry points is
@@ -312,11 +309,9 @@ rather than repaired.
   buyer domain discovery returns `compute.v1` and the composed catalogue resolves
   `rl`, entirely from installed wheels. This proves the assembled set is
   consistent; it cannot prove any single wheel is self-describing.
-- [x] 9.1b Add `scripts/check_wheel_closure.py` and `make check-wheel-closure`,
-  which installs one wheel at a time into a fresh environment resolving only what
-  that wheel declares, then imports every module it ships. Run against the
-  pre-fix metadata it names five modules and both missing distributions;
-  removing a declaration again reproduces the failure.
+- [x] 9.1b Add `scripts/check_wheel_closure.py` and `make check-wheel-closure`.
+  Rationale in `design.md`; jurisdiction recorded in
+  `docs/development/TESTING.md` under Packaging Validation.
 - [x] 9.1c Declare `arkhai-kit-alkahest` and `arkhai-kit-policy` as runtime
   dependencies of `arkhai-vms`. The moved listing models read Alkahest escrow
   shapes and the moved policies are middlewares in the policy kit's vocabulary,
@@ -357,22 +352,44 @@ and so blocks the end-to-end verification this change is meant to unblock.
 
 ## 10. Closeout
 
-- [ ] 10.1 Comment hygiene: run `make check-comment-hygiene`, resolve every
+- [x] 10.1 Comment hygiene: run `make check-comment-hygiene`, resolve every
   match, and read the changed Python directly for references to the review or
   migration that produced it.
-- [ ] 10.2 Import placement: confirm every import added is at module level,
-  and that none was placed locally without a circular-import or documented
-  lazy-load reason. This change removes deferred imports; it must not add
-  them.
-- [ ] 10.3 Documentation compliance: re-check accepted decisions against
+- [x] 10.2 Import placement: of the six modules this change adds, five have zero
+  function-scope imports. The one exception, `TorchStrategySource.load`, is a
+  documented lazy load — deferring the strategy module is the property the design
+  depends on, and a test fails if the import is hoisted.
+- [x] 10.3 Documentation compliance: re-check accepted decisions against
   `openspec/README.md`'s placement rules, including
   `docs/development/ARCHITECTURE.md` for the wheel ownership rule and
   `docs/development/TESTING.md` for the composition test conventions.
-- [ ] 10.4 Narrative compression: keep completed-task notes at final
+- [x] 10.4 Narrative compression: keep completed-task notes at final
   behaviour, material validation evidence, and permanent destinations; hold
   rejected alternatives in `design.md` only.
-- [ ] 10.5 Roadmap currency: determine whether any `docs/development/ROADMAP.md`
-  goal's current state or gap mapping changes, and record the disposition in
-  the design-promotion record either way. Note the relationship to
-  `remove-relative-uv-sources` and to the kit-composition goals.
-- [ ] 10.6 Promotion: complete the design-promotion record.
+- [x] 10.5 Roadmap currency: Goal 4's registry gap row is rewritten. Two of the
+  four named-item registries are now composed catalogues, so the row names what
+  remains — the buyer's aggregation policies, whose lookup also writes to the
+  registry it reads, and the identity verifiers — and names
+  `market_policy.catalogue` as the primitive they migrate onto.
+  `remove-relative-uv-sources` is unaffected: it targets parent-path
+  `tool.uv.sources` entries, a different mechanism, and remains unstarted.
+- [x] 10.6 Promotion: complete the design-promotion record.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| Every shipped module is owned by one distribution; no project enumerates another's files; no role obtains code by source-tree copy | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
+| A distribution declares every dependency its shipped modules import at module scope, verified per wheel rather than in aggregate | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
+| Neither a package initializer nor an image restores a source tree to the interpreter path | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
+| Configurable names resolve against a catalogue composed once at startup and immutable thereafter, never process-global state populated by import order | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Composition is role-owned: the role authorizes mechanisms, the domain contributes only its own items through a narrow typed request | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| Strict conflict with no precedence rule; load failure and malformed items fail at startup | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
+| `Wheel-owned domain code`, `Fatal domain plugin load failure`, and the optional-capability clause for negotiation | `openspec/specs/market-composition/spec.md` |
+| `Composed negotiation policy catalogue` and `Domain-chosen policy discovery` | `openspec/specs/negotiation-protocol/spec.md` |
+| Packaging validation is a distinct jurisdiction from the four test levels; per-wheel closure is not substitutable by an aggregate install | `docs/development/TESTING.md#packaging-validation` |
+| Operator-facing policy configuration: domain-offered policies, startup conflict failure, the `middleware` file contract, and the buyer authorizing no filesystem mechanism | `docs/configuration.md` |
+| Two named-item registries remain unconverted — the buyer's aggregation policies and the identity verifiers — with `market_policy.catalogue` as the primitive they migrate onto | `docs/development/ROADMAP.md` Goal 4 gap table |
+| The generic catalogue primitive eventually belongs in a zero-dependency kit package, since `market_identity` and `core_buyer` cannot depend on `arkhai-kit-policy` | Deferred; recorded in `design.md` and owned by `kit-storefront-composition-seam` |
+| Directory-level `force-include`, lazy facades, singleton catalogues, precedence overrides, and carrying policies on the domain contract | Rejected; retained in `design.md` only |
+| The RL strategy's laziness is the strategy module and its dependency graph, not torch itself — torch is already function-scoped | Corrected mid-change; recorded in `design.md` and guarded by a test |
