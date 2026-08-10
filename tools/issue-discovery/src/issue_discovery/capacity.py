@@ -15,6 +15,15 @@ import jsonschema
 from issue_discovery.redaction import Redactor
 
 
+class CapacityInputError(ValueError):
+    """Raised when input text cannot be parsed as capacity JSON at all.
+
+    Distinct from :class:`CapacityValidationError`, which reports a parseable
+    document that fails a contract. Callers map the two to different result
+    codes, so a malformed file is never reported as a contract failure.
+    """
+
+
 class CapacityValidationError(RuntimeError):
     """Raised when a portable capacity contract is internally inconsistent."""
 
@@ -237,8 +246,68 @@ def _schema_path(repo_root: Path, name: str) -> Path:
     return repo_root / "tools" / "issue-discovery" / "schemas" / name
 
 
+MAX_JSON_NESTING_DEPTH = 100
+"""Deepest container nesting accepted in any capacity input.
+
+Every capacity schema nests a handful of levels, so this bound is far above
+any admissible document. It exists so that over-nested input is refused by
+this contract rather than by whatever recursion limit the running interpreter
+happens to impose: interpreters differ in the depth at which the JSON decoder
+fails, and some parse depths that others reject. Refusing here keeps the
+reported result code identical everywhere.
+"""
+
+
+def json_nesting_depth(text: str) -> int:
+    """Return the deepest container nesting in ``text``.
+
+    Scans the raw document rather than a parsed value, because parsing is the
+    step this bound protects. String contents are skipped so that brackets
+    inside string literals do not count toward depth.
+    """
+
+    depth = 0
+    deepest = 0
+    in_string = False
+    escaped = False
+    for character in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        elif character in "]}":
+            depth -= 1
+    return deepest
+
+
+def load_json_text(text: str, path: Path) -> Any:
+    """Parse ``text`` as capacity JSON, refusing input that is not parseable.
+
+    Raises :class:`CapacityInputError` for both over-nested and syntactically
+    invalid input so that callers report one code for unusable input.
+    """
+
+    if json_nesting_depth(text) > MAX_JSON_NESTING_DEPTH:
+        raise CapacityInputError(
+            f"input nests deeper than {MAX_JSON_NESTING_DEPTH} levels: {path}"
+        )
+    try:
+        return json.loads(text)
+    except (RecursionError, UnicodeError) as exc:
+        raise CapacityInputError(f"input is not parseable JSON: {path}") from exc
+
+
 def _read_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = load_json_text(path.read_text(encoding="utf-8"), path)
     if not isinstance(value, dict):
         raise CapacityValidationError(f"expected a JSON object: {path}")
     return value

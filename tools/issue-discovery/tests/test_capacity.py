@@ -8,10 +8,14 @@ import jsonschema
 import pytest
 
 from issue_discovery.capacity import (
+    CapacityInputError,
     CapacityValidationError,
     FINITE_STAGE_ORDER,
+    MAX_JSON_NESTING_DEPTH,
     evaluate_capacity_result,
     finding_fingerprint,
+    json_nesting_depth,
+    load_json_text,
     scenario_sha256,
     validate_cancellation_receipt,
     validate_capacity_result,
@@ -1614,3 +1618,43 @@ def test_sanitized_code_shaped_409_is_classified_without_accepting_raw_message()
     raw["observations"][1]["detail"]["message"] = "provider internals"
     with pytest.raises(CapacityValidationError, match="sanitized code"):
         validate_capacity_result(raw, scenario, repo_root())
+
+
+def test_json_nesting_depth_ignores_brackets_inside_strings() -> None:
+    assert json_nesting_depth('{"a": "[[[["}') == 1
+    assert json_nesting_depth('{"a": "\\""}') == 1
+    assert json_nesting_depth('{"a": [{"b": [1]}]}') == 4
+    assert json_nesting_depth("0") == 0
+
+
+def test_load_json_text_refuses_nesting_beyond_the_declared_bound(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "over-nested.json"
+    depth = MAX_JSON_NESTING_DEPTH + 1
+    text = "[" * depth + "0" + "]" * depth
+
+    with pytest.raises(CapacityInputError):
+        load_json_text(text, path)
+
+
+def test_load_json_text_accepts_nesting_at_the_declared_bound(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "at-bound.json"
+    depth = MAX_JSON_NESTING_DEPTH
+    text = "[" * depth + "0" + "]" * depth
+
+    assert load_json_text(text, path) is not None
+
+
+def test_load_json_text_refuses_over_nesting_before_the_interpreter_does(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "shallow-enough-to-parse.json"
+    depth = MAX_JSON_NESTING_DEPTH + 1
+    text = "[" * depth + "0" + "]" * depth
+    json.loads(text)
+
+    with pytest.raises(CapacityInputError):
+        load_json_text(text, path)

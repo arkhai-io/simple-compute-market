@@ -168,13 +168,13 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 
 ## Lesser goal — End-to-end harness determinism
 
-**What it adds up to.** End-to-end scenarios assert on internal identifiers and advance by waiting for poll intervals, which makes them slow, timing-sensitive, and expensive to extend to a second domain. These changes align scenarios with the fulfillment lifecycle contract and decide whether the harness becomes an independently consumable project. Not a roadmap goal, but three goal-owned changes each carry a task requiring observable barriers rather than sleeps, and all of them land here.
+**What it adds up to.** End-to-end scenarios assert on internal identifiers and advance by waiting for poll intervals, which makes them slow, timing-sensitive, and expensive to extend to a second domain. These changes align scenarios with the fulfillment lifecycle contract, extend deterministic assertion to the agent-driven capacity harness, and decide whether the harness becomes an independently consumable project. Not a roadmap goal, but three goal-owned changes each carry a task requiring observable barriers rather than sleeps, and all of them land here.
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; 22 of 25 tasks complete | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
+| [`reconcile-agent-driven-vm-harness`](reconcile-agent-driven-vm-harness/) | active; preparation only | Rebuilds the public issue-discovery VM/G1 capacity contracts against current `dev`: the finite scenario matrix, reservation and fulfillment lifecycle correlation, typed scarcity, deterministic sanitized findings, and mocked issue and guarded fix planning. Prepares only — no live stage, no authenticated GitHub mutation, no product change |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
-| [`reconcile-agent-driven-vm-harness`](reconcile-agent-driven-vm-harness/) | active; preparation only | Rebuilds the public issue-discovery VM/G1 capacity contracts — finite scenario matrix, current reservation and fulfillment lifecycle correlation, deterministic sanitized findings, and mocked issue and guarded fix planning — against current `dev`. Prepares only: no live stage, no GitHub mutation, no product change |
 
 ## Independent active changes
 

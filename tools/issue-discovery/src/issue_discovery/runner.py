@@ -19,8 +19,10 @@ from issue_discovery.collectors import CollectorRunner, load_collectors
 from issue_discovery.commands import CommandResult, run_shell_command
 from issue_discovery.config import ToolPaths, load_yaml
 from issue_discovery.capacity import (
+    CapacityInputError,
     CapacityValidationError,
     evaluate_capacity_result,
+    load_json_text,
     scenario_sha256,
     validate_cancellation_receipt,
     validate_capacity_result,
@@ -489,7 +491,13 @@ class DiscoveryRunner:
         except (CapacityValidationError, CapacityIssuePlanError):
             _print_capacity_output(command, "error", None, None, "validation-failed")
             return 2
-        except (json.JSONDecodeError, OSError, RecursionError, UnicodeError):
+        except (
+            CapacityInputError,
+            json.JSONDecodeError,
+            OSError,
+            RecursionError,
+            UnicodeError,
+        ):
             _print_capacity_output(
                 command, "error", None, None, "input-unavailable-or-invalid"
             )
@@ -981,7 +989,7 @@ def _capacity_scenario_identity(scenario: dict[str, Any]) -> dict[str, str]:
 
 
 def _capacity_read_value(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return load_json_text(path.read_text(encoding="utf-8"), path)
 
 
 def _capacity_read_object(path: Path) -> dict[str, Any]:

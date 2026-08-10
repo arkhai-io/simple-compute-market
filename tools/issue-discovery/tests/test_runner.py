@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from issue_discovery.artifacts import ArtifactStore
-from issue_discovery.capacity import evaluate_capacity_result, scenario_sha256
+from issue_discovery.capacity import (
+    MAX_JSON_NESTING_DEPTH,
+    evaluate_capacity_result,
+    scenario_sha256,
+)
 from issue_discovery.collectors import CollectorRunner, CollectorSpec
 from issue_discovery.commands import run_shell_command
 from issue_discovery.config import load_yaml
@@ -1332,6 +1336,22 @@ def test_capacity_deeply_nested_json_emits_stable_invalid_input(
 ) -> None:
     scenario_path = tmp_path / "deeply-nested.json"
     scenario_path.write_text("[" * 20_000 + "0" + "]" * 20_000, encoding="utf-8")
+
+    code = DiscoveryRunner(repo_root=repo_root()).capacity_validate(scenario_path)
+
+    output = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert output["status"] == "error"
+    assert output["error"] == {"code": "input-unavailable-or-invalid"}
+
+
+def test_capacity_over_nested_json_emits_invalid_input_without_recursion(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    scenario_path = tmp_path / "over-nested.json"
+    depth = MAX_JSON_NESTING_DEPTH + 1
+    scenario_path.write_text("[" * depth + "0" + "]" * depth, encoding="utf-8")
 
     code = DiscoveryRunner(repo_root=repo_root()).capacity_validate(scenario_path)
 
