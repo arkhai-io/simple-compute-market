@@ -248,6 +248,11 @@ everything else is storefront-local.
   rather than removed because the buyer's own layout still puts its modules at
   the project root; converting it to package discovery is a layout change
   outside this section.
+- [x] 8.2a Remove `_add_checkout_root_to_path()` from `market_storefront`'s
+  package initializer. It inserted the monorepo checkout root into `sys.path` so
+  `domains.vms.*` would resolve outside Docker; the storefront now imports no
+  `domains.*` module at all. Leaving it would let an undeclared dependency or an
+  omitted wheel module work in a checkout and fail once installed.
 - [x] 8.2 Remove `COPY domains/ ./domains/` and `ENV PYTHONPATH=/app` from the
   VM storefront Dockerfile, and drop `/app` from both storefront services'
   `PYTHONPATH` in `compose.yml`. The image no longer resolves any module from a
@@ -257,6 +262,18 @@ everything else is storefront-local.
   `__init__.py` is a namespace anchor rather than a package, and is owned when
   some project's manifest ships that file — so the check distinguishes the two
   and both branches are exercised.
+- [x] 8.3b Extract the tombstone predicate into `scripts/tombstones.py` so the
+  manifest audit and the prune utility cannot diverge. They had: one treated a
+  file beginning with the marker as deleted even with live code below, the other
+  required the whole file. The strict rule wins, and the divergent case is tested.
+- [x] 8.3c Add `scripts/tests/` and `make test-scripts` — 34 tests across the
+  predicate, the manifest and ownership audits, and the prune utility. Every
+  branch the earlier tasks claimed was "exercised" by a one-off run now has
+  durable coverage, including the ones that must *not* fire.
+- [x] 8.3d Scope the prune utility's vacancy sweep to the source roots rather
+  than the whole repository. A utility that deletes directories should not be
+  able to reach an arbitrary path, and every namespace this convention applies to
+  lives under one.
 - [x] 8.3a Teach `check_wheel_manifests.py` about tombstones. A file whose
   contents are a tombstone comment is a pending deletion, not a module: it must
   not be added to a manifest, and a manifest still listing it is stale. Both
@@ -288,16 +305,28 @@ one where every package is installed. The guarantee it asserted is now
 structural — the buyer cannot reach that package at all — so it is tombstoned
 rather than repaired.
 
-- [x] 9.1 Build all seventeen internal wheels into a clean virtual environment
-  with no repository source tree and no `PYTHONPATH`, then import every module
-  each ships. `arkhai-vms-storefront` 77 modules, `arkhai-vms-buyer` 21,
-  `arkhai-vms` 13 — zero failures. Also ran the scenario the original CI failure
-  came from: buyer domain discovery returns `compute.v1` and the composed
-  catalogue resolves `rl`, entirely from installed wheels.
-- [x] 9.2 Assert no shipped file originates outside its own project directory.
-  The only remaining cross-project manifest entries are the two namespace
-  anchors the flat `domains.vms.buyer` import path requires, which `8.3`'s check
-  now distinguishes from an unowned package.
+- [x] 9.1a Build every internal wheel into one clean virtual environment with no
+  repository source tree and no `PYTHONPATH`, then import every module each
+  ships: `arkhai-vms-storefront` 77 modules, `arkhai-vms-buyer` 21, `arkhai-vms`
+  13, zero failures. Also ran the scenario the original CI failure came from —
+  buyer domain discovery returns `compute.v1` and the composed catalogue resolves
+  `rl`, entirely from installed wheels. This proves the assembled set is
+  consistent; it cannot prove any single wheel is self-describing.
+- [x] 9.1b Add `scripts/check_wheel_closure.py` and `make check-wheel-closure`,
+  which installs one wheel at a time into a fresh environment resolving only what
+  that wheel declares, then imports every module it ships. Run against the
+  pre-fix metadata it names five modules and both missing distributions;
+  removing a declaration again reproduces the failure.
+- [x] 9.1c Declare `arkhai-kit-alkahest` and `arkhai-kit-policy` as runtime
+  dependencies of `arkhai-vms`. The moved listing models read Alkahest escrow
+  shapes and the moved policies are middlewares in the policy kit's vocabulary,
+  both at module scope. `core_storefront` stays under the `[storefront]` extra,
+  which is correct, and the closure check records that exemption with its reason.
+- [x] 9.2 Assert that no shipped **implementation module** originates outside its
+  owning project directory, and that the only files which may is an explicitly
+  validated namespace-anchor `__init__.py`. Two remain, both required by the flat
+  `domains.vms.buyer` import path; `8.3`'s check validates that each is shipped by
+  some manifest and distinguishes it from an unowned package.
 - [ ] 9.3 Start the VM storefront from an image built without `COPY domains/`
   and assert its configured chain resolves. The import half is covered by `9.1`
   — every module in the storefront wheel imports with no source tree present —

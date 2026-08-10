@@ -23,10 +23,11 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-#: A file whose contents are a tombstone comment is a pending deletion, not a
-#: module. It must not be added to a manifest, and a manifest that still lists
-#: it is stale rather than correct.
-TOMBSTONE_MARKER = "# TOMBSTONE:"
+# Shared with scripts/prune_tombstones.py: a file beginning with the marker but
+# carrying live code must not be treated as deleted by one check and retained by
+# the other.
+from tombstones import is_tombstone
+
 
 import tomllib
 
@@ -47,14 +48,6 @@ def _only_include(config: dict) -> set[str]:
     if not wheel:
         return set()
     return {Path(entry).name for entry in wheel.get("only-include", [])}
-
-
-def _is_tombstone(path: Path) -> bool:
-    try:
-        head = path.read_text(encoding="utf-8").lstrip()
-    except OSError:
-        return False
-    return head.startswith(TOMBSTONE_MARKER)
 
 
 def audit(project: Path) -> list[str]:
@@ -80,12 +73,12 @@ def audit(project: Path) -> list[str]:
         on_disk = {
             item.name
             for item in resolved.iterdir()
-            if item.suffix == ".py" and not _is_tombstone(item)
+            if item.suffix == ".py" and not is_tombstone(item)
         }
         tombstoned = {
             item.name
             for item in resolved.iterdir()
-            if item.suffix == ".py" and _is_tombstone(item)
+            if item.suffix == ".py" and is_tombstone(item)
         }
         for stale in sorted(names & tombstoned):
             findings.append(
@@ -139,7 +132,7 @@ def audit_unowned_packages(root: Path) -> list[str]:
         live = [
             item
             for item in directory.iterdir()
-            if item.suffix == ".py" and not _is_tombstone(item)
+            if item.suffix == ".py" and not is_tombstone(item)
         ]
         if not live:
             continue

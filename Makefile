@@ -411,6 +411,12 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+check-wheel-closure: ## Fail if a wheel cannot import from its own declared dependencies
+	@python3 scripts/check_wheel_closure.py
+
+test-scripts: ## Run the repository check/utility test suite
+	@cd scripts && python3 -m pytest tests -q
+
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py
 

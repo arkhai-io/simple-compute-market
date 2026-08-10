@@ -23,7 +23,13 @@ import shutil
 import sys
 from pathlib import Path
 
-MARKER = "# TOMBSTONE:"
+from tombstones import MARKER, is_tombstone, reason  # noqa: F401
+
+
+#: Directories the vacancy sweep may enter. A deletion utility should not be able
+#: to reach an arbitrary path, and every namespace this convention applies to
+#: lives under a source root.
+SOURCE_ROOTS = ("domains", "kit", "core", "provisioning", "e2e-tests")
 
 #: Never walked. Build outputs and dependency trees can contain anything.
 SKIP_DIRS = frozenset({
@@ -39,48 +45,6 @@ SKIP_DIRS = frozenset({
     ".mypy_cache",
 })
 
-#: Extensions where a leading ``#`` is a comment. A tombstone in a file whose
-#: comment syntax differs would not be valid source, so it cannot be one.
-#:
-#: ``.md`` is included even though ``#`` is a heading there rather than a
-#: comment: documentation gets deleted too, and a one-line file reading
-#: "# TOMBSTONE: ..." is unambiguous either way. The whole-file requirement is
-#: what keeps this from matching the documents that define the convention —
-#: they show a tombstone inside a fenced example, surrounded by prose.
-COMMENT_HASH_SUFFIXES = frozenset({
-    ".py", ".pyi", ".toml", ".yml", ".yaml", ".sh", ".bash", ".cfg", ".ini",
-    ".tf", ".tfvars", ".env", ".mk", ".md", ".gitignore", ".dockerignore",
-})
-
-#: Files without a suffix where a leading ``#`` is still a comment.
-COMMENT_HASH_NAMES = frozenset({"Makefile", "Dockerfile"})
-
-
-def _takes_hash_comments(path: Path) -> bool:
-    return path.suffix in COMMENT_HASH_SUFFIXES or path.name in COMMENT_HASH_NAMES
-
-
-def is_tombstone(path: Path) -> bool:
-    """True when the file's entire content is a tombstone comment.
-
-    Deliberately strict. ``AGENTS.md`` and the implementation prompt both show a
-    tombstone inside a fenced example, and a whole-file check is what keeps this
-    from deleting the documentation that defines the convention.
-    """
-    if not _takes_hash_comments(path):
-        return False
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return False
-
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
-        return False
-    if not lines[0].lstrip().startswith(MARKER):
-        return False
-    # A tombstone may wrap onto continuation comment lines, but nothing else.
-    return all(line.lstrip().startswith("#") for line in lines)
 
 
 def find_tombstones(root: Path) -> list[Path]:
@@ -93,18 +57,6 @@ def find_tombstones(root: Path) -> list[Path]:
         if is_tombstone(path):
             found.append(path)
     return found
-
-
-def _reason(path: Path) -> str:
-    """The tombstone's stated reason, joined across continuation lines."""
-    lines = [
-        line.lstrip().lstrip("#").strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    joined = " ".join(lines)
-    joined = joined.removeprefix(MARKER.lstrip("# ")).strip()
-    return joined.removeprefix("delete this file").lstrip(" \u2014-")
 
 
 def _is_vacant(directory: Path) -> bool:
@@ -151,10 +103,10 @@ def main() -> int:
     if not tombstones:
         print("No tombstoned files found.")
     for path in tombstones:
-        reason = _reason(path)
+        why = reason(path)
         print(f"  {path.relative_to(root)}")
-        if reason:
-            print(f"      {reason}")
+        if why:
+            print(f"      {why}")
         if not args.dry_run:
             path.unlink()
             directories.add(path.parent)
@@ -166,12 +118,17 @@ def main() -> int:
     # holds no intentionally empty source directory, so a vacant one is residue.
     emptied: list[Path] = []
     if not args.dry_run:
-        for directory in sorted(
-            (d for d in root.rglob("*") if d.is_dir()),
-            key=lambda p: len(p.parts),
-            reverse=True,
-        ):
-            if not directory.exists() or SKIP_DIRS & set(directory.relative_to(root).parts):
+        candidates = [
+            d
+            for source_root in SOURCE_ROOTS
+            if (root / source_root).is_dir()
+            for d in (root / source_root).rglob("*")
+            if d.is_dir()
+        ]
+        for directory in sorted(candidates, key=lambda p: len(p.parts), reverse=True):
+            if not directory.exists():
+                continue
+            if SKIP_DIRS & set(directory.relative_to(root).parts):
                 continue
             if _is_vacant(directory):
                 shutil.rmtree(directory)

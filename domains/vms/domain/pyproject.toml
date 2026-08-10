@@ -7,6 +7,12 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2",
     "arkhai-core>=0.2.0",
+    # The listing models read Alkahest escrow shapes, and the negotiation
+    # policies are middlewares in the policy kit's vocabulary. Both are imported
+    # at module scope by modules this wheel always ships, so both are runtime
+    # dependencies rather than extras.
+    "arkhai-kit-alkahest",
+    "arkhai-kit-policy",
 ]
 
 [project.optional-dependencies]
