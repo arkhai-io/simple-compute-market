@@ -87,13 +87,19 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 import pytest
 
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_HOST_GPU_COUNT,
+    E2E_HOST_NAME,
+    refresh_storefront_projections,
+    register_e2e_host,
+)
 
 log = logging.getLogger(__name__)
 
@@ -202,8 +208,8 @@ class MRState:
     alice_strategy_ok: bool = False
     bob_inventory_seeded: bool = False
     alice_inventory_seeded: bool = False
-    bob_listing_id: Optional[str] = None
-    alice_listing_id: Optional[str] = None
+    bob_listing_id: str | None = None
+    alice_listing_id: str | None = None
     bob_in_a: bool = False
     bob_in_b: bool = False
     alice_in_a: bool = False
@@ -274,7 +280,7 @@ def alice_agent_id(alice_admin_client) -> str:
 def _list_listings(
     url: str,
     *,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     timeout: float = 5.0,
 ) -> list[dict[str, Any]]:
     full = url.rstrip("/") + "/listings?status=open&limit=200"
@@ -292,7 +298,7 @@ def _list_listings(
 def _list_listings_multi(
     urls: list[str],
     *,
-    auth: Optional[dict[str, str]] = None,
+    auth: dict[str, str] | None = None,
     timeout: float = 5.0,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     auth = auth or {}
@@ -415,6 +421,28 @@ class TestStage02a_BobInventory:
         assert result.failed_count == 0, f"bob import failed: {result}"
         assert result.imported_count >= 1
         mr_state.bob_inventory_seeded = True
+
+
+class TestStage02a1_ExecutorHostRegistry:
+    def test_02a1_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client, mr_state
+    ):
+        """Register the executor host both storefronts' resources sit on.
+
+        Both CSVs declare `attribute.vm_host=kvm1`, and the site authority
+        projects capacity by iterating host rows — with no host registered the
+        projection is empty and every inventory match downstream fails.
+        """
+        _require(mr_state, "bob_inventory_seeded")
+
+        host = register_e2e_host(provisioning_client)
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+        log.info(
+            "[02a1] executor host %s registered (gpus=%s); projections confirmed for %s",
+            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+        )
 
 
 class TestStage02b_AliceInventory:

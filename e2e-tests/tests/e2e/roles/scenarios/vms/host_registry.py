@@ -6,14 +6,16 @@ correlated onto it. With no hosts registered the projection is empty, so every
 inventory match fails and the storefront refuses each negotiation with
 `no_matching_inventory` — several layers from the cause.
 
-Scenarios call this from a numbered stage rather than relying on a mounted
-inventory file. Three reasons. A file is seeded at container start, so a failure
-surfaces at the first negotiation instead of at setup. A file is also
-docker-compose-specific: the canonical Helm deployment supplies inventory as an
-inline `inventory_ini` secret, so a scenario built around a mount exercises a path
-production does not use. And a file is shared state no scenario declares —
-registering through the same admin API an operator would use makes the dependency
-visible in the test that has it.
+Scenarios call this from a numbered stage. Registration used to happen in an
+autouse module fixture, where it was setup no scenario named and nobody looked
+for — a host registered with one GPU made every scenario reserving more fail as
+though no inventory matched. A numbered stage names its own dependency, reports
+in the scenario log, and fails at setup rather than several stages downstream.
+
+A mounted inventory file was also considered and rejected: `inventory_path` is
+docker-compose-specific, while the canonical Helm deployment supplies inventory as
+an inline `inventory_ini` secret, so a scenario built around a mount would
+exercise a path production does not use.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from vm_provisioning_operator.client import ProvisioningError
-from vm_provisioning_operator.models import HostCreate
+from vm_provisioning_operator.models import HostCreate, HostUpdate
 
 #: The alias every VM scenario's seed CSV carries in `attribute.vm_host`.
 E2E_HOST_NAME = "kvm1"
@@ -61,6 +63,13 @@ def register_e2e_host(
             ssh_key_type="path",
             ssh_key_value="/dev/null",
         ))
+    elif (existing.gpu_count or 0) < gpu_count:
+        # Reconcile rather than accept what is there. Scenarios share a stack, so
+        # a host registered by an earlier one may carry less capacity than this
+        # one reserves; the contract here is that the host exists *with the
+        # capacity the scenario needs*. A host that merely exists is what made a
+        # capacity shortfall read as an inventory mismatch.
+        provisioning_client.update_host(name, HostUpdate(gpu_count=gpu_count))
 
     host = provisioning_client.get_host(name)
     assert host is not None, f"host {name!r} absent after registration"
