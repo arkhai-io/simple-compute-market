@@ -209,6 +209,23 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
+def site_capacity_admin_client():
+    """Canonical sync capacity-admin client for the provisioning site authority.
+
+    The site ledger is a separate store from the host registry: `probe` and
+    `reserve` match against `CapacityBucket` rows, which only
+    `register_resource` creates. A scenario that reserves capacity has to put a
+    resource there, and does it through the same typed client an operator would
+    rather than a wrapper around the async one.
+    """
+    from market_site_client import SyncSiteCapacityAdminClient
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
+    return SyncSiteCapacityAdminClient(url, admin_key)
+
+
+@pytest.fixture(scope="module")
 def provisioning_client():
     """Canonical SyncProvisioningClient.
 

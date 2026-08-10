@@ -12,6 +12,7 @@ and lives in ``market_policy.scalar_policies``. Import it from there.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from market_policy.negotiation_middleware import (
@@ -135,6 +136,44 @@ def round_zero_opening_guard(
     return None, context
 
 
+def _row_is_available(row: Mapping[str, Any]) -> bool:
+    """Whether an inventory row can serve a negotiation now.
+
+    Two shapes reach this guard. A storefront-local resource row carries a
+    ``state`` string. A site-authority projection carries no ``state`` at all — it
+    reports ``enabled`` plus an ``available`` mapping of remaining capacity per
+    dimension — and reading it with the local shape discarded every projected row
+    before its attributes were examined, so the guard vetoed every negotiation on
+    a correctly populated projection.
+
+    A projected row with no ``available`` key is capacity whose remaining amount
+    has not been reported, which is not the same as none: the fallback projection
+    for a host with no registered capacity resource omits it. Treating unreported
+    as unavailable would veto the deployment shape that sells today.
+    """
+    state = row.get("state")
+    if state is not None:
+        return str(state).strip() == "available"
+
+    if row.get("enabled") is False:
+        return False
+    available = row.get("available")
+    if available is None:
+        return True
+    if isinstance(available, Mapping):
+        if not available:
+            return True
+        return any(_positive(amount) for amount in available.values())
+    return bool(available)
+
+
+def _positive(amount: Any) -> bool:
+    try:
+        return float(amount) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def has_matching_inventory_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -155,7 +194,7 @@ def has_matching_inventory_guard(
     import json
 
     for row in portfolio_raw:
-        if (row.get("state") or "").strip() != "available":
+        if not _row_is_available(row):
             continue
         attrs = row.get("attributes")
         if isinstance(attrs, str):

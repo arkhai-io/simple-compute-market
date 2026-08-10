@@ -107,6 +107,89 @@ class SiteCapacityAdminClient:
         return response.json()
 
 
+
+class SyncSiteCapacityAdminClient:
+    """Synchronous twin of :class:`SiteCapacityAdminClient`.
+
+    Same surface, same errors, same request. It exists because callers outside an
+    event loop — operator scripts and the end-to-end scenarios, which drive every
+    other service through synchronous typed clients — would otherwise have to wrap
+    each call in ``asyncio.run``. A setup step that reaches the site authority by a
+    different mechanism than production does is a step that can pass while
+    production is broken.
+
+    Keep the two in step: `docs/development/TESTING.md` expects signature parity
+    where both a sync and an async client exist, and a divergence here would be
+    invisible until a caller of one hit behaviour only the other had.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        admin_key: str = "",
+        *,
+        timeout: float = 10.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._admin_key = admin_key
+        self._timeout = timeout
+        self._transport = transport  # test seam (httpx.MockTransport / WSGI)
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Admin-Key": self._admin_key} if self._admin_key else {}
+
+    def register_resource(
+        self,
+        resource_id: str,
+        *,
+        total_units: int,
+        resource_type: str = "compute.gpu",
+        pool_id: str | None = None,
+        resource_subtype: str | None = None,
+        attributes: dict[str, Any] | None = None,
+        capacity: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        """Upsert a resource row in the site ledger.
+
+        Raises :class:`SiteCapacityAdminClientError` on any non-2xx response or
+        transport failure — never a raw ``httpx`` exception, so every caller sees
+        the same error shape regardless of which capacity-admin operation failed.
+        """
+        body = ResourceRegistration(
+            total_units=total_units,
+            resource_type=resource_type,
+            pool_id=pool_id,
+            resource_subtype=resource_subtype,
+            attributes=attributes or {},
+            capacity=capacity,
+            enabled=enabled,
+        )
+        url = f"{self._base_url}/api/v1/capacity/resources/{resource_id}"
+        with httpx.Client(
+            timeout=self._timeout, transport=self._transport,
+        ) as http:
+            try:
+                response = http.put(
+                    url,
+                    json=body.model_dump(exclude_none=True),
+                    headers=self._headers(),
+                )
+            except httpx.HTTPError as exc:
+                raise SiteCapacityAdminClientError(
+                    f"register_resource({resource_id!r}) failed to reach "
+                    f"{self._base_url!r}: {exc}"
+                ) from exc
+
+        if response.status_code >= 400:
+            raise SiteCapacityAdminClientError(
+                f"register_resource({resource_id!r}) failed: "
+                f"{response.status_code} {response.text}",
+                status_code=response.status_code,
+            )
+        return response.json()
+
 class SiteCapacityClient:
     """``CapacityClient`` over the site authority's buyer-facing HTTP
     capacity API.

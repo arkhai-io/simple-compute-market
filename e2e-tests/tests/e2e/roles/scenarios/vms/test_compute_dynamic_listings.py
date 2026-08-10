@@ -22,6 +22,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_HOST_GPU_COUNT,
     E2E_HOST_NAME,
     refresh_storefront_projections,
+    register_e2e_capacity,
     register_e2e_host,
 )
 
@@ -131,7 +132,7 @@ class TestComputeDynamicListings:
 
     def test_00a_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
-        dynamic_state: DynamicListingState,
+        site_capacity_admin_client, dynamic_state: DynamicListingState,
     ):
         """Register the executor host the seeded resources sit on.
 
@@ -148,6 +149,20 @@ class TestComputeDynamicListings:
         require_state(dynamic_state, "resources_seeded")
 
         host = register_e2e_host(provisioning_client)
+        # `reserve` matches CapacityBucket rows, which only `register_resource`
+        # creates — the host-derived projection the guard reads is a different
+        # store. Attributes mirror the seeded CSV so a claim built from the
+        # listing matches by equality.
+        register_e2e_capacity(
+            site_capacity_admin_client,
+            resource_id=DYNAMIC_RESOURCE_ID,
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "sla": "99.0",
+                "vm_host": "kvm1",
+            },
+        )
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
             f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
             f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
@@ -300,7 +315,7 @@ class TestFungibleComputeDynamicListings:
 
     def test_00a_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
-        fungible_state: FungiblePoolState,
+        site_capacity_admin_client, fungible_state: FungiblePoolState,
     ):
         """Register the executor host the two pool members sit on.
 
@@ -317,6 +332,19 @@ class TestFungibleComputeDynamicListings:
         require_state(fungible_state, "resources_seeded")
 
         host = register_e2e_host(provisioning_client)
+        # Both pool members, so a claim against the pool can match either.
+        for member in ("compute-e2e-fungible-a", "compute-e2e-fungible-b"):
+            register_e2e_capacity(
+                site_capacity_admin_client,
+                resource_id=member,
+                attributes={
+                    "pool_id": FUNGIBLE_POOL_ID,
+                    "gpu_model": "H200",
+                    "region": "California, US",
+                    "sla": "99.0",
+                    "vm_host": "kvm1",
+                },
+            )
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
             f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
             f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"

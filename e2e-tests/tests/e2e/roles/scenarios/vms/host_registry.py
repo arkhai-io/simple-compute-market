@@ -76,6 +76,35 @@ def register_e2e_host(
     return host
 
 
+def register_e2e_capacity(
+    site_admin_client: Any,
+    *,
+    resource_id: str = E2E_HOST_NAME,
+    gpu_count: int = E2E_HOST_GPU_COUNT,
+    attributes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Register sellable capacity for the executor host in the site ledger.
+
+    The ledger is a different store from the host registry, and from the
+    host-derived projection. `probe` and `reserve` match against
+    `CapacityBucket` rows, and `register_resource` is the only thing that creates
+    one — so a scenario that reserves capacity must put a resource here, however
+    many hosts are registered.
+
+    `attributes` carry the commercial fields a claim matches by equality. They are
+    passed in rather than defaulted because each scenario declares its own in the
+    resource CSV it seeds, and a default here would silently disagree with one of
+    them.
+    """
+    return site_admin_client.register_resource(
+        resource_id,
+        total_units=gpu_count,
+        resource_type="compute.gpu",
+        attributes=attributes or {},
+        capacity={"gpu_count": gpu_count},
+    )
+
+
 def refresh_storefront_projections(storefront_client: Any) -> dict[str, Any]:
     """Make the storefront pull site projections now, and prove it landed.
 
