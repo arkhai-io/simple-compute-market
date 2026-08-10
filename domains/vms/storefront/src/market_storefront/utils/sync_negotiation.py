@@ -78,6 +78,7 @@ from market_policy.negotiation_middleware import (
 )
 from market_policy.scalar_policies import _amount_from_proposal
 
+from market_storefront import container as _container
 from market_storefront.listings import extract_compute_from_order
 from market_storefront.negotiation import storefront_round as vm_storefront_round
 from market_storefront.negotiation.storefront_round import (  # noqa: F401
@@ -110,12 +111,13 @@ def _default_min_price() -> Any:
     return settings.pricing.default_min_price
 
 
-def _compose_policy_catalogue() -> NegotiationCatalogue:
+def compose_policy_catalogue() -> NegotiationCatalogue:
     """Build this storefront's negotiation policy catalogue.
 
-    Composed per hook rather than held as module state: one process may compose
-    more than one role, and a catalogue built at import time would be built
-    before configuration is resolved.
+    Called once from lifespan startup, which is after configuration resolves and
+    before the application serves traffic. The result is held on the container,
+    not in module state, so one process can still compose more than one role and
+    a test can compose a deliberately invalid catalogue.
 
     This role authorizes operator directory discovery, because
     ``[negotiation] extra_policy_paths`` is part of its configuration surface.
@@ -139,7 +141,7 @@ def _compose_policy_catalogue() -> NegotiationCatalogue:
 
 def _load_storefront_chain():
     return vm_storefront_round._load_storefront_chain(
-        policy_catalogue=_compose_policy_catalogue(),
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
     )
@@ -159,7 +161,7 @@ def _seller_reference_amount(
 async def _run_default_seller_round_policy(**kwargs: Any):
     kwargs.setdefault("negotiation_config", _negotiation_settings())
     kwargs.setdefault("chains", _chain_settings())
-    kwargs.setdefault("policy_catalogue", _compose_policy_catalogue())
+    kwargs.setdefault("policy_catalogue", _container.policy_catalogue())
     kwargs.setdefault("default_min_price", _default_min_price())
     return await vm_storefront_round._run_default_seller_round_policy(**kwargs)
 
@@ -175,7 +177,7 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     assert policy is not None
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
-        policy_catalogue=_compose_policy_catalogue(),
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         default_min_price=_default_min_price(),

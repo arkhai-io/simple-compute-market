@@ -88,7 +88,7 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
-| `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
+| `rl` | Decider | every | Loads the trained pufferlib checkpoint `arkhai_negotiator_seller.pt`, shipped inside the installed `arkhai-vms` distribution under `arkhai_vms/negotiation/rl/models/`, and produces the next move. Requires that distribution's `[rl]` extra (`arkhai-vms[rl]`, which pins torch). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Decider | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
 | `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
@@ -265,10 +265,17 @@ default = "accept_exact_listing"
 
 ### Bundled middlewares usable on the buyer side
 
-The same registry serves both sides — every middleware listed in the
-seller's "Bundled policies" table above is importable in an explicit
-`[negotiation] policies` chain here too. The ones that make sense
-buyer-side:
+Each role composes its own catalogue, so a name resolvable here is not
+automatically resolvable on the seller side and vice versa. The generic escrow
+vocabulary in the seller's "Bundled policies" table is offered to both roles by
+the policy kit, so those names work in an explicit `[negotiation] policies` chain
+here too; a domain's own policies are offered per role, and a seller-side guard
+naming inventory the buyer does not own is deliberately not resolvable here.
+
+The buyer authorizes no filesystem or entry-point mechanism, so nothing in
+`buyer.toml` causes a policy to be loaded from disk.
+
+The kit policies that make sense buyer-side:
 
 | Name | Why on the buyer side |
 |---|---|
@@ -276,7 +283,7 @@ buyer-side:
 | `max_rounds_guard` | Same as seller — exits after `[negotiation].max_rounds`. |
 | `listed_price` *(default decider)* | Accepts any seller number within the buyer's ceiling (`minimize` direction); exits otherwise. |
 | `bisection` | Symmetric — bisects from the buyer's side (`minimize` direction). |
-| `rl` | Symmetric — loads the buyer's trained checkpoint at `domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt`. |
+| `rl` | Symmetric — loads the buyer's trained checkpoint `arkhai_negotiator_buyer.pt` from the same installed distribution. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Symmetric aliases for the scalar-`amount` bisection decider. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Symmetric aliases for the scalar-`amount` RL decider. |
 | `accept_exact_listing` | Useful for non-negotiated exact-match escrow kinds. |

@@ -53,6 +53,7 @@ from market_policy import (
 from market_policy.negotiation_middleware import NegotiationRound
 from market_policy.scalar_policies import _amount_from_proposal
 
+from apicredits_storefront import container as _container
 from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.listings.pricing import (
     determine_strategy_from_order,
@@ -97,12 +98,13 @@ def _default_min_price() -> Any:
     return settings.get("pricing.default_min_price")
 
 
-def _compose_policy_catalogue() -> NegotiationCatalogue:
+def compose_policy_catalogue() -> NegotiationCatalogue:
     """Build this storefront's negotiation policy catalogue.
 
-    Composed per hook rather than held as module state: one process may compose
-    more than one role, and a catalogue built at import time would be built
-    before configuration is resolved.
+    Called once from lifespan startup, which is after configuration resolves and
+    before the application serves traffic. The result is held on the container,
+    not in module state, so one process can still compose more than one role and
+    a test can compose a deliberately invalid catalogue.
 
     Only this role's own mechanisms are authorized. Operator directory and
     entry-point discovery are deliberately absent — this domain declares no
@@ -132,7 +134,7 @@ def _default_seller_round_hook(sqlite_client: Any) -> ApiCreditsSellerRoundHook:
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         lookup_key_record,
-        policy_catalogue=_compose_policy_catalogue(),
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         default_min_price=_default_min_price(),

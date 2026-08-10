@@ -65,6 +65,19 @@ necessary.
   design-promotion record that this is correct, not an omission.
 - [x] 4.4 Compose one catalogue per role at the composition root from kit's
   set plus each discovered domain's sources.
+- [x] 4.5a Compose each storefront's catalogue during lifespan startup and hold
+  it on the container, not at the point of consumption. It was first composed per
+  hook, which is per negotiation request: a broken operator policy directory, a
+  duplicate source, or a malformed middleware would have failed the first
+  negotiation that reached it rather than startup, and filesystem discovery could
+  observe changes mid-process. Both contradicted the permanent contract that
+  composition failures surface before the role serves requests.
+  `container.policy_catalogue()` raises rather than composing on demand, so the
+  lifecycle cannot silently regress, and
+  `test_policy_catalogue_lifecycle.py` asserts the negotiation path composes
+  nothing. An autouse conftest fixture populates the container for suites that
+  exercise negotiation without running the lifespan — one place rather than
+  every suite.
 - [x] 4.5 Inject the catalogue into `default_seller_round_hook` and remove
   `extra_policy_paths` from its signature; source selection moves to
   composition. Both storefronts compose per hook rather than at import, so a
@@ -417,19 +430,26 @@ and so blocks the end-to-end verification this change is meant to unblock.
 
 ## Design promotion record
 
-| Accepted decision | Permanent location |
-|---|---|
-| Every shipped module is owned by one distribution; no project enumerates another's files; no role obtains code by source-tree copy | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
-| A distribution declares every dependency its shipped modules import at module scope, verified per wheel rather than in aggregate | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
-| Neither a package initializer nor an image restores a source tree to the interpreter path | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
-| Configurable names resolve against a catalogue composed once at startup and immutable thereafter, never process-global state populated by import order | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
-| Composition is role-owned: the role authorizes mechanisms, the domain contributes only its own items through a narrow typed request | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
-| Strict conflict with no precedence rule; load failure and malformed items fail at startup | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` |
-| `Wheel-owned domain code`, `Fatal domain plugin load failure`, and the optional-capability clause for negotiation | `openspec/specs/market-composition/spec.md` |
-| `Composed negotiation policy catalogue` and `Domain-chosen policy discovery` | `openspec/specs/negotiation-protocol/spec.md` |
-| Packaging validation is a distinct jurisdiction from the four test levels; per-wheel closure is not substitutable by an aggregate install | `docs/development/TESTING.md#packaging-validation` |
-| Operator-facing policy configuration: domain-offered policies, startup conflict failure, the `middleware` file contract, and the buyer authorizing no filesystem mechanism | `docs/configuration.md` |
-| Two named-item registries remain unconverted — the buyer's aggregation policies and the identity verifiers — with `market_policy.catalogue` as the primitive they migrate onto | `docs/development/ROADMAP.md` Goal 4 gap table |
-| The generic catalogue primitive eventually belongs in a zero-dependency kit package, since `market_identity` and `core_buyer` cannot depend on `arkhai-kit-policy` | Deferred; recorded in `design.md` and owned by `kit-storefront-composition-seam` |
-| Directory-level `force-include`, lazy facades, singleton catalogues, precedence overrides, and carrying policies on the domain contract | Rejected; retained in `design.md` only |
-| The RL strategy's laziness is the strategy module and its dependency graph, not torch itself — torch is already function-scoped | Corrected mid-change; recorded in `design.md` and guarded by a test |
+`Applied` rows are already in the named document. `At archival` rows are spec
+deltas that `openspec archive` synchronizes into `openspec/specs/` at workflow
+step 7; writing them into the permanent specs by hand now would duplicate the
+tool and leave the two copies to drift. The change is between steps 6 and 7 —
+`9.3` and `6a.2` are open — so those rows are named, not yet applied.
+
+| Accepted decision | Permanent location | State |
+|---|---|---|
+| Every shipped module is owned by one distribution; no project enumerates another's files; no role obtains code by source-tree copy | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` | Applied |
+| A distribution declares every dependency its shipped modules import at module scope, verified per wheel rather than in aggregate | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` | Applied |
+| Neither a package initializer nor an image restores a source tree to the interpreter path | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` | Applied |
+| Configurable names resolve against a catalogue composed once at startup and immutable thereafter, never process-global state populated by import order | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` | Applied |
+| Composition is role-owned: the role authorizes mechanisms, the domain contributes only its own items through a narrow typed request | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` | Applied |
+| Strict conflict with no precedence rule; load failure and malformed items fail at startup | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` | Applied |
+| `Wheel-owned domain code`, `Fatal domain plugin load failure`, and the optional-capability clause for negotiation | `openspec/specs/market-composition/spec.md` | At archival |
+| `Composed negotiation policy catalogue` and `Domain-chosen policy discovery` | `openspec/specs/negotiation-protocol/spec.md` | At archival |
+| Configurable catalogues are composed during application startup and injected, so a broken source fails before the role serves traffic | `docs/development/ARCHITECTURE.md#package-and-dependency-layers` | Applied |
+| Packaging validation is a distinct jurisdiction from the four test levels; per-wheel closure is not substitutable by an aggregate install | `docs/development/TESTING.md#packaging-validation` | Applied |
+| Operator-facing policy configuration: domain-offered policies, startup conflict failure, the `middleware` file contract, and the buyer authorizing no filesystem mechanism | `docs/configuration.md` | Applied |
+| Two named-item registries remain unconverted — the buyer's aggregation policies and the identity verifiers — with `market_policy.catalogue` as the primitive they migrate onto | `docs/development/ROADMAP.md` Goal 4 gap table | Applied |
+| The generic catalogue primitive eventually belongs in a zero-dependency kit package, since `market_identity` and `core_buyer` cannot depend on `arkhai-kit-policy` | Deferred; recorded in `design.md` and owned by `kit-storefront-composition-seam` | Deferred |
+| Directory-level `force-include`, lazy facades, singleton catalogues, precedence overrides, and carrying policies on the domain contract | Rejected; retained in `design.md` only | Rejected |
+| The RL strategy's laziness is the strategy module and its dependency graph, not torch itself — torch is already function-scoped | Corrected mid-change; recorded in `design.md` and guarded by a test | Applied |
