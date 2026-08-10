@@ -338,6 +338,23 @@ rather than repaired.
 - [ ] 9.5 Record which remaining E2E failures belong to
   `publish-multidimensional-listing-shape` rather than this change.
 
+### 9b. Image publication defect found during verification
+
+Pre-existing and unrelated to the ownership split, but it blocks `push-images`
+and so blocks the end-to-end verification this change is meant to unblock.
+
+- [x] 9b.1 Define `GIT_SUFFIX` in `provisioning/compute/service/Makefile` and tag
+  the built image with it, as the registry and storefront Makefiles already do.
+  The push target tags by commit; without the local tag it fails on a missing
+  image rather than on anything wrong with the build.
+- [x] 9b.2 Correct `push-images` to name the tag the build produces. The remote
+  name is `provisioning` and the local tag is `compute-provisioning`; the
+  `push_image` macro already takes both, and the call passed `provisioning` twice.
+- [x] 9b.3 Confirm no other consumer breaks: `compose/seller.yml` and
+  `domains/vms/compose.yml` reference the unsuffixed `arkhai:compute-provisioning`,
+  which the build still produces. Only this one service was affected — the
+  registry and storefront Makefiles both already defined `GIT_SUFFIX`.
+
 ## 10. Closeout
 
 - [ ] 10.1 Comment hygiene: run `make check-comment-hygiene`, resolve every

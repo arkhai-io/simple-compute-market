@@ -367,7 +367,9 @@ push-runtime-artifacts: push-images push-charts push-wheels push-cli
 push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
-	$(call push_image,provisioning,provisioning)
+	# Remote name is `provisioning`; the locally built tag is
+	# `compute-provisioning`. push_image takes both for exactly this reason.
+	$(call push_image,provisioning,compute-provisioning)
 
 push-dev-images: _require-ar-project
 	$(call push_image,dev-env,dev-env)
