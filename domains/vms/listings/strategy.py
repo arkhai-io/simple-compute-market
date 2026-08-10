@@ -9,7 +9,7 @@ from domains.vms.listings.models import (
 )
 
 
-def determine_strategy_from_resources(
+def _determine_strategy_from_resources(
     offer_resource: ComputeDomainResource | None,
 ) -> str | None:
     """Determine negotiation strategy from the listing's offered resource."""
@@ -24,4 +24,4 @@ def determine_strategy_from_order(order: Listing | None) -> str | None:
     """Determine negotiation strategy from a VM Listing."""
     if not order:
         return None
-    return determine_strategy_from_resources(order.offer_resource)
+    return _determine_strategy_from_resources(order.offer_resource)

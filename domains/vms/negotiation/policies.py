@@ -222,13 +222,3 @@ __all__ = [
     "round_zero_opening_guard",
     "their_proposed_amount",
 ]
-
-
-def _backfill_market_policy_compat_exports() -> None:
-    import market_policy.negotiation_middleware as compat
-
-    for name in __all__:
-        setattr(compat, name, globals()[name])
-
-
-_backfill_market_policy_compat_exports()

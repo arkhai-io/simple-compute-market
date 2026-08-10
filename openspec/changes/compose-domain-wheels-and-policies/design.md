@@ -140,9 +140,29 @@ after the split nothing re-exports across a package boundary.
   multi-role processes; see the injection decision above.
 - **Relocating the namespace into one shared wheel:** rejected; see the split
   decision above.
+- **Loading the torch strategy unconditionally at composition:** rejected;
+  see the reinforcement-learning decision above.
+- **Deleting `determine_strategy_from_resources` and `resource_is_compute` as
+  dead code:** rejected on inspection. Each has exactly one caller — in its own
+  module — and was reachable publicly only through a facade re-export. They are
+  over-exported internal helpers, not dead code, and deleting them would break
+  their callers. They become private and leave the facade instead.
 - **Folding this into `remove-relative-uv-sources`:** rejected. That change
   targets parent-path `tool.uv.sources` entries and is unstarted; this targets
   an unowned namespace assembled by file manifests. Different mechanisms.
+
+### The reinforcement-learning strategy is a separate source
+
+Importing the torch strategy imports torch and reads model checkpoints. It was
+previously registered by a lazy import triggered while resolving a chain, which
+is the import-order dependence this change removes; loading it unconditionally
+at composition would make every storefront pay for a strategy most never use.
+
+It is therefore its own source, and the domain offers it only when the chain
+being composed names one of its aliases. The domain knows which of its own
+policies are expensive; the role only asks for what the domain permits. A chain
+that asks for it and cannot load it fails, because negotiating under a silently
+substituted strategy is worse than failing.
 
 ## Risks
 

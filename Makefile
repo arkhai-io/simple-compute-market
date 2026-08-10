@@ -411,6 +411,9 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+check-wheel-manifests: ## Fail if a wheel file manifest has drifted from its source tree
+	@python3 scripts/check_wheel_manifests.py
+
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@echo "Scanning for change-ID and task-number references outside openspec/..."
 	@matches=$$(grep -rnE \

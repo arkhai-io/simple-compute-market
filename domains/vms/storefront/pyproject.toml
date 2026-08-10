@@ -154,6 +154,9 @@ build-backend = "hatchling.build"
 pythonpath = ["src", "../../.."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "torch: requires the [rl] extra; exercises the torch negotiation strategy",
+]
 
 [tool.hatch.metadata]
 allow-direct-references=true

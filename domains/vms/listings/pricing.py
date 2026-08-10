@@ -8,7 +8,7 @@ from typing import Any
 from domains.vms.listings.models import Listing
 
 
-def resource_is_compute(resource: Any) -> bool:
+def _resource_is_compute(resource: Any) -> bool:
     """True when the resource represents compute rather than tokens."""
     if isinstance(resource, str):
         try:
@@ -25,7 +25,7 @@ def extract_compute_from_order(order: dict[str, Any]) -> dict[str, Any]:
     offer_resource = order.get("offer_resource", {})
     if isinstance(offer_resource, str):
         offer_resource = json.loads(offer_resource)
-    if not resource_is_compute(offer_resource):
+    if not _resource_is_compute(offer_resource):
         raise ValueError(
             f"Order offer_resource is not compute: "
             f"listing_id={order.get('listing_id')}"

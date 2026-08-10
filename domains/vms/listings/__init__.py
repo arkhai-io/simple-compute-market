@@ -29,7 +29,6 @@ from domains.vms.listings.host_csv_importer import (
 from domains.vms.listings.pricing import (
     extract_compute_from_order,
     extract_initial_price_from_order,
-    resource_is_compute,
 )
 from domains.vms.listings.reconciler import (
     HELD_ALLOCATION_STATES,
@@ -70,7 +69,6 @@ from domains.vms.listings.resource_csv_importer import (
 )
 from domains.vms.listings.strategy import (
     determine_strategy_from_order,
-    determine_strategy_from_resources,
 )
 
 __all__ = [
@@ -84,7 +82,6 @@ __all__ = [
     "ComputeResource",
     "ComputeResourcePortfolio",
     "determine_strategy_from_order",
-    "determine_strategy_from_resources",
     "ERC20TokenMetadata",
     "extract_compute_from_order",
     "extract_initial_price_from_order",
@@ -117,7 +114,6 @@ __all__ = [
     "Region",
     "register_resource_adapter",
     "ResourceAdapter",
-    "resource_is_compute",
     "record_derived_listing",
     "reopen_local_derived_listing",
     "short_ts",

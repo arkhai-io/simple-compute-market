@@ -67,6 +67,12 @@ them as objects, touching no registry.
   cache write during resolution, and the `market_policy` compatibility
   monkey-patch are removed. `market_policy.buyer_policy`'s parallel global
   registry is converted to the same composed form.
+- `domains/apicredits` is brought to the same pattern: it declares the
+  negotiation capability, offers its four guards as an inline source, and its
+  own `force-include` manifest is replaced by owned packaging. Its manifest
+  audited complete at proposal time, but a complete hand-maintained manifest is
+  what `vms/buyer` had before the POOLS work, so it is corrected rather than
+  left to drift.
 - `domains/vms/{listings,negotiation,settlement}` is split by consumer:
   storefront-only modules move into `market_storefront`, the buyer's
   formatting helpers move into the buyer, and genuinely shared models move
@@ -86,7 +92,7 @@ them as objects, touching no registry.
   `core/buyer` (plugin loading, policy surface), `core/storefront`
   (composition), `domains/vms/{buyer,domain,storefront}`,
   `domains/vms/{listings,negotiation,settlement}`,
-  `domains/apicredits/{negotiation,storefront}`,
+  `domains/apicredits` (negotiation, storefront, and root packaging),
   `domains/bare_metal/storefront`, the VM storefront `Dockerfile` and
   `compose.yml`
 - Behaviour change to record: `~/.config/arkhai/policies` is scanned

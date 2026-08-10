@@ -7,6 +7,7 @@ from market_core import (
     DomainCapability,
     ImmutableComputeProvisioningCapability,
     ImmutableFulfillmentCapability,
+    ImmutableNegotiationCapability,
     ImmutableSettlementCapability,
     ImmutableStorefrontCapability,
     MarketDomainContract,
@@ -22,6 +23,7 @@ def get_market_domain_contract() -> MarketDomainContract:
     from market_storefront.services.fulfillment_service import (
         fulfill_compute_obligation,
     )
+    from domains.vms.negotiation.policy_sources import vm_policy_sources
     from market_storefront.utils.sync_negotiation import (
         _accepted_escrow_artifacts,
     )
@@ -32,12 +34,16 @@ def get_market_domain_contract() -> MarketDomainContract:
         DomainCapability.SETTLEMENT,
         DomainCapability.FULFILLMENT,
         DomainCapability.COMPUTE_PROVISIONING,
+        DomainCapability.NEGOTIATION,
     }
     return validate_domain_contract(replace(
         base,
         declared_capabilities=base.declared_capabilities | capabilities,
         storefront=ImmutableStorefrontCapability(
             run_negotiation_policy=default_seller_round_hook,
+        ),
+        negotiation=ImmutableNegotiationCapability(
+            policy_sources=vm_policy_sources,
         ),
         settlement=ImmutableSettlementCapability(
             verify=verify_escrow_for_settlement,

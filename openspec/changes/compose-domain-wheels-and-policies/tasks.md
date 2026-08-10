@@ -58,8 +58,9 @@ necessary.
 - [ ] 4.1 VM: expose its two guards as an inline source and declare
   `NEGOTIATION`. Its default chain becomes an ordered tuple of names
   interleaving kit and VM policies, replacing `_DEFAULT_GUARDS`.
-- [ ] 4.2 API-credit: same, for its four guards. Verify after composition
-  that it resolves no name it does not own and no name VM provides.
+- [ ] 4.2 API-credit: same, for its four guards — the three seller-side and
+  the buyer-side key responder. Verify after composition that it resolves no
+  name it does not own and no name VM provides.
 - [ ] 4.3 Bare-metal: declare no `NEGOTIATION` capability. Record in the
   design-promotion record that this is correct, not an omission.
 - [ ] 4.4 Compose one catalogue per role at the composition root from kit's
@@ -87,9 +88,11 @@ necessary.
 - [ ] 5.4 Convert `market_policy.buyer_policy`'s registry to the same composed
   form. Preserve both modes of `configured_buyer_policy`: tolerant when
   rendering `market --help`, strict when loading a chain.
-- [ ] 5.5 Delete confirmed dead code: `listings/strategy.determine_strategy_from_resources`
-  and `listings/pricing.resource_is_compute`, each reachable only from one
-  same-file caller and a facade re-export.
+- [ ] 5.5 Make `listings/strategy.determine_strategy_from_resources` and
+  `listings/pricing.resource_is_compute` private and remove them from the
+  `listings` facade. Each has one caller, in its own module, and was reachable
+  publicly only through the facade; they are over-exported, not dead, so
+  deletion would break their callers.
 
 ### 6. Commit 1 verification
 
@@ -132,9 +135,14 @@ necessary.
   `compose.yml` where it assumes the copied tree.
 - [ ] 8.3 Add a repository check rejecting a Python package under `domains/`
   that no `pyproject.toml` owns, so an unowned namespace cannot reappear.
-- [ ] 8.4 Review the `force-include` table in `domains/apicredits/pyproject.toml`
-  against the same rule and record whether it is in scope here or deferred
-  with a reason. Its manifest was audited as complete at proposal time.
+- [ ] 8.4 Bring `domains/apicredits` to the same ownership rule: split
+  `listings`, `negotiation`, and `settlement` by consumer, remove the
+  `force-include` table from `domains/apicredits/pyproject.toml`, and remove
+  any reliance on an interpreter path for domain resolution. Its manifest
+  audited complete at proposal time; a complete hand-maintained manifest is
+  what `vms/buyer` had before the POOLS work.
+- [ ] 8.5 Confirm the repository check from 8.3 covers `domains/apicredits`
+  and that no package under either domain tree is unowned.
 
 ### 9. Commit 2 verification
 

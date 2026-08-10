@@ -40,7 +40,7 @@ policies = [
 # Optional directories scanned at startup for custom policies.
 # Each immediate subdirectory is treated as a policy named after the
 # folder; the subdir must contain a policy.py exposing
-# `factory(cfg) -> NegotiationMiddleware`. See "Custom policies" below.
+# `middleware`. See "Custom policies" below.
 # extra_policy_paths = []
 
 # Legacy back-compat key (synthesized into a default chain when
@@ -182,9 +182,14 @@ Then list `"region_lock"` in `[negotiation] policies`.
 **2. File discovery (no Python packaging):** drop a policy folder under
 `$XDG_CONFIG_HOME/arkhai/policies/<policy_name>/policy.py` (or under a
 directory listed in `[negotiation] extra_policy_paths`). The file must
-expose `factory(cfg) -> NegotiationMiddleware`. The storefront
-discovers and registers them at startup; the folder name becomes the
-policy name listed in `[negotiation] policies`.
+expose a `middleware` callable with the negotiation middleware signature.
+The storefront loads them at startup; the folder name becomes the policy
+name listed in `[negotiation] policies`.
+
+Note that the buyer's aggregation policies use a different file contract:
+those expose `factory(cfg) -> AggregationPolicy`. The two are separate
+mechanisms with separate directories, described under "Buyer: aggregation
+policy" below.
 
 ---
 
