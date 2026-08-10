@@ -253,3 +253,44 @@ def test_catalogue_is_the_type_callers_annotate_against() -> None:
     catalogue = negotiation_catalogue_builder().build()
 
     assert isinstance(catalogue, Catalogue)
+
+
+# --- generic typing ---------------------------------------------------------
+
+
+def test_the_catalogue_machinery_is_parameterised_by_item_type() -> None:
+    """The runtime behaviour was always generic; the typing now says so.
+
+    A caller composing a catalogue of something other than middlewares should
+    keep its element type rather than falling back to `Any`.
+    """
+    assert Catalogue[int] is not None
+    assert CatalogueBuilder[int] is not None
+    assert CatalogueSource[int] is not None
+
+
+def test_a_typed_builder_composes_a_typed_catalogue() -> None:
+    builder: CatalogueBuilder[int] = CatalogueBuilder(kind="counter")
+    catalogue = builder.add_loader(InlineSource({"seven": 7})).build()
+
+    assert catalogue["seven"] == 7
+    assert catalogue.resolve(["seven"]) == [7]
+
+
+def test_the_negotiation_alias_carries_its_element_type() -> None:
+    """The alias should add static precision, not only a friendlier name."""
+    from market_policy import NegotiationCatalogue, NegotiationMiddleware
+
+    assert NegotiationCatalogue is not Catalogue
+    assert NegotiationCatalogue == Catalogue[NegotiationMiddleware]
+
+
+def test_a_non_callable_catalogue_needs_no_callable_validator() -> None:
+    """`require_callable_item` is negotiation's choice, not the machinery's."""
+    catalogue = (
+        CatalogueBuilder(kind="threshold")
+        .add_loader(InlineSource({"low": 1, "high": 99}))
+        .build()
+    )
+
+    assert catalogue.resolve(["high", "low"]) == [99, 1]

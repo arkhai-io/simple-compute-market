@@ -20,7 +20,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any
+from typing import Generic, TypeVar, cast
+
+#: The item type these sources yield. Each loader is item-neutral; the catalogue
+#: composing them decides what a well-formed item is.
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -47,40 +51,44 @@ def default_policy_root(leaf: str) -> Path:
 
 
 @dataclass(frozen=True)
-class InlineSource:
+class InlineSource(Generic[T]):
     """Items known when the offering package was built."""
 
-    items: Mapping[str, Any]
+    items: Mapping[str, T]
     label: str = "inline"
 
     def describe(self) -> str:
         return f"{self.label}({len(self.items)} items)"
 
-    def load(self) -> Mapping[str, Any]:
+    def load(self) -> Mapping[str, T]:
         return dict(self.items)
 
 
 @dataclass(frozen=True)
-class EntryPointSource:
-    """Items published by installed distributions."""
+class EntryPointSource(Generic[T]):
+    """Items published by installed distributions.
+
+    An entry point resolves to an arbitrary object, so the declared item type is
+    a claim the composing catalogue's validator is responsible for checking.
+    """
 
     group: str
 
     def describe(self) -> str:
         return f"entry-points({self.group})"
 
-    def load(self) -> Mapping[str, Any]:
-        loaded: dict[str, Any] = {}
+    def load(self) -> Mapping[str, T]:
+        loaded: dict[str, T] = {}
         for entry_point in entry_points(group=self.group):
             # Deliberately unguarded. A distribution that declares an item and
             # cannot supply it is an incomplete install, and continuing past it
             # reports a missing item instead of a broken package.
-            loaded[entry_point.name] = entry_point.load()
+            loaded[entry_point.name] = cast("T", entry_point.load())
         return loaded
 
 
 @dataclass(frozen=True)
-class DirectorySource:
+class DirectorySource(Generic[T]):
     """Items loaded from operator-supplied directories.
 
     Each immediate subdirectory of a root may contain ``policy.py`` exposing
@@ -99,15 +107,15 @@ class DirectorySource:
     @classmethod
     def from_paths(
         cls, paths: Iterable[str | Path], *, symbol: str, label: str = "directories"
-    ) -> DirectorySource:
+    ) -> DirectorySource[T]:
         return cls(tuple(Path(path) for path in paths), symbol=symbol, label=label)
 
     def describe(self) -> str:
         roots = ", ".join(str(root) for root in self.roots) or "(no roots)"
         return f"{self.label}({roots}; symbol={self.symbol})"
 
-    def load(self) -> Mapping[str, Any]:
-        loaded: dict[str, Any] = {}
+    def load(self) -> Mapping[str, T]:
+        loaded: dict[str, T] = {}
         for root in self.roots:
             if not root.is_dir():
                 logger.debug("[policy] skipping absent policy root %s", root)
@@ -120,7 +128,7 @@ class DirectorySource:
                     loaded[entry.name] = item
         return loaded
 
-    def _load_folder(self, folder: Path) -> Any | None:
+    def _load_folder(self, folder: Path) -> T | None:
         policy_file = folder / "policy.py"
         if not policy_file.is_file():
             return None
@@ -134,4 +142,4 @@ class DirectorySource:
         item = getattr(module, self.symbol, None)
         if item is None:
             raise AttributeError(f"{policy_file} defines no {self.symbol!r} symbol")
-        return item
+        return cast("T", item)

@@ -12,18 +12,21 @@ ask for, and cannot silently absorb a role option that was misspelled.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from market_policy.catalogue import (
     Catalogue,
     CatalogueBuilder,
+    CatalogueSource,
     require_callable_item,
 )
 from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     max_rounds_guard,
+    normalize_policies_by_escrow_kind_config,
 )
 from market_policy.scalar_policies import (
     accept_exact_listing_middleware,
@@ -38,8 +41,11 @@ from market_policy.sources import InlineSource
 
 __all__ = [
     "NEGOTIATION_POLICY_KIND",
+    "NegotiationCatalogue",
     "NegotiationPolicyRequest",
+    "NegotiationPolicySource",
     "PolicyRole",
+    "configured_policy_names",
     "negotiation_catalogue_builder",
     "scalar_escrow_policies",
 ]
@@ -77,14 +83,46 @@ class NegotiationPolicyRequest:
         return bool(self.requested_policies & names)
 
 
-def negotiation_catalogue_builder() -> CatalogueBuilder:
+def configured_policy_names(
+    negotiation_config: Any,
+    *,
+    default_chain: Sequence[str],
+    default_terminal: str,
+) -> frozenset[str]:
+    """Every policy name this configuration could ask a catalogue to resolve.
+
+    Composition needs this before the catalogue exists, because a domain may
+    decide whether an expensive optional policy is worth loading. It is a
+    superset, not the chain: a per-escrow-kind table contributes every kind's
+    names even though one negotiation reaches only one of them.
+    """
+
+    raw = getattr(negotiation_config, "policies", None)
+    names: set[str] = set(default_chain)
+    names.add(default_terminal)
+
+    by_kind = normalize_policies_by_escrow_kind_config(raw)
+    if by_kind:
+        for chain in by_kind.values():
+            names.update(str(name).strip() for name in chain if str(name).strip())
+        return frozenset(names)
+
+    configured = [str(name).strip() for name in (raw or []) if str(name).strip()]
+    names.update(configured)
+    mode = (getattr(negotiation_config, "policy_mode", "") or "").strip()
+    if mode:
+        names.add(mode)
+    return frozenset(names)
+
+
+def negotiation_catalogue_builder() -> CatalogueBuilder[NegotiationMiddleware]:
     """A builder that validates negotiation policies and names them in errors."""
-    return CatalogueBuilder(
+    return CatalogueBuilder[NegotiationMiddleware](
         kind=NEGOTIATION_POLICY_KIND, validate=require_callable_item
     )
 
 
-def scalar_escrow_policies() -> InlineSource:
+def scalar_escrow_policies() -> InlineSource[NegotiationMiddleware]:
     """The generic escrow-negotiation policies this package implements.
 
     Offered as an ordinary source rather than a privileged default, so there is
@@ -109,6 +147,9 @@ def scalar_escrow_policies() -> InlineSource:
     return InlineSource(policies, label="kit-scalar-escrow")
 
 
-#: Re-exported so callers need not reach into the generic module for the type
-#: they annotate against.
-NegotiationCatalogue = Catalogue
+#: A catalogue of negotiation middlewares. Callers annotate against this rather
+#: than the bare generic, so the element type survives composition.
+NegotiationCatalogue = Catalogue[NegotiationMiddleware]
+
+#: A source offering negotiation middlewares.
+NegotiationPolicySource = CatalogueSource[NegotiationMiddleware]

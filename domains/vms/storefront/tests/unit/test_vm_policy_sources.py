@@ -8,6 +8,7 @@ learning does not import torch to find that out.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -63,32 +64,57 @@ def test_the_torch_source_is_offered_for_each_rl_alias(rl_name: str) -> None:
     assert any(isinstance(s, TorchStrategySource) for s in sources)
 
 
-def test_composing_the_default_surface_does_not_import_torch() -> None:
-    """Withholding the source must actually avoid the import, not just the name.
+def test_composing_the_default_surface_does_not_import_the_strategy_module() -> None:
+    """Withholding the source must avoid the import, not merely the name.
 
-    Run in a subprocess: torch may already be imported by an unrelated test in
-    this process, which would make an in-process assertion vacuous.
+    Asserts the property this design actually has. Torch is imported lazily
+    inside the strategy's forward passes, so composing the RL source does not
+    pull torch into the process either way; what composition avoids is the
+    strategy module and its dependency graph.
+
+    Run in a subprocess because an unrelated test in this process may already
+    have imported the module, which would make an in-process check vacuous.
     """
+    strategy = "domains.vms.negotiation.rl.torch_arkhai_strategy"
     program = (
         "import sys;"
         "from market_policy import (negotiation_catalogue_builder,"
         " scalar_escrow_policies, NegotiationPolicyRequest, PolicyRole);"
         "from domains.vms.negotiation.policy_sources import"
-        " vm_policy_sources, VM_DEFAULT_SELLER_CHAIN;"
+        " vm_policy_sources, VM_DEFAULT_SELLER_CHAIN, RL_POLICY_NAMES;"
+        "import os;"
+        "wanted = frozenset([os.environ['REQUESTED']]) if os.environ['REQUESTED']"
+        " else frozenset(VM_DEFAULT_SELLER_CHAIN);"
         "r=NegotiationPolicyRequest(role=PolicyRole.STOREFRONT,"
-        " requested_policies=frozenset(VM_DEFAULT_SELLER_CHAIN));"
+        " requested_policies=wanted);"
         "b=negotiation_catalogue_builder().add_loader(scalar_escrow_policies());"
         "b.add_loaders(vm_policy_sources(r));"
         "c=b.build();"
-        "assert c.resolve(list(VM_DEFAULT_SELLER_CHAIN));"
-        "print('torch' in sys.modules)"
+        "assert c.names();"
+        f"print({strategy!r} in sys.modules)"
     )
 
-    result = subprocess.run(
-        [sys.executable, "-c", program], capture_output=True, text=True, check=True
-    )
+    # pytest's `pythonpath` setting applies to this process, not to a bare
+    # subprocess, so the parent's resolved sys.path is handed over explicitly.
+    base = dict(os.environ)
+    base["PYTHONPATH"] = os.pathsep.join(
+        [path for path in sys.path if path] + [base.get("PYTHONPATH", "")]
+    ).strip(os.pathsep)
 
-    assert result.stdout.strip() == "False", result.stderr
+    def _imports_strategy(requested: str) -> bool:
+        result = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**base, "REQUESTED": requested},
+        )
+        return result.stdout.strip() == "True"
+
+    # The control case matters: without it this test could pass because the
+    # module is never importable in this environment for some other reason.
+    assert _imports_strategy("rl") is True
+    assert _imports_strategy("") is False
 
 
 def test_an_rl_chain_fails_loudly_when_the_strategy_cannot_load(monkeypatch) -> None:

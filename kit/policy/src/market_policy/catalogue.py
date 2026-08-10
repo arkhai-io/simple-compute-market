@@ -18,11 +18,13 @@ and each keeps its own notion of a well-formed item.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+#: The item type a catalogue holds. Invariant: a catalogue both accepts items
+#: from its sources and hands them back to callers.
 T = TypeVar("T")
 
 __all__ = [
@@ -60,8 +62,8 @@ class UnknownCatalogueEntryError(KeyError):
 
 
 @runtime_checkable
-class CatalogueSource(Protocol):
-    """One way of obtaining named items."""
+class CatalogueSource(Protocol[T]):
+    """One way of obtaining named items of type ``T``."""
 
     def describe(self) -> str:
         """Identify this source in composition errors.
@@ -71,7 +73,7 @@ class CatalogueSource(Protocol):
         type.
         """
 
-    def load(self) -> Mapping[str, Any]:
+    def load(self) -> Mapping[str, T]:
         """Return the items this source offers.
 
         Raises on failure rather than returning a partial mapping: a provider
@@ -82,10 +84,13 @@ class CatalogueSource(Protocol):
 
 #: Raises when ``item`` is not well formed for its catalogue. Receives the name
 #: and the offered item; the caller adds source attribution.
-ItemValidator = Callable[[str, Any], None]
+#:
+#: Typed against ``object`` rather than ``T`` because a validator's job is to
+#: establish that an unvalidated value *is* a ``T``; it cannot presuppose it.
+ItemValidator = Callable[[str, object], None]
 
 
-def require_callable_item(name: str, item: Any) -> None:
+def require_callable_item(name: str, item: object) -> None:
     """Reject an item that is not callable. The common case."""
     if not callable(item):
         raise CatalogueItemTypeError(
@@ -94,7 +99,7 @@ def require_callable_item(name: str, item: Any) -> None:
 
 
 @dataclass(frozen=True)
-class Catalogue(Mapping[str, Any]):
+class Catalogue(Mapping[str, T]):
     """Every item available to one composed role.
 
     Construct through :class:`CatalogueBuilder`; the validation that makes this
@@ -102,16 +107,16 @@ class Catalogue(Mapping[str, Any]):
     """
 
     kind: str
-    _by_name: Mapping[str, Any]
+    _by_name: Mapping[str, T]
     _provenance: Mapping[str, str]
 
-    def __getitem__(self, name: str) -> Any:
+    def __getitem__(self, name: str) -> T:
         try:
             return self._by_name[name]
         except KeyError:
             raise self._unknown(name) from None
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._by_name)
 
     def __len__(self) -> int:
@@ -127,7 +132,7 @@ class Catalogue(Mapping[str, Any]):
         except KeyError:
             raise self._unknown(name) from None
 
-    def resolve(self, names: Sequence[str]) -> list[Any]:
+    def resolve(self, names: Sequence[str]) -> list[T]:
         """Resolve names to items, in the order given."""
         missing = [name for name in names if name not in self._by_name]
         if missing:
@@ -143,7 +148,7 @@ class Catalogue(Mapping[str, Any]):
 
 
 @dataclass
-class CatalogueBuilder:
+class CatalogueBuilder(Generic[T]):
     """Accumulates sources, then loads and validates them once.
 
     ``kind`` names what is being catalogued, so errors read in the caller's
@@ -156,21 +161,21 @@ class CatalogueBuilder:
 
     kind: str
     validate: ItemValidator | None = None
-    _loaders: list[CatalogueSource] = field(default_factory=list)
+    _loaders: list[CatalogueSource[T]] = field(default_factory=list)
 
-    def add_loader(self, loader: CatalogueSource) -> CatalogueBuilder:
+    def add_loader(self, loader: CatalogueSource[T]) -> CatalogueBuilder[T]:
         """Declare a source. Nothing is loaded until :meth:`build`."""
         self._loaders.append(loader)
         return self
 
-    def add_loaders(self, loaders: Sequence[CatalogueSource]) -> CatalogueBuilder:
+    def add_loaders(self, loaders: Sequence[CatalogueSource[T]]) -> CatalogueBuilder[T]:
         for loader in loaders:
             self.add_loader(loader)
         return self
 
-    def build(self) -> Catalogue:
+    def build(self) -> Catalogue[T]:
         """Load every declared source and return the frozen catalogue."""
-        merged: dict[str, Any] = {}
+        merged: dict[str, T] = {}
         provenance: dict[str, str] = {}
 
         for loader in self._loaders:

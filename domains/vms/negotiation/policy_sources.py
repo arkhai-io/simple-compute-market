@@ -5,11 +5,11 @@ reinforcement-learning strategy. It offers no buyer-side policies. The generic
 escrow vocabulary its chains interleave with is offered by the policy kit and
 is not restated here.
 
-The RL strategy is a separate source because loading it imports torch and reads
-model checkpoints. A storefront that never negotiates with RL should not pay for
-that, so the domain offers the source only when the composing role's
-configuration names one of its aliases. That decision belongs here: the domain
-knows which of its own policies are expensive.
+The RL strategy is a separate source because loading it pulls in the strategy
+module and its model-checkpoint handling. A storefront that never negotiates with
+RL should not pay for that, so the domain offers the source only when the
+composing role's configuration names one of its aliases. That decision belongs
+here: the domain knows which of its own policies are expensive.
 """
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from market_policy import (
-    CatalogueSource,
     InlineSource,
     NegotiationMiddleware,
     NegotiationPolicyRequest,
+    NegotiationPolicySource,
     PolicyRole,
 )
 
@@ -63,10 +63,17 @@ VM_DEFAULT_SELLER_CHAIN = (
 class TorchStrategySource:
     """The reinforcement-learning strategy, under each escrow-kind alias.
 
-    Loading imports torch, so this source is offered only when a chain names
-    one of :data:`RL_POLICY_NAMES`. It fails rather than degrading: a chain that
-    asks for RL and receives a silent substitute negotiates under a strategy
-    the operator did not choose.
+    Loading imports :mod:`domains.vms.negotiation.rl.torch_arkhai_strategy` and
+    its checkpoint-loading machinery, so this source is offered only when a chain
+    names one of :data:`RL_POLICY_NAMES`.
+
+    Torch itself is imported lazily inside the strategy's own forward passes, not
+    at module import, so composing this source does not by itself pull torch into
+    the process — the first RL negotiation round does. What composition avoids is
+    the strategy module and its dependency graph.
+
+    It fails rather than degrading: a chain that asks for RL and receives a silent
+    substitute negotiates under a strategy the operator did not choose.
     """
 
     def describe(self) -> str:
@@ -80,11 +87,11 @@ class TorchStrategySource:
 
 def vm_policy_sources(
     request: NegotiationPolicyRequest,
-) -> tuple[CatalogueSource, ...]:
+) -> tuple[NegotiationPolicySource, ...]:
     """The policies this domain offers to the requesting role."""
     if request.role is not PolicyRole.STOREFRONT:
         return ()
-    sources: list[CatalogueSource] = [
+    sources: list[NegotiationPolicySource] = [
         InlineSource(VM_SELLER_POLICIES, label="vm-domain[storefront]"),
     ]
     if request.wants_any(RL_POLICY_NAMES):

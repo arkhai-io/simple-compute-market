@@ -23,11 +23,12 @@ from pathlib import Path
 from market_core import DomainCapability, MarketDomainContract
 from market_policy import (
     NEGOTIATION_MIDDLEWARE_GROUP,
-    Catalogue,
-    CatalogueSource,
     DirectorySource,
     EntryPointSource,
+    NegotiationCatalogue,
+    NegotiationMiddleware,
     NegotiationPolicyRequest,
+    NegotiationPolicySource,
     PolicyRole,
     negotiation_catalogue_builder,
     scalar_escrow_policies,
@@ -41,7 +42,7 @@ _DIRECTORY_POLICY_SYMBOL = "middleware"
 
 def domain_policy_sources(
     domain: MarketDomainContract, request: NegotiationPolicyRequest
-) -> tuple[CatalogueSource, ...]:
+) -> tuple[NegotiationPolicySource, ...]:
     """Return the policies ``domain`` offers for ``request``, or none.
 
     A domain that composes its negotiation middlewares as values exposes no
@@ -64,7 +65,7 @@ def compose_negotiation_catalogue(
     include_kit_policies: bool = True,
     include_entry_points: bool = False,
     directory_roots: Iterable[str | Path] = (),
-) -> Catalogue:
+) -> NegotiationCatalogue:
     """Build the catalogue this role resolves configured policy names against.
 
     Every mechanism other than a domain's own policies is authorized here by
@@ -76,11 +77,13 @@ def compose_negotiation_catalogue(
     if include_kit_policies:
         builder.add_loader(scalar_escrow_policies())
     if include_entry_points:
-        builder.add_loader(EntryPointSource(group=NEGOTIATION_MIDDLEWARE_GROUP))
+        builder.add_loader(
+            EntryPointSource[NegotiationMiddleware](group=NEGOTIATION_MIDDLEWARE_GROUP)
+        )
     roots = tuple(directory_roots)
     if roots:
         builder.add_loader(
-            DirectorySource.from_paths(
+            DirectorySource[NegotiationMiddleware].from_paths(
                 roots, symbol=_DIRECTORY_POLICY_SYMBOL, label="operator-directories"
             )
         )

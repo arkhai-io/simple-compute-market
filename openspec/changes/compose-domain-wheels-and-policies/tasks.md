@@ -65,9 +65,17 @@ necessary.
   design-promotion record that this is correct, not an omission.
 - [ ] 4.4 Compose one catalogue per role at the composition root from kit's
   set plus each discovered domain's sources.
-- [ ] 4.5 Inject the catalogue into `default_seller_round_hook` and remove
+- [x] 4.5 Inject the catalogue into `default_seller_round_hook` and remove
   `extra_policy_paths` from its signature; source selection moves to
-  composition.
+  composition. Both storefronts compose per hook rather than at import, so a
+  catalogue is never built before configuration resolves. The escrow-kind
+  dispatch middleware takes the resolver too — a required argument, not a
+  default, so a per-kind chain cannot reach a name the role did not authorize.
+- [x] 4.7 Remove the storefront-round file-discovery and lazy RL-registration
+  helpers. Both were mechanisms triggered from inside chain resolution; they are
+  now sources a role authorizes at composition. Tombstone the test file whose
+  subject was the removed private helper; its coverage moved to the directory
+  source and role-authorization suites.
 - [ ] 4.6 Make `core_buyer.plugins` domain loading fatal on load failure,
   matching `core_storefront.publication_plugins`, so a broken install fails
   instead of reporting that no domain is installed.
@@ -108,6 +116,28 @@ necessary.
 - [ ] 6.7 `market --help` renders under a `buyer.toml` naming an unknown
   policy; chain loading under the same config fails.
 
+### 6a. Validation jurisdiction for this slice
+
+Recorded so the suite is not over-credited. Every test added by commit 1 is
+**unit level** under `docs/development/TESTING.md`'s definition: pure
+composition and transformation, a real local filesystem boundary for the
+directory source, and a mocked entry-point boundary. None uses the real
+application stack or a typed client, so none is integration coverage.
+
+- [x] 6a.1 Confirm every added test sits under a path its package's
+  `testpaths` collects. Three files were initially placed at `tests/` root
+  where `make test` does not reach them.
+- [ ] 6a.2 Add one storefront application integration test once a role
+  resolves a configured policy through the composed catalogue in a real
+  request: real in-process application, real DI and configuration, the
+  negotiation endpoint driven through the canonical storefront typed client.
+  If that client lacks the method, extend the client rather than building the
+  payload by hand.
+- [ ] 6a.3 Do not add an end-to-end case to prove catalogue merging. One is
+  owed only if this change alters the policy names a buyer sends into a real
+  storefront negotiation, which is a cross-service compatibility question and
+  belongs to system tests.
+
 ## Commit 2 — Wheel-owned domain code
 
 ### 7. Split by consumer
@@ -143,6 +173,12 @@ necessary.
   what `vms/buyer` had before the POOLS work.
 - [ ] 8.5 Confirm the repository check from 8.3 covers `domains/apicredits`
   and that no package under either domain tree is unowned.
+- [ ] 8.6 Record, rather than fix here, that a manifest audit is a static check
+  and cannot detect a stale installed artifact. A built wheel whose contents
+  predate a source change produces the same class of failure as a drifted
+  manifest — a symptom several modules from its cause. Build-and-import
+  validation across every domain wheel and its advertised entry points is
+  tracked separately; it needs a build step in CI and is not scoped here.
 
 ### 9. Commit 2 verification
 

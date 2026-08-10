@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-import importlib.util
 import logging
-import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
+
+from market_policy import NegotiationCatalogue
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationMiddleware,
+    NegotiationRound,
+    normalize_policies_by_escrow_kind_config,
+    run_negotiation_chain_with_context,
+)
 
 from domains.vms.listings import (
     determine_strategy_from_order,
@@ -18,22 +25,13 @@ from domains.vms.negotiation.policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
-from market_policy.negotiation_middleware import (
-    NegotiationContext,
-    NegotiationMiddleware,
-    NegotiationRound,
-    load_negotiation_chain,
-    normalize_policies_by_escrow_kind_config,
-    register_negotiation_middleware,
-    run_negotiation_chain_with_context,
-)
 
 logger = logging.getLogger(__name__)
 
 
 # The result carrier and hook protocol are domain-invariant and live in
 # the policy kit; re-exported here so existing import paths keep working.
-from market_policy.seller_round import (  # noqa: E402,F401
+from market_policy.seller_round import (
     SellerRoundHook,
     SellerRoundResult,
 )
@@ -53,83 +51,6 @@ async def _default_seller_policy_inputs(capacity: Any) -> dict[str, Any]:
     }
 
 
-_FILE_POLICIES_DISCOVERED = False
-
-
-def _default_policy_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "arkhai" / "policies"
-
-
-def _register_file_policy(folder: Path) -> bool:
-    """Load ``folder/policy.py`` and register its ``middleware`` callable."""
-    policy_file = folder / "policy.py"
-    if not policy_file.is_file():
-        return False
-
-    name = folder.name
-    module_id = f"domains.vms.negotiation._file_policies.{name}"
-    try:
-        spec = importlib.util.spec_from_file_location(module_id, policy_file)
-        if spec is None or spec.loader is None:
-            logger.warning("[POLICY] couldn't build spec for %s", policy_file)
-            return False
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        logger.warning(
-            "[POLICY] failed to import file policy %s from %s: %s",
-            name, policy_file, exc,
-        )
-        return False
-
-    middleware = getattr(module, "middleware", None)
-    if not callable(middleware):
-        logger.warning(
-            "[POLICY] %s has no callable 'middleware' - skipping",
-            policy_file,
-        )
-        return False
-
-    register_negotiation_middleware(name)(middleware)
-    logger.info("[POLICY] registered file middleware %r from %s", name, policy_file)
-    return True
-
-
-def _discover_file_policies(
-    force: bool = False,
-    *,
-    extra_policy_paths: Iterable[str | Path] | None = None,
-) -> None:
-    """Register middleware from configured policy directories."""
-    global _FILE_POLICIES_DISCOVERED
-    if _FILE_POLICIES_DISCOVERED and not force:
-        return
-    _FILE_POLICIES_DISCOVERED = True
-
-    candidates = [
-        _default_policy_dir(),
-        *(Path(p) for p in (extra_policy_paths or ())),
-    ]
-
-    for root in candidates:
-        if not root.is_dir():
-            logger.debug("[POLICY] skipping non-existent policy dir %s", root)
-            continue
-        for entry in sorted(root.iterdir()):
-            if not entry.is_dir() or entry.name.startswith((".", "_")):
-                continue
-            _register_file_policy(entry)
-
-
-def _maybe_register_rl_middleware() -> None:
-    """Trigger self-registration of the torch RL middleware if available."""
-    try:
-        import domains.vms.negotiation.rl.torch_arkhai_strategy  # noqa: F401
-    except Exception as exc:
-        logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
-
-
 _DEFAULT_GUARDS = [
     "round_zero_opening_guard",
     "buyer_counter_guard",
@@ -137,7 +58,6 @@ _DEFAULT_GUARDS = [
     "escrow_shape_guard",
 ]
 _DEFAULT_TERMINAL = "bisection"
-_RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
 def _prepend_default_guards(policy_names: list[str]) -> list[str]:
@@ -148,36 +68,31 @@ def _prepend_default_guards(policy_names: list[str]) -> list[str]:
     return out
 
 
-def _policy_names_need_rl(policy_names: list[str]) -> bool:
-    return any(name in _RL_POLICY_NAMES for name in policy_names)
-
-
-def _policy_map_needs_rl(policies_by_kind: dict[str, list[str]]) -> bool:
-    return any(_policy_names_need_rl(names) for names in policies_by_kind.values())
-
-
 def _load_storefront_chain(
     *,
+    policy_catalogue: NegotiationCatalogue,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
-    extra_policy_paths: Iterable[str | Path] | None = None,
 ) -> list[NegotiationMiddleware]:
-    """Resolve the VM storefront's configured negotiation middleware chain."""
-    _discover_file_policies(extra_policy_paths=extra_policy_paths)
+    """Resolve the VM storefront's configured negotiation middleware chain.
 
+    Names resolve against the catalogue the composing role built. Operator
+    directory discovery and the torch strategy are no longer triggered from
+    here: both are sources the role authorizes at composition, so a chain
+    cannot cause a mechanism to be consulted mid-negotiation.
+    """
     negotiation_cfg = negotiation_config
     raw_policies = getattr(negotiation_cfg, "policies", None)
     policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
     if policies_by_kind:
-        if _policy_map_needs_rl(policies_by_kind):
-            _maybe_register_rl_middleware()
         chain_config_paths = {
             name: chain.alkahest_address_config_path
             for name, chain in (chains or {}).items()
         }
-        return load_negotiation_chain(_DEFAULT_GUARDS) + [
+        return policy_catalogue.resolve(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
+                resolve=policy_catalogue.resolve,
                 chain_config_paths=chain_config_paths,
             )
         ]
@@ -185,16 +100,12 @@ def _load_storefront_chain(
     policy_names = list(raw_policies or [])
     if not policy_names:
         policy_mode = (
-            (getattr(negotiation_cfg, "policy_mode", "") or "").strip()
-            or _DEFAULT_TERMINAL
-        )
+            getattr(negotiation_cfg, "policy_mode", "") or ""
+        ).strip() or _DEFAULT_TERMINAL
         policy_names = [policy_mode]
     policy_names = _prepend_default_guards(policy_names)
 
-    if _policy_names_need_rl(policy_names):
-        _maybe_register_rl_middleware()
-
-    return load_negotiation_chain(policy_names)
+    return policy_catalogue.resolve(policy_names)
 
 
 def _direction_from_strategy_label(strategy: str) -> str:
@@ -210,12 +121,14 @@ def _seller_reference_amount(
     default_min_price: Any = None,
 ) -> int:
     """Compute the seller's absolute reference amount in base units."""
-    per_hour = Decimal(str(
-        extract_initial_price_from_order(
-            listing,
-            default_min_price=default_min_price,
+    per_hour = Decimal(
+        str(
+            extract_initial_price_from_order(
+                listing,
+                default_min_price=default_min_price,
+            )
         )
-    ))
+    )
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
     return int(per_hour * seconds // Decimal(3600))
 
@@ -229,7 +142,7 @@ async def _run_default_seller_round_policy(
     policy_inputs: dict[str, Any] | None = None,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
-    extra_policy_paths: Iterable[str | Path] | None = None,
+    policy_catalogue: NegotiationCatalogue,
     default_min_price: Any = None,
 ) -> SellerRoundResult:
     """Run the default VM seller per-round policy hook."""
@@ -261,14 +174,15 @@ async def _run_default_seller_round_policy(
             requested_duration_seconds,
             default_min_price=default_min_price,
         )
-        if uses_scalar_amount else 0
+        if uses_scalar_amount
+        else 0
     )
     direction = _direction_from_strategy_label(strategy_label)
 
     chain = _load_storefront_chain(
         negotiation_config=negotiation_config,
         chains=chains,
-        extra_policy_paths=extra_policy_paths,
+        policy_catalogue=policy_catalogue,
     )
     context = NegotiationContext(
         direction=direction,
@@ -276,8 +190,7 @@ async def _run_default_seller_round_policy(
         listing=listing_dict if isinstance(listing_dict, dict) else {},
         our_escrow_proposal=their_proposal,
         available_resources=(
-            (policy_inputs or {}).get("available_resources")
-            or {"resources": []}
+            (policy_inputs or {}).get("available_resources") or {"resources": []}
         ),
         intermediate={
             "requested_duration_seconds": requested_duration_seconds,
@@ -306,7 +219,7 @@ class _DefaultSellerRoundHook:
     capacity: Any
     negotiation_config: Any = None
     chains: Mapping[str, Any] | None = None
-    extra_policy_paths: Iterable[str | Path] | None = None
+    policy_catalogue: NegotiationCatalogue | None = None
     default_min_price: Any = None
 
     async def __call__(
@@ -326,7 +239,7 @@ class _DefaultSellerRoundHook:
             policy_inputs=policy_inputs,
             negotiation_config=self.negotiation_config,
             chains=self.chains,
-            extra_policy_paths=self.extra_policy_paths,
+            policy_catalogue=self.policy_catalogue,
             default_min_price=self.default_min_price,
         )
 
@@ -336,7 +249,7 @@ def default_seller_round_hook(
     *,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
-    extra_policy_paths: Iterable[str | Path] | None = None,
+    policy_catalogue: NegotiationCatalogue,
     default_min_price: Any = None,
 ) -> SellerRoundHook:
     """Build the default VM seller round hook.
@@ -349,6 +262,6 @@ def default_seller_round_hook(
         capacity=capacity,
         negotiation_config=negotiation_config,
         chains=chains,
-        extra_policy_paths=extra_policy_paths,
+        policy_catalogue=policy_catalogue,
         default_min_price=default_min_price,
     )

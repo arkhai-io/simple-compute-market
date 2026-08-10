@@ -21,7 +21,8 @@ re-exports every name from here, so existing import paths keep working.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -29,7 +30,6 @@ from market_policy.negotiation_middleware import (
     NegotiationMiddleware,
     NegotiationRound,
     NegotiationStep,
-    load_negotiation_chain,
     register_negotiation_middleware,
     run_negotiation_chain,
     their_last_proposal,
@@ -43,7 +43,7 @@ DEFAULT_REASONABLE_MULTIPLIER = 1.5
 _ZERO_ADDRESS = "0x" + "0" * 40
 
 
-def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[float]:
+def _amount_from_proposal(proposal: dict[str, Any] | None) -> float | None:
     """Pull the absolute payment amount out of a VM EscrowProposal dict."""
     if not isinstance(proposal, dict):
         return None
@@ -62,7 +62,7 @@ def _amount_from_proposal(proposal: dict[str, Any] | None) -> Optional[float]:
     return None
 
 
-def their_proposed_amount(history: list[NegotiationRound]) -> Optional[float]:
+def their_proposed_amount(history: list[NegotiationRound]) -> float | None:
     """Most recent absolute amount the other side proposed. None if not yet."""
     for round_ in reversed(history):
         if round_.sender == "them":
@@ -115,7 +115,7 @@ def our_previous_counters(history: list[NegotiationRound]) -> list[float]:
     return out
 
 
-def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
+def our_first_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
     """Our earliest proposal in the transcript."""
     for h in history:
         if h.sender == "us" and h.proposal is not None:
@@ -145,11 +145,7 @@ def escrow_shape_uses_scalar_amount(proposal: dict[str, Any] | None) -> bool:
     fields = proposal.get("fields") or {}
     if "amount" in fields:
         return True
-    if (
-        "token" in fields
-        and "tokenId" not in fields
-        and "token_id" not in fields
-    ):
+    if "token" in fields and "tokenId" not in fields and "token_id" not in fields:
         return True
     return any(
         (r.get("field") if isinstance(r, dict) else getattr(r, "field", None))
@@ -215,8 +211,7 @@ def bisection_middleware(
             )
         if their_amount <= our_amount * reasonable:
             proposed = (our_amount + their_amount) / 2
-            if proposed > our_amount:
-                proposed = our_amount
+            proposed = min(proposed, our_amount)
             return (
                 NegotiationDecision(
                     action="counter",
@@ -248,7 +243,9 @@ def bisection_middleware(
         return NegotiationDecision(action="exit", reason="price_unreasonable"), context
 
     return (
-        NegotiationDecision(action="reject", reason=f"unknown_direction:{context.direction!r}"),
+        NegotiationDecision(
+            action="reject", reason=f"unknown_direction:{context.direction!r}"
+        ),
         context,
     )
 
@@ -297,7 +294,8 @@ def listed_price_middleware(
     if their_amount is None:
         return (
             NegotiationDecision(
-                action="accept", proposal=dict(their_proposal),
+                action="accept",
+                proposal=dict(their_proposal),
                 reason="listed_price_amountless",
             ),
             context,
@@ -348,9 +346,20 @@ def _escrow_kind_lookup_keys(kind: str) -> list[str]:
 def make_escrow_kind_dispatch_middleware(
     policies_by_kind: dict[str, list[str]],
     *,
+    resolve: Callable[[Sequence[str]], list[NegotiationMiddleware]],
     chain_config_paths: dict[str, str | None] | None = None,
 ) -> NegotiationMiddleware:
-    """Build a terminal middleware that dispatches by selected escrow kind."""
+    """Build a terminal middleware that dispatches by selected escrow kind.
+
+    ``resolve`` turns configured policy names into middlewares. It is required
+    rather than defaulted so that the composed catalogue a role built is the
+    only thing this dispatcher can reach: a default would let a per-escrow-kind
+    chain resolve names the role never authorized.
+
+    Per-kind chains are still resolved on first use, because which kinds a
+    negotiation touches is not known until a proposal arrives. That is a cache
+    of already-authorized items, not discovery.
+    """
     normalized: dict[str, list[str]] = {
         str(kind).strip(): [str(name).strip() for name in chain if str(name).strip()]
         for kind, chain in policies_by_kind.items()
@@ -366,7 +375,7 @@ def make_escrow_kind_dispatch_middleware(
             if any(name == "escrow_kind_dispatch" for name in names):
                 raise RuntimeError("escrow_kind_dispatch cannot dispatch to itself")
             if key not in chain_cache:
-                chain_cache[key] = load_negotiation_chain(names)
+                chain_cache[key] = resolve(names)
             return key, chain_cache[key]
         return None
 
@@ -404,8 +413,6 @@ def make_escrow_kind_dispatch_middleware(
 
     escrow_kind_dispatch_middleware.__name__ = "escrow_kind_dispatch_middleware"
     return escrow_kind_dispatch_middleware
-
-
 
 
 def _normalize_escrow_field(value: Any) -> Any:
@@ -450,7 +457,11 @@ def _proposal_requires_exact_amount(matched: dict[str, Any]) -> bool:
     if isinstance(literal_fields, dict) and "amount" in literal_fields:
         return True
     for rate in matched.get("rates") or []:
-        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
         if field == "amount":
             return True
     return False
@@ -541,7 +552,11 @@ def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
     if isinstance(literal_fields, dict) and "amount" in literal_fields:
         return True
     for rate in entry.get("rates") or []:
-        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
         if field == "amount":
             return True
     return False
@@ -558,8 +573,6 @@ def proposal_uses_scalar_amount(
         return True
     matched = _accepted_escrow_for_proposal(listing, proposal)
     return _accepted_entry_uses_scalar_amount(matched)
-
-
 
 
 @register_negotiation_middleware("buyer_counter_guard")
@@ -607,8 +620,6 @@ def buyer_counter_guard(
         context.intermediate["buyer_counter_proposal"] = dict(pinned)
 
     return None, context
-
-
 
 
 def _peer_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
@@ -659,8 +670,12 @@ def escrow_shape_guard(
         return None, context
 
     for key, seller_value in seller_literal.items():
-        buyer_value = proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
-        if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(seller_value):
+        buyer_value = (
+            proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
+        )
+        if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(
+            seller_value
+        ):
             return (
                 NegotiationDecision(
                     action="reject",
@@ -754,7 +769,9 @@ def accept_exact_listing_middleware(
     proposal_fields = proposal.get("fields") or {}
     if not isinstance(proposal_fields, dict):
         return (
-            NegotiationDecision(action="reject", reason="exact_listing:fields_not_object"),
+            NegotiationDecision(
+                action="reject", reason="exact_listing:fields_not_object"
+            ),
             context,
         )
     expected_amount = int(round(context.our_reference_amount))
@@ -782,8 +799,7 @@ def accept_exact_listing_middleware(
                 NegotiationDecision(
                     action="reject",
                     reason=(
-                        f"exact_listing:field_mismatch:{key!r}:"
-                        f"{actual!r}!={expected!r}"
+                        f"exact_listing:field_mismatch:{key!r}:{actual!r}!={expected!r}"
                     ),
                 ),
                 context,
@@ -847,7 +863,8 @@ def accept_exact_listing_middleware(
             action="accept",
             proposal=(
                 _set_proposal_amount(proposal, expected_amount)
-                if requires_amount else dict(proposal)
+                if requires_amount
+                else dict(proposal)
             ),
             reason="exact_listing",
         ),
@@ -915,7 +932,9 @@ def buyer_escrow_shape_guard(
         if key == "amount":
             continue
         their_value = their_fields.get(key) if isinstance(their_fields, dict) else None
-        if _normalize_escrow_field(pinned_value) != _normalize_escrow_field(their_value):
+        if _normalize_escrow_field(pinned_value) != _normalize_escrow_field(
+            their_value
+        ):
             return (
                 NegotiationDecision(
                     action="reject",
@@ -946,6 +965,8 @@ def buyer_escrow_shape_guard(
             context,
         )
     return None, context
+
+
 __all__ = [
     "_amount_from_proposal",
     "accept_exact_listing_middleware",

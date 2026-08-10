@@ -15,10 +15,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from market_policy import (
-    CatalogueSource,
     InlineSource,
     NegotiationMiddleware,
     NegotiationPolicyRequest,
+    NegotiationPolicySource,
     PolicyRole,
 )
 
@@ -67,7 +67,7 @@ _BY_ROLE: Mapping[PolicyRole, Mapping[str, NegotiationMiddleware]] = {
 
 def api_credits_policy_sources(
     request: NegotiationPolicyRequest,
-) -> tuple[CatalogueSource, ...]:
+) -> tuple[NegotiationPolicySource, ...]:
     """The policies this domain offers to the requesting role."""
     return (
         InlineSource(
