@@ -22,6 +22,16 @@ require_gh() {
     gh auth status >/dev/null 2>&1 || die "gh is not authenticated — run 'gh auth login'"
 }
 
+gh_version() { gh --version 2>/dev/null | head -1; }
+
+# Reported when a subcommand rejects a flag: the flags this script uses have
+# appeared at different gh releases, and the version is the first thing needed to
+# tell "unsupported here" from "wrong arguments".
+unsupported() {
+    printf 'note: %s\n' "$1" >&2
+    printf '      gh: %s\n' "$(gh_version)" >&2
+}
+
 current_branch() {
     git rev-parse --abbrev-ref HEAD 2>/dev/null || die "not a git repository"
 }
@@ -42,10 +52,24 @@ require_pushed() {
     fi
 }
 
+# Filtered client-side rather than with `gh run list --branch`: that flag is
+# absent from older gh releases, while `--json`/`--jq` are present in every
+# version that has `run list` at all.
 latest_run_id() {
     local branch="$1"
-    gh run list --workflow "$WORKFLOW" --branch "$branch" --limit 1 \
-        --json databaseId --jq '.[0].databaseId // empty'
+    gh run list --workflow "$WORKFLOW" --limit 30 \
+        --json databaseId,headBranch \
+        --jq "[.[] | select(.headBranch == \"$branch\")] | .[0].databaseId // empty" \
+        2>/dev/null
+}
+
+list_runs() {
+    local branch="$1"
+    gh run list --workflow "$WORKFLOW" --limit 30 \
+        --json databaseId,headBranch,status,conclusion,createdAt,displayTitle \
+        --jq "[.[] | select(.headBranch == \"$branch\")] | .[:5][]
+              | \"\(.databaseId)  \(.status)/\(.conclusion // \"-\")  \(.createdAt)  \(.displayTitle)\"" \
+        2>/dev/null
 }
 
 cmd_dispatch() {
@@ -54,11 +78,17 @@ cmd_dispatch() {
     require_pushed "$branch"
     printf 'dispatching %s on %s\n' "$WORKFLOW" "$branch"
     gh workflow run "$WORKFLOW" --ref "$branch"
-    # The run is not queryable the instant dispatch returns.
-    sleep 4
-    local run_id; run_id="$(latest_run_id "$branch")"
-    [ -n "$run_id" ] && printf 'run %s: %s\n' "$run_id" \
-        "$(gh run view "$run_id" --json url --jq .url)"
+    # The run is not queryable the instant dispatch returns, and the dispatch has
+    # already succeeded by this point — a failed id lookup must not fail the
+    # command and imply nothing was queued.
+    sleep 5
+    local run_id; run_id="$(latest_run_id "$branch" || true)"
+    if [ -n "$run_id" ]; then
+        printf 'run %s: %s\n' "$run_id" \
+            "$(gh run view "$run_id" --json url --jq .url 2>/dev/null || echo '(url unavailable)')"
+    else
+        printf 'dispatched; the run is not queryable yet — try: make e2e-status\n'
+    fi
 }
 
 cmd_watch() {
@@ -66,12 +96,31 @@ cmd_watch() {
     local branch; branch="$(current_branch)"
     local run_id; run_id="$(latest_run_id "$branch")"
     [ -n "$run_id" ] || die "no $WORKFLOW run found for branch '$branch'"
-    gh run watch "$run_id" --exit-status
+    if ! gh run watch "$run_id" --exit-status 2>/dev/null; then
+        local status
+        status="$(gh run view "$run_id" --json status,conclusion \
+            --jq '"\(.status)/\(.conclusion // "-")"' 2>/dev/null || echo unknown)"
+        if [ "$status" = "unknown" ]; then
+            unsupported "'gh run watch --exit-status' failed; poll with: make e2e-status"
+            return 1
+        fi
+        # `--exit-status` makes watch exit non-zero on a failed run, which is the
+        # intended signal rather than an error in this script.
+        printf 'run %s finished: %s\n' "$run_id" "$status"
+        case "$status" in *"/success") return 0 ;; *) return 1 ;; esac
+    fi
 }
 
 cmd_status() {
     require_gh
-    gh run list --workflow "$WORKFLOW" --branch "$(current_branch)" --limit 5
+    local branch; branch="$(current_branch)"
+    local rows; rows="$(list_runs "$branch")"
+    if [ -z "$rows" ]; then
+        printf 'no %s runs found for branch %s\n' "$WORKFLOW" "$branch"
+        return 0
+    fi
+    printf 'RUN ID      STATUS/RESULT        CREATED               TITLE\n'
+    printf '%s\n' "$rows"
 }
 
 # Both halves of the evidence, named so it is obvious which is which.
@@ -90,9 +139,9 @@ cmd_logs() {
     # Artifact first: it carries the scenario output and the stack logs, and is a
     # far smaller fetch than a 90-minute job's step log.
     if ! gh run download "$run_id" --name "$ARTIFACT" --dir "$dest" 2>/dev/null; then
-        printf 'note: no %s artifact — the run may predate it, or the stack failed\n' \
-            "$ARTIFACT" >&2
-        printf '      before collecting; falling back to the step log\n' >&2
+        printf 'note: no %s artifact for run %s — it may predate the artifact, or\n' \
+            "$ARTIFACT" "$run_id" >&2
+        printf '      the stack failed before collecting; using the step log instead\n' >&2
     fi
 
     # Fetched when the artifact lacks the scenario output — older runs, or a job
