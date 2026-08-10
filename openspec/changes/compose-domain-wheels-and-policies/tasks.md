@@ -327,11 +327,51 @@ rather than repaired.
   — every module in the storefront wheel imports with no source tree present —
   so what remains unproven is the image build and container startup themselves,
   which need a Docker daemon.
-- [ ] 9.4 Run the E2E buyer CLI scenario that currently fails at stage B4 and
-  record the resulting failure count and skip count. A reduced skip count
-  indicates tests previously skipped because the domain was unloadable.
-- [ ] 9.5 Record which remaining E2E failures belong to
-  `publish-multidimensional-listing-shape` rather than this change.
+- [x] 9.4 Run on `ci-discovered-bug-fixes` (`c710057d`): **6 failed, 52 passed,
+  42 skipped**, against a 5/53/42 baseline. Skip count unchanged, so nothing was
+  skipping because the domain was unloadable — the plugin failure aborted the
+  buy rather than suppressing tests.
+
+  The packaging defect is resolved. Stage B4's failure mode changed from
+  `skipping buyer domain 'vms': No module named 'domains.vms.listings.listing_mode'`
+  followed by "none is installed", to `discover 1 match(es)` →
+  `negotiate → bob-storefront` → `HTTP 409 no_matching_inventory`. The buyer now
+  loads its domain, discovers a listing, and negotiates; it is blocked downstream.
+
+  One new failure was this change's own defect, described in 9.4a.
+- [x] 9.4a `market credits buy` failed with
+  `UnknownCatalogueEntryError: unknown negotiation policy: answer_key_challenge`.
+  The API-credit buyer contract declared no negotiation capability, so the buyer
+  role composed a catalogue without the domain's buyer-side responder. Identical
+  to the defect found in the VM buyer contract earlier in this change, in the
+  other domain, and flagged as outstanding at the time without being fixed.
+
+  Fixed, and `domains/apicredits/buyer/tests/test_real_domain_composition.py`
+  guards it — the counterpart of the VM suite added for the same defect. Both
+  domains' published buyer contracts are now covered.
+
+  Worth recording why component tests missed it twice: the domain offered the
+  policy, the role forwarded the request, and the catalogue resolved names, each
+  verified. Only the published contract's capability set was wrong, and nothing
+  asserted on the real contract until a test was written against it.
+- [x] 9.5 All five remaining failures are one pre-existing defect, none in this
+  change's scope:
+
+  | Scenario | Signature |
+  |---|---|
+  | `test_b4_market_buy_reaches_ready` | `HTTP 409 no_matching_inventory` |
+  | `test_02_admin_reserve_2x_closes_oversized_listings` | `No available compute VM matched required attributes` |
+  | `test_02_reserve_2x_keeps_large_slices_open` | same |
+  | `test_05a_evaluate_negotiate_would_not_exit` (×2) | `has_matching_inventory_guard` returns `reject` / `no_matching_inventory` |
+
+  Each is the registry's dimension and form-factor filters failing closed on
+  missing fields, owned by `publish-multidimensional-listing-shape`. The
+  negotiation-side symptom is `arkhai_vms.negotiation.policies`'
+  `has_matching_inventory_guard` rejecting because the inventory query returns
+  nothing — the guard is behaving correctly on an empty result.
+
+  No `UnknownCatalogueEntryError`, no plugin load failure, and no import error
+  appears anywhere in the run apart from 9.4a's.
 
 ### 9b. Image publication defect found during verification
 
