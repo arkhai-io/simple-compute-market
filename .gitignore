@@ -223,3 +223,6 @@ deploy-base-sepolia/
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+
+# Downloaded CI evidence — see scripts/e2e-ci.sh / make e2e-logs.
+.e2e-logs/
