@@ -114,7 +114,7 @@ def test_the_requested_set_reaches_the_domain_for_conditional_offers():
         negotiation=ImmutableNegotiationCapability(policy_sources=_sources),
     )
 
-    compose_buyer_negotiation_catalogue(domain and [domain], requested_policies=["rl"])
+    compose_buyer_negotiation_catalogue([domain], requested_policies=["rl"])
 
     assert seen["role"] is PolicyRole.BUYER
     assert seen["requested"] == frozenset({"rl"})

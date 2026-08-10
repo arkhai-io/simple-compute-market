@@ -105,7 +105,7 @@ necessary.
   `load_negotiation_chain`, `list_negotiation_middlewares`, the entry-point cache
   write during resolution, and the stub file-discovery trigger. Remove the error
   message instructing the operator to import a domain package. Zero references
-  to any of them remain in the repository. The decorator is not retained as a
+  remain in production or test code. The decorator is not retained as a
   marker: the source mappings are the declaration, and two ways to declare one
   policy is worse than either.
 - [x] 5.1a Convert every test that resolved through the registry to compose its
@@ -115,8 +115,11 @@ necessary.
   own catalogue instead of mutating state every other test inherits.
 - [x] 5.1b Pass the resolver at the two remaining escrow-kind dispatch call
   sites in tests. All five call sites across production and tests now supply it.
-- [x] 5.2 Delete `_backfill_market_policy_compat_exports` and its call. No
-  caller reads the attributes it sets on `market_policy.negotiation_middleware`.
+- [x] 5.2 Delete `_backfill_market_policy_compat_exports` and its call from
+  **both** modules that carried one — the VM policies module and
+  `market_policy.scalar_policies`. Each patched its `__all__` onto
+  `market_policy.negotiation_middleware` at import, so that module's contents
+  depended on what had been imported. No caller reads those attributes.
 - [x] 5.3 Reduce the VM negotiation policies module to the two guards it
   defines. The compatibility block re-exported 36 names; nine files imported
   eleven of them through that path and now import
@@ -135,7 +138,9 @@ necessary.
 - [x] 5.4b Remove the lookup failure's guess that the reader should check
   whether a domain plugin is installed. No domain offers a buyer policy; the
   message named a cause it could not know, from inside the generic layer.
-- [x] 5.5 Make `listings/strategy.determine_strategy_from_resources` and
+- [x] 5.5 Verified: both helpers are private in their owning modules and absent
+  from the `listings` facade's imports and `__all__`. Make
+  `listings/strategy.determine_strategy_from_resources` and
   `listings/pricing.resource_is_compute` private and remove them from the
   `listings` facade. Each has one caller, in its own module, and was reachable
   publicly only through the facade; they are over-exported, not dead, so

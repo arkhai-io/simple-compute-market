@@ -8,9 +8,10 @@ by ``unit_count`` — this module supplies the VM unit, the lease hour
 (``duration_seconds / 3600``), and re-attaches ``duration_seconds`` to
 the outcome for VM callers and run-log compatibility.
 
-Importing this module also installs the RL middleware registrar so
-``rl``-named policies in buyer.toml resolve (core cannot import
-``domains.*``).
+``rl``-named policies in buyer.toml resolve through the VM domain's declared
+negotiation capability: the buyer role composes a catalogue from installed
+domain contracts, and this domain offers its torch strategy when the requested
+policy set names it. Importing this module installs nothing.
 """
 
 from __future__ import annotations

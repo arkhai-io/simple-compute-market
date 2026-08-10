@@ -156,18 +156,17 @@ without recomputing.
 
 ### Custom policies
 
-Two ways to register:
+Two ways to supply one.
 
-**1. Decorator (in-process):** any Python module imported by the
-storefront can register a middleware:
+**1. A market domain offers it.** A domain declares the negotiation capability
+and returns the policies it offers for the requesting role. The storefront
+composes those with the policy kit's own into one catalogue at startup, and a
+name offered twice is a startup error rather than a silent override. This is how
+every in-repo policy is supplied:
 
 ```python
-from market_policy import (
-    NegotiationDecision,
-    register_negotiation_middleware,
-)
+from market_policy import InlineSource, NegotiationDecision
 
-@register_negotiation_middleware("region_lock")
 def region_lock(history, context):
     if context.listing.get("offer_resource", {}).get("region") not in {"California, US"}:
         return (
@@ -177,7 +176,13 @@ def region_lock(history, context):
     return None, context
 ```
 
-Then list `"region_lock"` in `[negotiation] policies`.
+Offer it from the domain's policy-source hook, then list `"region_lock"` in
+`[negotiation] policies`:
+
+```python
+def my_domain_policy_sources(request):
+    return (InlineSource({"region_lock": region_lock}, label="my-domain"),)
+```
 
 **2. File discovery (no Python packaging):** drop a policy folder under
 `$XDG_CONFIG_HOME/arkhai/policies/<policy_name>/policy.py` (or under a
@@ -196,8 +201,8 @@ policy" below.
 ## Buyer: negotiation policy
 
 The buyer runs the **same middleware shape** as the seller — same
-`(history, context) -> (Maybe<Response>, Context)` contract, same
-`load_negotiation_chain()` registry. But the buyer's primary config
+`(history, context) -> (Maybe<Response>, Context)` contract, resolved from a
+catalogue the buyer role composes. But the buyer's primary config
 surface is one level up: a named **buyer policy** (a `BuyerPolicy`
 object) that bundles the middleware chain with everything around it —
 which escrow formats it can negotiate (escrow tuple selection offers
@@ -281,9 +286,10 @@ The seller-only guards (`has_matching_inventory_guard`,
 on the buyer's chain — they're no-ops on the buyer side and shouldn't
 be listed.
 
-Custom policies — register via `@register_negotiation_middleware(...)`
-or drop into `[negotiation] extra_policy_paths` exactly as described in
-the seller section.
+Custom policies come from a domain's declared negotiation capability, exactly as
+described in the seller section. The buyer authorizes no filesystem mechanism:
+`[negotiation] extra_policy_paths` is a seller-side setting, and nothing in
+`buyer.toml` causes a policy to be loaded from disk.
 
 ---
 
