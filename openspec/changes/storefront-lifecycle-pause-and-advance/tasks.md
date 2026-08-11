@@ -128,6 +128,32 @@ response than the underlying call already produces.
       when a loop notices, never what it does, and production keeps the shipped values.
       **Done.**
 
+## 4c. Interruptibility cannot be expressed on an offer (found in run 31499398440)
+
+- [x] 4c.1 **Resolved by restructuring, and the defect filed separately.** Both full-deal
+      scenarios now trigger teardown by back-dating the lease rather than posting an
+      interrupt. Expiry is what ends a lease in production; interruption is an operator
+      escape hatch, and driving the main teardown path with the escape hatch left the
+      ordinary path uncovered — `DealLease.backdate` was written for exactly this and had
+      never been called by anything in the suite. Everything downstream (10b's explicit
+      `check_leases` cycle, the held `vm_remove` gate, 11a, 11b) is unchanged, because it
+      keys off the lease view and the mock rule rather than the interrupt response. The
+      guard's own defect is now
+      `declare-interruptible-on-a-compute-offer`. **Done.**
+- [x] 4c.2 Rename the stage to match what it does — `TestStage10a_LeaseExpirySetup` /
+      `test_10a_expire_lease_and_arm_teardown_gate`, and the phase banner with it. A stage
+      named for interruption that expires a lease is worse than either. **Done.**
+- [x] 4c.3 Declare `deal_lease` in 10a's `require_state`. The stage now reaches through it,
+      so a missing lease view must skip rather than raise two lines later. **Done.**
+- [ ] 4c.4 **Original note, retained.** `POST /admin/deals/{uid}/interrupt` gates
+      on `offer_resource["interruptible"]`, and `ComputeResource` has no such field, so
+      pydantic drops it and no deal in the suite can satisfy the guard. Its fallback test
+      — a splitter-gated buyer escrow proposal — is also false for a plain ERC20 escrow.
+      Three candidate fixes are set out in
+      `compose-domain-wheels-and-policies/e2e-inventory-findings.md`; adding a first-class
+      field changes the published offer's wire shape, which is why this is not a test-side
+      choice. `11a` and `11b` are blocked behind it.
+
 ## 5. Documentation
 
 - [x] 5.1 Rewrite the `pause`/`resume` endpoint summaries and `AdminPauseResponse`

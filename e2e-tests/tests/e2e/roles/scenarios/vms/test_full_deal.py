@@ -68,7 +68,7 @@ Phase 9 — Provisioning completion
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
-Phase 10 — Explicit interruption and durable teardown
+Phase 10 — Lease expiry and durable teardown
   10a  Pause automatic lease servicing, arm the provider teardown gate, and
        interrupt the deal through the storefront admin control plane.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
@@ -1288,18 +1288,39 @@ class TestStage09c_LeaseRegistered:
             "ledger" if lease_view.is_ledger else "legacy",
         )
 
+def _expired_lease_end() -> str:
+    """A lease end far enough in the past that the next watchdog cycle acts.
+
+    Fixed offset rather than "now": the provisioning service applies a grace
+    period after expiry before releasing, so an end time of exactly now would
+    leave the lease unexpired and the stage would fail on a correct system.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    return (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat().replace("+00:00", "Z")
+
 # ===========================================================================
-# Phase 10 — Explicit interruption enters durable teardown
+# Phase 10 — Lease expiry enters durable teardown
 # ===========================================================================
 
-class TestStage10a_ExplicitInterruptionSetup:
-    def test_10a_interrupt_deal_and_arm_teardown_gate(
+class TestStage10a_LeaseExpirySetup:
+    def test_10a_expire_lease_and_arm_teardown_gate(
         self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, deal_state: DealState,
+        deal_state: DealState,
     ):
-        """Request external interruption and hold provider teardown at its gate."""
+        """Expire the deal's lease and hold provider teardown at its gate.
+
+        The watchdog is paused first so the expiry sits unobserved until 10b runs
+        one cycle: that keeps the trigger and the reaction as separate, asserted
+        steps rather than one race.
+        """
+        # `deal_lease` is now a dependency: this stage back-dates through it
+        # rather than posting an interrupt, so a missing lease view must skip here
+        # rather than raise an AttributeError two lines down.
         require_state(deal_state, "lease_id", "real_escrow_uid",
-                      "reserved_resource_id")
+                      "reserved_resource_id", "deal_lease")
         assert provisioning_client.pause_lease_watchdog().get("paused") is True
         delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
         provisioning_test_client.add_mock_rule(
@@ -1307,11 +1328,22 @@ class TestStage10a_ExplicitInterruptionSetup:
             match={"vm_action": "vm_remove"},
             pause_before_result=True,
         )
-        interrupted = storefront_admin_client.admin_interrupt_deal(
-            deal_state.real_escrow_uid, reason="e2e_external_interruption"
+        # Expire the lease rather than interrupting the deal. Expiry is what ends
+        # a lease in production; interruption is an operator escape hatch for a
+        # deal sold as interruptible, and driving the main teardown path with the
+        # escape hatch left the ordinary path uncovered — `DealLease.backdate`
+        # was written for exactly this and had never been called by anything.
+        #
+        # The watchdog is paused above, so nothing acts on the expiry until 10b
+        # runs one cycle deliberately.
+        lease = deal_state.deal_lease.backdate(_expired_lease_end())
+        assert lease.get("id") == deal_state.lease_id, (
+            f"back-dated the wrong reservation: {lease}"
         )
-        assert interrupted.get("status") == "interrupted", interrupted
-        assert interrupted.get("capacity_reservation_id") == deal_state.lease_id
+        assert lease.get("status") == "active", (
+            "the lease should still read active until a watchdog cycle observes "
+            f"the expiry — 10b is what advances it: {lease}"
+        )
         deal_state._termination_requested = True
 
 

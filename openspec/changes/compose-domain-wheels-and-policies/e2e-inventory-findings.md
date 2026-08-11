@@ -571,3 +571,67 @@ dynamic-listing scenario has been converted so far.
 That is the useful signal from this run: the two scenarios that pause do not exhibit the
 flap and the ones that do not pause still do. The conversion works; it just has not been
 applied to the rest of the suite yet.
+
+---
+
+# Run 31499398440 — `4 failed, 85 passed, 18 skipped`
+
+One more passing, three fewer skipped, and the interruption/teardown stages ran for the
+first time in this campaign. Three of the four failures are one cause.
+
+**`10a`, and `11a`/`11b` cascading from it.** The admin interrupt endpoint answers
+`409 Deal is not marked interruptible/splitter-backed`. The scenario's offer does declare
+`"interruptible": True` — but `ComputeResource` has no such field, pydantic drops unknown
+keys by default, and so the stored `offer_resource` never carries it. The word
+`interruptible` does not appear anywhere in the run's compose logs.
+
+`_deal_is_interruptible` then falls through to its second test, whether the buyer's escrow
+proposal is splitter-gated, which a plain MockERC20 escrow is not. So the guard is
+unsatisfiable for every deal this suite creates, and `11a`/`11b` never get to run.
+
+This is a real gap, not a scenario mistake: an admin control gates on an offer attribute
+the offer schema cannot express. Three shapes of fix, and the choice is a product decision
+rather than a test one:
+
+1. `ComputeResource` gains `interruptible: bool = False`. Interruptibility is a commercial
+   property of the offer — spot versus on-demand — and a buyer arguably needs to see it
+   before agreeing, which argues for a first-class field. It changes the published offer
+   wire shape.
+2. The guard reads a provider tag under `attributes["tag.*"]`. No wire change, but the
+   model's own docstring says tags are opaque to policy and matched by equality, and this
+   value is load-bearing for a lifecycle control — the wrong home for it.
+3. The scenario makes its deals splitter-gated so the existing second test passes. Keeps
+   production untouched, and leaves the first test dead code that no deal can satisfy.
+
+**`09b` (buyer CLI)** is `monotonic-listing-reconciliation` again, in a scenario not yet
+converted to pause-and-advance. Unchanged from the previous run and expected until 4.2b
+lands.
+
+Worth noting what this run confirms about the campaign's shape. Every fix has moved the
+failure further down the same flow rather than sideways: capacity setup, then the mock's
+method surface, then placement identity, then the stage gate, then wiring, then lease
+identity, and now an offer attribute that cannot be expressed. Each was invisible until
+the flow reached it, and each was a real defect rather than a test artefact.
+
+## Teardown now triggers on expiry, not interruption
+
+The `10a` stages in both full-deal scenarios back-date the lease instead of posting an
+interrupt. Two reasons, and the second is the stronger one.
+
+The interrupt guard is unsatisfiable (see above), so the stages could not pass as written.
+But the guard is not really what was wrong. Lease expiry is how a lease ends in
+production; interruption is an operator escape hatch for capacity sold as preemptible.
+Driving the main teardown path with the escape hatch meant the ordinary path — the one
+every real deal takes — had no coverage at all, and `DealLease.backdate`, written for
+exactly this and documented in the class docstring as how the full-deal scenarios drive
+expiry, had never been called by anything.
+
+Everything after `10a` is unchanged: `10b` still runs one explicit `check_leases` cycle,
+the `vm_remove` mock rule still holds the provider at its gate, and `11a`/`11b` still
+assert convergence. They key off the lease view and the gate rather than off the interrupt
+response, which is why swapping the trigger was a local change.
+
+The interrupt control keeps its own defect, now owned by
+`declare-interruptible-on-a-compute-offer`, along with an end-to-end scenario dedicated to
+it. That is the right place for it: one scenario proving the escape hatch, rather than two
+scenarios using the escape hatch to prove something else.
