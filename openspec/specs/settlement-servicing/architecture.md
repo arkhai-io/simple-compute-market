@@ -14,7 +14,7 @@ SettlementPlan
 active obligations ── evaluate ── collect / abandon / expire
 ```
 
-Core owns restartable lifecycle structure and stable claim state. It does not understand an oracle predicate, token transfer, or domain-specific evidence. This lets persistence, retries, and operator inspection remain consistent while mechanism implementations evolve independently.
+The settlement-runtime kit owns restartable lifecycle structure and stable obligation state. It does not understand an oracle predicate, token transfer, or domain-specific evidence. Core supplies schema-opaque carriers and storefront composition contracts; persistence adapters, retries, and operator inspection remain consistent while mechanism implementations evolve independently.
 
 ## Plan and codec boundary
 
@@ -22,11 +22,49 @@ A plan carries lifecycle-universal fields and versioned mechanism payloads. Kit 
 
 Keeping codecs explicit is safer than generic dispatch on an arbitrary escrow-kind string: each supported `(kind, schema_version)` has an owning validator and materializer, and unknown versions fail instead of being guessed into a current model.
 
-## Claims and persisted hook state
+## Conditional-escrow clients and durable mechanism state
 
-Claim servicing records enough state to retry condition checks and collection without reconstructing decisions from mutable configuration. Hook scratch state is part of the servicing record when a mechanism needs a cursor, receipt, or retry token. It is not an invitation to persist arbitrary provider objects.
+Mechanism implementations satisfy one `ConditionalEscrowClient` port for
+materialize, authoritative status, check, collect, and expired reclaim. They
+receive a stable operation reference and may return only public-safe opaque
+references, actions, anchors, receipts, and mechanism state. The repository
+persists returned mechanism state even when a condition remains pending. This
+is what makes request-once/poll workflows survive restart without repeating an
+external mutation.
 
 Condition interpretation and collection remain separate because an asynchronous condition may be false many times before collection is valid. Same-wallet chain operations may need serialization to avoid nonce races, but that mechanism constraint does not become a generic marketplace lock.
+
+## Obligation identity and competing terminal effects
+
+Plan identity stays out of the negotiation wire carrier. The servicing
+repository combines a stable agreement reference, ordered obligation index,
+and canonical validated obligation snapshot to derive an immutable
+`obligation_ref`. This keeps legacy model dumps stable while giving every
+mechanism operation one durable idempotency boundary.
+
+Materialization, condition evaluation, collection, and reclaim have separate
+state because their failure and recovery semantics differ. Mutation attempts
+are journaled before external I/O; uncertain acknowledgement is retained so a
+restart retries the same operation rather than inventing a new effect.
+Collection and reclaim use one database serialization point because they are
+financially exclusive even when separate workers and roles initiate them.
+
+Aggregate status is derived from obligation rows rather than stored as another
+authority. Partial completion is a normal inspectable state: a completed
+payment does not erase a bond that needs repair, and a failed bond does not
+replay a completed payment.
+
+## Interval and bond policy
+
+Intervals allocate accepted integer value in proportion to each interval's
+duration, then distribute the bounded rounding remainder to the earliest
+intervals. This rule is deterministic on both sides and conserves the accepted
+total without zero-value mechanism obligations.
+
+A penalty bond is an ordinary directional obligation, not a special runtime
+branch. Policy changes payer and claimant to seller and buyer while preserving
+the accepted mechanism demand. The same materialize/check/collect/reclaim
+engine therefore handles payment intervals and bonds.
 
 ## Heartbeat evidence
 
@@ -38,7 +76,9 @@ Commercial abandonment may request early physical termination, but it does not d
 
 ## Current limits
 
-The baseline does not provide a universal `service(plan) → receipt` implementation, arbitrary plan materialization, or generic reclaim for every future mechanism. Compatibility coercions for older plan shapes are not the enduring extension model.
+Heartbeat evidence remains persisted but is not an automated adjudication
+policy. Evidence freshness, neutral oracle authority, disputed outcomes, and
+splitter/oracle contract selection require a separate accepted design.
 
 ## Related contracts
 

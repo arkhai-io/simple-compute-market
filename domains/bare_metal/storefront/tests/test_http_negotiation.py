@@ -125,12 +125,16 @@ async def test_signed_opening_accepts_and_persists_domain_artifacts(tmp_path) ->
     assert listing_threads.json()["count"] == 1
     assert detail.json()["terminal_state"] == "success"
     assert detail.json()["round_count"] == 2
-    assert (await runtime.db.load_bare_metal_message(
-        negotiation_id=negotiation_id,
-    )).ssh_public_key == "ssh-ed25519 buyer-key"
-    assert (await runtime.db.load_bare_metal_terms(
-        negotiation_id=negotiation_id,
-    )).machine_id == "machine-1"
+    assert (
+        await runtime.db.load_bare_metal_message(
+            negotiation_id=negotiation_id,
+        )
+    ).ssh_public_key == "ssh-ed25519 buyer-key"
+    assert (
+        await runtime.db.load_bare_metal_terms(
+            negotiation_id=negotiation_id,
+        )
+    ).machine_id == "machine-1"
 
 
 async def test_auth_and_domain_failures_write_no_thread(tmp_path) -> None:

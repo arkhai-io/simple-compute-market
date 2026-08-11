@@ -53,6 +53,30 @@ async def test_valid_listing_passes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hosted_settlement_option_passes_without_alkahest_choice() -> None:
+    payload = _valid_payload(
+        accepted_escrows=[],
+        settlement_options=[
+            {
+                "option_id": "a" * 64,
+                "mechanism": "fiat.stripe.v1",
+                "asset": "usd",
+                "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+                "params": {"account_ref": "acct-seller"},
+            }
+        ],
+    )
+    async with _client() as c:
+        resp = await c.post("/api/v1/listings/validate-publish", json=payload)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["accepted_escrows_count"] == 0
+    assert body["settlement_options_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_missing_offer_resource_rejected() -> None:
     payload = _valid_payload()
     del payload["offer_resource"]["gpu_model"]
@@ -81,7 +105,9 @@ async def test_empty_accepted_escrows_rejected() -> None:
 @pytest.mark.asyncio
 async def test_accepted_escrow_missing_required_keys_rejected() -> None:
     payload = _valid_payload(
-        accepted_escrows=[{"escrow_address": "0x" + "11" * 20}]  # missing chain_name + literal_fields
+        accepted_escrows=[
+            {"escrow_address": "0x" + "11" * 20}
+        ]  # missing chain_name + literal_fields
     )
     async with _client() as c:
         resp = await c.post("/api/v1/listings/validate-publish", json=payload)

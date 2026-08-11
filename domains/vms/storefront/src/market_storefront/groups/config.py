@@ -41,7 +41,8 @@ def config_path() -> None:
 @config_app.command("show")
 def config_show(
     raw: bool = typer.Option(
-        False, "--raw",
+        False,
+        "--raw",
         help="Print the TOML file verbatim instead of the loaded mapping.",
     ),
 ) -> None:
@@ -59,8 +60,12 @@ def config_show(
 
 @config_app.command("set")
 def config_set(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
-    value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
+    key: str = typer.Argument(
+        ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
+    ),
+    value: str = typer.Argument(
+        ..., help="Value to assign (coerced to int/float/bool when possible)."
+    ),
 ) -> None:
     """Set a single value in the storefront's storefront.toml.
 
@@ -71,7 +76,7 @@ def config_set(
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
-        coerced = (low == "true")
+        coerced = low == "true"
     else:
         try:
             coerced = int(value)
@@ -90,7 +95,9 @@ def config_set(
 
 @config_app.command("get")
 def config_get(
-    key: str = typer.Argument(..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."),
+    key: str = typer.Argument(
+        ..., help="Dotted config key, e.g. 'port' or 'pricing.default_min_price'."
+    ),
 ) -> None:
     """Print the value of a single config key from the storefront's storefront.toml."""
     doc = load_storefront_config()
@@ -250,7 +257,8 @@ _INIT_USER_TEMPLATE = """\
 @config_app.command("init-user")
 def config_init_user(
     overwrite: bool = typer.Option(
-        False, "--overwrite",
+        False,
+        "--overwrite",
         help="Replace an existing storefront.toml instead of refusing.",
     ),
 ) -> None:
@@ -264,11 +272,14 @@ def config_init_user(
     if path.exists() and not overwrite:
         typer.secho(
             f"{path} already exists. Pass --overwrite to replace it.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(1)
 
     user_config_dir().mkdir(parents=True, exist_ok=True)
     path.write_text(_INIT_USER_TEMPLATE)
     typer.echo(f"Wrote {path}")
-    typer.echo("Edit it, or use `market-storefront config set <key> <value>` to populate.")
+    typer.echo(
+        "Edit it, or use `market-storefront config set <key> <value>` to populate."
+    )

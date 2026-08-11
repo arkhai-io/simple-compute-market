@@ -12,12 +12,24 @@ from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_settlement_runtime import (
+        FailurePolicy,
+        SettlementJobCoordinator,
+        SettlementRuntime,
+        SettlementServicingWorker,
+        SettlementSQLiteRepository,
+    )
 
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.services.system_service import SystemService
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
 resolved_sqlite_client: "SQLiteClient | None" = None
+resolved_settlement_repository: "SettlementSQLiteRepository | None" = None
+resolved_settlement_runtime: "SettlementRuntime | None" = None
+resolved_settlement_worker: "SettlementServicingWorker | None" = None
+resolved_settlement_coordinator: "SettlementJobCoordinator | None" = None
+resolved_failure_policy: "FailurePolicy | None" = None
 resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None

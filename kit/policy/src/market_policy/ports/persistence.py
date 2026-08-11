@@ -17,6 +17,10 @@ class NegotiationThreadPersistencePort(Protocol):
         owner_id: str,
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
+        buyer_escrow_proposal: dict[str, Any] | None = None,
+        provision_terms: dict[str, Any] | None = None,
     ) -> None: ...
 
     async def get_thread_info(
@@ -68,15 +72,15 @@ class NegotiationThreadPersistencePort(Protocol):
         their_agent_id: str | None = None,
     ) -> dict[str, Any] | None: ...
 
-    async def get_active_negotiations_for_order(
+    async def get_active_negotiations_for_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
     ) -> list[dict[str, Any]]: ...
 
-    async def cancel_negotiations_for_order(
+    async def cancel_negotiations_for_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         except_negotiation_id: str | None = None,
-    ) -> list[str]: ...
+    ) -> list[dict[str, Any]]: ...

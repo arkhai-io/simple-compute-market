@@ -5,6 +5,7 @@ Downstream call sites pick the right client by ``chain_name`` (sourced
 from the listing's ``accepted_escrows[].chain_name`` or the incoming
 escrow's chain).
 """
+
 from __future__ import annotations
 
 import logging
@@ -60,6 +61,8 @@ def build_clients() -> dict[str, Any]:
         except Exception as exc:
             logger.warning(
                 "[ALKAHEST] Failed to initialise client for chain %s: %s. "
-                "This chain will not be available at runtime.", name, exc,
+                "This chain will not be available at runtime.",
+                name,
+                exc,
             )
     return out

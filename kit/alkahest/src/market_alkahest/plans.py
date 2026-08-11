@@ -13,10 +13,17 @@ contract is structural — both sides derive byte-identical payloads.
 """
 
 from __future__ import annotations
+from copy import deepcopy
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from .schemas import (
     EscrowTerms,
@@ -154,9 +161,7 @@ def settlement_obligation_to_escrow_terms(
         else SettlementObligation.model_validate(obligation)
     )
     if ob.mechanism != ALKAHEST_MECHANISM:
-        raise ValueError(
-            f"not an {ALKAHEST_MECHANISM} obligation: {ob.mechanism!r}"
-        )
+        raise ValueError(f"not an {ALKAHEST_MECHANISM} obligation: {ob.mechanism!r}")
     return EscrowTerms(
         maker=ob.payer,
         chain_name=ob.params.get("chain_name"),
@@ -177,13 +182,11 @@ def escrow_terms_from_settlement_plan(
     silently dropping obligations would under-materialize the deal.
     """
     plan_model = (
-        plan if isinstance(plan, SettlementPlan)
+        plan
+        if isinstance(plan, SettlementPlan)
         else SettlementPlan.model_validate(plan)
     )
-    return [
-        settlement_obligation_to_escrow_terms(ob)
-        for ob in plan_model.obligations
-    ]
+    return [settlement_obligation_to_escrow_terms(ob) for ob in plan_model.obligations]
 
 
 def materialize_settlement_plan_from_proposal(
@@ -215,6 +218,148 @@ def materialize_settlement_plan_from_proposal(
     return SettlementPlan(
         obligations=[escrow_terms_to_settlement_obligation(t) for t in terms],
         service_terms=dict(service_terms or {}),
+    )
+
+
+class IntervalAllocation(BaseModel):
+    """One deterministic interval boundary and its conserved amount."""
+
+    interval_index: int = Field(ge=0)
+    duration_seconds: int = Field(gt=0)
+    expiration_unix: int = Field(gt=0)
+    amount: int = Field(gt=0)
+
+
+def interval_amount_schedule(
+    *,
+    total_amount: int,
+    start_unix: int,
+    duration_seconds: int,
+    interval_seconds: int,
+) -> list[IntervalAllocation]:
+    """Split a total proportionally and allocate rounding remainder earliest."""
+    if total_amount <= 0:
+        raise ValueError("total_amount must be positive")
+    if start_unix <= 0:
+        raise ValueError("start_unix must be positive")
+    if duration_seconds <= 0:
+        raise ValueError("duration_seconds must be positive")
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+
+    interval_count = (duration_seconds + interval_seconds - 1) // interval_seconds
+    if total_amount < interval_count:
+        raise ValueError(
+            "total_amount cannot produce a positive amount for every interval"
+        )
+    durations = [
+        min(interval_seconds, duration_seconds - index * interval_seconds)
+        for index in range(interval_count)
+    ]
+    amounts = [
+        total_amount * interval_duration // duration_seconds
+        for interval_duration in durations
+    ]
+    remainder = total_amount - sum(amounts)
+    for index in range(remainder):
+        amounts[index] += 1
+
+    elapsed = 0
+    schedule: list[IntervalAllocation] = []
+    for index, (interval_duration, amount) in enumerate(zip(durations, amounts)):
+        elapsed += interval_duration
+        schedule.append(
+            IntervalAllocation(
+                interval_index=index,
+                duration_seconds=interval_duration,
+                expiration_unix=start_unix + elapsed,
+                amount=amount,
+            )
+        )
+    return schedule
+
+
+def split_settlement_obligation_into_intervals(
+    obligation: SettlementObligation | dict[str, Any],
+    *,
+    start_unix: int,
+    duration_seconds: int,
+    interval_seconds: int,
+) -> list[SettlementObligation]:
+    """Produce independent Alkahest obligations without changing ABI demand."""
+    template = (
+        obligation
+        if isinstance(obligation, SettlementObligation)
+        else SettlementObligation.model_validate(obligation)
+    )
+    if template.mechanism != ALKAHEST_MECHANISM:
+        raise ValueError(
+            f"not an {ALKAHEST_MECHANISM} obligation: {template.mechanism!r}"
+        )
+    if template.amount is None:
+        raise ValueError("interval policy requires a scalar obligation amount")
+    expected_expiration = start_unix + duration_seconds
+    if template.expiration_unix != expected_expiration:
+        raise ValueError(
+            "obligation expiration does not match the accepted interval duration"
+        )
+
+    schedule = interval_amount_schedule(
+        total_amount=template.amount,
+        start_unix=start_unix,
+        duration_seconds=duration_seconds,
+        interval_seconds=interval_seconds,
+    )
+    obligations: list[SettlementObligation] = []
+    for allocation in schedule:
+        params = deepcopy(template.params)
+        obligation_data = params.get("obligation_data")
+        if not isinstance(obligation_data, dict):
+            raise ValueError("interval policy requires Alkahest obligation_data")
+        obligation_data["amount"] = allocation.amount
+        obligations.append(
+            template.model_copy(
+                update={
+                    "amount": allocation.amount,
+                    "expiration_unix": allocation.expiration_unix,
+                    "params": params,
+                }
+            )
+        )
+    return obligations
+
+
+def build_penalty_bond_obligation(
+    template: SettlementObligation | dict[str, Any],
+    *,
+    amount: int,
+    expiration_unix: int | None = None,
+) -> SettlementObligation:
+    """Build an explicit seller-funded, buyer-claimable bond obligation."""
+    if amount <= 0:
+        raise ValueError("penalty bond amount must be positive")
+    source = (
+        template
+        if isinstance(template, SettlementObligation)
+        else SettlementObligation.model_validate(template)
+    )
+    if source.mechanism != ALKAHEST_MECHANISM:
+        raise ValueError(
+            f"not an {ALKAHEST_MECHANISM} obligation: {source.mechanism!r}"
+        )
+    params = deepcopy(source.params)
+    obligation_data = params.get("obligation_data")
+    if not isinstance(obligation_data, dict):
+        raise ValueError("penalty bond requires Alkahest obligation_data")
+    obligation_data["amount"] = amount
+    return source.model_copy(
+        update={
+            "payer": "seller",
+            "claimant": "buyer",
+            "amount": amount,
+            "expiration_unix": expiration_unix or source.expiration_unix,
+            "params": params,
+        }
     )
 
 

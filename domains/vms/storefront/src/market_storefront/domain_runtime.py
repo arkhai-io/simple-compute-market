@@ -1,6 +1,7 @@
 """Storefront composition root for the VM market-domain contract."""
 
 from __future__ import annotations
+
 from dataclasses import replace
 
 from market_core import (
@@ -19,6 +20,7 @@ def get_market_domain_contract() -> MarketDomainContract:
     from arkhai_vms.domain_runtime import market_domain
     from core_storefront.escrow_verification import verify_escrow_for_settlement
     from domains.vms.negotiation.storefront_round import default_seller_round_hook
+
     from market_storefront.services.fulfillment_service import (
         fulfill_compute_obligation,
     )
@@ -33,21 +35,34 @@ def get_market_domain_contract() -> MarketDomainContract:
         DomainCapability.FULFILLMENT,
         DomainCapability.COMPUTE_PROVISIONING,
     }
-    return validate_domain_contract(replace(
-        base,
-        declared_capabilities=base.declared_capabilities | capabilities,
-        storefront=ImmutableStorefrontCapability(
-            run_negotiation_policy=default_seller_round_hook,
-        ),
-        settlement=ImmutableSettlementCapability(
-            verify=verify_escrow_for_settlement,
-            build_plan=_accepted_escrow_artifacts,
-        ),
-        fulfillment=ImmutableFulfillmentCapability(
-            fulfill=fulfill_compute_obligation,
-        ),
-        compute_provisioning=ImmutableComputeProvisioningCapability(
-            provision=fulfill_compute_obligation,
-        ),
-    ))
+    return validate_domain_contract(
+        replace(
+            base,
+            declared_capabilities=base.declared_capabilities | capabilities,
+            storefront=ImmutableStorefrontCapability(
+                run_negotiation_policy=default_seller_round_hook,
+            ),
+            settlement=ImmutableSettlementCapability(
+                verify=verify_escrow_for_settlement,
+                build_plan=_accepted_escrow_artifacts,
+            ),
+            fulfillment=ImmutableFulfillmentCapability(
+                fulfill=fulfill_compute_obligation,
+            ),
+            compute_provisioning=ImmutableComputeProvisioningCapability(
+                provision=fulfill_compute_obligation,
+            ),
+        )
+    )
 
+
+def build_settlement_runtime(*, sqlite_client, alkahest_clients):
+    """Compose VM policy and Alkahest over the shared settlement foundation."""
+    from market_storefront.settlement_composition import (
+        build_vm_settlement_composition,
+    )
+
+    return build_vm_settlement_composition(
+        sqlite_client=sqlite_client,
+        alkahest_clients=alkahest_clients,
+    )

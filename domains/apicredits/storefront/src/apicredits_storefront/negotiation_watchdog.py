@@ -64,7 +64,8 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
         nid = thread["negotiation_id"]
         logger.warning(
             "negotiation_watchdog: marking %s as abandoned (updated_at=%s)",
-            nid, thread["updated_at"],
+            nid,
+            thread["updated_at"],
         )
         try:
             await sqlite_client.update_negotiation_thread_terminal(
@@ -74,7 +75,8 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
         except Exception as exc:
             logger.warning(
                 "negotiation_watchdog: failed to terminate thread %s: %s",
-                nid, exc,
+                nid,
+                exc,
             )
             continue
         try:
@@ -101,7 +103,8 @@ async def watchdog_loop() -> None:
             n = await _watchdog_tick(sqlite_client)
             if n:
                 logger.info(
-                    "negotiation_watchdog_loop: abandoned %d stale thread(s)", n,
+                    "negotiation_watchdog_loop: abandoned %d stale thread(s)",
+                    n,
                 )
         except asyncio.CancelledError:
             logger.info("negotiation_watchdog_loop: cancelled, shutting down")

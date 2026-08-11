@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_middleware import NegotiationRound
@@ -73,7 +73,9 @@ def history_from_messages(
     """Convert persisted thread messages into policy-consumable rounds."""
     out: list[NegotiationRound] = []
     for i, message in enumerate(messages):
-        sender = "us" if message.get("sender") == our_sender else "them"
+        sender: Literal["us", "them"] = (
+            "us" if message.get("sender") == our_sender else "them"
+        )
         action = _action_from_stored_message(message.get("action_taken", ""))
         amount = _stored_amount(message.get("proposed_price"))
         proposal = (
@@ -81,16 +83,20 @@ def history_from_messages(
             if amount is not None or buyer_pinned_proposal is not None
             else None
         )
-        out.append(NegotiationRound(
-            round_number=i,
-            sender=sender,
-            action=action,
-            proposal=proposal,
-        ))
+        out.append(
+            NegotiationRound(
+                round_number=i,
+                sender=sender,
+                action=action,
+                proposal=proposal,
+            )
+        )
     return out
 
 
-def _action_from_stored_message(action_taken: str) -> str:
+def _action_from_stored_message(
+    action_taken: str,
+) -> Literal["initial", "counter", "accept", "exit", "reject"]:
     if action_taken == "make_offer":
         return "initial"
     if action_taken == "counter_offer":
@@ -234,6 +240,7 @@ async def create_sync_negotiation_thread(
     requested_duration_seconds: int | None,
     requested_start_utc: str | None,
     buyer_escrow_proposal: dict[str, Any] | None,
+    provision_terms: dict[str, Any] | None = None,
     opening_sender: str,
     opening_amount: int,
 ) -> None:
@@ -252,6 +259,7 @@ async def create_sync_negotiation_thread(
             requested_duration_seconds=requested_duration_seconds,
             requested_start_utc=requested_start_utc,
             buyer_escrow_proposal=buyer_escrow_proposal,
+            provision_terms=provision_terms,
         )
         await txn.add_message(
             negotiation_id=negotiation_id,

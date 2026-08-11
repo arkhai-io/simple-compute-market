@@ -60,7 +60,11 @@ def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
         "/api/v1/system/status",
         "/health",
     } <= paths
-    assert not any("fulfillment" in path or "provision" in path for path in paths)
+    assert not any(
+        fragment in path
+        for path in paths
+        for fragment in ("fulfillment", "provision", "claim", "collect")
+    )
     settle_schema = app.openapi()["components"]["schemas"]["BareMetalSettleRequest"]
     assert set(settle_schema["properties"]) == {"negotiation_id", "buyer_address"}
 

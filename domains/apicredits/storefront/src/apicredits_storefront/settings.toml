@@ -35,7 +35,7 @@ enable_registry_discovery = true
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-# Deal-servicing engine sweep cadence (seconds).
+# Shared settlement-servicing worker cadence (seconds).
 claims_sweep_interval = 30
 
 [wallet]

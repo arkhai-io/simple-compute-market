@@ -30,6 +30,7 @@ from market_alkahest.schemas import (
     EscrowProposal,
     accepted_recipient_address,
 )
+from market_core.schemas import SettlementSelection
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
@@ -52,12 +53,12 @@ DEFAULT_SETTLEMENT_POLL_INTERVAL = 5.0
 DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
 
 
-# Factory: build the EscrowProposal for a specific candidate listing.
-# Returns None when the listing carries no accepted_escrows entry
-# compatible with the buyer's chain + filters — the orchestrator then
-# skips that candidate. The caller closes over chain config + selection
-# rules; the orchestrator just invokes per match.
-BuildEscrowProposalFn = Callable[[dict[str, Any]], Optional["EscrowProposal"]]
+# Factory: choose one settlement carrier for a candidate listing. The
+# concrete schema plugin returns either an Alkahest escrow proposal or a
+# mechanism-neutral settlement selection. None skips the candidate.
+BuildEscrowProposalFn = Callable[
+    [dict[str, Any]], Optional[EscrowProposal | SettlementSelection]
+]
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +232,124 @@ def wait_for_settlement(
         sleep(poll_interval)
 
 
+def start_hosted_settlement(
+    *,
+    seller_url: str,
+    negotiation_id: str,
+    obligation_ref: str,
+    buyer_address: str,
+    buyer_private_key: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+) -> dict[str, Any]:
+    """Start an accepted hosted obligation through the storefront authority."""
+    signature, timestamp = _sign(
+        f"settlement_start:{obligation_ref}",
+        buyer_private_key,
+    )
+    return _signed_json(
+        seller_url.rstrip("/") + "/api/v1/settlements",
+        {
+            "negotiation_id": negotiation_id,
+            "obligation_ref": obligation_ref,
+        },
+        signature,
+        timestamp,
+        method="POST",
+        timeout=timeout,
+        identity_identifier=buyer_address,
+    )
+
+
+def poll_hosted_settlement(
+    *,
+    seller_url: str,
+    settlement_ref: str,
+    buyer_address: str,
+    buyer_private_key: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+) -> dict[str, Any]:
+    signature, timestamp = _sign(
+        f"settlement_status:{settlement_ref}",
+        buyer_private_key,
+    )
+    return _signed_json(
+        seller_url.rstrip("/") + f"/api/v1/settlements/{settlement_ref}",
+        None,
+        signature,
+        timestamp,
+        method="GET",
+        timeout=timeout,
+        identity_identifier=buyer_address,
+    )
+
+
+def reclaim_hosted_settlement(
+    *,
+    seller_url: str,
+    settlement_ref: str,
+    buyer_address: str,
+    buyer_private_key: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+) -> dict[str, Any]:
+    signature, timestamp = _sign(
+        f"settlement_reclaim:{settlement_ref}",
+        buyer_private_key,
+    )
+    return _signed_json(
+        seller_url.rstrip("/") + f"/api/v1/settlements/{settlement_ref}/reclaim",
+        None,
+        signature,
+        timestamp,
+        method="POST",
+        timeout=timeout,
+        identity_identifier=buyer_address,
+    )
+
+
+def wait_for_hosted_settlement(
+    *,
+    seller_url: str,
+    settlement_ref: str,
+    buyer_address: str,
+    buyer_private_key: str,
+    poll_interval: float = DEFAULT_SETTLEMENT_POLL_INTERVAL,
+    total_timeout: float = DEFAULT_SETTLEMENT_TIMEOUT,
+    on_poll: Optional[Callable[[int, dict], None]] = None,
+    on_action: Optional[Callable[[dict[str, Any]], None]] = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Poll the storefront without retaining transient Checkout URLs."""
+    deadline = time.monotonic() + total_timeout
+    attempts = 0
+    while True:
+        attempts += 1
+        body = poll_hosted_settlement(
+            seller_url=seller_url,
+            settlement_ref=settlement_ref,
+            buyer_address=buyer_address,
+            buyer_private_key=buyer_private_key,
+        )
+        action = body.get("action")
+        if isinstance(action, dict) and on_action is not None:
+            on_action(action)
+        if on_poll is not None:
+            on_poll(attempts, body)
+        if body.get("status") in {
+            "ready",
+            "collected",
+            "reclaimed",
+            "failed",
+            "manual_required",
+        }:
+            return body
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                "Hosted settlement did not reach a terminal public status "
+                f"within {total_timeout}s"
+            )
+        sleep(poll_interval)
+
+
 # ---------------------------------------------------------------------------
 # Escrow creation: injected hook (real impl lives in escrow_client.py)
 # ---------------------------------------------------------------------------
@@ -324,21 +443,24 @@ def _negotiate_matches(
                 reason="missing_seller_url_or_listing_id",
             )
 
-        # Per-candidate escrow proposal: token, escrow contract, and chain
-        # come from the listing's accepted_escrows. None ⇒ no entry on
-        # the buyer's chain (or no entry matching --token-contract).
-        escrow_proposal = build_escrow_proposal(match)
-        if escrow_proposal is None:
+        settlement_proposal = build_escrow_proposal(match)
+        if settlement_proposal is None:
             attempts.append({
                 "seller_url": seller_url,
                 "listing_id": listing_id,
-                "error": "no_compatible_accepted_escrow",
+                "error": "no_compatible_settlement_option",
             })
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=None,
-                reason="no_compatible_accepted_escrow",
+                reason="no_compatible_settlement_option",
             )
+        if isinstance(settlement_proposal, SettlementSelection):
+            escrow_proposal = None
+            settlement_selection = settlement_proposal
+        else:
+            escrow_proposal = settlement_proposal
+            settlement_selection = None
 
         neg_ctx: dict[str, Any] = {"listing_id": listing_id}
 
@@ -410,6 +532,7 @@ def _negotiate_matches(
                 unit_count=unit_count,
                 provision_terms=provision,
                 escrow_proposal=escrow_proposal,
+                settlement_selection=settlement_selection,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
                 chain=chain,

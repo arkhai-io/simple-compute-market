@@ -57,7 +57,10 @@ class NegotiateController:
         )
 
         buyer_auth._verify(
-            request, "negotiate_new", body.listing_id, body.buyer_address,
+            request,
+            "negotiate_new",
+            body.listing_id,
+            body.buyer_address,
         )
 
         try:
@@ -71,26 +74,36 @@ class NegotiateController:
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
             )
         except StorefrontPausedError as exc:
-            raise HTTPException(status_code=503, detail={
-                "error": "paused", "reason": exc.reason,
-                "hint": "Storefront or listing is paused.",
-            })
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "paused",
+                    "reason": exc.reason,
+                    "hint": "Storefront or listing is paused.",
+                },
+            )
         except OfferUnfulfillableError as exc:
-            raise HTTPException(status_code=409, detail={
-                "error": "offer_unfulfillable",
-                "reason": exc.reason,
-                "listing_id": exc.listing_id,
-                "hint": (
-                    "Seller refused: listing is closed, the quota cannot "
-                    "cover the requested quantity, or the key claim was "
-                    "rejected. See `reason`."
-                ),
-            })
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "offer_unfulfillable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": (
+                        "Seller refused: listing is closed, the quota cannot "
+                        "cover the requested quantity, or the key claim was "
+                        "rejected. See `reason`."
+                    ),
+                },
+            )
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail={
-                "error": "incompatible_provision_terms",
-                "reason": str(exc),
-            })
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "incompatible_provision_terms",
+                    "reason": str(exc),
+                },
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
@@ -121,7 +134,8 @@ class NegotiateController:
 
         if body.action == "counter" and body.proposal is None:
             raise HTTPException(
-                status_code=400, detail="'proposal' required for counter",
+                status_code=400,
+                detail="'proposal' required for counter",
             )
 
         try:

@@ -89,8 +89,7 @@ def _add_operator_state(conn: sqlite3.Connection) -> None:
         """,
     )
     conn.execute(
-        "INSERT INTO bare_metal_operator_state(singleton_id, paused) "
-        "VALUES (1, 0)",
+        "INSERT INTO bare_metal_operator_state(singleton_id, paused) VALUES (1, 0)",
     )
 
 

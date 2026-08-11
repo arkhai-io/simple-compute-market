@@ -16,6 +16,7 @@ class ListingRequest:
     listing_id: str
     offer: dict[str, Any]
     accepted_escrows: list[dict[str, Any]]
+    settlement_options: list[dict[str, Any]]
     demands: list[dict[str, Any]]
     max_duration_seconds: int | None
     storefront_url: str | None

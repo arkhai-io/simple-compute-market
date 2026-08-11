@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core_storefront.registry_publication import (
     close_listing_in_registries,
@@ -15,9 +15,13 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_closed,
     stale_open_listing_ids,
 )
+from registry_client import ListingRequest, UpdateListingRequest
+
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from registry_client import ListingRequest, UpdateListingRequest
+
+if TYPE_CHECKING:
+    from market_storefront.utils.multi_registry_client import MultiRegistryClient
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +40,9 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             status="closed",
         )
     except Exception as exc:
-        logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
+        logger.warning(
+            "[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc
+        )
 
     return await close_listing_in_registries(
         order_id,
@@ -69,7 +75,9 @@ async def close_stale_compute_listings_after_capacity_change(
     """
     closed_listing_ids: list[str] = []
     for listing_id in stale_open_listing_ids(
-        db_path, home_site=home_site, configured_site_count=configured_site_count,
+        db_path,
+        home_site=home_site,
+        configured_site_count=configured_site_count,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
@@ -82,8 +90,10 @@ async def close_stale_compute_listings_after_capacity_change(
         if row and row.get("status") == "closed":
             closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(
-        db_path, closed_listing_ids,
-        home_site=home_site, configured_site_count=configured_site_count,
+        db_path,
+        closed_listing_ids,
+        home_site=home_site,
+        configured_site_count=configured_site_count,
     )
     return closed_listing_ids
 
@@ -112,7 +122,9 @@ async def reopen_available_compute_listings_after_capacity_change(
     if member_availability is None:
         return []
     reopened_listing_ids = closed_available_listing_ids(
-        db_path, home_site=home_site, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
@@ -122,11 +134,15 @@ async def reopen_available_compute_listings_after_capacity_change(
     return reopened_listing_ids
 
 
-def _make_registry_client() -> "MultiRegistryClient":
+def _make_registry_client() -> MultiRegistryClient:
     """Construct a multi-registry client wrapping every configured URL."""
     from market_storefront.utils.multi_registry_client import MultiRegistryClient
 
-    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
+    urls = (
+        list(settings.registry.urls)
+        if settings.registry.urls
+        else ["http://localhost:8080"]
+    )
     return MultiRegistryClient(
         urls,
         timeout=settings.registry.discovery_timeout,
@@ -161,22 +177,26 @@ def _record_listing_published_stage_event(
     listing_id: str,
     offer_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
+    settlement_options: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
 ) -> None:
     stage_event(
-        "discovery", "order_published",
+        "discovery",
+        "order_published",
         order_id=listing_id,
         agent_url=BASE_URL_OVERRIDE,
         offer=offer_resource,
         accepted_escrows=accepted_escrows,
+        settlement_options=settlement_options,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
     )
 
 
 async def _registries_to_target(
-    listing_id: str, fallback_urls: list[str],
+    listing_id: str,
+    fallback_urls: list[str],
 ) -> list[str]:
     """Return registry URLs that should receive update/delete for ``listing_id``."""
     try:
@@ -189,7 +209,8 @@ async def _registries_to_target(
 
 
 async def _record_publications(
-    listing_id: str, results: list[dict[str, Any]],
+    listing_id: str,
+    results: list[dict[str, Any]],
 ) -> None:
     """Persist one ``publications`` row per per-registry write result."""
     try:
@@ -211,5 +232,7 @@ async def _record_publications(
         except Exception as exc:
             logger.warning(
                 "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id, result.get("registry_url"), exc,
+                listing_id,
+                result.get("registry_url"),
+                exc,
             )

@@ -25,11 +25,14 @@ def _build_market_domain_contract() -> MarketDomainContract:
         replace(
             base,
             declared_capabilities=(
-                base.declared_capabilities
-                | {
-                    DomainCapability.STOREFRONT,
-                    DomainCapability.SETTLEMENT,
-                }
+                (
+                    base.declared_capabilities
+                    | {
+                        DomainCapability.STOREFRONT,
+                        DomainCapability.SETTLEMENT,
+                    }
+                )
+                - {DomainCapability.FULFILLMENT}
             ),
             storefront=ImmutableStorefrontCapability(
                 run_negotiation_policy=default_seller_round_hook,
@@ -38,6 +41,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 verify=verify_escrow_for_settlement,
                 build_plan=build_bare_metal_settlement_plan,
             ),
+            fulfillment=None,
         ),
     )
 

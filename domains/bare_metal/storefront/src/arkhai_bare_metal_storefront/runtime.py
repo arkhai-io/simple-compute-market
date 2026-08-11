@@ -11,6 +11,7 @@ from typing import Any
 
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from market_core import MarketDomainContract, validate_domain_contract
+from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
 
 from .domain_runtime import get_market_domain_contract
 from .negotiation import default_seller_round_hook
@@ -31,7 +32,21 @@ class BareMetalStorefrontRuntime:
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
-    escrow_verifier: Callable[..., Awaitable[None]] = verify_escrow_for_settlement
+    escrow_verifier: Callable[..., Awaitable[int]] = verify_escrow_for_settlement
+    settlement_repository: SettlementSQLiteRepository = field(init=False, repr=False)
+    settlement_runtime: SettlementRuntime = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        repository = SettlementSQLiteRepository(
+            self.db.db_path,
+            apply_migrations=False,
+        )
+        object.__setattr__(self, "settlement_repository", repository)
+        object.__setattr__(
+            self,
+            "settlement_runtime",
+            SettlementRuntime(repository, {}),
+        )
 
     def negotiation_service(self) -> BareMetalNegotiationService:
         """Build the request-scoped bare-metal negotiation orchestrator."""
@@ -52,6 +67,7 @@ class BareMetalStorefrontRuntime:
             chain_config_paths=self.chain_config_paths,
             build_plan=self.plan_builder,
             verify_escrow=self.escrow_verifier,
+            settlement_runtime=self.settlement_runtime,
         )
 
     async def health(self) -> dict[str, object]:

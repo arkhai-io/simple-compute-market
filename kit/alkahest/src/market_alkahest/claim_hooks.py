@@ -1,30 +1,25 @@
-"""Alkahest mechanism hooks for the deal-servicing engine.
+"""Alkahest implementation of the conditional-escrow runtime port.
 
-The claims engine (``core_storefront.settlement_lifecycle``) is
-mechanism-generic; this module is the ``alkahest.v1`` implementation of
-its hook contract, shared by every domain that collects scalar escrows:
-
-* ``check_conditions`` classifies the escrow's arbiter tree (via the
-  kit's arbiter-codec registry) and reports whether collection would
-  pass: RecipientArbiter conditions are ready as soon as a fulfillment
-  exists; TrustedOracleArbiter conditions get an arbitration request
-  (once — recorded in the claim's ``mechanism_state``) and then poll
-  for ``ArbitrationMade``; AllArbiter recurses over its children.
-* ``collect`` runs the kit's codec-dispatched collection.
-
-What the hooks read from the claim: ``claim_ref`` (the escrow uid),
-``fulfillment_ref`` (the fulfillment uid), and the obligation's
-``params`` (``chain_name``, ``escrow_contract``,
-``obligation_data.arbiter`` / ``obligation_data.demand``). Claims whose
-obligation carries no arbiter (legacy deals predating the plan carrier)
-are treated as ready and collected by trying — a revert just means the
-engine retries later.
+The adapter preserves the existing codec-dispatched Alkahest calls while
+keeping chain clients and address configuration injected by composition roots.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from typing import Any, Callable
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from market_settlement_runtime.models import (
+    ConditionOutcome,
+    EffectOutcome,
+    MaterializationOutcome,
+    StatusOutcome,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,95 +30,288 @@ def _demand_bytes(value: Any) -> bytes | None:
     if isinstance(value, (bytes, bytearray)):
         return bytes(value)
     if isinstance(value, str):
-        s = value[2:] if value.startswith("0x") else value
+        encoded = value[2:] if value.startswith("0x") else value
         try:
-            return bytes.fromhex(s)
+            return bytes.fromhex(encoded)
         except ValueError:
             return None
     return None
 
 
-class AlkahestClaimHooks:
-    """``MechanismHooks`` for ``alkahest.v1`` obligations.
+def _value(source: Any, name: str, default: Any = None) -> Any:
+    return (
+        source.get(name, default)
+        if isinstance(source, Mapping)
+        else getattr(source, name, default)
+    )
 
-    ``get_client`` resolves a chain name to a connected AlkahestClient
-    (or ``None`` when the storefront has no client for that chain — the
-    hooks then raise, which the engine turns into backoff, never silent
-    success).
+
+def _receipt_ref(receipt: Any) -> str | None:
+    """Reduce an SDK receipt to an opaque, public-safe reference."""
+    if receipt is None:
+        return None
+    if isinstance(receipt, (str, int)):
+        return str(receipt)
+    if isinstance(receipt, Mapping):
+        for key in ("transaction_hash", "transactionHash", "tx_hash", "hash", "uid"):
+            candidate = receipt.get(key)
+            if isinstance(candidate, (str, int)):
+                return str(candidate)
+    try:
+        encoded = json.dumps(
+            receipt, default=str, separators=(",", ":"), sort_keys=True
+        ).encode()
+    except (TypeError, ValueError):
+        encoded = repr(receipt).encode()
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+@dataclass(frozen=True)
+class _ConditionResult:
+    decision: Literal["pending", "ready", "failed", "manual_required"]
+    receipt_ref: str | None = None
+    last_error: str | None = None
+
+
+class AlkahestConditionalEscrowClient:
+    """Concrete ``ConditionalEscrowClient`` backed by Alkahest codecs.
+
+    Trusted-oracle request markers are round-tripped through mechanism state,
+    making each stable check operation request once and poll thereafter.
     """
 
     def __init__(
         self,
         *,
         get_client: Callable[[str | None], Any],
-        chain_config_paths: dict[str, str | None] | None = None,
+        chain_config_paths: Mapping[str, str | None] | None = None,
         default_chain: str | None = None,
         arbitration_probe_timeout: float = 5.0,
+        clock: Callable[[], float] = time.time,
     ) -> None:
+        if arbitration_probe_timeout <= 0:
+            raise ValueError("arbitration_probe_timeout must be positive")
         self._get_client = get_client
         self._config_paths = dict(chain_config_paths or {})
         self._default_chain = default_chain
         self._probe_timeout = arbitration_probe_timeout
+        self._clock = clock
 
-    # -- hook contract ---------------------------------------------------
-
-    async def check_conditions(self, claim: Any) -> str:
-        params = (claim.obligation or {}).get("params") or {}
-        obligation_data = params.get("obligation_data") or {}
-        arbiter = obligation_data.get("arbiter")
-        if not arbiter:
-            # Pre-plan deal: no stored demand tree. Today's deals are
-            # RecipientArbiter-gated, whose condition is satisfied by the
-            # fulfillment itself — collect-by-trying covers the rest.
-            return "ready"
-        chain = self._chain_of(claim)
-        demand = _demand_bytes(obligation_data.get("demand"))
-        return await self._check_arbiter(
-            claim,
-            chain=chain,
-            arbiter=arbiter,
-            demand=demand,
-        )
-
-    async def collect(self, claim: Any) -> dict[str, Any]:
-        from market_alkahest.claims import collect_escrow_with_codec
-
-        chain = self._chain_of(claim)
-        client = self._get_client(chain)
-        if client is None:
-            raise RuntimeError(f"no alkahest client configured for chain {chain!r}")
-        if not claim.fulfillment_ref:
-            raise RuntimeError("claim has no fulfillment_ref to collect against")
-        params = (claim.obligation or {}).get("params") or {}
-        escrow_address = params.get("escrow_contract")
-        if not escrow_address or set(escrow_address[2:]) <= {"0"}:
-            # Placeholder/absent contract address (some flows pin a zero
-            # address and resolve the real contract elsewhere): fall back
-            # to the dispatcher's try-every-codec scan.
-            escrow_address = None
+    async def materialize(
+        self, obligation: dict[str, Any], *, operation_ref: str
+    ) -> MaterializationOutcome:
+        try:
+            chain, client, params, escrow_address = self._context(obligation)
+            codec = self._escrow_codec(chain, escrow_address)
+            obligation_data = params.get("obligation_data")
+            if not isinstance(obligation_data, dict):
+                raise ValueError("alkahest obligation_data must be an object")
+            expiration_unix = int(obligation["expiration_unix"])
+        except (KeyError, TypeError, ValueError) as exc:
+            return MaterializationOutcome(
+                mechanism_ref="",
+                status="manual_required",
+                mechanism_state=self._state({}, operation_ref),
+                last_error=str(exc),
+            )
         from market_alkahest.txlock import chain_tx_lock
 
         async with chain_tx_lock(None):
-            codec, receipt = await collect_escrow_with_codec(
+            mechanism_ref = await codec.create_obligation(
+                client, obligation_data, expiration_unix
+            )
+        return MaterializationOutcome(
+            mechanism_ref=mechanism_ref,
+            status="ready",
+            condition_anchor=mechanism_ref,
+            receipt=self._receipt(operation_ref, codec.kind),
+            mechanism_state=self._state({}, operation_ref, codec.kind),
+        )
+
+    async def get_status(
+        self,
+        obligation: dict[str, Any],
+        *,
+        mechanism_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> StatusOutcome:
+        try:
+            chain, client, _, escrow_address = self._context(obligation)
+            from market_alkahest.alkahest import get_escrow_obligation_with_codec
+
+            codec, decoded = await get_escrow_obligation_with_codec(
                 client,
-                claim.claim_ref,
-                claim.fulfillment_ref,
-                chain_name=chain,
-                config_path=self._config_paths.get(chain),
+                mechanism_ref,
+                chain_name=chain or "",
+                config_path=self._config_paths.get(chain or ""),
                 escrow_address=escrow_address,
             )
-        return {"escrow_kind": codec.kind, "receipt": str(receipt)}
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._manual_status(
+                mechanism_ref, operation_ref, mechanism_state, str(exc)
+            )
 
-    # -- classification ----------------------------------------------------
+        state = self._state(mechanism_state, operation_ref, codec.kind)
+        attestation = _value(decoded, "attestation")
+        if attestation is None:
+            return StatusOutcome(
+                status="failed",
+                mechanism_ref=mechanism_ref,
+                condition_anchor=mechanism_ref,
+                receipt=self._receipt(operation_ref, codec.kind),
+                mechanism_state=state,
+                last_error="alkahest get_obligation returned no attestation",
+            )
+        uid = _value(attestation, "uid")
+        if uid and str(uid).lower() != mechanism_ref.lower():
+            return self._manual_status(
+                mechanism_ref,
+                operation_ref,
+                state,
+                "alkahest attestation UID does not match the mechanism reference",
+                codec.kind,
+            )
+        try:
+            revoked = int(_value(attestation, "revocation_time", 0) or 0)
+            expiration = int(_value(attestation, "expiration_time", 0) or 0)
+        except (TypeError, ValueError):
+            return self._manual_status(
+                mechanism_ref,
+                operation_ref,
+                state,
+                "alkahest attestation lifecycle fields are malformed",
+                codec.kind,
+            )
+        if revoked:
+            return self._manual_status(
+                mechanism_ref,
+                operation_ref,
+                state,
+                "alkahest attestation is revoked; chain state cannot distinguish collection from reclaim without the operation receipt",
+                codec.kind,
+            )
+        if expiration == 0:
+            return self._manual_status(
+                mechanism_ref,
+                operation_ref,
+                state,
+                "alkahest escrow attestation has no expiration",
+                codec.kind,
+            )
+        return StatusOutcome(
+            status="expired" if self._clock() >= expiration else "ready",
+            mechanism_ref=mechanism_ref,
+            condition_anchor=mechanism_ref,
+            receipt=self._receipt(operation_ref, codec.kind),
+            mechanism_state=state,
+        )
+
+    async def check(
+        self,
+        obligation: dict[str, Any],
+        *,
+        mechanism_ref: str,
+        fulfillment_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> ConditionOutcome:
+        del mechanism_ref
+        try:
+            chain, _, params, _ = self._context(obligation)
+            obligation_data = params.get("obligation_data") or {}
+            if not isinstance(obligation_data, Mapping):
+                raise ValueError("alkahest obligation_data must be an object")
+            arbiter = obligation_data.get("arbiter")
+            if not arbiter:
+                result = _ConditionResult("ready")
+                state = self._state(mechanism_state, operation_ref)
+            else:
+                result, state = await self._check_arbiter(
+                    chain,
+                    str(arbiter),
+                    _demand_bytes(obligation_data.get("demand")),
+                    fulfillment_ref,
+                    operation_ref,
+                    mechanism_state,
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            return ConditionOutcome(
+                decision="manual_required",
+                mechanism_state=self._state(mechanism_state, operation_ref),
+                last_error=str(exc),
+            )
+        receipt = {"operation_ref": operation_ref}
+        if result.receipt_ref is not None:
+            receipt["receipt"] = result.receipt_ref
+        return ConditionOutcome(
+            decision=result.decision,
+            receipt=receipt,
+            mechanism_state=state,
+            last_error=result.last_error,
+        )
+
+    async def collect(
+        self,
+        obligation: dict[str, Any],
+        *,
+        mechanism_ref: str,
+        fulfillment_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> EffectOutcome:
+        from market_alkahest.claims import collect_escrow_with_codec
+        from market_alkahest.txlock import chain_tx_lock
+
+        chain, client, _, address = self._context(obligation)
+        async with chain_tx_lock(None):
+            codec, provider_receipt = await collect_escrow_with_codec(
+                client,
+                mechanism_ref,
+                fulfillment_ref,
+                chain_name=chain or "",
+                config_path=self._config_paths.get(chain or ""),
+                escrow_address=address,
+            )
+        return EffectOutcome(
+            receipt=self._receipt(operation_ref, codec.kind, provider_receipt),
+            mechanism_state=self._state(mechanism_state, operation_ref, codec.kind),
+        )
+
+    async def reclaim_expired(
+        self,
+        obligation: dict[str, Any],
+        *,
+        mechanism_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> EffectOutcome:
+        from market_alkahest.alkahest import reclaim_expired_escrow_with_codec
+        from market_alkahest.txlock import chain_tx_lock
+
+        chain, client, _, address = self._context(obligation)
+        async with chain_tx_lock(None):
+            codec, provider_receipt = await reclaim_expired_escrow_with_codec(
+                client,
+                mechanism_ref,
+                chain_name=chain or "",
+                config_path=self._config_paths.get(chain or ""),
+                escrow_address=address,
+            )
+        return EffectOutcome(
+            receipt=self._receipt(operation_ref, codec.kind, provider_receipt),
+            mechanism_state=self._state(mechanism_state, operation_ref, codec.kind),
+        )
 
     async def _check_arbiter(
         self,
-        claim: Any,
-        *,
         chain: str | None,
         arbiter: str,
         demand: bytes | None,
-    ) -> str:
+        fulfillment_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> tuple[_ConditionResult, dict[str, Any]]:
         from market_alkahest.alkahest import get_arbiter_codec_for
 
         codec = get_arbiter_codec_for(
@@ -131,93 +319,169 @@ class AlkahestClaimHooks:
             arbiter,
             config_path=self._config_paths.get(chain or ""),
         )
-        kind = codec.kind
-
-        if kind == "recipient_arbiter":
-            return "ready"
-
-        if kind == "trusted_oracle_arbiter":
+        state = self._state(mechanism_state, operation_ref)
+        if codec.kind == "recipient_arbiter":
+            return _ConditionResult("ready"), state
+        if codec.kind == "trusted_oracle_arbiter":
             if demand is None:
                 raise ValueError(
                     "trusted_oracle_arbiter condition without demand bytes"
                 )
-            return await self._check_trusted_oracle(claim, chain=chain, demand=demand)
-
-        if kind == "all_arbiter":
+            return await self._check_trusted_oracle(
+                chain, demand, fulfillment_ref, operation_ref, state
+            )
+        if codec.kind == "all_arbiter":
             if demand is None:
                 raise ValueError("all_arbiter condition without demand bytes")
             from market_alkahest.claims import AllArbiterCodec
 
             tree = AllArbiterCodec().decode_demand_data(demand)
-            for child_arbiter, child_demand in zip(
-                tree["arbiters"], tree["demands"]
-            ):
-                status = await self._check_arbiter(
-                    claim,
-                    chain=chain,
-                    arbiter=child_arbiter,
-                    demand=child_demand,
+            for child_arbiter, child_demand in zip(tree["arbiters"], tree["demands"]):
+                result, state = await self._check_arbiter(
+                    chain,
+                    child_arbiter,
+                    child_demand,
+                    fulfillment_ref,
+                    operation_ref,
+                    state,
                 )
-                if status != "ready":
-                    return status
-            return "ready"
-
-        raise ValueError(f"no condition policy for arbiter kind {kind!r}")
+                if result.decision != "ready":
+                    return result, state
+            return _ConditionResult("ready"), state
+        return _ConditionResult(
+            "manual_required",
+            last_error=f"no condition policy for arbiter kind {codec.kind!r}",
+        ), state
 
     async def _check_trusted_oracle(
-        self, claim: Any, *, chain: str | None, demand: bytes
-    ) -> str:
+        self,
+        chain: str | None,
+        demand: bytes,
+        fulfillment_ref: str,
+        operation_ref: str,
+        mechanism_state: dict[str, Any],
+    ) -> tuple[_ConditionResult, dict[str, Any]]:
         from market_alkahest.claims import (
             TrustedOracleArbiterCodec,
             arbitration_status,
             request_arbitration,
         )
 
-        client = self._get_client(chain)
-        if client is None:
-            raise RuntimeError(f"no alkahest client configured for chain {chain!r}")
-        if not claim.fulfillment_ref:
-            raise RuntimeError("trusted-oracle condition without a fulfillment_ref")
-
+        client = self._client(chain)
         decoded = TrustedOracleArbiterCodec().decode_demand_data(demand)
-        oracle = decoded["oracle"]
-
-        requested_for = claim.mechanism_state.get("arbitration_requested_for")
-        if requested_for != claim.fulfillment_ref:
+        oracle, oracle_demand = decoded["oracle"], decoded["data"]
+        request_key = hashlib.sha256(
+            b"\x00".join(
+                (fulfillment_ref.encode(), str(oracle).lower().encode(), oracle_demand)
+            )
+        ).hexdigest()
+        state = self._state(mechanism_state, operation_ref)
+        adapter_state = dict(state.get("alkahest") or {})
+        requested = dict(adapter_state.get("arbitration_requests") or {})
+        receipt_ref = None
+        if requested.get(request_key) != operation_ref:
             from market_alkahest.txlock import chain_tx_lock
 
             async with chain_tx_lock(None):
-                await request_arbitration(
+                request_receipt = await request_arbitration(
                     client,
-                    fulfillment_uid=claim.fulfillment_ref,
+                    fulfillment_uid=fulfillment_ref,
                     oracle=oracle,
-                    demand=decoded["data"],
+                    demand=oracle_demand,
                 )
-            claim.mechanism_state["arbitration_requested_for"] = claim.fulfillment_ref
+            requested[request_key] = operation_ref
+            adapter_state["arbitration_requests"] = requested
+            state["alkahest"] = adapter_state
+            receipt_ref = _receipt_ref(request_receipt)
             logger.info(
-                "[CLAIMS] arbitration requested for %s (oracle=%s)",
-                claim.claim_ref, oracle,
+                "[SETTLEMENT] arbitration requested operation_ref=%s", operation_ref
             )
+        try:
+            event = await arbitration_status(
+                client,
+                fulfillment_uid=fulfillment_ref,
+                oracle=oracle,
+                demand=oracle_demand,
+                timeout_seconds=self._probe_timeout,
+            )
+        except Exception as exc:
+            return _ConditionResult(
+                "pending",
+                receipt_ref,
+                f"alkahest arbitration status failed: {exc}",
+            ), state
+        if event is None or getattr(event, "decision", None) is False:
+            return _ConditionResult("pending", receipt_ref), state
+        return _ConditionResult("ready", receipt_ref), state
 
-        event = await arbitration_status(
-            client,
-            fulfillment_uid=claim.fulfillment_ref,
-            oracle=oracle,
-            demand=decoded["data"],
-            timeout_seconds=self._probe_timeout,
+    def _context(
+        self, obligation: dict[str, Any]
+    ) -> tuple[str | None, Any, dict[str, Any], str | None]:
+        params = obligation.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError("alkahest obligation params must be an object")
+        chain = params.get("chain_name") or self._default_chain
+        address = params.get("escrow_contract")
+        if address and str(address).startswith("0x") and set(str(address)[2:]) <= {"0"}:
+            address = None
+        return chain, self._client(chain), params, address
+
+    def _client(self, chain: str | None) -> Any:
+        client = self._get_client(chain)
+        if client is None:
+            raise ValueError(f"no alkahest client configured for chain {chain!r}")
+        return client
+
+    def _escrow_codec(self, chain: str | None, address: str | None) -> Any:
+        if not address:
+            raise ValueError(
+                "alkahest materialization requires a deployed escrow_contract"
+            )
+        from market_alkahest.alkahest import get_escrow_codec_for
+
+        return get_escrow_codec_for(
+            chain or "",
+            address,
+            config_path=self._config_paths.get(chain or ""),
         )
-        if event is None:
-            return "pending"
-        decision = getattr(event, "decision", None)
-        if decision is False:
-            # A false arbitration isn't terminal — oracles may re-arbitrate
-            # (e.g. once missing heartbeats resume). The expiration grace
-            # bounds how long we keep asking.
-            return "pending"
-        return "ready"
 
-    # -- helpers -----------------------------------------------------------
+    @staticmethod
+    def _receipt(
+        operation_ref: str, kind: str, provider_receipt: Any = None
+    ) -> dict[str, Any]:
+        result = {"operation_ref": operation_ref, "escrow_kind": kind}
+        provider_ref = _receipt_ref(provider_receipt)
+        if provider_ref is not None:
+            result["receipt"] = provider_ref
+        return result
 
-    def _chain_of(self, claim: Any) -> str | None:
-        params = (claim.obligation or {}).get("params") or {}
-        return params.get("chain_name") or self._default_chain
+    @staticmethod
+    def _state(
+        state: Mapping[str, Any], operation_ref: str, kind: str | None = None
+    ) -> dict[str, Any]:
+        result = dict(state)
+        adapter_state = dict(result.get("alkahest") or {})
+        adapter_state["last_operation_ref"] = operation_ref
+        if kind is not None:
+            adapter_state["escrow_kind"] = kind
+        result["alkahest"] = adapter_state
+        return result
+
+    def _manual_status(
+        self,
+        mechanism_ref: str,
+        operation_ref: str,
+        state: Mapping[str, Any],
+        error: str,
+        kind: str | None = None,
+    ) -> StatusOutcome:
+        return StatusOutcome(
+            status="manual_required",
+            mechanism_ref=mechanism_ref,
+            condition_anchor=mechanism_ref,
+            receipt=self._receipt(operation_ref, kind)
+            if kind
+            else {"operation_ref": operation_ref},
+            mechanism_state=self._state(state, operation_ref, kind),
+            last_error=error,
+        )

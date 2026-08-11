@@ -18,19 +18,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from core_storefront.sqlite_client import (  # noqa: F401 — re-exported
+from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
-    _amount_from_db_text,
-    _amount_to_db_text,
-    _publication_row_to_dict,
 )
-from core_storefront.sqlite_migrations import Migration
+from core_storefront.sqlite_migrations import MigrationLike
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
 from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
 from domains.vms.listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
+from market_settlement_runtime import settlement_migrations
 
 from .config import settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
@@ -44,8 +42,14 @@ logger = logging.getLogger(__name__)
 class SQLiteClient(CoreSQLiteClient):
     """Core market-state client + the VM domain's inventory tables."""
 
-    def _domain_migrations(self) -> tuple[Migration, ...]:
-        return VM_MIGRATIONS
+    _ESCROW_COLS = (
+        *CoreSQLiteClient._ESCROW_COLS,
+        "obligation_ref",
+        "obligation_index",
+    )
+
+    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
+        return (*settlement_migrations(), *VM_MIGRATIONS)
 
     def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
         # Resources table (local source of truth across all resource types).
@@ -294,7 +298,10 @@ class SQLiteClient(CoreSQLiteClient):
         """
         # Capacity gate — only for active compute.gpu slices.
         if resource_type == "compute.gpu" and (state is None or state != "deleted"):
-            from market_storefront.services.resource_capacity_validator import check_slice_fits_host
+            from market_storefront.services.resource_capacity_validator import (
+                check_slice_fits_host,
+            )
+
             attrs = attributes or {}
             await check_slice_fits_host(
                 sqlite_client=self,
@@ -342,7 +349,9 @@ class SQLiteClient(CoreSQLiteClient):
                         min_price,
                         token,
                         max_duration_seconds,
-                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
+                        json.dumps(accepted_escrows)
+                        if accepted_escrows is not None
+                        else None,
                         now_iso,
                         now_iso,
                     ),
@@ -378,6 +387,7 @@ class SQLiteClient(CoreSQLiteClient):
         state: str | None = None,
     ) -> list[dict[str, Any]]:
         """List resource rows from local DB as generic DB-resource dicts."""
+
         def _load() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -430,7 +440,10 @@ class SQLiteClient(CoreSQLiteClient):
                         except Exception:
                             attrs = {}
                     accepted: list[dict[str, Any]] | None = None
-                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                    if (
+                        isinstance(row_accepted_escrows, str)
+                        and row_accepted_escrows.strip()
+                    ):
                         try:
                             parsed_ae = json.loads(row_accepted_escrows)
                             if isinstance(parsed_ae, list):
@@ -462,6 +475,7 @@ class SQLiteClient(CoreSQLiteClient):
 
     async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
         """Fetch a single resource row by resource_id."""
+
         def _load_one() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -665,6 +679,7 @@ class SQLiteClient(CoreSQLiteClient):
         enabled: bool = True,
     ) -> None:
         """Create or update a host row."""
+
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -821,12 +836,19 @@ class SQLiteClient(CoreSQLiteClient):
             },
             "used": used,
             "remaining": {
-                k: (host_limit - used[k]) if (host_limit := host.get({
-                    "gpu_count": "total_gpu_count",
-                    "vcpu_count": "host_cpu_cores",
-                    "ram_gb": "host_ram_gb",
-                    "disk_gb": "host_disk_gb",
-                }[k])) is not None else None
+                k: (host_limit - used[k])
+                if (
+                    host_limit := host.get(
+                        {
+                            "gpu_count": "total_gpu_count",
+                            "vcpu_count": "host_cpu_cores",
+                            "ram_gb": "host_ram_gb",
+                            "disk_gb": "host_disk_gb",
+                        }[k]
+                    )
+                )
+                is not None
+                else None
                 for k in ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
             },
         }
@@ -885,7 +907,9 @@ class SQLiteClient(CoreSQLiteClient):
         Supports direct-set semantics only: set_value, set_state, set_attribute.
         """
         if set_value is None and set_state is None and not set_attribute:
-            raise ValueError("Transition must include set_value, set_state, or set_attribute")
+            raise ValueError(
+                "Transition must include set_value, set_state, or set_attribute"
+            )
 
         resolved_event_id = event_id or str(uuid.uuid4())
         set_attribute_json = json.dumps(set_attribute) if set_attribute else None
@@ -940,7 +964,9 @@ class SQLiteClient(CoreSQLiteClient):
                     attr_expr = "COALESCE(attributes, '{}')"
                     for path, path_value in set_attribute.items():
                         if not isinstance(path, str) or not path.startswith("$."):
-                            raise ValueError(f"Invalid JSON path for set_attribute: {path}")
+                            raise ValueError(
+                                f"Invalid JSON path for set_attribute: {path}"
+                            )
                         if path in ("$.allocation_id", "$.compute_allocation_id"):
                             continue
                         attr_expr = f"json_set({attr_expr}, ?, json(?))"
@@ -960,11 +986,13 @@ class SQLiteClient(CoreSQLiteClient):
                 if set_state == "available":
                     allocation_id = None
                     if set_attribute:
-                        raw_allocation_id = (
-                            set_attribute.get("$.allocation_id")
-                            or set_attribute.get("$.compute_allocation_id")
-                        )
-                        if isinstance(raw_allocation_id, str) and raw_allocation_id.strip():
+                        raw_allocation_id = set_attribute.get(
+                            "$.allocation_id"
+                        ) or set_attribute.get("$.compute_allocation_id")
+                        if (
+                            isinstance(raw_allocation_id, str)
+                            and raw_allocation_id.strip()
+                        ):
                             allocation_id = raw_allocation_id.strip()
                     if allocation_id:
                         cur.execute(
@@ -1029,7 +1057,6 @@ class SQLiteClient(CoreSQLiteClient):
             event_id=event_id,
             occurred_at=occurred_at,
         )
-
 
     @classmethod
     def _sync_compute_pool_for_resource(
@@ -1137,6 +1164,60 @@ class SQLiteClient(CoreSQLiteClient):
         )
         return pool_id
 
+    async def bind_escrow_obligation(
+        self,
+        *,
+        escrow_uid: str,
+        obligation_ref: str,
+        obligation_index: int,
+    ) -> dict[str, Any]:
+        """Persist the verified obligation identity without permitting rebinding."""
+        if not obligation_ref.strip():
+            raise ValueError("obligation_ref must not be empty")
+        if obligation_index < 0:
+            raise ValueError("obligation_index must be non-negative")
+
+        def _bind() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT obligation_ref, obligation_index FROM escrows "
+                    "WHERE escrow_uid = ?",
+                    (escrow_uid,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Unknown escrow {escrow_uid}")
+                existing_ref, existing_index = row
+                if existing_ref is not None and (
+                    str(existing_ref) != obligation_ref
+                    or int(existing_index) != obligation_index
+                ):
+                    raise ValueError(
+                        f"escrow {escrow_uid} is already bound to a different obligation"
+                    )
+                conn.execute(
+                    "UPDATE escrows SET obligation_ref = ?, obligation_index = ?, "
+                    "updated_at = ? WHERE escrow_uid = ?",
+                    (
+                        obligation_ref,
+                        obligation_index,
+                        datetime.now().isoformat(),
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_bind)
+        row = await self.load_escrow(escrow_uid=escrow_uid)
+        if row is None:
+            raise RuntimeError(f"escrow {escrow_uid} disappeared after binding")
+        return row
 
     # ------------------------------------------------------------------
     # Capacity holds — two-phase reserve bookkeeping. The hold itself
@@ -1144,7 +1225,6 @@ class SQLiteClient(CoreSQLiteClient):
     # table only remembers which allocation a negotiation's acceptance
     # placed, so settlement can commit it instead of reserving fresh.
     # ------------------------------------------------------------------
-
 
 
 _sqlite_client: SQLiteClient | None = None

@@ -47,6 +47,7 @@ def _config_path_callback(value: str | None) -> str | None:
     """Override the TOML loader path before any subcommand body runs."""
     if value:
         from market_config.config_loader import set_user_config_path
+
         set_user_config_path(Path(value))
     return value
 
@@ -67,7 +68,7 @@ def main(
         callback=_config_path_callback,
         is_eager=True,
         help="Path to an explicit storefront.toml. Defaults to "
-             "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
+        "$XDG_CONFIG_HOME/arkhai/storefront.toml.",
     ),
 ) -> None:
     """market-storefront — provider-side admin CLI."""
@@ -82,11 +83,13 @@ def main(
 @app.command("serve")
 def serve_cmd(
     host: str = typer.Option(
-        "0.0.0.0", "--host",
+        "0.0.0.0",
+        "--host",
         help="Bind interface (default 0.0.0.0).",
     ),
     port: int | None = typer.Option(
-        None, "--port",
+        None,
+        "--port",
         help="Override seller.port from config.toml.",
     ),
 ) -> None:
@@ -105,11 +108,27 @@ def serve_cmd(
 # Group registrations
 # ---------------------------------------------------------------------------
 
-app.add_typer(logs_app, name="logs", help="Inspect storefront stage events from the local SQLite log.")
-app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
-app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
-app.add_typer(config_app, name="config", help="Inspect or edit the user config.toml (path/show/get/set/init-user).")
-app.add_typer(escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund).")
+app.add_typer(
+    logs_app,
+    name="logs",
+    help="Inspect storefront stage events from the local SQLite log.",
+)
+app.add_typer(
+    network_app,
+    name="network",
+    help="Join the operator's ZeroTier network and list peers.",
+)
+app.add_typer(
+    portfolio_app, name="portfolio", help="Manage local resource portfolio data."
+)
+app.add_typer(
+    config_app,
+    name="config",
+    help="Inspect or edit the user config.toml (path/show/get/set/init-user).",
+)
+app.add_typer(
+    escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund)."
+)
 register_publish_command(app)
 
 

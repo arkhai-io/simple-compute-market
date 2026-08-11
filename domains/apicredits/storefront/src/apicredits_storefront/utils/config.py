@@ -54,7 +54,9 @@ def _build_settings() -> Dynaconf:
                 logger.warning(
                     "[CONFIG] wallet.address (%s) does not match the address "
                     "derived from wallet.private_key (%s); using the "
-                    "configured address.", addr_cfg, derived_addr,
+                    "configured address.",
+                    addr_cfg,
+                    derived_addr,
                 )
     return s
 
@@ -105,9 +107,7 @@ def credits_service_url() -> str:
 def credits_admin_key() -> str:
     """Admin key for the credits service; falls back to admin_api_key."""
     return str(
-        settings.get("credits.admin_key", "")
-        or settings.get("admin_api_key", "")
-        or ""
+        settings.get("credits.admin_key", "") or settings.get("admin_api_key", "") or ""
     )
 
 

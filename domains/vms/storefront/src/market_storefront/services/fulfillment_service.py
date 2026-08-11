@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
-
-from core_storefront.stage_log import stage_event
+from typing import Any
 
 from alkahest_py import AlkahestClient
-
 from compute_provisioning import (
     ComputeProvisioningClient,
     ComputeProvisioningJobError,
@@ -20,7 +18,13 @@ from compute_provisioning import (
     LeaseRegistration,
     LeaseTermination,
 )
+from core_storefront.stage_log import stage_event
 from market_fulfillment import VersionedEnvelope
+
+from market_storefront.services.capacity_client import (
+    build_capacity_client,
+    build_fulfillment_client,
+)
 from market_storefront.services.vm_fulfillment_service import (
     fulfill_vm_obligation,
     persist_escrow_fields_with_retry,
@@ -28,12 +32,7 @@ from market_storefront.services.vm_fulfillment_service import (
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
-
-from market_storefront.utils.config import CHAINS, settings, BASE_URL_OVERRIDE
-from market_storefront.services.capacity_client import (
-    build_capacity_client,
-    build_fulfillment_client,
-)
+from market_storefront.utils.config import BASE_URL_OVERRIDE, CHAINS, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,6 @@ logger = logging.getLogger(__name__)
 # calls -- matches the domains/vms package name; no other convention is
 # documented anywhere in the fulfillment kit.
 _VM_MARKET = "vms"
-
 
 
 async def _do_provision(
@@ -89,7 +87,10 @@ async def _do_provision(
         )
 
     connectivity = _connectivity_settings_from_storefront_config()
-    request_payload: dict[str, Any] = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+    request_payload: dict[str, Any] = {
+        "vm_target": vm_target,
+        "ssh_pubkey": ssh_public_key,
+    }
     if connectivity:
         request_payload["connectivity"] = connectivity
 
@@ -130,7 +131,8 @@ async def _do_provision(
         )
 
     envelope = await fulfillment_client.get_fulfillment_result(
-        accepted.fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+        accepted.fulfillment_id,
+        capacity_reservation_id=capacity_reservation_id,
     )
     return _fulfillment_result_to_legacy_shape(envelope)
 
@@ -145,7 +147,9 @@ def _connectivity_settings_from_storefront_config() -> dict[str, Any] | None:
     provisioning = settings.provisioning
     frp_server_addr = getattr(provisioning, "frp_server_addr", None) or None
     frp_domain = getattr(provisioning, "frp_domain", None) or None
-    frp_dashboard_password = getattr(provisioning, "frp_dashboard_password", None) or None
+    frp_dashboard_password = (
+        getattr(provisioning, "frp_dashboard_password", None) or None
+    )
     if not (frp_server_addr or frp_domain or frp_dashboard_password):
         return None
     return {
@@ -173,7 +177,8 @@ async def _poll_fulfillment_until_terminal(
     deadline = loop.time() + timeout
     while True:
         status = await fulfillment_client.get_fulfillment_status(
-            fulfillment_id, capacity_reservation_id=capacity_reservation_id,
+            fulfillment_id,
+            capacity_reservation_id=capacity_reservation_id,
         )
         if status.state in ("active", "failed"):
             return status
@@ -228,7 +233,6 @@ def _fulfillment_result_to_legacy_shape(envelope: VersionedEnvelope) -> dict[str
     return result
 
 
-
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service.
 
@@ -274,7 +278,7 @@ async def _apply_fulfillment_failure_policy_adapter(
     message: str,
     source: str,
 ) -> None:
-    from market_storefront.utils.failure_policy import (
+    from market_storefront.failure_actions import (
         FulfillmentFailureContext,
         apply_fulfillment_failure_policy,
     )
@@ -322,18 +326,20 @@ async def _register_vm_lease_with_settings(
         admin_key=settings.admin_api_key,
         timeout=10,
     ) as client:
-        await client.register_lease(LeaseRegistration(
-            capacity_reservation_id=capacity_reservation_id or resource_id,
-            deal_ref={"escrow_uid": escrow_uid},
-            executor_kind="vm",
-            executor_target=vm_target,
-            lease_start_utc=(
-                datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
-                if lease_start_utc
-                else None
-            ),
-            lease_end_utc=lease_end_dt,
-        ))
+        await client.register_lease(
+            LeaseRegistration(
+                capacity_reservation_id=capacity_reservation_id or resource_id,
+                deal_ref={"escrow_uid": escrow_uid},
+                executor_kind="vm",
+                executor_target=vm_target,
+                lease_start_utc=(
+                    datetime.fromisoformat(lease_start_utc.replace("Z", "+00:00"))
+                    if lease_start_utc
+                    else None
+                ),
+                lease_end_utc=lease_end_dt,
+            )
+        )
 
 
 async def terminate_vm_lease(
@@ -398,7 +404,9 @@ async def fulfill_compute_obligation(
         hold = await db.load_capacity_hold(negotiation_id=negotiation_id)
         if hold:
             held_reservation = dict(hold.get("payload") or {})
-            held_reservation.setdefault("capacity_reservation_id", hold.get("capacity_reservation_id"))
+            held_reservation.setdefault(
+                "capacity_reservation_id", hold.get("capacity_reservation_id")
+            )
             # Consume-once: whether the commit lands or falls back to a
             # fresh reserve, this hold row's job is done.
             await db.delete_capacity_hold(negotiation_id=negotiation_id)

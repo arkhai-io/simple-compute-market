@@ -15,7 +15,7 @@ composition root
 
 Core is valuable as a stable control skeleton: signed transport, round sequencing, persistence mechanics, lifecycle transitions, and typed handoffs. It does not become a collection of interchangeable callbacks or acquire domain vocabulary merely because one shipped market needs it.
 
-Domain packages define what is bought and sold: listing fields, provision intent, deterministic validation, terms interpretation, fulfillment requirements, and domain result vocabulary. Kit packages supply reusable mechanisms such as identity, policy middleware, settlement codecs, site capacity, resource pools, and fulfillment scheduling. Composition roots select concrete implementations and are therefore allowed to depend on all lower layers.
+Domain packages define what is bought and sold: listing fields, provision intent, deterministic validation, terms interpretation, fulfillment requirements, and domain result vocabulary. Kit packages supply reusable mechanisms and authorities such as identity, policy middleware, the commercial-settlement runtime and mechanism clients, site capacity, resource pools, and fulfillment scheduling. Composition roots select concrete implementations and are therefore allowed to depend on all lower layers.
 
 ## Typed phase boundaries
 
@@ -39,6 +39,25 @@ Dependency direction protects substitutability and testability:
 - composition roots own registration and configuration of concrete plugins and adapters.
 
 Type-only imports still couple packages and therefore obey the same direction.
+
+## Settlement runtime composition
+
+`market_settlement_runtime` is a foundation kit because its obligation and
+operation lifecycle is reusable across storefront roles and market domains. It
+depends only on generic carriers and its own injected ports. A composition root
+provides the SQLite repository path, conditional-escrow clients, accepted-plan
+and fulfillment callables, status projection, and real failure actions.
+
+The same runtime owns every materialize, status, check, collect, and reclaim
+transition. Mechanism clients may keep opaque durable state, but they cannot
+introduce a second scheduler or persistence authority. Domain-private delivery
+data remains in the domain's existing response channel and never becomes
+generic settlement state.
+
+A verified-only domain may register and adopt a pre-materialized obligation
+without installing a servicing worker. Full servicing begins only after the
+composition can bind a real immutable fulfillment reference; a no-op executor
+would falsely advertise collectability.
 
 ## Executable ownership
 

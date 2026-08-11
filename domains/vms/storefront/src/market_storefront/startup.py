@@ -14,6 +14,7 @@ from core_storefront.app_startup import (
     run_storefront_startup_steps,
     start_storefront_background_task,
 )
+
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     CHAINS,
@@ -43,7 +44,8 @@ async def _probe_chain_addresses() -> None:
         except Exception as exc:
             logger.warning(
                 "[STARTUP] chain=%s could not resolve alkahest config: %s",
-                chain.name, exc,
+                chain.name,
+                exc,
             )
             cfg = None
         if cfg is not None:
@@ -146,9 +148,10 @@ def _maybe_join_zerotier_network() -> None:
 
 
 def _initialize_negotiation_thread_store() -> None:
-    import market_storefront.container as _container
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
+
+    import market_storefront.container as _container
 
     storefront_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
     get_thread_store(
@@ -195,8 +198,7 @@ def _start_negotiation_watchdog() -> None:
             name="negotiation_watchdog",
             task_factory=_neg_watchdog_loop,
             log_message=(
-                "[STARTUP] Negotiation watchdog started "
-                "(interval=%ds, timeout=%ds)"
+                "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
             ),
             log_args=(
                 settings.negotiation_watchdog_interval,
@@ -207,19 +209,33 @@ def _start_negotiation_watchdog() -> None:
     )
 
 
-def _start_claims_engine() -> None:
-    from market_storefront.services.claims_runtime import claims_engine_loop
+async def _preflight_hosted_settlement() -> None:
+    import market_storefront.container as _container
+    from market_storefront.settlement_composition import (
+        verify_hosted_contract_ready,
+    )
 
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        raise RuntimeError("settlement composition was not initialized")
+    await verify_hosted_contract_ready(composition)
+
+
+def _start_settlement_servicing() -> None:
+    import market_storefront.container as _container
+
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        raise RuntimeError("settlement composition was not initialized")
     start_storefront_background_task(
         StorefrontBackgroundTask(
-            name="claims_engine",
-            task_factory=claims_engine_loop,
-            log_message="[STARTUP] Claims engine started (interval=%ss)",
+            name="settlement_servicing",
+            task_factory=composition.worker.run,
+            log_message="[STARTUP] Settlement servicing started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),
         logger=logger,
     )
-
 
 
 def _start_fulfillment_resume() -> None:
@@ -251,7 +267,6 @@ def _start_capacity_events_poller() -> None:
     )
 
 
-
 async def _load_site_projections() -> None:
     from market_storefront.services.site_projection_cache import load_site_projections
 
@@ -259,7 +274,9 @@ async def _load_site_projections() -> None:
 
 
 def _start_site_projection_poller() -> None:
-    from market_storefront.services.site_projection_cache import site_projection_poller_loop
+    from market_storefront.services.site_projection_cache import (
+        site_projection_poller_loop,
+    )
 
     start_storefront_background_task(
         StorefrontBackgroundTask(
@@ -268,6 +285,7 @@ def _start_site_projection_poller() -> None:
         ),
         logger=logger,
     )
+
 
 async def _startup_tasks() -> None:
     """Initialize background tasks. Called from server.py lifespan."""
@@ -288,7 +306,11 @@ async def _startup_tasks() -> None:
                 "negotiation_watchdog",
                 _start_negotiation_watchdog,
             ),
-            StorefrontStartupStep("claims_engine", _start_claims_engine),
+            StorefrontStartupStep(
+                "hosted_settlement_preflight",
+                _preflight_hosted_settlement,
+            ),
+            StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
             StorefrontStartupStep("fulfillment_resume", _start_fulfillment_resume),
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(

@@ -24,6 +24,7 @@ Seller lifecycle (EIP-191 seller-signed):
 Admin evaluation (X-Admin-Key, no side effects):
   POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,6 +66,7 @@ admin_router = APIRouter(prefix="/api/v1/admin/listings", tags=["admin-listings"
 # Public read endpoints
 # ---------------------------------------------------------------------------
 
+
 @cbv(router)
 class ListingsController:
     def __init__(
@@ -93,11 +95,16 @@ class ListingsController:
         paused: bool | None = Query(default=None),
     ) -> ListingListResponse:
         listings = await self._db.list_listings(
-            status=status, paused=paused, limit=limit, offset=offset,
+            status=status,
+            paused=paused,
+            limit=limit,
+            offset=offset,
         )
         return ListingListResponse(
-            listings=listings, count=len(listings),
-            limit=limit, offset=offset,
+            listings=listings,
+            count=len(listings),
+            limit=limit,
+            offset=offset,
         )
 
     @router.get(
@@ -108,7 +115,9 @@ class ListingsController:
     async def get_listing(self, listing_id: str) -> ListingResponse:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Listing {listing_id} not found"
+            )
         if "paused" not in row:
             row["paused"] = False
         return ListingResponse(**row)
@@ -122,10 +131,13 @@ class ListingsController:
     async def pause_listing(self, listing_id: str) -> PauseListingResponse:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Listing {listing_id} not found"
+            )
         await self._db.set_listing_paused(listing_id=listing_id, paused=True)
         return PauseListingResponse(
-            listing_id=listing_id, paused=True,
+            listing_id=listing_id,
+            paused=True,
             message="Listing paused. New negotiations will receive 503.",
         )
 
@@ -138,9 +150,12 @@ class ListingsController:
     async def resume_listing(self, listing_id: str) -> PauseListingResponse:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Listing {listing_id} not found"
+            )
 
         from domains.vms.listings.models import Listing
+
         try:
             listing = Listing.model_validate(row)
         except ValidationError as exc:
@@ -159,11 +174,15 @@ class ListingsController:
             ) from exc
 
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
-        from market_storefront.services.publication_service import publish_order_to_registry
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
+
         publish_result = await publish_order_to_registry(listing)
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
-            listing_id=listing_id, paused=False,
+            listing_id=listing_id,
+            paused=False,
             registry_status=registry_status,
             message=f"Listing resumed and {registry_status} to registry.",
         )
@@ -211,7 +230,9 @@ class ListingsController:
             listing_id=listing_id, payload=body
         )
         if status_code != 200:
-            raise HTTPException(status_code=status_code, detail=result.get("error", "Refund failed"))
+            raise HTTPException(
+                status_code=status_code, detail=result.get("error", "Refund failed")
+            )
         return RefundResponse(**result)
 
     @router.post(
@@ -225,7 +246,9 @@ class ListingsController:
             listing_id=listing_id, payload=body
         )
         if status_code != 200:
-            raise HTTPException(status_code=status_code, detail=result.get("error", "Claim failed"))
+            raise HTTPException(
+                status_code=status_code, detail=result.get("error", "Claim failed")
+            )
         return ClaimResponse(**result)
 
     @router.post(
@@ -239,7 +262,9 @@ class ListingsController:
             listing_id=listing_id, payload=body
         )
         if status_code != 200:
-            raise HTTPException(status_code=status_code, detail=result.get("error", "Reclaim failed"))
+            raise HTTPException(
+                status_code=status_code, detail=result.get("error", "Reclaim failed")
+            )
         return ReclaimResponse(**result)
 
     @router.post(
@@ -248,18 +273,23 @@ class ListingsController:
         summary="Oracle arbitration (seller auth)",
         dependencies=[Depends(make_seller_auth_dep("arbitrate_listing"))],
     )
-    async def arbitrate(self, listing_id: str, body: ArbitrateRequest) -> ArbitrateResponse:
+    async def arbitrate(
+        self, listing_id: str, body: ArbitrateRequest
+    ) -> ArbitrateResponse:
         status_code, result = await self._listing_svc.arbitrate(
             listing_id=listing_id, payload=body
         )
         if status_code != 200:
-            raise HTTPException(status_code=status_code, detail=result.get("error", "Arbitrate failed"))
+            raise HTTPException(
+                status_code=status_code, detail=result.get("error", "Arbitrate failed")
+            )
         return ArbitrateResponse(**result)
 
 
 # ---------------------------------------------------------------------------
 # Admin evaluation endpoints (no side effects)
 # ---------------------------------------------------------------------------
+
 
 @cbv(admin_router)
 class AdminListingsController:

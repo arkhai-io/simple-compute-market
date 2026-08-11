@@ -13,11 +13,11 @@ Global pause state
 ``_GLOBALLY_PAUSED`` is the module-level flag read by
 ``sync_negotiation.start_sync_negotiation``.
 """
+
 from __future__ import annotations
 
 import logging
 
-import market_storefront.container as _container
 from core_storefront.app_composition import (
     build_storefront_app,
     default_storefront_app_config,
@@ -28,8 +28,10 @@ from core_storefront.app_lifecycle import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+
+import market_storefront.container as _container
 from market_storefront.domain_runtime import get_market_domain_contract
-from market_storefront.utils.config import settings, AGENT_ID
+from market_storefront.utils.config import AGENT_ID, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 
@@ -60,7 +62,9 @@ def run_serve(
     import uvicorn
 
     resolved_port = port if port is not None else settings.port
-    uvicorn.run(app, host=host, port=resolved_port, root_path=settings.gateway.root_path)
+    uvicorn.run(
+        app, host=host, port=resolved_port, root_path=settings.gateway.root_path
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +81,12 @@ def _build_alkahest_clients() -> dict:
 def _build_listing_service(**kwargs):
     from market_storefront.services.listing_service import ListingService
 
-    return ListingService(**kwargs)
+    return ListingService(
+        **kwargs,
+        settlement_composition_provider=lambda: (
+            _container.resolved_settlement_composition
+        ),
+    )
 
 
 def _build_negotiation_service(*, sqlite_client):
@@ -94,6 +103,15 @@ def _build_system_service(*, sqlite_client):
     return SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
 
+def _build_settlement_composition(*, sqlite_client, alkahest_clients):
+    from market_storefront.domain_runtime import build_settlement_runtime
+
+    return build_settlement_runtime(
+        sqlite_client=sqlite_client,
+        alkahest_clients=alkahest_clients,
+    )
+
+
 def _populate_container(
     *,
     sqlite_client,
@@ -107,6 +125,10 @@ def _populate_container(
     _container.resolved_listing_service = listing_service
     _container.resolved_negotiation_service = negotiation_service
     _container.resolved_system_service = system_service
+    _container.resolved_settlement_composition = _build_settlement_composition(
+        sqlite_client=sqlite_client,
+        alkahest_clients=alkahest_clients,
+    )
 
 
 async def _run_startup_tasks() -> None:
@@ -135,14 +157,34 @@ lifespan = build_storefront_lifespan(
 # ---------------------------------------------------------------------------
 
 # Controller imports after lifespan exists, before app construction.
-from market_storefront.controllers.system_controller import router as system_router           # noqa: E402
-from market_storefront.controllers.admin_controller import router as admin_router          # noqa: E402
-from market_storefront.controllers.listings_controller import router as listings_router, admin_router as admin_listings_router       # noqa: E402
-from market_storefront.controllers.negotiations_controller import router as negotiations_router  # noqa: E402
-from market_storefront.controllers.negotiate_controller import router as negotiate_router     # noqa: E402
-from market_storefront.controllers.settle_controller import router as settle_router, admin_settle_router           # noqa: E402
-from market_storefront.controllers.deals_controller import router as deals_router  # noqa: E402
-
+from market_storefront.controllers.admin_controller import (  # noqa: E402
+    router as admin_router,
+)
+from market_storefront.controllers.deals_controller import (  # noqa: E402
+    router as deals_router,
+)
+from market_storefront.controllers.listings_controller import (  # noqa: E402
+    admin_router as admin_listings_router,
+)
+from market_storefront.controllers.listings_controller import (  # noqa: E402
+    router as listings_router,
+)
+from market_storefront.controllers.negotiate_controller import (  # noqa: E402
+    router as negotiate_router,
+)
+from market_storefront.controllers.negotiations_controller import (  # noqa: E402
+    router as negotiations_router,
+)
+from market_storefront.controllers.settle_controller import (  # noqa: E402
+    admin_settle_router,
+    settlements_router,
+)
+from market_storefront.controllers.settle_controller import (  # noqa: E402
+    router as settle_router,
+)
+from market_storefront.controllers.system_controller import (  # noqa: E402
+    router as system_router,
+)
 
 app = build_storefront_app(
     config=default_storefront_app_config(root_path=settings.gateway.root_path),
@@ -156,6 +198,7 @@ app = build_storefront_app(
         negotiations_router,
         negotiate_router,
         settle_router,
+        settlements_router,
         deals_router,
         admin_settle_router,
     ),

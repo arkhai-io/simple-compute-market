@@ -1,11 +1,17 @@
 """HTTP request/response models for the Negotiate and Negotiations controllers."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from market_core.schemas import EscrowProposal, ProvisionTerms, SettlementPlan
+from market_core.schemas import (
+    EscrowProposal,
+    ProvisionTerms,
+    SettlementPlan,
+    SettlementSelection,
+)
 
 
 class NegotiateNewRequest(BaseModel):
@@ -22,7 +28,8 @@ class NegotiateNewRequest(BaseModel):
     listing_id: str
     buyer_address: str
     provision_terms: ProvisionTerms
-    proposal: EscrowProposal
+    proposal: dict[str, Any] | None = None
+    settlement_selection: SettlementSelection | None = None
     buyer_agent_url: str = ""
 
 
@@ -47,6 +54,7 @@ class NegotiateNewResponse(BaseModel):
     reason: str | None = None
     accepted_provision_terms: ProvisionTerms | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
+    settlement_selection: SettlementSelection | None = None
     settlement_plan: SettlementPlan | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
 
@@ -55,6 +63,7 @@ class NegotiateContinueRequest(BaseModel):
     action: Literal["counter", "accept", "exit"]
     buyer_address: str
     proposal: dict[str, Any] | None = None
+    settlement_selection: SettlementSelection | None = None
     reason: str | None = None
 
 
@@ -64,6 +73,7 @@ class NegotiateContinueResponse(BaseModel):
     reason: str | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
     settlement_plan: SettlementPlan | None = None
+    settlement_selection: SettlementSelection | None = None
     accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 

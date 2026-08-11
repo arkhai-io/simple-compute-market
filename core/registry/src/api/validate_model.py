@@ -27,6 +27,10 @@ class ValidatePublishRequest(BaseModel):
         default_factory=list,
         description="List of escrow tuples the seller will accept",
     )
+    settlement_options: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Mechanism-neutral settlement choices",
+    )
     demands: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Listing-level arbiter demands",
@@ -49,4 +53,5 @@ class ValidatePublishResponse(BaseModel):
     listing_id: str
     offer_resource_type: str | None = None   # "compute" | "token" | "unknown"
     accepted_escrows_count: int = 0
+    settlement_options_count: int = 0
     errors: list[str] = Field(default_factory=list)

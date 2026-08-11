@@ -1,0 +1,73 @@
+# Optional hosted-settlement E2E overlay. Use with compose.vms.yml after
+# staging the signed release and generating operator-owned environment/config files.
+services:
+  hosted-settlement-migrate:
+    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    command: ["hosted-settlement-migrate"]
+    env_file:
+      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
+    read_only: true
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+
+  hosted-settlement-api:
+    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    command: ["hosted-settlement-api", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
+    ports:
+      - "18080:8080"
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  hosted-settlement-worker:
+    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    command: ["hosted-settlement-worker", "--interval-seconds", "5"]
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+
+  bob-storefront:
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+    volumes:
+      - ${VMS_BOB_HOSTED_STOREFRONT_CONFIG:?set hosted storefront config}:/etc/arkhai/storefront.toml:ro
+
+volumes:
+  hosted-settlement-data:

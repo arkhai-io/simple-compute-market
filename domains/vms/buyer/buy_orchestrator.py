@@ -36,8 +36,12 @@ from core_buyer.orchestration import (  # noqa: F401 — re-exports
     _looks_like_propagation_lag,
     _signed_json,
     poll_settlement_status,
+    poll_hosted_settlement,
+    reclaim_hosted_settlement,
     submit_settlement,
+    start_hosted_settlement,
     wait_for_settlement,
+    wait_for_hosted_settlement,
 )
 from core_buyer.orchestration import AgreedTerms as CoreAgreedTerms
 from core_buyer.orchestration import (

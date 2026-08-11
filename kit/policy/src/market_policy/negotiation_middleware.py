@@ -95,6 +95,7 @@ class NegotiationChainExhausted(RuntimeError):
     chain than the one configured.
     """
 
+
 NegotiationMiddleware = Callable[
     [list[NegotiationRound], NegotiationContext],
     NegotiationStep,
@@ -194,9 +195,9 @@ def load_negotiation_chain(
         try:
             import importlib.metadata as md
 
-            eps = md.entry_points(group="market_policy.negotiation_middlewares")
+            eps = tuple(md.entry_points(group="market_policy.negotiation_middlewares"))
         except Exception:
-            eps = []
+            eps = ()
         found = False
         for ep in eps:
             if ep.name == name:

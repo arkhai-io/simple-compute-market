@@ -33,7 +33,9 @@ _VM_RESOURCE_TYPE = "compute.gpu"
 # what.
 
 
-def compute_capacity_claim_from_order(order_dict: dict[str, Any] | None) -> dict[str, Any]:
+def compute_capacity_claim_from_order(
+    order_dict: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Extract inventory-matching attributes from a VM listing/order.
 
     ``offer_resource`` may arrive as a JSON string, a plain dict, or a

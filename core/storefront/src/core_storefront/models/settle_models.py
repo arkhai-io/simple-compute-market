@@ -50,6 +50,22 @@ class SettleStatusResponse(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class SettlementStartRequest(BaseModel):
+    """Server-authoritative hosted start accepts accepted-plan identifiers only."""
+
+    negotiation_id: str = Field(min_length=1)
+    obligation_ref: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class SettlementPublicResponse(BaseModel):
+    settlement_ref: str | None = None
+    obligation_ref: str
+    status: str
+    action: dict[str, Any] | None = None
+    action_kind: str | None = None
+    action_expires_at_unix: int | None = None
+
+
 # ---------------------------------------------------------------------------
 # Admin dry-run models
 # ---------------------------------------------------------------------------

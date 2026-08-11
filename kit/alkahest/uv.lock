@@ -171,9 +171,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "web3" },
 ]
@@ -187,6 +188,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-kit-settlement-runtime", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "web3", specifier = ">=7.14.0" },
 ]
@@ -196,6 +198,17 @@ dev = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "arkhai-kit-settlement-runtime"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_settlement_runtime-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

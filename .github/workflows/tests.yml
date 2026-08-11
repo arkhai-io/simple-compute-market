@@ -39,13 +39,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: kit-alkahest,           dir: kit/alkahest }
-          - { name: kit-config,             dir: kit/config }
+          - { name: kit-alkahest,           dir: kit/alkahest, predist: true }
+          - { name: kit-config,             dir: kit/config, predist: true }
           - { name: kit-identity,           dir: kit/identity }
           - { name: kit-policy,             dir: kit/policy }
+          - { name: kit-settlement-runtime, dir: kit/settlement-runtime }
+          - { name: kit-hosted-settlement, dir: kit/hosted-settlement, predist: true, requires_hosted: true }
           - { name: core,                   dir: core }
-          - { name: core-buyer,             dir: core/buyer }
-          - { name: core-storefront,        dir: core/storefront }
+          - { name: core-buyer,             dir: core/buyer, predist: true }
+          - { name: core-storefront,        dir: core/storefront, predist: true }
           - { name: core-storefront-client, dir: core/storefront-client }
           - { name: core-registry,          dir: core/registry, predist: true }
           - { name: kit-site,              dir: kit/site }
@@ -53,17 +55,18 @@ jobs:
           - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
           - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
+          - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true }
           # The deselected tests assert that injected/static option flags
           # appear in `typer --help` output; under headless pytest capture
           # in CI the Rich-rendered options panel comes back empty (passes
           # locally with a TTY). Tracked for a test-side fix.
-          - { name: vms-buyer,              dir: domains/vms/buyer, pytest_args: "--deselect tests/test_plugin_export.py::test_assembled_listing_is_vm_rendering_not_generic_fallback --deselect tests/test_policy_cli_injection.py::test_policy_params_become_flags_and_land_in_kwargs --deselect tests/test_policy_cli_injection.py::test_assembled_buy_and_negotiate_surface_the_default_policy_flags" }
+          - { name: vms-buyer,              dir: domains/vms/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_assembled_listing_is_vm_rendering_not_generic_fallback --deselect tests/test_policy_cli_injection.py::test_policy_params_become_flags_and_land_in_kwargs --deselect tests/test_policy_cli_injection.py::test_assembled_buy_and_negotiate_surface_the_default_policy_flags" }
           # test_alkahest parity tests spawn node via alkahest_py (needs the
           # JS impl); cross-language parity is covered by the ts/rust jobs.
-          - { name: vms-storefront,         dir: domains/vms/storefront, pytest_args: "--deselect tests/unit/test_alkahest.py::test_rust --deselect tests/unit/test_alkahest.py::test_python" }
+          - { name: vms-storefront,         dir: domains/vms/storefront, predist: true, requires_hosted: true, pytest_args: "--deselect tests/unit/test_alkahest.py::test_rust --deselect tests/unit/test_alkahest.py::test_python" }
           - { name: compute-provisioning-service, dir: provisioning/compute/service, predist: true }
-          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback" }
-          - { name: apicredits-storefront,   dir: domains/apicredits/storefront }
+          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback" }
+          - { name: apicredits-storefront,   dir: domains/apicredits/storefront, predist: true }
           - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }
           - { name: apicredits-middleware,   dir: domains/apicredits/middleware/python }
           - { name: apicredits-sample-app,   dir: domains/apicredits/sample-app }
@@ -72,6 +75,22 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.11.17"
+      - name: Download exact hosted release assets
+        if: matrix.requires_hosted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .dist
+          repository="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["repository"])')"
+          version="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["release_version"])')"
+          manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["manifest_filename"])')"
+          wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["client_wheel"]["filename"])')"
+          test -n "$repository"
+          gh release download "v$version" --repo "$repository" \
+            --pattern "$manifest" --pattern "$wheel" --dir .dist
+      - name: Verify staged hosted release
+        if: matrix.requires_hosted
+        run: make verify-hosted-release
       - name: Build sibling wheels into .dist
         # Some lockfiles resolve sibling arkhai-* wheels from the repo's
         # .dist/ (the `make dist` output dir), which isn't in a fresh
@@ -89,14 +108,18 @@ jobs:
           uv build --no-sources --out-dir .dist kit/alkahest
           uv build --no-sources --out-dir .dist kit/config
           uv build --no-sources --out-dir .dist kit/policy
+          uv build --no-sources --out-dir .dist kit/settlement-runtime
           uv build --no-sources --out-dir .dist core/storefront-client
           uv build --no-sources --out-dir .dist core/registry-client
+      - name: Build hosted adapter from verified client contract
+        if: matrix.requires_hosted
+        run: uv build --no-sources --out-dir .dist kit/hosted-settlement
       - name: pytest
         working-directory: ${{ matrix.dir }}
         env:
           PYTHONPATH: ${{ matrix.pythonpath }}
           PYTEST_ARGS: ${{ matrix.pytest_args }}
-        run: uv run --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
+        run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
 
   ts-middleware:
     name: ts · apicredits-middleware

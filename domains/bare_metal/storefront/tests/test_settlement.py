@@ -100,11 +100,14 @@ def test_plan_builder_is_deterministic(monkeypatch) -> None:
 
 
 def test_plan_builder_returns_empty_without_proposal() -> None:
-    assert build_bare_metal_settlement_plan(
-        proposal=None,
-        agreed_amount=0,
-        duration_seconds=3600,
-    ) == {}
+    assert (
+        build_bare_metal_settlement_plan(
+            proposal=None,
+            agreed_amount=0,
+            duration_seconds=3600,
+        )
+        == {}
+    )
 
 
 def test_plan_builder_rejects_invalid_duration_before_materialization(

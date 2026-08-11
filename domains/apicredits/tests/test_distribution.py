@@ -50,14 +50,26 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             APICREDITS / "storefront",
             "arkhai_apicredits_storefront-*.whl",
         ),
+        "vms_storefront": (
+            REPO / "domains" / "vms" / "storefront",
+            "arkhai_vms_storefront-*.whl",
+        ),
+        "bare_metal_storefront": (
+            REPO / "domains" / "bare_metal" / "storefront",
+            "arkhai_bare_metal_storefront-*.whl",
+        ),
         "service": (
             APICREDITS / "service",
             "arkhai_apicredits_service-*.whl",
         ),
         "core": (REPO / "core", "arkhai_core-*.whl"),
-        "core_storefront": (REPO / "core" / "storefront", "arkhai_core_storefront-*.whl"),
+        "core_storefront": (
+            REPO / "core" / "storefront",
+            "arkhai_core_storefront-*.whl",
+        ),
         "core_registry_client": (
-            REPO / "core" / "registry-client", "arkhai_core_registry_client-*.whl",
+            REPO / "core" / "registry-client",
+            "arkhai_core_registry_client-*.whl",
         ),
         "policy": (REPO / "kit" / "policy", "arkhai_kit_policy-*.whl"),
         "alkahest": (REPO / "kit" / "alkahest", "arkhai_kit_alkahest-*.whl"),
@@ -65,6 +77,10 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "config": (REPO / "kit" / "config", "arkhai_kit_config-*.whl"),
         "site": (REPO / "kit" / "site", "arkhai_kit_site-*.whl"),
         "site_client": (REPO / "kit" / "site-client", "arkhai_kit_site_client-*.whl"),
+        "settlement_runtime": (
+            REPO / "kit" / "settlement-runtime",
+            "arkhai_kit_settlement_runtime-*.whl",
+        ),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():
@@ -89,8 +105,7 @@ def _members(wheel: Path) -> set[str]:
 def _metadata(wheel: Path) -> str:
     with zipfile.ZipFile(wheel) as archive:
         metadata_name = next(
-            name for name in archive.namelist()
-            if name.endswith(".dist-info/METADATA")
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
         )
         return archive.read(metadata_name).decode()
 
@@ -137,10 +152,15 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     assert "Requires-Dist: arkhai-core-buyer>=0.2.0" in buyer_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
-    assert (
-        "Requires-Dist: arkhai-core-storefront>=0.2.0"
-        in storefront_metadata
-    )
+    assert "Requires-Dist: arkhai-core-storefront>=0.2.0" in storefront_metadata
+
+
+def test_storefront_wheels_require_settlement_runtime(
+    wheels: dict[str, Path],
+) -> None:
+    for name in ("storefront", "vms_storefront", "bare_metal_storefront"):
+        metadata = _metadata(wheels[name])
+        assert "Requires-Dist: arkhai-kit-settlement-runtime>=0.1.0" in metadata, name
 
 
 def test_storefront_wheel_exports_contract_constant(
@@ -148,15 +168,15 @@ def test_storefront_wheel_exports_contract_constant(
 ) -> None:
     with zipfile.ZipFile(wheels["storefront"]) as archive:
         entry_points_name = next(
-            name for name in archive.namelist()
+            name
+            for name in archive.namelist()
             if name.endswith(".dist-info/entry_points.txt")
         )
         entry_points = archive.read(entry_points_name).decode()
 
     assert "[market.storefront_domains]" in entry_points
     assert (
-        "apicredits = "
-        "apicredits_storefront.domain_runtime:APICREDITS_STOREFRONT_DOMAIN"
+        "apicredits = apicredits_storefront.domain_runtime:APICREDITS_STOREFRONT_DOMAIN"
     ) in entry_points
 
 
@@ -173,9 +193,13 @@ def test_domain_contract_imports_from_built_wheel(
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv", "pip", "install",
-            "--python", str(python),
-            "--find-links", str(wheels["domain"].parent),
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--find-links",
+            str(wheels["domain"].parent),
             str(wheels["domain"]),
         ],
         check=True,
@@ -219,9 +243,13 @@ def test_service_schema_module_imports_from_built_wheel(
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv", "pip", "install",
-            "--python", str(python),
-            "--find-links", str(wheels["service"].parent),
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--find-links",
+            str(wheels["service"].parent),
             str(wheels["service"]),
         ],
         check=True,
@@ -260,14 +288,21 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
     fall back to.
     """
     venv = wheels["storefront"].parent / "venv-storefront-runtime"
-    subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["uv", "venv", str(venv)], check=True, capture_output=True, text=True
+    )
     python = venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
     subprocess.run(
         [
-            "uv", "pip", "install",
-            "--python", str(python),
-            "--find-links", str(wheels["storefront"].parent),
-            str(wheels["domain"]), str(wheels["storefront"]),
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--find-links",
+            str(wheels["storefront"].parent),
+            str(wheels["domain"]),
+            str(wheels["storefront"]),
         ],
         check=True,
         capture_output=True,

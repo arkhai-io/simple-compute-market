@@ -80,7 +80,8 @@ def _build_settings() -> Dynaconf:
                     "[CONFIG] wallet.address (%s) does not match the address "
                     "derived from wallet.private_key (%s); using the configured "
                     "address.",
-                    addr_cfg, derived_addr,
+                    addr_cfg,
+                    derived_addr,
                 )
     return s
 
@@ -200,7 +201,9 @@ def _resolve_base_url() -> str:
         resolved = resolve_base_url_best_effort(raw, zerotier)
         if resolved != raw:
             logger.info(
-                "[CONFIG] base_url resolved to %s (network=%s)", resolved, zerotier,
+                "[CONFIG] base_url resolved to %s (network=%s)",
+                resolved,
+                zerotier,
             )
         return resolved
     except BaseUrlResolutionError as exc:

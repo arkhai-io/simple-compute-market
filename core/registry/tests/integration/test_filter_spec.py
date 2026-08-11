@@ -15,7 +15,10 @@ import pytest
 @pytest.mark.asyncio
 async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None:
     from src.main import app
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as raw:
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as raw:
         resp = await raw.get("/filter-spec")
     assert resp.status_code == 200
 
@@ -26,7 +29,13 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 
     assert body["listing_shape"]["type"] == "object"
     required = set(body["listing_shape"].get("required") or [])
-    assert {"listing_id", "offer_resource", "accepted_escrows"} <= required
+    assert {"listing_id", "offer_resource", "storefront_url"} <= required
+    settlement_requirements = {
+        tuple(branch.get("required") or [])
+        for branch in body["listing_shape"].get("anyOf") or []
+    }
+    assert ("accepted_escrows",) in settlement_requirements
+    assert ("settlement_options",) in settlement_requirements
 
     names = {f["name"] for f in body["filters"]}
     assert {"gpu_model", "region", "ram_gb_min", "token"} <= names
@@ -51,7 +60,10 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 @pytest.mark.asyncio
 async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:
     from src.main import app
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as raw:
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as raw:
         r1 = await raw.get("/filter-spec")
         r2 = await raw.get("/filter-spec")
     assert r1.headers["etag"] == r2.headers["etag"]

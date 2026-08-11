@@ -33,9 +33,11 @@ class NegotiationsController:
     ) -> None:
         self._svc = neg_svc
 
-    @router.get("/{listing_id}/negotiations",
-                response_model=NegotiationListResponse,
-                summary="List negotiations for a listing")
+    @router.get(
+        "/{listing_id}/negotiations",
+        response_model=NegotiationListResponse,
+        summary="List negotiations for a listing",
+    )
     async def list_negotiations(
         self,
         listing_id: str,
@@ -49,20 +51,28 @@ class NegotiationsController:
                 listing_id=listing_id,
                 terminal_state=terminal_state or None,
                 buyer_address=buyer_address or None,
-                limit=limit, offset=offset,
+                limit=limit,
+                offset=offset,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
         return NegotiationListResponse(
-            listing_id=listing_id, negotiations=threads,
-            count=len(threads), limit=limit, offset=offset,
+            listing_id=listing_id,
+            negotiations=threads,
+            count=len(threads),
+            limit=limit,
+            offset=offset,
         )
 
-    @router.get("/{listing_id}/negotiations/{neg_id}",
-                response_model=NegotiationDetailResponse,
-                summary="Get negotiation detail")
+    @router.get(
+        "/{listing_id}/negotiations/{neg_id}",
+        response_model=NegotiationDetailResponse,
+        summary="Get negotiation detail",
+    )
     async def get_negotiation(
-        self, listing_id: str, neg_id: str,
+        self,
+        listing_id: str,
+        neg_id: str,
     ) -> NegotiationDetailResponse:
         try:
             detail = await self._svc.get_detail(listing_id=listing_id, neg_id=neg_id)
@@ -77,12 +87,18 @@ class NegotiationsController:
         dependencies=[Depends(require_admin_key)],
     )
     async def advance_negotiation(
-        self, listing_id: str, neg_id: str, body: AdvanceRequest,
+        self,
+        listing_id: str,
+        neg_id: str,
+        body: AdvanceRequest,
     ) -> AdvanceResponse:
         try:
             result = await self._svc.advance(
-                listing_id=listing_id, neg_id=neg_id,
-                action=body.action, proposal=body.proposal, reason=body.reason,
+                listing_id=listing_id,
+                neg_id=neg_id,
+                action=body.action,
+                proposal=body.proposal,
+                reason=body.reason,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -98,11 +114,16 @@ class NegotiationsController:
         dependencies=[Depends(require_admin_key)],
     )
     async def force_accept_negotiation(
-        self, listing_id: str, neg_id: str, body: ForceAcceptRequest,
+        self,
+        listing_id: str,
+        neg_id: str,
+        body: ForceAcceptRequest,
     ) -> ForceAcceptResponse:
         try:
             result = await self._svc.force_accept(
-                listing_id=listing_id, neg_id=neg_id, amount=body.amount,
+                listing_id=listing_id,
+                neg_id=neg_id,
+                amount=body.amount,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))

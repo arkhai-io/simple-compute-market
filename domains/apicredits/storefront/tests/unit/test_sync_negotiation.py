@@ -2,8 +2,8 @@
 
 Capacity snapshots and key lookups are faked at the service seams the
 default hook resolves at call time; everything else — guards, terminal
-policy, thread persistence, token-terms persistence, quota hold — runs
-for real against a temp SQLite database.
+policy, thread persistence, token-terms persistence, and the safe default
+that grants no unfunded quota hold — runs against a temporary SQLite database.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-
 from apicredits_storefront.utils.sync_negotiation import (
     OfferUnfulfillableError,
     _normalize_api_credits_message_terms,
@@ -33,18 +32,24 @@ class FakeCapacity:
         self.reserved: list[dict] = []
 
     async def snapshot(self):
-        return [{
-            "resource_id": "svc-quota",
-            "resource_type": "api_credits",
-            "available_units": self.available,
-            "total_units": 1000,
-            "state": "available",
-        }]
+        return [
+            {
+                "resource_id": "svc-quota",
+                "resource_type": "api_credits",
+                "available_units": self.available,
+                "total_units": 1000,
+                "state": "available",
+            }
+        ]
 
     async def reserve(self, *, claim=None, deal_ref=None, ttl_seconds=None):
-        self.reserved.append({
-            "claim": claim, "deal_ref": deal_ref, "ttl_seconds": ttl_seconds,
-        })
+        self.reserved.append(
+            {
+                "claim": claim,
+                "deal_ref": deal_ref,
+                "ttl_seconds": ttl_seconds,
+            }
+        )
         return {
             "capacity_reservation_id": f"alloc-{len(self.reserved)}",
             "resource_id": "svc-quota",
@@ -59,7 +64,9 @@ def fake_capacity(monkeypatch):
     from apicredits_storefront.services import capacity_client as cc_module
 
     monkeypatch.setattr(
-        cc_module, "build_capacity_client", lambda factory: capacity,
+        cc_module,
+        "build_capacity_client",
+        lambda factory: capacity,
     )
     return capacity
 
@@ -80,7 +87,6 @@ def key_records(monkeypatch):
 @pytest.fixture
 async def db(tmp_path):
     import market_policy.negotiation_thread as thread_module
-
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
     client = SQLiteClient(db_path=str(tmp_path / "credits-storefront.db"))
@@ -101,12 +107,14 @@ async def db(tmp_path):
             "base_url": "https://api.acme.example",
             "resource_id": "svc-quota",
         },
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": _ESCROW,
-            "literal_fields": {"token": _TOKEN},
-            "rates": [{"field": "amount", "per": "token", "value": "100"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": _ESCROW,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=None,
         seller="http://seller:8002",
@@ -161,7 +169,7 @@ def test_normalize_api_credits_message_terms_rejects_foreign_terms() -> None:
         payload={"duration_seconds": 60},
     )
 
-    with pytest.raises(ValueError, match="api_credits.v1"):
+    with pytest.raises(ValueError, match=r"api_credits\.v1"):
         _normalize_api_credits_message_terms(terms)
 
 
@@ -188,8 +196,10 @@ async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
     )
 
 
-async def test_listed_price_accept_persists_terms_and_hold(db, fake_capacity, key_records):
-    # quantity 3 × unit rate 100 = 300; opening at the bound accepts
+async def test_listed_price_accept_persists_terms_without_unfunded_hold(
+    db, fake_capacity, key_records
+):
+    # quantity 3 * unit rate 100 = 300; opening at the bound accepts
     # under the listed_price default.
     response = await _start(db, amount=300, quantity=3)
     assert response["action"] == "accept"
@@ -201,21 +211,18 @@ async def test_listed_price_accept_persists_terms_and_hold(db, fake_capacity, ke
     neg_id = response["negotiation_id"]
     terms = await db.load_credit_terms(negotiation_id=neg_id)
     assert terms == {
-        "negotiation_id": neg_id, "quantity": 3,
-        "key_mode": "new", "key_id": None,
+        "negotiation_id": neg_id,
+        "quantity": 3,
+        "key_mode": "new",
+        "key_id": None,
     }
 
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     assert thread["terminal_state"] == "success"
     assert int(thread["agreed_price"]) == 300
 
-    # Acceptance placed a TTL quota hold with the generic units claim.
-    assert fake_capacity.reserved
-    hold_req = fake_capacity.reserved[0]
-    assert hold_req["claim"] == {"units": 3, "resource_id": "svc-quota"}
-    assert hold_req["ttl_seconds"] > 0
-    hold = await db.load_capacity_hold(negotiation_id=neg_id)
-    assert hold["capacity_reservation_id"] == "alloc-1"
+    assert fake_capacity.reserved == []
+    assert await db.load_capacity_hold(negotiation_id=neg_id) is None
 
 
 async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_records):
@@ -228,11 +235,17 @@ async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_rec
 
 async def test_existing_key_owned_by_buyer_wallet(db, fake_capacity, key_records):
     key_records["ak_mine"] = {
-        "key_id": "ak_mine", "owner_scheme": "wallet",
-        "owner_id": _BUYER.upper().replace("0X", "0x"), "status": "active",
+        "key_id": "ak_mine",
+        "owner_scheme": "wallet",
+        "owner_id": _BUYER.upper().replace("0X", "0x"),
+        "status": "active",
     }
     response = await _start(
-        db, amount=300, quantity=3, key_mode="existing", key_id="ak_mine",
+        db,
+        amount=300,
+        quantity=3,
+        key_mode="existing",
+        key_id="ak_mine",
     )
     assert response["action"] == "accept"
     terms = await db.load_credit_terms(
@@ -244,8 +257,10 @@ async def test_existing_key_owned_by_buyer_wallet(db, fake_capacity, key_records
 
 async def test_existing_key_rejections(db, fake_capacity, key_records):
     key_records["ak_theirs"] = {
-        "key_id": "ak_theirs", "owner_scheme": "wallet",
-        "owner_id": "0x" + "99" * 20, "status": "active",
+        "key_id": "ak_theirs",
+        "owner_scheme": "wallet",
+        "owner_id": "0x" + "99" * 20,
+        "status": "active",
     }
     with pytest.raises(OfferUnfulfillableError) as exc:
         await _start(db, key_mode="existing", key_id="ak_theirs")
@@ -258,16 +273,24 @@ async def test_existing_key_rejections(db, fake_capacity, key_records):
 
 async def test_open_key_top_up_without_guarded_owner(db, fake_capacity, key_records):
     key_records["ak_open"] = {
-        "key_id": "ak_open", "owner_scheme": None,
-        "owner_id": None, "status": "active",
+        "key_id": "ak_open",
+        "owner_scheme": None,
+        "owner_id": None,
+        "status": "active",
     }
     response = await _start(
-        db, amount=300, quantity=3, key_mode="existing", key_id="ak_open",
+        db,
+        amount=300,
+        quantity=3,
+        key_mode="existing",
+        key_id="ak_open",
     )
     assert response["action"] == "accept"
 
 
-async def test_bisection_counter_round_scales_by_quantity(db, fake_capacity, key_records):
+async def test_bisection_counter_round_scales_by_quantity(
+    db, fake_capacity, key_records
+):
     """Counter rounds keep the quantity-scaled reference from the terms row."""
     from tests._settings_overrides import settings_overrides
 

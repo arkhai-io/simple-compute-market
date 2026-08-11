@@ -145,11 +145,7 @@ def escrow_shape_uses_scalar_amount(proposal: dict[str, Any] | None) -> bool:
     fields = proposal.get("fields") or {}
     if "amount" in fields:
         return True
-    if (
-        "token" in fields
-        and "tokenId" not in fields
-        and "token_id" not in fields
-    ):
+    if "token" in fields and "tokenId" not in fields and "token_id" not in fields:
         return True
     return any(
         (r.get("field") if isinstance(r, dict) else getattr(r, "field", None))
@@ -248,7 +244,9 @@ def bisection_middleware(
         return NegotiationDecision(action="exit", reason="price_unreasonable"), context
 
     return (
-        NegotiationDecision(action="reject", reason=f"unknown_direction:{context.direction!r}"),
+        NegotiationDecision(
+            action="reject", reason=f"unknown_direction:{context.direction!r}"
+        ),
         context,
     )
 
@@ -297,7 +295,8 @@ def listed_price_middleware(
     if their_amount is None:
         return (
             NegotiationDecision(
-                action="accept", proposal=dict(their_proposal),
+                action="accept",
+                proposal=dict(their_proposal),
                 reason="listed_price_amountless",
             ),
             context,
@@ -406,8 +405,6 @@ def make_escrow_kind_dispatch_middleware(
     return escrow_kind_dispatch_middleware
 
 
-
-
 def _normalize_escrow_field(value: Any) -> Any:
     if isinstance(value, str) and value.startswith("0x") and len(value) == 42:
         return value.lower()
@@ -450,7 +447,11 @@ def _proposal_requires_exact_amount(matched: dict[str, Any]) -> bool:
     if isinstance(literal_fields, dict) and "amount" in literal_fields:
         return True
     for rate in matched.get("rates") or []:
-        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
         if field == "amount":
             return True
     return False
@@ -541,7 +542,11 @@ def _accepted_entry_uses_scalar_amount(entry: dict[str, Any] | None) -> bool:
     if isinstance(literal_fields, dict) and "amount" in literal_fields:
         return True
     for rate in entry.get("rates") or []:
-        field = rate.get("field") if isinstance(rate, dict) else getattr(rate, "field", None)
+        field = (
+            rate.get("field")
+            if isinstance(rate, dict)
+            else getattr(rate, "field", None)
+        )
         if field == "amount":
             return True
     return False
@@ -558,8 +563,6 @@ def proposal_uses_scalar_amount(
         return True
     matched = _accepted_escrow_for_proposal(listing, proposal)
     return _accepted_entry_uses_scalar_amount(matched)
-
-
 
 
 @register_negotiation_middleware("buyer_counter_guard")
@@ -607,8 +610,6 @@ def buyer_counter_guard(
         context.intermediate["buyer_counter_proposal"] = dict(pinned)
 
     return None, context
-
-
 
 
 def _peer_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
@@ -659,8 +660,12 @@ def escrow_shape_guard(
         return None, context
 
     for key, seller_value in seller_literal.items():
-        buyer_value = proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
-        if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(seller_value):
+        buyer_value = (
+            proposal_literal.get(key) if isinstance(proposal_literal, dict) else None
+        )
+        if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(
+            seller_value
+        ):
             return (
                 NegotiationDecision(
                     action="reject",
@@ -754,7 +759,9 @@ def accept_exact_listing_middleware(
     proposal_fields = proposal.get("fields") or {}
     if not isinstance(proposal_fields, dict):
         return (
-            NegotiationDecision(action="reject", reason="exact_listing:fields_not_object"),
+            NegotiationDecision(
+                action="reject", reason="exact_listing:fields_not_object"
+            ),
             context,
         )
     expected_amount = int(round(context.our_reference_amount))
@@ -782,8 +789,7 @@ def accept_exact_listing_middleware(
                 NegotiationDecision(
                     action="reject",
                     reason=(
-                        f"exact_listing:field_mismatch:{key!r}:"
-                        f"{actual!r}!={expected!r}"
+                        f"exact_listing:field_mismatch:{key!r}:{actual!r}!={expected!r}"
                     ),
                 ),
                 context,
@@ -847,7 +853,8 @@ def accept_exact_listing_middleware(
             action="accept",
             proposal=(
                 _set_proposal_amount(proposal, expected_amount)
-                if requires_amount else dict(proposal)
+                if requires_amount
+                else dict(proposal)
             ),
             reason="exact_listing",
         ),
@@ -868,6 +875,19 @@ def buyer_escrow_shape_guard(
     pinned = context.our_escrow_proposal
     if not isinstance(pinned, dict):
         return None, context
+    pinned_selection = pinned.get("settlement_selection")
+    their_selection = their_proposal.get("settlement_selection")
+    if pinned_selection is not None or their_selection is not None:
+        if _normalize_exact_value(pinned_selection) != _normalize_exact_value(
+            their_selection
+        ):
+            return (
+                NegotiationDecision(
+                    action="reject",
+                    reason="settlement_selection_changed",
+                ),
+                context,
+            )
 
     if pinned.get("chain_name") != their_proposal.get("chain_name"):
         return (
@@ -915,7 +935,9 @@ def buyer_escrow_shape_guard(
         if key == "amount":
             continue
         their_value = their_fields.get(key) if isinstance(their_fields, dict) else None
-        if _normalize_escrow_field(pinned_value) != _normalize_escrow_field(their_value):
+        if _normalize_escrow_field(pinned_value) != _normalize_escrow_field(
+            their_value
+        ):
             return (
                 NegotiationDecision(
                     action="reject",
@@ -946,6 +968,8 @@ def buyer_escrow_shape_guard(
             context,
         )
     return None, context
+
+
 __all__ = [
     "_amount_from_proposal",
     "accept_exact_listing_middleware",

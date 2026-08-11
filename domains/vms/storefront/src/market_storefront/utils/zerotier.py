@@ -25,7 +25,9 @@ def _normalize_base_url(url: str) -> str:
     """
     parsed = urlparse(url)
     if not parsed.scheme:
-        raise BaseUrlResolutionError("BASE_URL_OVERRIDE must include a scheme (e.g., http://).")
+        raise BaseUrlResolutionError(
+            "BASE_URL_OVERRIDE must include a scheme (e.g., http://)."
+        )
     if not parsed.hostname:
         raise BaseUrlResolutionError("BASE_URL_OVERRIDE must include a host.")
     if parsed.port is None:
@@ -59,7 +61,9 @@ def _list_zerotier_networks(timeout: float = 5.0) -> Optional[List[NetworkInfo]]
         logger.warning("ZeroTier CLI timed out while listing networks.")
         return None
     except subprocess.CalledProcessError as exc:
-        logger.warning("ZeroTier CLI error when listing networks: %s", exc.stderr or exc.stdout)
+        logger.warning(
+            "ZeroTier CLI error when listing networks: %s", exc.stderr or exc.stdout
+        )
         return None
 
     try:
@@ -128,7 +132,11 @@ def join_zerotier_network(network_id: str) -> bool:
         logger.info("Joined ZeroTier network %s.", network_id)
         return True
     except subprocess.CalledProcessError as exc:
-        logger.error("Failed to join ZeroTier network %s: %s", network_id, exc.stderr or exc.stdout)
+        logger.error(
+            "Failed to join ZeroTier network %s: %s",
+            network_id,
+            exc.stderr or exc.stdout,
+        )
         return False
 
 
@@ -143,7 +151,9 @@ def _check_zerotier_cli() -> bool:
         )
         return True
     except FileNotFoundError:
-        logger.warning("ZeroTier CLI not found. Install with: cd scripts/zerotier && make install")
+        logger.warning(
+            "ZeroTier CLI not found. Install with: cd scripts/zerotier && make install"
+        )
         return False
 
 
@@ -160,7 +170,9 @@ def get_zerotier_node_id() -> Optional[str]:
             text=True,
         )
     except subprocess.CalledProcessError as exc:
-        logger.warning("ZeroTier CLI error when getting node ID: %s", exc.stderr or exc.stdout)
+        logger.warning(
+            "ZeroTier CLI error when getting node ID: %s", exc.stderr or exc.stdout
+        )
         return None
     except FileNotFoundError:
         # Already logged by _check_zerotier_cli
@@ -172,7 +184,9 @@ def get_zerotier_node_id() -> Optional[str]:
     return None
 
 
-def resolve_base_url_best_effort(base_url_override: str, zerotier_network: Optional[str]) -> str:
+def resolve_base_url_best_effort(
+    base_url_override: str, zerotier_network: Optional[str]
+) -> str:
     """
     Resolve BASE_URL_OVERRIDE once without waiting.
 

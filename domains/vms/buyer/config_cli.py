@@ -32,7 +32,8 @@ def config_path() -> None:
 @config_app.command("show")
 def config_show(
     raw: bool = typer.Option(
-        False, "--raw",
+        False,
+        "--raw",
         help="Print the TOML file verbatim instead of the loaded mapping.",
     ),
 ) -> None:
@@ -51,7 +52,9 @@ def config_show(
 @config_app.command("set")
 def config_set(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
-    value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
+    value: str = typer.Argument(
+        ..., help="Value to assign (coerced to int/float/bool when possible)."
+    ),
 ) -> None:
     """Set a single value in the buyer.toml.
 
@@ -62,7 +65,7 @@ def config_set(
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
-        coerced = (low == "true")
+        coerced = low == "true"
     else:
         try:
             coerced = int(value)
@@ -151,6 +154,9 @@ _INIT_USER_TEMPLATE = """\
                                                 # deadline are cancelled and the lowest agreed price among
                                                 # those that completed wins. Unset = wait for all.
 
+[settlement]
+# mechanism_priority = ["alkahest.v1", "fiat.stripe.v1"]
+
 [negotiation]
 # policies = ["buyer_escrow_shape_guard", "bisection"]
 #                                              # ordered policy chain; terminal policy is
@@ -173,7 +179,8 @@ _INIT_USER_TEMPLATE = """\
 @config_app.command("init-user")
 def config_init_user(
     overwrite: bool = typer.Option(
-        False, "--overwrite",
+        False,
+        "--overwrite",
         help="Replace an existing buyer.toml instead of refusing.",
     ),
 ) -> None:
@@ -187,7 +194,8 @@ def config_init_user(
     if path.exists() and not overwrite:
         typer.secho(
             f"{path} already exists. Pass --overwrite to replace it.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(1)
 

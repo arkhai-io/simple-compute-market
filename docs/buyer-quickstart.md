@@ -179,6 +179,24 @@ To exit early after `expiration_unix`:
 market escrow reclaim <escrow_uid>
 ```
 
+## Hosted Checkout settlement
+
+When a VM listing advertises `fiat.stripe.v1`, select it with
+`--settlement-mechanism fiat.stripe.v1` and optionally constrain the lowercase
+currency using `--settlement-asset usd`. Add `--no-browser` to print the
+current one-time Checkout action instead of opening it. The buyer first
+negotiates an exact advertised option; no hosted-provider call occurs before
+seller acceptance. After acceptance, the CLI starts and polls the settlement
+through the seller storefront, not through a buyer-configured financial
+authority.
+
+The run log retains only the opaque settlement reference, lifecycle status,
+action kind, and expiry. It does not retain the Checkout URL or payment data.
+If interrupted, resume the accepted run rather than starting another
+negotiation. Hosted reclaim is buyer-authorized at the settlement route after
+expiry; it is rejected once fulfillment, satisfied evaluation, or collection
+has won the shared lifecycle reservation.
+
 ## Common pitfalls
 
 - **Prices on the CLI are human / whole-token units per hour.** `2`

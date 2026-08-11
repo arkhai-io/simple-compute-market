@@ -18,6 +18,7 @@ must match what the storefront expects (case-insensitive for ``eip191``)
 or the request is rejected; this prevents a client from claiming a
 different identity than the one its signature attests.
 """
+
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
@@ -94,6 +95,7 @@ def make_seller_auth_dep(operation: str):
             _: None = Depends(make_seller_auth_dep("create_listing")),
         ) -> dict: ...
     """
+
     async def _dep(request: Request) -> None:
         # Path params take priority (e.g. /listings/{listing_id}/close)
         resource_id = request.path_params.get("listing_id", "")
@@ -102,6 +104,7 @@ def make_seller_auth_dep(operation: str):
             # signs as "create_listing:{agent_wallet_address}:{ts}".
             # Use settings.wallet.address as the resource_id to match.
             from market_storefront.utils.config import settings
+
             resource_id = settings.wallet.address or ""
         verify_seller_signature(request, operation, resource_id)
 

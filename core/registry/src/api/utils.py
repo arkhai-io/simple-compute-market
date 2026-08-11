@@ -183,6 +183,7 @@ def order_to_dict(listing: Listing) -> dict:
         "storefront_url": publisher.storefront_url if publisher else None,
         "offer_resource": _as_json_obj(listing.offer_resource, {}),
         "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
+        "settlement_options": _as_json_obj(listing.settlement_options, []),
         "demands": _as_json_obj(listing.demands, []),
         "max_duration_seconds": listing.max_duration_seconds,
         "oracle_address": listing.oracle_address,

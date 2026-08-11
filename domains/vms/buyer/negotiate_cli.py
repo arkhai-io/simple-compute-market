@@ -10,7 +10,6 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 
 from __future__ import annotations
 
-import os
 from typing import Any, Optional
 
 import typer
@@ -19,7 +18,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .buyer_client import ResumeState, negotiate_with_seller
-from .common import resolve_config_value
 from .cli_helpers import resolve_prices_from_matches
 from .deal_helpers import load_negotiation_resume_point
 from .run_log import RunLog
@@ -50,78 +48,93 @@ def register(app: typer.Typer) -> None:
 
     def negotiate(  # registered below after policy-param injection
         seller_url: Optional[str] = typer.Option(
-            None, "--seller", "-s",
+            None,
+            "--seller",
+            "-s",
             help="Seller agent base URL. Optional — resolved from the "
-                 "registry given --listing-id; resumed runs (--from) "
-                 "read it from the run-log. Pass explicitly to override.",
+            "registry given --listing-id; resumed runs (--from) "
+            "read it from the run-log. Pass explicitly to override.",
         ),
         listing_id: Optional[str] = typer.Option(
-            None, "--listing-id",
+            None,
+            "--listing-id",
             help="The seller's listing_id. Required for fresh runs; "
-                 "resumed runs (--from) read it from the run-log.",
+            "resumed runs (--from) read it from the run-log.",
         ),
         registry_urls: Optional[str] = typer.Option(
-            None, "--registry-urls",
+            None,
+            "--registry-urls",
             help="Comma-separated registry base URLs (default: "
-                 "registry.urls from config.toml). Used to resolve the "
-                 "seller URL and price floor from a listing_id; the "
-                 "first registry that knows the listing wins.",
+            "registry.urls from config.toml). Used to resolve the "
+            "seller URL and price floor from a listing_id; the "
+            "first registry that knows the listing wins.",
         ),
         discovery_timeout: Optional[float] = typer.Option(
-            None, "--discovery-timeout",
+            None,
+            "--discovery-timeout",
             help="Per-registry deadline in seconds (default: "
-                 "registry.discovery_timeout from config.toml, fallback 5).",
+            "registry.discovery_timeout from config.toml, fallback 5).",
         ),
         assume_yes: bool = assume_yes_option(
             "Skip interactive confirmations on auto-derived prices.",
         ),
         max_rounds: int = typer.Option(
-            10, "--max-rounds",
+            10,
+            "--max-rounds",
             help="Walk away after this many buyer-initiated counters.",
         ),
         from_run: Optional[str] = typer.Option(
-            None, "--from",
+            None,
+            "--from",
             help="Resume the round loop of a prior `market negotiate` run "
-                 "(by run-id). Skips /negotiate/new; replays the seller's "
-                 "last counter into the strategy and continues. Useful "
-                 "when the buyer crashed mid-round but the seller's "
-                 "thread state is still live.",
+            "(by run-id). Skips /negotiate/new; replays the seller's "
+            "last counter into the strategy and continues. Useful "
+            "when the buyer crashed mid-round but the seller's "
+            "thread state is still live.",
         ),
         buyer_address: Optional[str] = typer.Option(
-            None, "--buyer-address",
+            None,
+            "--buyer-address",
             help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
-            None, "--buyer-priv-key",
+            None,
+            "--buyer-priv-key",
             help="Override buyer private key (default: wallet.private_key).",
         ),
         duration_hours: Optional[float] = typer.Option(
-            None, "--duration-hours", "-t",
+            None,
+            "--duration-hours",
+            "-t",
             help="Lease duration the buyer wants (hours, fractional ok). "
-                 "Required for fresh runs — sent on /negotiate/new and "
-                 "validated server-side against the listing's max_duration_seconds. "
-                 "Resumed runs read it from the run-log.",
+            "Required for fresh runs — sent on /negotiate/new and "
+            "validated server-side against the listing's max_duration_seconds. "
+            "Resumed runs read it from the run-log.",
         ),
         start_utc: Optional[str] = typer.Option(
-            None, "--start-utc",
+            None,
+            "--start-utc",
             help="Requested lease start time in UTC (ISO-8601 or YYYY-MM-DD HH:MM). "
-                 "Omit or pass 'now' for immediate start.",
+            "Omit or pass 'now' for immediate start.",
         ),
         token_contract: Optional[str] = typer.Option(
-            None, "--token-contract",
+            None,
+            "--token-contract",
             help="Optional ERC-20 accepted-escrow filter. Omit to use the "
-                 "token/escrow shape selected from the listing.",
+            "token/escrow shape selected from the listing.",
         ),
         token_decimals: Optional[float] = typer.Option(
-            None, "--token-decimals",
+            None,
+            "--token-decimals",
             help="ERC-20 token decimals override for scaling price flags. "
-                 "Only needed when decimals cannot be resolved on chain.",
+            "Only needed when decimals cannot be resolved on chain.",
         ),
         chain_name: Optional[str] = typer.Option(
-            None, "--chain",
+            None,
+            "--chain",
             help="Which [chains.<name>] entry to negotiate against. When "
-                 "omitted the buyer prompts; required when --yes is set "
-                 "and the listing accepts more than one chain you have configured.",
+            "omitted the buyer prompts; required when --yes is set "
+            "and the listing accepts more than one chain you have configured.",
         ),
         **policy_values: Any,
     ) -> None:
@@ -142,9 +155,11 @@ def register(app: typer.Typer) -> None:
         policy_params_all: dict[str, Any] = {
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
-        policy_params_all.update(parse_filter_options(
-            policy_values.get("policy_param") or [],
-        ))
+        policy_params_all.update(
+            parse_filter_options(
+                policy_values.get("policy_param") or [],
+            )
+        )
         initial_price: Optional[float] = policy_params_all.get("initial_price")
         max_price: Optional[float] = policy_params_all.get("max_price")
 
@@ -156,15 +171,18 @@ def register(app: typer.Typer) -> None:
 
         # Resolution: CLI flag > config.toml > derivation.
         from .common import resolve_buyer_wallet
+
         addr, pk = resolve_buyer_wallet(
-            override_addr=buyer_address, override_pk=buyer_private_key,
+            override_addr=buyer_address,
+            override_pk=buyer_private_key,
         )
         if not addr or not pk:
             typer.secho(
                 "Missing buyer wallet config. Pass --buyer-priv-key or set "
                 "wallet.private_key in config.toml; the address is derived "
                 "from the key.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
 
@@ -177,7 +195,8 @@ def register(app: typer.Typer) -> None:
                 typer.secho(
                     "--max-price is required when resuming (the strategy "
                     "needs the buyer's ceiling).",
-                    err=True, fg=typer.colors.RED,
+                    err=True,
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             resume_state = ResumeState(
@@ -189,10 +208,15 @@ def register(app: typer.Typer) -> None:
 
         # Resolve registry URLs + per-registry deadline + auth once.
         from .common import (
-            VMS_SCHEMA_ID, resolve_indexer_urls_for_schema,
-            resolve_discovery_timeout, resolve_indexer_auth,
+            VMS_SCHEMA_ID,
+            resolve_indexer_urls_for_schema,
+            resolve_discovery_timeout,
+            resolve_indexer_auth,
         )
-        reg_urls = resolve_indexer_urls_for_schema(VMS_SCHEMA_ID, override=registry_urls)
+
+        reg_urls = resolve_indexer_urls_for_schema(
+            VMS_SCHEMA_ID, override=registry_urls
+        )
         deadline = resolve_discovery_timeout(override=discovery_timeout)
         reg_auth = resolve_indexer_auth()
 
@@ -202,21 +226,26 @@ def register(app: typer.Typer) -> None:
         listing_dict: Optional[dict] = None
         if listing_id and resume_state is None:
             from .buy_orchestrator import fetch_listing_dict_multi
+
             try:
                 listing_dict = fetch_listing_dict_multi(
-                    reg_urls, listing_id, timeout=deadline, auth=reg_auth,
+                    reg_urls,
+                    listing_id,
+                    timeout=deadline,
+                    auth=reg_auth,
                 )
             except RuntimeError as exc:
                 typer.secho(
                     f"Could not fetch listing {listing_id}: {exc}",
-                    err=True, fg=typer.colors.RED,
+                    err=True,
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             if not listing_dict:
                 typer.secho(
-                    f"No listing {listing_id!r} in any of "
-                    f"{len(reg_urls)} registries.",
-                    err=True, fg=typer.colors.RED,
+                    f"No listing {listing_id!r} in any of {len(reg_urls)} registries.",
+                    err=True,
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             if not seller_url:
@@ -224,7 +253,8 @@ def register(app: typer.Typer) -> None:
                 if not seller_url:
                     typer.secho(
                         f"Listing {listing_id} has no `seller` field; pass --seller explicitly.",
-                        err=True, fg=typer.colors.RED,
+                        err=True,
+                        fg=typer.colors.RED,
                     )
                     raise typer.Exit(2)
             # Fill missing prices from the listing's advertised rate —
@@ -245,7 +275,8 @@ def register(app: typer.Typer) -> None:
             typer.secho(
                 "Missing required negotiation inputs. For a fresh run pass "
                 "--listing-id (and optionally --seller); for a resume pass --from <run-id>.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
 
@@ -253,13 +284,15 @@ def register(app: typer.Typer) -> None:
             typer.secho(
                 "Fresh runs require --initial-price and --max-price (or a "
                 "registry-discoverable listing_id with an advertised min_price).",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         if resume_state is None and (duration_hours is None or duration_hours <= 0):
             typer.secho(
                 "Fresh runs require --duration-hours (the buyer's lease ask).",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         duration_seconds = (
@@ -272,13 +305,15 @@ def register(app: typer.Typer) -> None:
         # set) filters entries to one ERC-20.
         from core_buyer.escrow_selection import select_escrow_entry
         from .common import select_chain_for_listing
+
         picked_entry: Optional[dict] = None
         chain_cfg = None
         if listing_dict is not None:
             chain_cfg = select_chain_for_listing(
-                listing=listing_dict, override=chain_name, yes=assume_yes,
+                listing=listing_dict,
+                override=chain_name,
+                yes=assume_yes,
             )
-            from .policy_surface import configured_buyer_policy
 
             picked_entry = select_escrow_entry(
                 listing_dict,
@@ -288,7 +323,8 @@ def register(app: typer.Typer) -> None:
                 rpc_url=chain_cfg.rpc_url,
                 buyer_address=addr,
                 console=console,
-                compatible=configured_buyer_policy().compatible,
+                compatible=_policy.compatible,
+                preference=_policy.prefer_settlement,
             )
             if picked_entry is None:
                 msg = (
@@ -300,6 +336,7 @@ def register(app: typer.Typer) -> None:
                 typer.secho(msg + ".", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
             from market_alkahest.schemas import accepted_token_address
+
             entry_token = accepted_token_address(picked_entry)
             if isinstance(entry_token, str) and entry_token.startswith("0x"):
                 # Surface the picked token back to the run-log + the
@@ -317,13 +354,17 @@ def register(app: typer.Typer) -> None:
             )
             if decimals is None:
                 from market_alkahest.token import (
-                    resolve_token, TokenResolutionError,
+                    resolve_token,
+                    TokenResolutionError,
                 )
+
                 tc = token_contract
                 if tc and chain_cfg is not None:
                     try:
                         meta = resolve_token(
-                            tc, rpc_url=chain_cfg.rpc_url, chain_id=chain_cfg.chain_id,
+                            tc,
+                            rpc_url=chain_cfg.rpc_url,
+                            chain_id=chain_cfg.chain_id,
                         )
                         decimals = meta.decimals
                     except (TokenResolutionError, RuntimeError):
@@ -333,7 +374,8 @@ def register(app: typer.Typer) -> None:
                     "Could not resolve token decimals to scale prices. "
                     "Pass --token-decimals or ensure the listing's accepted "
                     "chain is configured in [chains.<name>].",
-                    err=True, fg=typer.colors.RED,
+                    err=True,
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             scale = 10 ** int(decimals)
@@ -409,6 +451,7 @@ def register(app: typer.Typer) -> None:
         from arkhai_vms import make_vm_provision_terms
         from domains.vms.settlement import escrow_proposal_from_accepted_entry
         import time as _time
+
         provision_terms: Optional[VmProvisionTerms] = None
         escrow_proposal: Optional[EscrowProposal] = None
         if resume_state is None:
@@ -434,6 +477,7 @@ def register(app: typer.Typer) -> None:
         # falls through to its default chain.
         chain = None
         from .common import resolve_negotiation_config
+
         policies, policy_mode = resolve_negotiation_config()
         if resume_state is not None and not (policies or policy_mode):
             # A resume continues under the policy that opened the
@@ -444,6 +488,7 @@ def register(app: typer.Typer) -> None:
                 policy_mode = str(policy_mode_from_log)
         if policies or policy_mode:
             from .buyer_client import _load_buyer_chain
+
             chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
 
         try:

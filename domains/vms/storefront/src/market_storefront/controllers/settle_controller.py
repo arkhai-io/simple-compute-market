@@ -1,21 +1,18 @@
 """Settle controller — post-negotiation escrow and provisioning status."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-from fastapi_utils.cbv import cbv
-
-import market_storefront.container as _container
-from market_storefront.middleware import buyer_auth
-from market_storefront.middleware.admin_auth import require_admin_key
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
+    SettlementPublicResponse,
+    SettlementStartRequest,
     SettleRequest,
     SettleResponse,
     SettleStatusResponse,
@@ -23,17 +20,35 @@ from core_storefront.models.settle_models import (
     VerifyEscrowRequest,
     VerifyEscrowResponse,
 )
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from fastapi_utils.cbv import cbv
+from market_settlement_runtime import SettlementObligationRecord
+
+import market_storefront.container as _container
+from market_storefront.middleware import buyer_auth
+from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.services.admin_settle_service import AdminSettleService
+from market_storefront.settlement_composition import (
+    ensure_hosted_fulfillment,
+    hosted_settlement_projection,
+    load_hosted_agreement,
+    serialize_settlement_job,
+    truncate_lease_for_terminal_settlement,
+)
+from market_storefront.utils.escrow_verification import EscrowVerificationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/settle", tags=["settle"])
+settlements_router = APIRouter(prefix="/api/v1", tags=["settlements"])
 
 
 @cbv(router)
 class SettleController:
     def __init__(
         self,
-        db=Depends(lambda: _container.resolved_sqlite_client),
+        db: Any = Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
     ) -> None:
         self._db = db
 
@@ -49,18 +64,38 @@ class SettleController:
         body: SettleRequest,
         request: Request,
     ) -> Any:
-        from market_storefront.utils.escrow_verification import (
-            EscrowVerificationError,
-        )
-        from market_storefront.utils.settlement_jobs import (
-            serialize_settlement_job,
-            start_settlement_job,
-        )
 
         buyer_auth._verify(request, "settle_escrow", escrow_uid, body.buyer_address)
 
-        alkahest = _container.get_alkahest_client(body.chain_name)
-        if alkahest is None:
+        composition = _container.resolved_settlement_composition
+        if composition is None:
+            raise HTTPException(
+                status_code=503, detail="settlement runtime is unavailable"
+            )
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=body.negotiation_id
+        )
+        proposal = (thread or {}).get("buyer_escrow_proposal")
+        selection = (
+            proposal.get("settlement_selection") if isinstance(proposal, dict) else None
+        )
+        mechanism = (
+            selection.get("mechanism") if isinstance(selection, dict) else "alkahest.v1"
+        )
+        if mechanism != "alkahest.v1":
+            raise HTTPException(
+                status_code=400,
+                detail="hosted obligations use /api/v1/settlements",
+            )
+        mechanism_client = composition.mechanism_clients.get(mechanism)
+        if mechanism_client is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"settlement mechanism {mechanism!r} is not configured",
+            )
+        if mechanism == "alkahest.v1" and body.chain_name not in (
+            _container.configured_chain_names()
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -69,23 +104,30 @@ class SettleController:
                 ),
             )
         try:
-            result = await start_settlement_job(
+            result = await composition.coordinator.start(
                 escrow_uid=escrow_uid,
                 negotiation_id=body.negotiation_id,
-                ssh_public_key=body.ssh_public_key,
-                sqlite_client=self._db,
-                alkahest_client=alkahest,
+                mechanism_client=mechanism_client,
                 chain_name=body.chain_name,
+                request={"ssh_public_key": body.ssh_public_key},
             )
         except EscrowVerificationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
-            logger.error("[SETTLE] start_settlement_job failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.error("[SETTLE] settlement start failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        serialized = serialize_settlement_job(result) if "created_at" in result else result
+        serialized = (
+            serialize_settlement_job(result)
+            if "created_at" in result
+            else {
+                "escrow_uid": result.get("escrow_uid"),
+                "negotiation_id": result.get("negotiation_id"),
+                "status": result.get("status"),
+            }
+        )
         status_code = 200 if result.get("status") in ("ready", "failed") else 202
         return JSONResponse(content=serialized, status_code=status_code)
 
@@ -99,16 +141,239 @@ class SettleController:
         self,
         escrow_uid: str,
         request: Request,
-        buyer_address: str = Query(description="Buyer wallet address for EIP-191 verification"),
+        buyer_address: str = Query(
+            description="Buyer wallet address for EIP-191 verification"
+        ),
     ) -> SettleStatusResponse:
-        from market_storefront.utils.settlement_jobs import serialize_settlement_job
 
         buyer_auth._verify(request, "settle_status", escrow_uid, buyer_address)
 
         job = await self._db.load_escrow(escrow_uid=escrow_uid)
         if not job:
-            raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
+            raise HTTPException(
+                status_code=404, detail=f"No settlement job for escrow {escrow_uid}"
+            )
         return SettleStatusResponse(**serialize_settlement_job(job))
+
+
+@cbv(settlements_router)
+class SettlementsController:
+    def __init__(
+        self,
+        db: Any = Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
+    ) -> None:
+        self._db = db
+
+    @staticmethod
+    def _composition():
+        composition = _container.resolved_settlement_composition
+        if composition is None or "fiat.stripe.v1" not in composition.mechanism_clients:
+            raise HTTPException(
+                status_code=503,
+                detail="hosted settlement runtime is unavailable",
+            )
+        return composition
+
+    async def _record(self, settlement_ref: str) -> SettlementObligationRecord:
+        composition = self._composition()
+        row = await composition.repository.load_settlement_obligation_by_mechanism_ref(
+            settlement_ref
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="settlement not found")
+        record = SettlementObligationRecord.model_validate(row)
+        if record.obligation.get("mechanism") != "fiat.stripe.v1":
+            raise HTTPException(status_code=404, detail="settlement not found")
+        return record
+
+    async def _authorize(
+        self,
+        request: Request,
+        *,
+        operation: str,
+        resource_id: str,
+        record: SettlementObligationRecord,
+    ) -> None:
+        agreement = await load_hosted_agreement(
+            sqlite_client=self._db,
+            negotiation_id=record.agreement_ref,
+            obligation_ref=record.obligation_ref,
+        )
+        buyer_auth._verify(
+            request,
+            operation,
+            resource_id,
+            agreement.buyer_address,
+        )
+
+    @settlements_router.post(
+        "/settlements",
+        response_model=SettlementPublicResponse,
+        summary="Start one accepted hosted settlement obligation",
+    )
+    async def start(
+        self,
+        body: SettlementStartRequest,
+        request: Request,
+    ) -> SettlementPublicResponse:
+        composition = self._composition()
+        try:
+            agreement = await load_hosted_agreement(
+                sqlite_client=self._db,
+                negotiation_id=body.negotiation_id,
+                obligation_ref=body.obligation_ref,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        buyer_auth._verify(
+            request,
+            "settlement_start",
+            body.obligation_ref,
+            agreement.buyer_address,
+        )
+        records = await composition.runtime.register_plan(
+            agreement_ref=agreement.negotiation_id,
+            obligations=[agreement.obligation],
+        )
+        record = records[0]
+        worker_id = f"settlement-start:{uuid.uuid4().hex}"
+        try:
+            await composition.runtime.materialize(
+                obligation_ref=record.obligation_ref,
+                local_role="buyer",
+                worker_id=worker_id,
+            )
+            row = await composition.repository.load_settlement_obligation(
+                record.obligation_ref
+            )
+            assert row is not None
+            record = SettlementObligationRecord.model_validate(row)
+            if record.mechanism_status == "ready":
+                record = await ensure_hosted_fulfillment(
+                    composition=composition,
+                    sqlite_client=self._db,
+                    record=record,
+                    worker_id=f"settlement-fulfill:{uuid.uuid4().hex}",
+                )
+            projected = await hosted_settlement_projection(
+                composition=composition,
+                record=record,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[SETTLEMENTS] Hosted settlement start failed after durable reservation"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="hosted settlement authority is temporarily unavailable",
+            ) from exc
+        return SettlementPublicResponse(**projected)
+
+    @settlements_router.get(
+        "/settlements/{settlement_ref}",
+        response_model=SettlementPublicResponse,
+        summary="Retrieve hosted funding and fulfillment status",
+    )
+    async def status(
+        self,
+        settlement_ref: str,
+        request: Request,
+    ) -> SettlementPublicResponse:
+        composition = self._composition()
+        record = await self._record(settlement_ref)
+        await self._authorize(
+            request,
+            operation="settlement_status",
+            resource_id=settlement_ref,
+            record=record,
+        )
+        try:
+            await composition.runtime.reconcile_status(
+                obligation_ref=record.obligation_ref,
+                local_role="buyer",
+                worker_id=f"settlement-status:{uuid.uuid4().hex}",
+            )
+            row = await composition.repository.load_settlement_obligation(
+                record.obligation_ref
+            )
+            assert row is not None
+            record = SettlementObligationRecord.model_validate(row)
+            if record.mechanism_status == "ready" and not record.fulfillment_ref:
+                record = await ensure_hosted_fulfillment(
+                    composition=composition,
+                    sqlite_client=self._db,
+                    record=record,
+                    worker_id=f"settlement-fulfill:{uuid.uuid4().hex}",
+                )
+            projected = await hosted_settlement_projection(
+                composition=composition,
+                record=record,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[SETTLEMENTS] Hosted settlement status reconciliation failed"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="hosted settlement status is temporarily unavailable",
+            ) from exc
+        return SettlementPublicResponse(**projected)
+
+    @settlements_router.post(
+        "/settlements/{settlement_ref}/reclaim",
+        response_model=SettlementPublicResponse,
+        summary="Reclaim one eligible expired hosted settlement",
+    )
+    async def reclaim(
+        self,
+        settlement_ref: str,
+        request: Request,
+    ) -> SettlementPublicResponse:
+        composition = self._composition()
+        record = await self._record(settlement_ref)
+        await self._authorize(
+            request,
+            operation="settlement_reclaim",
+            resource_id=settlement_ref,
+            record=record,
+        )
+        try:
+            outcome = await composition.runtime.reclaim(
+                obligation_ref=record.obligation_ref,
+                local_role="buyer",
+                worker_id=f"settlement-reclaim:{uuid.uuid4().hex}",
+            )
+            if outcome.status == "busy":
+                raise HTTPException(
+                    status_code=409,
+                    detail="settlement fulfillment or collection already reserved",
+                )
+            if outcome.status == "succeeded":
+                await truncate_lease_for_terminal_settlement(
+                    escrow_uid=settlement_ref,
+                    reason="hosted settlement reclaimed",
+                    sqlite_client=self._db,
+                )
+            row = await composition.repository.load_settlement_obligation(
+                record.obligation_ref
+            )
+            assert row is not None
+            record = SettlementObligationRecord.model_validate(row)
+            projected = await hosted_settlement_projection(
+                composition=composition,
+                record=record,
+            )
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("[SETTLEMENTS] Hosted reclaim reconciliation failed")
+            raise HTTPException(
+                status_code=503,
+                detail="hosted settlement reclaim is temporarily unavailable",
+            ) from exc
+        return SettlementPublicResponse(**projected)
 
 
 # ---------------------------------------------------------------------------
@@ -122,10 +387,10 @@ admin_settle_router = APIRouter(prefix="/api/v1/admin/settle", tags=["admin-sett
 class AdminSettleController:
     def __init__(
         self,
-        db=Depends(lambda: _container.resolved_sqlite_client),
-        _key=Depends(require_admin_key),
+        db: Any = Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
+        _key: Any = Depends(require_admin_key),  # noqa: B008
     ) -> None:
-        from market_storefront.services.admin_settle_service import AdminSettleService
+
         self._db = db
         self._svc = AdminSettleService(
             sqlite_client=db,
@@ -154,10 +419,10 @@ class AdminSettleController:
                 chain_name=body.chain_name,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
             logger.error("[ADMIN SETTLE] verify_escrow failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         return VerifyEscrowResponse(**result)
 
     @admin_settle_router.post(
@@ -180,10 +445,12 @@ class AdminSettleController:
                 duration_seconds=body.duration_seconds,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
-            logger.error("[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.error(
+                "[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True
+            )
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         return EvaluateSettleResponse(**result)
 
     @admin_settle_router.get(
@@ -201,8 +468,12 @@ class AdminSettleController:
     async def wait_for_settlement(
         self,
         escrow_uid: str,
-        timeout: float = Query(default=60.0, gt=0, le=120,
-                               description="Maximum seconds to wait (server-enforced, max 120)"),
+        timeout: float = Query(
+            default=60.0,
+            gt=0,
+            le=120,
+            description="Maximum seconds to wait (server-enforced, max 120)",
+        ),
     ) -> SettleWaitResponse:
         """Server-side long-poll: block until settlement is terminal or timeout elapses."""
         _terminal = {"ready", "failed"}

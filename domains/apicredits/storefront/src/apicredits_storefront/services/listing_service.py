@@ -59,7 +59,8 @@ class ListingService:
         if available is None:
             available = next(
                 (
-                    units for (_site, rid), units in availability.items()
+                    units
+                    for (_site, rid), units in availability.items()
                     if rid == resource_id
                 ),
                 None,
@@ -75,21 +76,19 @@ class ListingService:
                 f"(available={available})."
             )
 
-        from apicredits_storefront.domain_runtime import (
-            get_market_domain_contract,
+        listing = get_market_domain_contract().codecs.listing(
+            {
+                "offer_resource": {
+                    "service_name": service_name,
+                    "description": description,
+                    "openapi_url": openapi_url,
+                    "base_url": base_url,
+                    "resource_id": resource_id,
+                },
+                "accepted_escrows": accepted_escrows,
+                "demands": [],
+            }
         )
-
-        listing = get_market_domain_contract().codecs.listing({
-            "offer_resource": {
-                "service_name": service_name,
-                "description": description,
-                "openapi_url": openapi_url,
-                "base_url": base_url,
-                "resource_id": resource_id,
-            },
-            "accepted_escrows": accepted_escrows,
-            "demands": [],
-        })
         listing_id = str(uuid.uuid4())
         now_iso = datetime.now().isoformat()
         await self._db.upsert_listing(
@@ -107,7 +106,8 @@ class ListingService:
             paused=paused,
         )
         stage_event(
-            "discovery", "token_listing_created",
+            "discovery",
+            "token_listing_created",
             listing_id=listing_id,
             resource_id=resource_id,
             service_name=service_name,

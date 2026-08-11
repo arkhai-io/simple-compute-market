@@ -1,4 +1,4 @@
-"""Settlement: issuance fulfillment orchestration + the settle job flow."""
+"""Settlement: issuance fulfillment and shared-runtime composition."""
 
 from __future__ import annotations
 
@@ -6,12 +6,16 @@ import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
 
 from domains.apicredits.settlement import fulfillment as fulfillment_module
-from domains.apicredits.settlement.credits_client import CreditsServiceClient, CreditsServiceError
+from domains.apicredits.settlement.credits_client import (
+    CreditsServiceClient,
+    CreditsServiceError,
+)
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from market_core import ImmutableFulfillmentCapability
 
@@ -37,14 +41,17 @@ def _events():
 # fulfill_api_credits_obligation
 # ---------------------------------------------------------------------------
 
+
 async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     issued = {}
 
     async def fake_issue(self, **kwargs):
         issued.update(kwargs)
         return {
-            "key_id": "ak_new", "secret": "ak_new.s3cret",
-            "quantity": kwargs["quantity"], "balance": 3,
+            "key_id": "ak_new",
+            "secret": "ak_new.s3cret",
+            "quantity": kwargs["quantity"],
+            "balance": 3,
             "capacity_reservation_id": kwargs.get("capacity_reservation_id"),
             "already_issued": False,
         }
@@ -62,7 +69,10 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         service_url="http://tokens:8082",
         admin_key="k",
         stage_event=stage_event,
-        held_reservation={"capacity_reservation_id": "alloc-7", "resource_id": "svc-quota"},
+        held_reservation={
+            "capacity_reservation_id": "alloc-7",
+            "resource_id": "svc-quota",
+        },
     )
 
     assert result["status"] == "fulfilled"
@@ -200,9 +210,76 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
         )
 
 
+async def test_failure_policy_injects_ordered_quota_event_and_webhook_handlers(
+    monkeypatch,
+):
+    from apicredits_storefront.services import fulfillment_service
+
+    calls: list[str] = []
+
+    async def release(_store, context):
+        calls.append("release_capacity")
+        context["state"] = "released"
+        context["reopened_listing_ids"] = ["listing-1"]
+        return {"status": "succeeded"}
+
+    async def emit(_store, context):
+        calls.append("emit_event")
+        assert context["state"] is None
+        return {"status": "succeeded"}
+
+    async def webhook(_store, context):
+        calls.append("webhook")
+        assert context["reopened_listing_ids"] == []
+        return {"status": "sent", "status_code": 204}
+
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_configured_failure_actions",
+        lambda: ("release_capacity", "emit_event", "webhook"),
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_release_capacity_handler",
+        release,
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_emit_failure_event_handler",
+        emit,
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "_failure_webhook_handler",
+        webhook,
+    )
+
+    result = await fulfillment_service.build_api_credit_failure_policy().apply(
+        object(),
+        {
+            "escrow_uid": "0xfailed",
+            "state": None,
+            "reopened_listing_ids": [],
+        },
+    )
+
+    assert calls == [
+        "release_capacity",
+        "emit_event",
+        "webhook",
+    ]
+    assert [action["status"] for action in result.actions] == [
+        "succeeded",
+        "succeeded",
+        "sent",
+    ]
+    assert result.context["state"] is None
+
+
 # ---------------------------------------------------------------------------
-# start_settlement_job — fail-closed verification + credentials channel
+# Settlement coordinator — exact obligation + credentials channel
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 async def settled_db(tmp_path, monkeypatch):
@@ -212,6 +289,7 @@ async def settled_db(tmp_path, monkeypatch):
     from apicredits_storefront.services import capacity_client as cc_module
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
     from apicredits_storefront.utils.sync_negotiation import start_sync_negotiation
+    from apicredits_storefront.utils import config as config_module
     from market_core.schemas import EscrowProposal, ProvisionTerms
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
@@ -224,9 +302,34 @@ async def settled_db(tmp_path, monkeypatch):
             return None  # no hold; issuance reserves fresh
 
     monkeypatch.setattr(
-        cc_module, "build_capacity_client", lambda factory: _Capacity(),
+        cc_module,
+        "build_capacity_client",
+        lambda factory: _Capacity(),
     )
 
+    monkeypatch.setattr(
+        config_module.settings.wallet,
+        "address",
+        "0x" + "22" * 20,
+    )
+    address_config = tmp_path / "alkahest-addresses.json"
+    address_config.write_text(
+        json.dumps(
+            {
+                "arbiters_addresses": {
+                    "recipient_arbiter": "0x" + "33" * 20,
+                }
+            }
+        )
+    )
+    monkeypatch.setitem(
+        config_module.CHAINS,
+        "anvil",
+        SimpleNamespace(
+            alkahest_address_config_path=str(address_config),
+            rpc_url="http://x",
+        ),
+    )
     client = SQLiteClient(db_path=str(tmp_path / "settle.db"))
     thread_module._thread_store = None
     get_thread_store(
@@ -241,12 +344,14 @@ async def settled_db(tmp_path, monkeypatch):
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource=dict(_OFFER),
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": escrow_addr,
-            "literal_fields": {"token": token},
-            "rates": [{"field": "amount", "per": "token", "value": "100"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": escrow_addr,
+                "literal_fields": {"token": token},
+                "rates": [{"field": "amount", "per": "token", "value": "100"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=None,
         seller="http://seller:8002",
@@ -263,28 +368,93 @@ async def settled_db(tmp_path, monkeypatch):
             rates=[{"field": "amount", "per": "token", "value": "100"}],
             expiration_unix=1_800_000_000,
         ),
-        provision_terms=ProvisionTerms(kind="api_credits.v1", version=1, payload={"quantity": 3, "key": {"mode": "new"}}),
+        provision_terms=ProvisionTerms(
+            kind="api_credits.v1",
+            version=1,
+            payload={"quantity": 3, "key": {"mode": "new"}},
+        ),
         our_base_url="http://seller:8002",
         their_agent_url=_BUYER,
     )
     assert response["action"] == "accept"
+    assert response.get("settlement_plan"), response
     return client, response["negotiation_id"]
 
 
-async def test_settlement_job_verifies_issues_and_stores_credentials(
-    settled_db, monkeypatch,
+def _build_settlement_composition(db):
+    from apicredits_storefront.domain_runtime import (
+        fulfill_api_credit_settlement,
+        persist_api_credit_settlement_outcome,
+        prepare_api_credit_settlement,
+        reserve_api_credit_settlement,
+    )
+    from market_settlement_runtime import (
+        ConditionOutcome,
+        EffectOutcome,
+        SettlementJobCoordinator,
+        SettlementRuntime,
+        SettlementServicingWorker,
+        SettlementSQLiteRepository,
+        StatusOutcome,
+    )
+
+    class ReadyEscrowClient:
+        async def get_status(self, _obligation, **kwargs):
+            return StatusOutcome(
+                status="ready",
+                mechanism_ref=kwargs["mechanism_ref"],
+            )
+
+        async def check(self, _obligation, **_kwargs):
+            return ConditionOutcome(decision="ready")
+
+        async def collect(self, _obligation, **_kwargs):
+            return EffectOutcome(receipt={"tx": "collected"})
+
+    repository = SettlementSQLiteRepository(db.db_path, apply_migrations=False)
+    runtime = SettlementRuntime(
+        repository,
+        {"alkahest.v1": ReadyEscrowClient()},
+    )
+    worker = SettlementServicingWorker(
+        runtime,
+        repository,
+        worker_id="api-credit-test",
+        interval_seconds=30,
+    )
+    coordinator = SettlementJobCoordinator(
+        runtime,
+        prepare=partial(prepare_api_credit_settlement, sqlite_client=db),
+        reserve_start=partial(
+            reserve_api_credit_settlement,
+            db,
+            settlement_runtime=runtime,
+            wake_servicing=worker.wake,
+        ),
+        fulfill=fulfill_api_credit_settlement,
+        persist_outcome=partial(persist_api_credit_settlement_outcome, db),
+        wake_servicing=worker.wake,
+    )
+    return runtime, worker, coordinator
+
+
+async def test_settlement_coordinator_verifies_issues_and_stores_credentials(
+    settled_db,
+    monkeypatch,
 ):
     db, neg_id = settled_db
     from apicredits_storefront import domain_runtime
-    from apicredits_storefront.utils import config as config_module
-    from apicredits_storefront.utils import settlement_jobs
+    from core_storefront import escrow_verification
 
     verified = {}
+    fulfillment_calls: list[dict] = []
 
     async def fake_verify(**kwargs):
         verified.update(kwargs)
+        return 0
 
     async def fake_fulfill(**kwargs):
+        fulfillment_calls.append(kwargs)
         return {
             "status": "fulfilled",
             "fulfillment_uid": "0xfulfill",
@@ -292,7 +462,11 @@ async def test_settlement_job_verifies_issues_and_stores_credentials(
             "tenant_credentials": {"key_id": "ak_new", "secret": "s3cret"},
         }
 
-    monkeypatch.setattr(settlement_jobs, "verify_escrow_for_settlement", fake_verify)
+    monkeypatch.setattr(
+        escrow_verification,
+        "verify_escrow_for_settlement",
+        fake_verify,
+    )
     monkeypatch.setattr(
         domain_runtime,
         "APICREDITS_STOREFRONT_DOMAIN",
@@ -301,25 +475,25 @@ async def test_settlement_job_verifies_issues_and_stores_credentials(
             fulfillment=ImmutableFulfillmentCapability(fulfill=fake_fulfill),
         ),
     )
-    monkeypatch.setitem(
-        config_module.CHAINS, "anvil",
-        SimpleNamespace(alkahest_address_config_path=None, rpc_url="http://x"),
+    mechanism_client = object()
+    runtime, worker, coordinator = _build_settlement_composition(db)
+
+    result = await coordinator.start(
+        escrow_uid="0xdeal",
+        negotiation_id=neg_id,
+        mechanism_client=mechanism_client,
+        chain_name="anvil",
     )
-    try:
-        result = await settlement_jobs.start_settlement_job(
-            escrow_uid="0xdeal",
-            negotiation_id=neg_id,
-            sqlite_client=db,
-            alkahest_client=object(),
-            chain_name="anvil",
-        )
-    finally:
-        pass
     assert result["status"] == "provisioning"
+    assert domain_runtime.serialize_api_credit_settlement_start(result) == {
+        "escrow_uid": "0xdeal",
+        "negotiation_id": neg_id,
+        "status": "provisioning",
+    }
     assert verified["escrow_uid"] == "0xdeal"
     assert int(verified["agreed_price"]) == 300
+    assert verified["agreed_duration_seconds"] == 0
 
-    # Background task lands the credentials on the job row.
     for _ in range(50):
         job = await db.load_escrow(escrow_uid="0xdeal")
         if job and job.get("status") == "ready":
@@ -327,44 +501,104 @@ async def test_settlement_job_verifies_issues_and_stores_credentials(
         await asyncio.sleep(0.02)
     assert job["status"] == "ready"
     assert json.loads(job["tenant_credentials"])["secret"] == "s3cret"
+    assert job["obligation_index"] == 0
+    assert job["obligation_ref"]
+    serialized = domain_runtime.serialize_api_credit_settlement(job)
+    assert serialized["tenant_credentials"]["secret"] == "s3cret"
+    assert json.loads(serialized["connection_details"])["key_id"] == "ak_new"
 
-    # The fulfilled deal is registered with the claims engine.
-    claim = await db.load_claim("0xdeal")
-    assert claim is not None
-    assert claim["fulfillment_ref"] == "0xfulfill"
+    status = await runtime.get_status(neg_id)
+    obligation = status.obligations[0]
+    assert obligation.fulfillment_ref == "0xfulfill"
 
-    # Idempotent: a second settle returns the existing row.
-    again = await settlement_jobs.start_settlement_job(
+    processed = 0
+    for _ in range(50):
+        processed = await worker.run_once()
+        if processed:
+            break
+        await asyncio.sleep(0.02)
+    assert processed == 1
+    serviced = await runtime.get_status(neg_id)
+    assert serviced.obligations[0].collection_state == "succeeded"
+    assert obligation.mechanism_ref == "0xdeal"
+    assert "s3cret" not in json.dumps(obligation.model_dump(mode="json"))
+
+    again = await coordinator.start(
         escrow_uid="0xdeal",
         negotiation_id=neg_id,
-        sqlite_client=db,
-        alkahest_client=object(),
+        mechanism_client=mechanism_client,
         chain_name="anvil",
     )
     assert again["status"] == "ready"
+    assert len(fulfillment_calls) == 1
 
 
-async def test_settlement_job_fails_closed_on_bad_escrow(settled_db, monkeypatch):
+async def test_legacy_ready_row_recovers_into_shared_servicing(
+    settled_db,
+    monkeypatch,
+):
     db, neg_id = settled_db
-    from core_storefront.escrow_verification import EscrowVerificationError
+    from core_storefront import escrow_verification
 
-    from apicredits_storefront.utils import config as config_module
-    from apicredits_storefront.utils import settlement_jobs
+    async def fake_verify(**_kwargs):
+        return 0
+
+    monkeypatch.setattr(
+        escrow_verification,
+        "verify_escrow_for_settlement",
+        fake_verify,
+    )
+    assert await db.insert_escrow(
+        escrow_uid="0xlegacy-ready",
+        negotiation_id=neg_id,
+        chain_name="anvil",
+        escrow_address="0x" + "11" * 20,
+        status="provisioning",
+    )
+    await db.update_escrow(
+        escrow_uid="0xlegacy-ready",
+        status="ready",
+        fulfillment_uid="0xlegacy-fulfillment",
+    )
+
+    runtime, worker, coordinator = _build_settlement_composition(db)
+    result = await coordinator.start(
+        escrow_uid="0xlegacy-ready",
+        negotiation_id=neg_id,
+        mechanism_client=object(),
+        chain_name="anvil",
+    )
+
+    assert result["status"] == "ready"
+    status = await runtime.get_status(neg_id)
+    assert status.obligations[0].fulfillment_ref == "0xlegacy-fulfillment"
+    assert await worker.run_once() == 1
+    serviced = await runtime.get_status(neg_id)
+    assert serviced.obligations[0].collection_state == "succeeded"
+
+
+async def test_settlement_coordinator_fails_closed_on_bad_escrow(
+    settled_db,
+    monkeypatch,
+):
+    db, neg_id = settled_db
+    from core_storefront import escrow_verification
+    from core_storefront.escrow_verification import EscrowVerificationError
 
     async def fake_verify(**kwargs):
         raise EscrowVerificationError("amount mismatch")
 
-    monkeypatch.setattr(settlement_jobs, "verify_escrow_for_settlement", fake_verify)
-    monkeypatch.setitem(
-        config_module.CHAINS, "anvil",
-        SimpleNamespace(alkahest_address_config_path=None, rpc_url="http://x"),
+    monkeypatch.setattr(
+        escrow_verification,
+        "verify_escrow_for_settlement",
+        fake_verify,
     )
+    _, _, coordinator = _build_settlement_composition(db)
     with pytest.raises(EscrowVerificationError):
-        await settlement_jobs.start_settlement_job(
+        await coordinator.start(
             escrow_uid="0xbad",
             negotiation_id=neg_id,
-            sqlite_client=db,
-            alkahest_client=object(),
+            mechanism_client=object(),
             chain_name="anvil",
         )
     assert await db.load_escrow(escrow_uid="0xbad") is None

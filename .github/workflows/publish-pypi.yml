@@ -71,6 +71,7 @@ jobs:
             kit-config: ['kit/config/**', '.github/workflows/publish-pypi.yml']
             kit-identity: ['kit/identity/**', '.github/workflows/publish-pypi.yml']
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
+            kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
             core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
             core-storefront: ['core/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -104,6 +105,7 @@ jobs:
             {"key": "kit-config",             "path": "kit/config",                       "dist": "arkhai-kit-config"},
             {"key": "kit-identity",           "path": "kit/identity",                     "dist": "arkhai-kit-identity"},
             {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
+            {"key": "kit-settlement-runtime", "path": "kit/settlement-runtime",               "dist": "arkhai-kit-settlement-runtime"},
             {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
             {"key": "core-buyer",             "path": "core/buyer",                       "dist": "arkhai-core-buyer"},
             {"key": "core-storefront",        "path": "core/storefront",                  "dist": "arkhai-core-storefront"},
@@ -171,6 +173,22 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "::notice::publishing ${DIST} ${version}"
           fi
+      - name: Download exact hosted release assets
+        if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .dist
+          repository="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["repository"])')"
+          version="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["release_version"])')"
+          manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["manifest_filename"])')"
+          wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["client_wheel"]["filename"])')"
+          test -n "$repository"
+          gh release download "v$version" --repo "$repository" \
+            --pattern "$manifest" --pattern "$wheel" --dir .dist
+      - name: Verify staged hosted client release
+        if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
+        run: make verify-hosted-release
       - name: Build distribution
         if: steps.check.outputs.skip == 'false'
         working-directory: ${{ matrix.path }}

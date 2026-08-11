@@ -13,7 +13,8 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -48,16 +49,19 @@ class FakeSite:
         return httpx.MockTransport(self._handle)
 
     def _emit(self, kind: str, resource_id: str | None) -> None:
-        self.events.append({
-            "version": next(self._versions),
-            "kind": kind,
-            "resource_id": resource_id,
-            "occurred_at": "2026-01-01T00:00:00Z",
-        })
+        self.events.append(
+            {
+                "version": next(self._versions),
+                "kind": kind,
+                "resource_id": resource_id,
+                "occurred_at": "2026-01-01T00:00:00Z",
+            }
+        )
 
     def _available(self, rid: str) -> int:
         held = sum(
-            a["units"] for a in self.reservations.values()
+            a["units"]
+            for a in self.reservations.values()
             if a["resource_id"] == rid
             and a["state"] in ("reserved", "provisioning", "leased", "releasing")
         )
@@ -81,30 +85,36 @@ class FakeSite:
             return httpx.Response(200, json=self.resources[rid])
 
         if path == "/api/v1/capacity/snapshot":
-            return httpx.Response(200, json={"resources": [
-                {
-                    "resource_id": rid,
-                    "resource_type": "compute.gpu",
-                    "unit": "count",
-                    "value": row["total_units"],
-                    "available_units": self._available(rid),
-                    # Real kit/site's snapshot always includes a
-                    # multidimensional "available" map (PRIMARY_DIMENSION
-                    # is "gpu_count") -- without it, an injected exact
-                    # ClaimMatcher (which always resolves both legacy and
-                    # modern claims through this map, never
-                    # available_units directly) sees every row as
-                    # zero-capacity for ranking purposes, regardless of
-                    # this fake's own separate reservation-matching logic.
-                    "available": {"gpu_count": self._available(rid)},
-                    "state": (
-                        "available" if self._available(rid) > 0 else "leased"
-                    ),
-                    "attributes": row["attributes"],
-                    "enabled": True,
-                }
-                for rid, row in self.resources.items() if row["enabled"]
-            ]})
+            return httpx.Response(
+                200,
+                json={
+                    "resources": [
+                        {
+                            "resource_id": rid,
+                            "resource_type": "compute.gpu",
+                            "unit": "count",
+                            "value": row["total_units"],
+                            "available_units": self._available(rid),
+                            # Real kit/site's snapshot always includes a
+                            # multidimensional "available" map (PRIMARY_DIMENSION
+                            # is "gpu_count") -- without it, an injected exact
+                            # ClaimMatcher (which always resolves both legacy and
+                            # modern claims through this map, never
+                            # available_units directly) sees every row as
+                            # zero-capacity for ranking purposes, regardless of
+                            # this fake's own separate reservation-matching logic.
+                            "available": {"gpu_count": self._available(rid)},
+                            "state": (
+                                "available" if self._available(rid) > 0 else "leased"
+                            ),
+                            "attributes": row["attributes"],
+                            "enabled": True,
+                        }
+                        for rid, row in self.resources.items()
+                        if row["enabled"]
+                    ]
+                },
+            )
 
         if path == "/api/v1/capacity/probe":
             return httpx.Response(200, json={"match": self._match(body["claim"])})
@@ -122,11 +132,16 @@ class FakeSite:
                 "deal_ref": body.get("deal_ref") or {},
             }
             self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"reservation": {
-                **match,
-                "capacity_reservation_id": capacity_reservation_id,
-                "hold_expires_at": None,
-            }})
+            return httpx.Response(
+                200,
+                json={
+                    "reservation": {
+                        **match,
+                        "capacity_reservation_id": capacity_reservation_id,
+                        "hold_expires_at": None,
+                    }
+                },
+            )
 
         if path.endswith("/commit"):
             capacity_reservation_id = path.split("/")[-2]
@@ -146,9 +161,12 @@ class FakeSite:
             else:
                 escrow = (body.get("deal_ref") or {}).get("escrow_uid")
                 reservation = next(
-                    (a for a in self.reservations.values()
-                     if a["deal_ref"].get("escrow_uid") == escrow
-                     and a["state"] != "released"),
+                    (
+                        a
+                        for a in self.reservations.values()
+                        if a["deal_ref"].get("escrow_uid") == escrow
+                        and a["state"] != "released"
+                    ),
                     None,
                 )
             if reservation is None or reservation["state"] == "released":
@@ -157,10 +175,15 @@ class FakeSite:
             reservation["failure_reason"] = body.get("failure_reason")
             reservation["failure_message"] = body.get("failure_message")
             self._emit("released", reservation["resource_id"])
-            return httpx.Response(200, json={"reservation": {
-                **reservation,
-                "allocated_gpu_count": reservation["units"],
-            }})
+            return httpx.Response(
+                200,
+                json={
+                    "reservation": {
+                        **reservation,
+                        "allocated_gpu_count": reservation["units"],
+                    }
+                },
+            )
 
         if path.endswith("/truncate-lease"):
             capacity_reservation_id = path.split("/")[-2]
@@ -175,22 +198,31 @@ class FakeSite:
             escrow = request.url.params.get("escrow_uid")
             state = request.url.params.get("state")
             rows = [
-                a for a in self.reservations.values()
+                a
+                for a in self.reservations.values()
                 if (escrow is None or a["deal_ref"].get("escrow_uid") == escrow)
                 and (state is None or a["state"] == state)
             ]
-            return httpx.Response(200, json={
-                "reservations": rows, "total": len(rows),
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "reservations": rows,
+                    "total": len(rows),
+                },
+            )
 
         if path == "/api/v1/capacity/events":
             after = int(request.url.params.get("after", 0))
             limit = int(request.url.params.get("limit", 500))
             page = [e for e in self.events if e["version"] > after][:limit]
             latest = self.events[-1]["version"] if self.events else 0
-            return httpx.Response(200, json={
-                "events": page, "latest_version": latest,
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "events": page,
+                    "latest_version": latest,
+                },
+            )
 
         return httpx.Response(404, json={"detail": f"unhandled {path}"})
 
@@ -211,7 +243,10 @@ class FakeSite:
         # lives in a resource's own attributes dict the way
         # gpu_model/region do.
         required_resource_type = claim.get("resource_type")
-        if required_resource_type is not None and required_resource_type != "compute.gpu":
+        if (
+            required_resource_type is not None
+            and required_resource_type != "compute.gpu"
+        ):
             return None
         for rid, row in self.resources.items():
             if not row["enabled"]:
@@ -259,7 +294,9 @@ def aggregate_over(
     )
 
     remote = SiteCapacityClient(
-        "http://fake-site:8081", "test-key", transport=fake.transport(),
+        "http://fake-site:8081",
+        "test-key",
+        transport=fake.transport(),
     )
     aggregate = AggregateCapacityClient({site_name: remote})
     if sqlite_client_factory is not None:
@@ -278,17 +315,30 @@ def site_capacity(
 ) -> Iterator[Any]:
     """Route every build_capacity_client() call at the fake ledger."""
     aggregate = aggregate_over(
-        fake, site_name=site_name, sqlite_client_factory=sqlite_client_factory,
+        fake,
+        site_name=site_name,
+        sqlite_client_factory=sqlite_client_factory,
     )
-    patches = [patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
-        return_value=aggregate,
-    )]
+    patches = [
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=aggregate,
+        )
+    ]
     # fulfillment_service binds the name at import time.
-    patches.append(patch(
-        "market_storefront.services.fulfillment_service.build_capacity_client",
-        return_value=aggregate,
-    ))
+    patches.append(
+        patch(
+            "market_storefront.services.fulfillment_service.build_capacity_client",
+            return_value=aggregate,
+        )
+    )
+    # settlement_composition also binds the factory at import time.
+    patches.append(
+        patch(
+            "market_storefront.settlement_composition.build_capacity_client",
+            return_value=aggregate,
+        )
+    )
     with contextlib.ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
@@ -296,7 +346,11 @@ def site_capacity(
 
 
 async def pump_events(
-    aggregate: Any, fake: FakeSite, *, site_name: str = "default", after: int = 0,
+    aggregate: Any,
+    fake: FakeSite,
+    *,
+    site_name: str = "default",
+    after: int = 0,
 ) -> int:
     """Deliver the fake site's events to aggregate subscribers (the
     production poller's job). Returns the last delivered version."""
@@ -306,10 +360,13 @@ async def pump_events(
     for event in fake.events:
         if event["version"] <= after:
             continue
-        await aggregate.emit_site_delta(site_name, CapacityDelta(
-            kind=event["kind"],
-            version=event["version"],
-            resource_id=event.get("resource_id"),
-        ))
+        await aggregate.emit_site_delta(
+            site_name,
+            CapacityDelta(
+                kind=event["kind"],
+                version=event["version"],
+                resource_id=event.get("resource_id"),
+            ),
+        )
         last = event["version"]
     return last

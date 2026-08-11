@@ -11,7 +11,9 @@ from domains.vms.settlement import (
     token_resource_from_accepted_escrow,
 )
 from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
-from market_storefront.services.vm_job_spec_service import compute_capacity_claim_from_order
+from market_storefront.services.vm_job_spec_service import (
+    compute_capacity_claim_from_order,
+)
 
 
 def build_vm_fulfillment_plan(

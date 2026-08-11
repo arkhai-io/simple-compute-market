@@ -89,9 +89,14 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
     if not sites:
         url = str(getattr(cap, "authority_url", "") or "").strip()
         if not url:
-            url = str(getattr(
-                getattr(config.settings, "provisioning", None), "service_url", "",
-            ) or "")
+            url = str(
+                getattr(
+                    getattr(config.settings, "provisioning", None),
+                    "service_url",
+                    "",
+                )
+                or ""
+            )
         if url:
             sites["default"] = url.rstrip("/")
     if not sites:
@@ -105,7 +110,8 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
 
 
 async def member_availability_view(
-    client: Any, db_path: str | None = None,
+    client: Any,
+    db_path: str | None = None,
 ) -> dict[tuple[str | None, str], int]:
     """Available units per pool member, from the aggregated snapshots.
 
@@ -175,19 +181,32 @@ def _make_listing_reconcile_subscriber(
         # each source actually provides.
         projection = (
             site_pool_projection()
-            if bool(getattr(getattr(settings, "capacity", None), "use_site_projection_for_listings", False))
+            if bool(
+                getattr(
+                    getattr(settings, "capacity", None),
+                    "use_site_projection_for_listings",
+                    False,
+                )
+            )
             else None
         )
         buckets = site_capacity_buckets() if projection is not None else None
-        if delta.kind in _CONSUMING_DELTA_KINDS or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
+        if (
+            delta.kind in _CONSUMING_DELTA_KINDS
+            or delta.kind in _MIXED_DIRECTION_DELTA_KINDS
+        ):
             closed = await close_stale_compute_listings_after_capacity_change(
-                db_path, home_site=home_site, configured_site_count=len(sites),
-                member_availability=availability, site_pool_projection=projection,
+                db_path,
+                home_site=home_site,
+                configured_site_count=len(sites),
+                member_availability=availability,
+                site_pool_projection=projection,
                 site_capacity_buckets=buckets,
             )
             if closed:
                 stage_event(
-                    "provision", "stale_compute_listings_closed",
+                    "provision",
+                    "stale_compute_listings_closed",
                     resource_id=delta.resource_id,
                     site=delta.site,
                     capacity_version=delta.version,
@@ -195,13 +214,16 @@ def _make_listing_reconcile_subscriber(
                 )
         if delta.kind == "released" or delta.kind in _MIXED_DIRECTION_DELTA_KINDS:
             reopened = await reopen_available_compute_listings_after_capacity_change(
-                db_path, home_site=home_site, member_availability=availability,
+                db_path,
+                home_site=home_site,
+                member_availability=availability,
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
             )
             if reopened:
                 stage_event(
-                    "provision", "compute_listings_reopened",
+                    "provision",
+                    "compute_listings_reopened",
                     resource_id=delta.resource_id,
                     site=delta.site,
                     capacity_version=delta.version,
@@ -230,8 +252,9 @@ def _aggregate_for(
     placement = PLACEMENT_POLICIES.get(placement_name)
     if placement is None:
         logger.warning(
-            "[CAPACITY] Unknown placement policy %r — using fill_first "
-            "(known: %s)", placement_name, sorted(PLACEMENT_POLICIES),
+            "[CAPACITY] Unknown placement policy %r — using fill_first (known: %s)",
+            placement_name,
+            sorted(PLACEMENT_POLICIES),
         )
         placement = fill_first
     if placement is most_available:
@@ -251,10 +274,7 @@ def _aggregate_for(
             ),
         )
     aggregate = AggregateCapacityClient(
-        {
-            name: SiteCapacityClient(url, admin_key)
-            for name, url in sites.items()
-        },
+        {name: SiteCapacityClient(url, admin_key) for name, url in sites.items()},
         placement=placement,
     )
     aggregate.subscribe(
@@ -331,7 +351,8 @@ class AggregateFulfillmentClient:
     def _route_order(self, capacity_reservation_id: str | None) -> Iterable[str]:
         cached = (
             self._reservation_sites.get(str(capacity_reservation_id))
-            if capacity_reservation_id else None
+            if capacity_reservation_id
+            else None
         )
         if cached and cached in self._sites:
             yield cached
@@ -342,7 +363,8 @@ class AggregateFulfillmentClient:
             yield from self._sites
 
     async def schedule_resource(
-        self, request: FulfillmentScheduleRequest,
+        self,
+        request: FulfillmentScheduleRequest,
     ) -> FulfillmentScheduleResponse:
         last_error: Exception | None = None
         for name in self._route_order(request.capacity_reservation_id):
@@ -351,7 +373,9 @@ class AggregateFulfillmentClient:
             except ComputeProvisioningError as exc:
                 logger.warning(
                     "[FULFILLMENT_AGGREGATOR] schedule at site %r failed, "
-                    "trying next: %s", name, exc,
+                    "trying next: %s",
+                    name,
+                    exc,
                 )
                 last_error = exc
                 continue
@@ -361,7 +385,8 @@ class AggregateFulfillmentClient:
         raise last_error
 
     async def begin_fulfillment(
-        self, body: FulfillmentRequestBody,
+        self,
+        body: FulfillmentRequestBody,
     ) -> FulfillmentAcceptanceResponse:
         last_error: Exception | None = None
         for name in self._route_order(body.capacity_reservation_id):
@@ -369,8 +394,9 @@ class AggregateFulfillmentClient:
                 result = await self._sites[name].begin_fulfillment(body)
             except ComputeProvisioningError as exc:
                 logger.warning(
-                    "[FULFILLMENT_AGGREGATOR] begin at site %r failed, "
-                    "trying next: %s", name, exc,
+                    "[FULFILLMENT_AGGREGATOR] begin at site %r failed, trying next: %s",
+                    name,
+                    exc,
                 )
                 last_error = exc
                 continue
@@ -380,7 +406,10 @@ class AggregateFulfillmentClient:
         raise last_error
 
     async def get_fulfillment_status(
-        self, fulfillment_id: str, *, capacity_reservation_id: str | None = None,
+        self,
+        fulfillment_id: str,
+        *,
+        capacity_reservation_id: str | None = None,
     ) -> FulfillmentStatusResponse:
         """Read fulfillment status, routed by ``capacity_reservation_id`` if
         the caller has it (it's keyed on that, not ``fulfillment_id``, in the
@@ -393,7 +422,9 @@ class AggregateFulfillmentClient:
             except ComputeProvisioningError as exc:
                 logger.warning(
                     "[FULFILLMENT_AGGREGATOR] status at site %r failed, "
-                    "trying next: %s", name, exc,
+                    "trying next: %s",
+                    name,
+                    exc,
                 )
                 last_error = exc
                 continue
@@ -401,7 +432,10 @@ class AggregateFulfillmentClient:
         raise last_error
 
     async def get_fulfillment_result(
-        self, fulfillment_id: str, *, capacity_reservation_id: str | None = None,
+        self,
+        fulfillment_id: str,
+        *,
+        capacity_reservation_id: str | None = None,
     ) -> VersionedEnvelope[dict[str, Any]]:
         """Read fulfillment result; see ``get_fulfillment_status`` on routing."""
         last_error: Exception | None = None
@@ -411,7 +445,9 @@ class AggregateFulfillmentClient:
             except ComputeProvisioningError as exc:
                 logger.warning(
                     "[FULFILLMENT_AGGREGATOR] result at site %r failed, "
-                    "trying next: %s", name, exc,
+                    "trying next: %s",
+                    name,
+                    exc,
                 )
                 last_error = exc
                 continue
@@ -528,9 +564,14 @@ async def capacity_events_poller_loop() -> None:
     from market_storefront.utils import config
     from market_storefront.utils.sqlite_client import get_sqlite_client
 
-    interval = float(getattr(
-        getattr(config.settings, "capacity", None), "poll_interval", 5,
-    ) or 5)
+    interval = float(
+        getattr(
+            getattr(config.settings, "capacity", None),
+            "poll_interval",
+            5,
+        )
+        or 5
+    )
     aggregate = build_capacity_client(lambda: get_sqlite_client())
     site_clients = remote_site_clients(aggregate)
 
@@ -539,18 +580,27 @@ async def capacity_events_poller_loop() -> None:
             close_stale_compute_listings_after_capacity_change,
             reopen_available_compute_listings_after_capacity_change,
         )
+
         db_path = get_sqlite_client().db_path
         availability = await member_availability_view(aggregate, db_path)
         await close_stale_compute_listings_after_capacity_change(
-            db_path, member_availability=availability,
+            db_path,
+            member_availability=availability,
         )
         await reopen_available_compute_listings_after_capacity_change(
-            db_path, member_availability=availability,
+            db_path,
+            member_availability=availability,
         )
 
-    await asyncio.gather(*(
-        site_events_poller(
-            aggregate, name, client, interval, full_reconcile=_full_reconcile,
+    await asyncio.gather(
+        *(
+            site_events_poller(
+                aggregate,
+                name,
+                client,
+                interval,
+                full_reconcile=_full_reconcile,
+            )
+            for name, client in site_clients.items()
         )
-        for name, client in site_clients.items()
-    ))
+    )

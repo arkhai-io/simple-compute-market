@@ -167,6 +167,7 @@ storefront.toml.
 {{- $chain := $cfg.chain | default dict -}}
 {{- $prov := $seller.provisioning | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
+{{- $hosted := $cfg.hostedSettlement | default dict -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
 # Sensitive values come from the Secret overlay (storefront.secrets.toml).
@@ -214,6 +215,26 @@ mode        = {{ $prov.mode | quote }}
 poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
+[hosted_settlement]
+enabled = {{ $hosted.enabled | default false }}
+base_url = {{ $hosted.baseUrl | default "" | quote }}
+authority_id = {{ $hosted.authorityId | default "" | quote }}
+environment = {{ $hosted.environment | default "" | quote }}
+expected_authority = {{ $hosted.expectedAuthority | default "" | quote }}
+expected_manifest_digest = {{ $hosted.expectedManifestDigest | default "" | quote }}
+contract_version = {{ $hosted.contractVersion | default "0.1.0" | quote }}
+expected_schema_version = {{ $hosted.expectedSchemaVersion | default 3 }}
+timeout_seconds = {{ $hosted.requestTimeoutSeconds | default 10 }}
+preflight_timeout_seconds = {{ $hosted.preflightTimeoutSeconds | default 5 }}
+allow_insecure_loopback = {{ $hosted.allowInsecureLoopback | default false }}
+required_capabilities = [{{ range $i, $cap := ($hosted.requiredCapabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
+{{- range $resolverID, $resolver := ($hosted.resolvers | default dict) }}
+
+[hosted_settlement.resolvers.{{ $resolverID }}]
+chain_name = {{ $resolver.chainName | quote }}
+evidence_mode = {{ $resolver.evidenceMode | quote }}
+{{- end }}
+
 [negotiation]
 {{- if $neg.policies }}
 policies = [{{ range $i, $mw := $neg.policies }}{{ if $i }}, {{ end }}{{ $mw | quote }}{{ end }}]
@@ -244,6 +265,7 @@ side.
 {{- $cfg := $agent.config -}}
 {{- $seller := $cfg.seller | default dict -}}
 {{- $integ := $seller.integrations | default dict -}}
+{{- $hostedCredential := $agent.secret.hostedSettlementRequestCredential | default $agent.secret.privKey -}}
 {{- $adminKey := ($root.Values.global).adminApiKey | default "" -}}
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
 # Deep-merged on top of storefront.toml at runtime by dynaconf.
@@ -267,6 +289,11 @@ resources_csv_inline = """
 [wallet]
 address     = {{ $agent.secret.walletAddress | quote }}
 private_key = {{ $agent.secret.privKey | quote }}
+{{- if $hostedCredential }}
+
+[hosted_settlement]
+request_credential = {{ $hostedCredential | quote }}
+{{- end }}
 {{- if or $integ.geminiApiKey $integ.gemini_api_key }}
 
 [integrations]

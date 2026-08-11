@@ -9,6 +9,11 @@ from typing import Any, Optional
 import typer
 from rich.console import Console
 from rich.table import Table
+from market_policy.buyer_policy import (
+    SettlementPreferenceCandidate,
+    SettlementPreferenceContext,
+    SettlementPreferenceHook,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,81 @@ def _filter_entries(
     return out
 
 
+def _policy_preference(
+    *,
+    listing: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    chain_name: str,
+    token_contract_filter: Optional[str],
+    preference: SettlementPreferenceHook,
+) -> Optional[dict[str, Any]]:
+    from market_alkahest.schemas import primary_rate_value
+
+    views = tuple(
+        SettlementPreferenceCandidate(
+            identity=str(position),
+            position=position,
+            chain_name=chain_name,
+            escrow_address=str(entry.get("escrow_address") or ""),
+            token_address=_entry_token(entry),
+            unit_price=primary_rate_value(entry),
+        )
+        for position, entry in enumerate(candidates)
+    )
+    context = SettlementPreferenceContext(
+        listing_id=(
+            str(listing["listing_id"])
+            if listing.get("listing_id") is not None
+            else None
+        ),
+        chain_name=chain_name,
+        token_contract_filter=(
+            token_contract_filter.lower() if token_contract_filter else None
+        ),
+    )
+    try:
+        first = preference(views, context)
+        repeated = preference(views, context)
+    except Exception as exc:
+        logger.warning(
+            "Buyer settlement preference failed; using constrained fallback: %s",
+            exc,
+        )
+        return None
+    if first != repeated:
+        logger.warning(
+            "Buyer settlement preference was inconsistent for identical candidates; "
+            "using constrained fallback"
+        )
+        return None
+    if first is None or first == ():
+        return None
+    if isinstance(first, str):
+        identities = (first,)
+    elif isinstance(first, tuple) and all(isinstance(item, str) for item in first):
+        identities = first
+    else:
+        logger.warning(
+            "Buyer settlement preference returned an invalid result; "
+            "expected one identity, an identity tuple, or None"
+        )
+        return None
+    if len(set(identities)) != len(identities):
+        logger.warning(
+            "Buyer settlement preference returned duplicate identities; "
+            "using constrained fallback"
+        )
+        return None
+    by_identity = {view.identity: candidates[view.position] for view in views}
+    if any(identity not in by_identity for identity in identities):
+        logger.warning(
+            "Buyer settlement preference returned an unknown identity; "
+            "using constrained fallback"
+        )
+        return None
+    return by_identity[identities[0]]
+
+
 def _balance(
     *,
     rpc_url: str,
@@ -54,11 +134,13 @@ def _balance(
     except Exception:
         return 0
     try:
-        return asyncio.run(get_wallet_token_balance(
-            wallet_address=wallet_address,
-            token_address=token_address,
-            rpc_url=rpc_url,
-        ))
+        return asyncio.run(
+            get_wallet_token_balance(
+                wallet_address=wallet_address,
+                token_address=token_address,
+                rpc_url=rpc_url,
+            )
+        )
     except Exception as exc:
         logger.debug("balanceOf(%s) failed: %s", token_address, exc)
         return 0
@@ -74,14 +156,14 @@ def select_escrow_entry(
     buyer_address: str,
     console: Optional[Console] = None,
     compatible: Optional[Any] = None,
+    preference: SettlementPreferenceHook | None = None,
 ) -> Optional[dict[str, Any]]:
     """Return one accepted escrow entry to negotiate against.
 
     ``compatible`` is the configured buyer policy's format predicate
     (ARCHITECTURE.md, "Buyer negotiation policy surface"): entries the policy cannot
-    negotiate are never offered, so an incompatible-only listing yields
-    None ("no compatible escrow format") instead of a tuple the
-    strategy would mangle.
+    negotiate are never offered. Noninteractive ``preference`` sees only the
+    constrained candidates and runs before balance and list-order fallback.
     """
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):
@@ -105,6 +187,17 @@ def select_escrow_entry(
 
     if len(candidates) == 1:
         return candidates[0]
+
+    if assume_yes and preference is not None:
+        preferred = _policy_preference(
+            listing=listing,
+            candidates=candidates,
+            chain_name=chain_name,
+            token_contract_filter=token_contract_filter,
+            preference=preference,
+        )
+        if preferred is not None:
+            return preferred
 
     if assume_yes:
         for entry in candidates:

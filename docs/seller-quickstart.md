@@ -241,6 +241,22 @@ touching libvirt. To create real VMs:
 
    `SUCCESS / ping: pong` means the next buy will actually create a VM.
 
+## Optional hosted fiat publication
+
+Hosted settlement is disabled by default. Configure the storefront's
+`[hosted_settlement]` consumer trust/API pin plus an operator-owned condition
+profile, resolver ID, connected-account reference, lowercase currency, and
+positive integer minor-unit rate. Publication preflights the account and
+condition capability. A failed hosted preflight suppresses only the fiat
+option and continues serving valid Alkahest listings.
+
+The storefront never receives Stripe credentials or provider IDs and never
+stores Checkout or account-link URLs. It persists one opaque settlement
+reference and drives funded VM fulfillment, condition check/collect, and
+eligible reclaim through the shared settlement worker. Stripe funds remain
+platform-custodied by the separately operated authority; an EAS condition
+anchor is audit/predicate evidence, not custody.
+
 ## Common pitfalls
 
 - **Don't restart without pinning `onchain_agent_id`** — every fresh

@@ -35,7 +35,8 @@ def _make_registry_client():
 
     urls = (
         list(settings.registry.urls)
-        if settings.registry.urls else ["http://localhost:8080"]
+        if settings.registry.urls
+        else ["http://localhost:8080"]
     )
     return MultiRegistryClient(
         urls,
@@ -67,12 +68,14 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 
     try:
         await get_sqlite_client().update_listing(
-            listing_id=listing_id, status="closed",
+            listing_id=listing_id,
+            status="closed",
         )
     except Exception as exc:
         logger.warning(
             "[LOCAL DB] Failed to update listing %s as closed: %s",
-            listing_id, exc,
+            listing_id,
+            exc,
         )
 
     return await close_listing_in_registries(
@@ -97,7 +100,8 @@ async def close_token_listings_after_capacity_change(
         availability = await availability_view(capacity)
     except Exception as exc:
         logger.warning(
-            "[CAPACITY] Quota snapshot unavailable; closing nothing: %s", exc,
+            "[CAPACITY] Quota snapshot unavailable; closing nothing: %s",
+            exc,
         )
         return []
     rows = await db.list_listings(status="open", limit=200)
@@ -124,7 +128,8 @@ async def reopen_token_listings_after_capacity_change(
         availability = await availability_view(capacity)
     except Exception as exc:
         logger.warning(
-            "[CAPACITY] Quota snapshot unavailable; reopening nothing: %s", exc,
+            "[CAPACITY] Quota snapshot unavailable; reopening nothing: %s",
+            exc,
         )
         return []
     rows = await db.list_listings(status="closed", limit=200)
@@ -142,22 +147,26 @@ def _record_listing_published_stage_event(
     listing_id: str,
     offer_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
+    settlement_options: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
 ) -> None:
     stage_event(
-        "discovery", "order_published",
+        "discovery",
+        "order_published",
         order_id=listing_id,
         agent_url=BASE_URL_OVERRIDE,
         offer=offer_resource,
         accepted_escrows=accepted_escrows,
+        settlement_options=settlement_options,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
     )
 
 
 async def _registries_to_target(
-    listing_id: str, fallback_urls: list[str],
+    listing_id: str,
+    fallback_urls: list[str],
 ) -> list[str]:
     try:
         pubs = await get_sqlite_client().load_publications(listing_id=listing_id)
@@ -168,7 +177,8 @@ async def _registries_to_target(
 
 
 async def _record_publications(
-    listing_id: str, results: list[dict[str, Any]],
+    listing_id: str,
+    results: list[dict[str, Any]],
 ) -> None:
     try:
         sqlite_client = get_sqlite_client()
@@ -189,5 +199,7 @@ async def _record_publications(
         except Exception as exc:
             logger.warning(
                 "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id, result.get("registry_url"), exc,
+                listing_id,
+                result.get("registry_url"),
+                exc,
             )

@@ -3,18 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
-
+from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
-from market_policy.identity import Identity
+
 from market_storefront.utils.sync_negotiation import (
     SellerRoundResult,
-    continue_sync_negotiation,
     _normalize_vm_message_terms,
+    continue_sync_negotiation,
     start_sync_negotiation,
 )
-from market_core.schemas import EscrowProposal, ProvisionTerms
-
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"
 _TOKEN = "0x0000000000000000000000000000000000000001"
@@ -24,6 +23,7 @@ _ESCROW = "0x" + "11" * 20
 @pytest.fixture
 async def db(tmp_path):
     import market_policy.negotiation_thread as thread_module
+
     from market_storefront.utils.sqlite_client import SQLiteClient
 
     client = SQLiteClient(db_path=str(tmp_path / "seller_round_hook.db"))
@@ -44,12 +44,14 @@ async def db(tmp_path):
             "region": "California, US",
             "resource_id": "resource-hook",
         },
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": _ESCROW,
-            "literal_fields": {"token": _TOKEN},
-            "rates": [{"field": "amount", "per": "hour", "value": "100"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": _ESCROW,
+                "literal_fields": {"token": _TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -69,15 +71,17 @@ def _proposal(amount: int) -> EscrowProposal:
 
 
 def test_normalize_vm_message_terms_uses_domain_runtime() -> None:
-    terms = ProvisionTerms.model_validate({
-        "kind": "compute.v1",
-        "version": 1,
-        "payload": {
-            "duration_seconds": "3600",
-            "start_utc": "2030-01-01T00:00:00Z",
-            "ssh_public_key": "ssh-rsa AAAA",
-        },
-    })
+    terms = ProvisionTerms.model_validate(
+        {
+            "kind": "compute.v1",
+            "version": 1,
+            "payload": {
+                "duration_seconds": "3600",
+                "start_utc": "2030-01-01T00:00:00Z",
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        }
+    )
 
     normalized = _normalize_vm_message_terms(terms)
 
@@ -153,6 +157,112 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
     assert seen["history"][0].proposal["fields"]["amount"] == 50
     assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
+
+
+@pytest.mark.asyncio
+async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkeypatch):
+    from market_core.schemas import (
+        RateValue,
+        SettlementOption,
+        SettlementSelection,
+        derive_settlement_option_id,
+    )
+
+    from market_storefront.utils.config import settings
+
+    rates = [RateValue(field="amount", value=42)]
+    params = {
+        "account_ref": "acct-seller",
+        "condition": {"kind": "builtin", "arbiter": "trusted_oracle"},
+    }
+    option = SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=rates,
+            params=params,
+        ),
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rates=rates,
+        params=params,
+    )
+    selection = SettlementSelection(
+        mechanism=option.mechanism,
+        option_id=option.option_id,
+        expiration_unix=1_900_000_000,
+    )
+    await db.upsert_listing(
+        listing_id="L-hosted",
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource={
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.9,
+            "region": "California, US",
+            "resource_id": "resource-hosted",
+        },
+        accepted_escrows=[],
+        settlement_options=[option.model_dump(mode="json")],
+        fulfillment_resource=None,
+        max_duration_seconds=7200,
+        seller="http://seller:8001",
+    )
+    monkeypatch.setattr(
+        settings.wallet,
+        "address",
+        "0x" + "33" * 20,
+        raising=False,
+    )
+
+    async def hook(**_kwargs):
+        return SellerRoundResult(
+            our_amount=42,
+            strategy_label="listed_price",
+            direction="minimize",
+            chain_label="hosted",
+            decision=NegotiationDecision(
+                action="accept",
+                proposal={"settlement_selection": selection.model_dump()},
+            ),
+            intermediate={
+                "accepted_settlement_selection": selection.model_dump(),
+                "accepted_settlement_option": option.model_dump(mode="json"),
+            },
+        )
+
+    response = await start_sync_negotiation(
+        sqlite_client=db,
+        our_listing_id="L-hosted",
+        buyer_address=_BUYER,
+        proposal={"settlement_selection": selection.model_dump()},
+        provision_terms=ProvisionTerms(
+            kind="compute.v1",
+            version=1,
+            payload={
+                "duration_seconds": 3600,
+                "ssh_public_key": "ssh-rsa AAAA",
+            },
+        ),
+        our_base_url="http://test-seller:8001",
+        their_agent_url="http://buyer:9000",
+        seller_round_hook=hook,
+    )
+
+    assert response["action"] == "accept"
+    assert response["settlement_selection"] == selection.model_dump()
+    assert response["settlement_plan"]["obligations"][0]["mechanism"] == (
+        "fiat.stripe.v1"
+    )
+    thread = await db.load_negotiation_thread_row(
+        negotiation_id=response["negotiation_id"]
+    )
+    assert thread["buyer_escrow_proposal"] == {
+        "settlement_selection": selection.model_dump()
+    }
+    assert thread["settlement_plan"] == response["settlement_plan"]
 
 
 @pytest.mark.asyncio

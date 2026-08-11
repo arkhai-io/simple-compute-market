@@ -26,7 +26,14 @@ listing_shape:
   # matching the GET /publishers entity. gpu_model is gated to a vetted
   # NVIDIA vocabulary; region stays open because city/datacenter naming
   # has no canonical list.
-  required: [listing_id, offer_resource, accepted_escrows, storefront_url]
+  required: [listing_id, offer_resource, storefront_url]
+  anyOf:
+    - properties:
+        accepted_escrows: {type: array, minItems: 1}
+      required: [accepted_escrows]
+    - properties:
+        settlement_options: {type: array, minItems: 1}
+      required: [settlement_options]
   properties:
     listing_id: {type: string, minLength: 1}
     storefront_url: {type: string, minLength: 1}
@@ -116,7 +123,7 @@ listing_shape:
         open_ports_count: {type: integer, minimum: 0}
     accepted_escrows:
       type: array
-      minItems: 1
+      minItems: 0
       items:
         type: object
         required: [chain_name, escrow_address, literal_fields]
@@ -138,6 +145,28 @@ listing_shape:
                 field: {type: string}
                 per: {type: string}
                 value: {type: string}
+    settlement_options:
+      type: array
+      minItems: 0
+      items:
+        type: object
+        additionalProperties: false
+        required: [option_id, mechanism, asset, rates, params]
+        properties:
+          option_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+          mechanism: {type: string, minLength: 1}
+          asset: {type: string, minLength: 1}
+          rates:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [field, per, value]
+              properties:
+                field: {type: string, minLength: 1}
+                per: {type: string, minLength: 1}
+                value: {type: string, pattern: "^[0-9]+$"}
+          params: {type: object}
     max_duration_seconds:
       type: [integer, "null"]
       minimum: 1

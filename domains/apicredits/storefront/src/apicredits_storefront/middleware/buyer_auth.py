@@ -13,7 +13,10 @@ from core_storefront.auth import AuthError, verify_buyer_signature
 
 
 def _verify(
-    request: Request, operation: str, resource_id: str, claimed_address: str,
+    request: Request,
+    operation: str,
+    resource_id: str,
+    claimed_address: str,
 ) -> None:
     """Core signed-request verification; raises HTTPException on failure."""
     try:

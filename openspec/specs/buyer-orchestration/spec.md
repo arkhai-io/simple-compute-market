@@ -3,9 +3,7 @@
 ## Purpose
 
 Define registry fan-in, domain plugins, policy-driven negotiation, aggregation, settlement, and run recovery.
-
 ## Requirements
-
 ### Requirement: Plugin-composed buyer CLI
 The core `market` CLI MUST discover domain plugins through entry-point metadata and let each plugin register namespaced verbs without core importing the domain.
 
@@ -59,11 +57,91 @@ Every shipped buyer domain plugin MUST pass one contract suite covering identity
 - **WHEN** VM, bare-metal, or API-credit buyer integration is modified
 - **THEN** the shared conformance suite runs against that implementation in addition to its domain-specific behavior tests
 
+### Requirement: Policy-constrained settlement preference
+
+Buyer orchestration MUST apply buyer-policy preference only to settlement candidates that
+already satisfy compatibility and active chain/token constraints. A policy MUST NOT select
+or introduce a candidate outside that set, and invalid policy output MUST fall back or fail
+actionably without bypassing compatibility.
+
+#### Scenario: Several compatible candidates remain
+
+- **WHEN** noninteractive orchestration has several compatible settlement candidates and
+  policy returns a valid preference
+- **THEN** orchestration selects according to that preference before balance-based or
+  deterministic default fallback
+
+#### Scenario: Policy returns an unknown candidate
+
+- **WHEN** policy output references a settlement tuple not present in the constrained input
+  set
+- **THEN** orchestration rejects that output and does not submit settlement using the
+  unknown tuple
+
+#### Scenario: Interactive choice is requested
+
+- **WHEN** the buyer explicitly requests interactive selection among compatible candidates
+- **THEN** the user's valid choice remains authoritative rather than being silently replaced
+  by policy preference
+
+#### Scenario: Zero or one candidate remains
+
+- **WHEN** compatibility filtering leaves zero or one candidate
+- **THEN** orchestration respectively reports no valid settlement choice or uses the sole
+  candidate without requiring a preference decision
+
+### Requirement: Storefront-mediated hosted buyer action
+After accepted terms, a VM buyer selecting `fiat.stripe.v1` MUST start and
+poll the opaque settlement through the seller storefront. It MUST NOT sign
+requests directly to the hosted financial authority. Checkout URLs are
+transient display/browser actions and MUST NOT enter run-log events.
+
+#### Scenario: Buyer selects hosted Checkout
+- **WHEN** explicit mechanism and asset constraints select one advertised
+  hosted option
+- **THEN** the buyer submits that exact selection during negotiation, starts
+  the accepted obligation by deterministic ID, and reports ready only after
+  the storefront confirms authoritative funding and fulfillment
+
+### Requirement: Mechanism-neutral constrained preference
+
+Buyer orchestration MUST normalize legacy escrow entries and settlement options into immutable preference candidates only after compatibility, active chain, mechanism, asset, and other authoritative filters. Explicit `--settlement-mechanism` and `--settlement-asset` constraints MUST be applied before policy ranking; policy output MUST NOT introduce an unadvertised or incompatible choice.
+
+#### Scenario: Buyer requests hosted fiat
+- **WHEN** `--settlement-mechanism fiat.stripe.v1` and a supported asset leave several options
+- **THEN** buyer policy ranks only those hosted options and exact deterministic fallback applies if it expresses no preference
+
+#### Scenario: Buyer selects Alkahest
+- **WHEN** constraints or interactive choice select an existing Alkahest escrow
+- **THEN** the existing escrow creation/submission path and run-log fields remain unchanged and no hosted API is called
+
+### Requirement: Hosted buyer action handling
+
+After accepted terms are submitted, the buyer MAY start the accepted hosted obligation and retrieve its current action. The CLI MUST print the action and MAY open it unless `--no-browser` is set, but MUST persist only the opaque settlement reference, public status, action type, and expiry. It MUST NOT persist or log a Checkout URL, payment/customer/card data, provider identity, request credential, or raw service body.
+
+#### Scenario: Hosted Checkout action is returned
+- **WHEN** settlement start returns a browser redirect action
+- **THEN** the CLI displays it, conditionally opens it, and stores only the allowed opaque action metadata
+
+#### Scenario: Buyer resumes after losing the redirect
+- **WHEN** a run log contains the hosted settlement reference but no URL
+- **THEN** the buyer retrieves the current action/status from the storefront rather than relying on a persisted URL or creating another settlement
+
+### Requirement: No provider call before accepted terms
+
+Discovery, filtering, preference, and proposal construction MUST use listing data only. Stripe or hosted-authority mutation MUST NOT occur until seller-accepted terms containing the exact settlement selection are durably recorded.
+
+#### Scenario: Negotiation exits before acceptance
+- **WHEN** the buyer declines, times out, or reaches a pricing limit before accepted terms
+- **THEN** no hosted escrow, Checkout Session, charge, account mutation, or provider operation is created
+
 ## Evidence
 
 - Core/domain import purity and entry-point composition: `core/buyer/tests/unit/test_carrier_purity.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Injected orchestration and aggregation-policy control: `core/buyer/tests/unit/test_orchestrator.py` and `kit/alkahest/tests/unit/test_aggregation.py`.
 - Persisted negotiation resume and agreed-run settlement continuation: `domains/vms/buyer/tests/test_buyer_client_resume.py` and `domains/vms/buyer/tests/test_buy_resume_cli.py`.
 - Policy-owned negotiation behavior: VM buyer policy and client tests.
+- Constrained settlement preference and fallback precedence:
+  `core/buyer/tests/unit/test_escrow_selection.py`.
 
 Simultaneous command registration for every installed domain plugin is not independently covered by the cited tests; the baseline claim is limited to the plugin boundary and each shipped plugin's export contract.

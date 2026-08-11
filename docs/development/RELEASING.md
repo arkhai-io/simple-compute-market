@@ -129,6 +129,18 @@ without a publish round-trip. `uv build --no-sources` strips those
 overrides so the built wheel records plain PyPI dependencies; the publish
 workflow always passes `--no-sources`.
 
+## Hosted settlement release pin
+
+`arkhai-kit-hosted-settlement` consumes an exact
+`arkhai-hosted-settlement-client` version. A deployable marketplace release
+must additionally pin the hosted service's signed immutable manifest: exact
+client wheel/version/hash, service image digest, OpenAPI/conformance hash,
+migration schema version, SBOM, provenance, and repository signer identity.
+The storefront readiness preflight verifies the manifest digest, API version,
+and required capabilities; a matching major version or floating image tag is
+not a substitute. The hosted repository publishes those artifacts. This
+repository publishes only the thin adapter and marketplace consumers.
+
 ## Troubleshooting
 
 - **403 from PyPI** — trusted publishing is not configured for the

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from market_storefront.utils.failure_policy import (
+from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
@@ -19,7 +19,8 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"))
     fake = FakeSite()
     fake.add_resource(
-        "gpu-host-1", 2,
+        "gpu-host-1",
+        2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
     )
 
@@ -30,11 +31,11 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         return {"action": "webhook", "status": "sent", "status_code": 204}
 
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.configured_failure_actions",
+        "market_storefront.failure_actions._configured_failure_actions_source",
         lambda: ["release_capacity", "webhook"],
     )
     webhook = AsyncMock(side_effect=fake_webhook)
-    monkeypatch.setattr("market_storefront.utils.failure_policy._send_webhook", webhook)
+    monkeypatch.setattr("market_storefront.failure_actions._send_webhook", webhook)
 
     with site_capacity(fake) as capacity:
         reserved = await capacity.reserve(
@@ -113,20 +114,26 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
     )
 
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.configured_failure_actions",
+        "market_storefront.failure_actions._configured_failure_actions_source",
         lambda: ["refund"],
     )
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.settings",
-        SimpleNamespace(wallet=SimpleNamespace(private_key="seller-pk", address="0xseller")),
+        "market_storefront.failure_actions.settings",
+        SimpleNamespace(
+            wallet=SimpleNamespace(private_key="seller-pk", address="0xseller")
+        ),
     )
     monkeypatch.setattr(
-        "market_storefront.utils.failure_policy.stage_event",
+        "market_storefront.failure_actions.stage_event",
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         "market_storefront.utils.config.CHAINS",
-        {"anvil": SimpleNamespace(rpc_url="http://rpc", alkahest_address_config_path="/addr.json")},
+        {
+            "anvil": SimpleNamespace(
+                rpc_url="http://rpc", alkahest_address_config_path="/addr.json"
+            )
+        },
     )
     monkeypatch.setattr(
         "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",

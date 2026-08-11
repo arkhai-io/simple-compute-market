@@ -32,7 +32,9 @@ def _default_projection_status_provider() -> dict[str, Any]:
     exercises `include_registry=True` pays no import cost, and a test can
     substitute a fake via the constructor without patching this module.
     """
-    from market_storefront.services.site_projection_cache import projection_status_summary
+    from market_storefront.services.site_projection_cache import (
+        projection_status_summary,
+    )
 
     return projection_status_summary()
 
@@ -42,7 +44,9 @@ def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
     explanations. Same lazy-resolution and constructor-injection rationale
     as `_default_projection_status_provider`, immediately above.
     """
-    from market_storefront.services.site_projection_cache import listing_mode_explanations
+    from market_storefront.services.site_projection_cache import (
+        listing_mode_explanations,
+    )
 
     return listing_mode_explanations()
 
@@ -50,6 +54,7 @@ def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class SystemService:
     """Business logic for storefront health and connectivity checks."""
@@ -60,7 +65,8 @@ class SystemService:
         sqlite_client,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
-        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]] | None = None,
+        listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
+        | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
@@ -68,7 +74,8 @@ class SystemService:
             projection_status_provider or _default_projection_status_provider
         )
         self._listing_mode_explanation_provider = (
-            listing_mode_explanation_provider or _default_listing_mode_explanation_provider
+            listing_mode_explanation_provider
+            or _default_listing_mode_explanation_provider
         )
 
     # ------------------------------------------------------------------
@@ -204,6 +211,7 @@ class SystemService:
                 return f"error: {exc}"
 
         import asyncio
+
         results = await asyncio.gather(*[_probe(u) for u in urls])
         if any(r == "ok" for r in results):
             return "ok"
@@ -250,7 +258,11 @@ class SystemService:
                 "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
                 len(existing),
             )
-            return {"seeded": False, "imported_count": len(existing), "source": "already_populated"}
+            return {
+                "seeded": False,
+                "imported_count": len(existing),
+                "source": "already_populated",
+            }
 
         if csv_inline:
             report = await self._db.upsert_resources_from_csv_content(
@@ -261,16 +273,20 @@ class SystemService:
             source = "resources_csv_inline (config)"
         elif csv_path:
             report = await self._db.upsert_resources_from_csv(
-                csv_path=csv_path, templates=ESCROW_TEMPLATES,
+                csv_path=csv_path,
+                templates=ESCROW_TEMPLATES,
             )
             source = csv_path
         elif os.path.exists(self._DEFAULT_CSV_PATH):
             report = await self._db.upsert_resources_from_csv(
-                csv_path=self._DEFAULT_CSV_PATH, templates=ESCROW_TEMPLATES,
+                csv_path=self._DEFAULT_CSV_PATH,
+                templates=ESCROW_TEMPLATES,
             )
             source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
-            logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
+            logger.info(
+                "[RESOURCE SEED] No resource source configured — starting with empty inventory"
+            )
             return {"seeded": False, "imported_count": 0, "source": None}
 
         imported = report.get("imported_count", 0)
@@ -278,7 +294,8 @@ class SystemService:
         if failed:
             logger.warning(
                 "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed, source,
+                failed,
+                source,
             )
         logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
         return {"seeded": True, "imported_count": imported, "source": source}
@@ -308,21 +325,25 @@ class SystemService:
 
             chain = _load_storefront_chain()
             label = f"chain[{len(chain)}]"
-            history = [NegotiationRound(
-                round_number=0, sender="them", action="initial",
-                # Minimal structurally-valid opening proposal: the VM
-                # opening guard validates the full EscrowProposal shape
-                # (chain_name/escrow_address/expiration_unix required).
-                # The zero escrow address keeps the shape guard's legacy
-                # carve-out applicable, so the probe needs no
-                # accepted-escrows context on a listing.
-                proposal={
-                    "chain_name": "probe",
-                    "escrow_address": "0x" + "00" * 20,
-                    "fields": {"amount": 10_000},
-                    "expiration_unix": 4_102_444_800,  # 2100-01-01
-                },
-            )]
+            history = [
+                NegotiationRound(
+                    round_number=0,
+                    sender="them",
+                    action="initial",
+                    # Minimal structurally-valid opening proposal: the VM
+                    # opening guard validates the full EscrowProposal shape
+                    # (chain_name/escrow_address/expiration_unix required).
+                    # The zero escrow address keeps the shape guard's legacy
+                    # carve-out applicable, so the probe needs no
+                    # accepted-escrows context on a listing.
+                    proposal={
+                        "chain_name": "probe",
+                        "escrow_address": "0x" + "00" * 20,
+                        "fields": {"amount": 10_000},
+                        "expiration_unix": 4_102_444_800,  # 2100-01-01
+                    },
+                )
+            ]
             context = NegotiationContext(
                 direction="maximize",
                 our_reference_amount=10_000.0,

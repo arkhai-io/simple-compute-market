@@ -196,7 +196,6 @@ source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { path = "arkhai_core-0.2.0.tar.gz" }
 wheels = [
     { path = "arkhai_core-0.2.0-py3-none-any.whl" },
 ]
@@ -209,7 +208,6 @@ dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
-sdist = { path = "arkhai_core_registry_client-0.10.0.tar.gz" }
 wheels = [
     { path = "arkhai_core_registry_client-0.10.0-py3-none-any.whl" },
 ]
@@ -227,22 +225,21 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { path = "arkhai_core_storefront-0.2.0.tar.gz" }
 wheels = [
     { path = "arkhai_core_storefront-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.0"
+source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "web3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e1/9d/03b17e1d4d307d94eed950cb888ac0388bbcaf4f928b0b6e185c826c8be5/arkhai_kit_alkahest-0.1.1.tar.gz", hash = "sha256:0d9c0d62739b184d8f765c08fdd6a0da15db6a52d1efb52b302bc29b43c16c2a", size = 158975, upload-time = "2026-07-23T19:37:54.968Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/5a/8fbe337320164c61acb63985db79446e5683543c521fc40fec0f97ac8a14/arkhai_kit_alkahest-0.1.1-py3-none-any.whl", hash = "sha256:fc9b6fe980353ec8e5eb418763f0ca842bd14b6182104a8e2a354a0bef4fc96d", size = 41238, upload-time = "2026-07-23T19:37:53.828Z" },
+    { path = "arkhai_kit_alkahest-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -253,7 +250,6 @@ dependencies = [
     { name = "arkhai-kit-alkahest" },
     { name = "eth-account" },
 ]
-sdist = { path = "arkhai_kit_config-0.1.0.tar.gz" }
 wheels = [
     { path = "arkhai_kit_config-0.1.0-py3-none-any.whl" },
 ]
@@ -266,7 +262,6 @@ dependencies = [
     { name = "eth-account" },
     { name = "pydantic" },
 ]
-sdist = { path = "arkhai_kit_identity-0.1.0.tar.gz" }
 wheels = [
     { path = "arkhai_kit_identity-0.1.0-py3-none-any.whl" },
 ]
@@ -279,9 +274,19 @@ dependencies = [
     { name = "pydantic" },
     { name = "typer" },
 ]
-sdist = { path = "arkhai_kit_policy-0.1.1.tar.gz" }
 wheels = [
     { path = "arkhai_kit_policy-0.1.1-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-settlement-runtime"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_settlement_runtime-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]

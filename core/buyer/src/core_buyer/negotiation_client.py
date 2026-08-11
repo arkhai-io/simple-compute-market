@@ -45,7 +45,11 @@ from market_policy.negotiation_middleware import (
 )
 from market_policy.scalar_policies import make_escrow_kind_dispatch_middleware
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
-from market_core.schemas import ProvisionTerms, SettlementPlan
+from market_core.schemas import (
+    ProvisionTerms,
+    SettlementPlan,
+    SettlementSelection,
+)
 
 
 DEFAULT_MAX_ROUNDS = 10
@@ -113,12 +117,12 @@ def _load_buyer_chain(
             _maybe_register_rl_middleware()
         try:
             from .buyer_config import buyer_chains
+
             chains = buyer_chains()
         except Exception:
             chains = {}
         chain_config_paths = {
-            name: chain.alkahest_address_config_path
-            for name, chain in chains.items()
+            name: chain.alkahest_address_config_path for name, chain in chains.items()
         }
         return load_negotiation_chain(list(default_guards)) + [
             make_escrow_kind_dispatch_middleware(
@@ -170,14 +174,16 @@ class NegotiationOutcome:
     echoes the buyer's ask from negotiation init (None on resume,
     where the prior run-log is the source of truth).
     """
-    status: str                     # "agreed" | "exited"
-    negotiation_id: Optional[str]   # None only if /new itself failed
+
+    status: str  # "agreed" | "exited"
+    negotiation_id: Optional[str]  # None only if /new itself failed
     agreed_amount: Optional[int] = None
     unit_count: Optional[float] = None
-    reason: Optional[str] = None    # populated on exit
+    reason: Optional[str] = None  # populated on exit
     rounds: int = 0
     accepted_provision_terms: Optional[ProvisionTerms] = None
     accepted_escrow_proposal: Optional[EscrowProposal] = None
+    settlement_selection: Optional[SettlementSelection] = None
     settlement_plan: Optional[SettlementPlan] = None
     # LEGACY mirror of the plan's alkahest obligations; kept while old
     # run-log readers exist. Leaves with the client-wheel wire bump.
@@ -197,6 +203,8 @@ class NegotiationOutcome:
             d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
         if self.accepted_escrow_proposal is not None:
             d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
+        if self.settlement_selection is not None:
+            d["settlement_selection"] = self.settlement_selection.model_dump()
         if self.settlement_plan is not None:
             d["settlement_plan"] = self.settlement_plan.model_dump()
         if self.accepted_escrow_terms is not None:
@@ -211,6 +219,7 @@ def _parse_accepted_terms_from_reply(
 ) -> tuple[
     Optional[ProvisionTerms],
     Optional[EscrowProposal],
+    Optional[SettlementSelection],
     Optional[SettlementPlan],
     Optional[list[EscrowTerms]],
 ]:
@@ -225,10 +234,18 @@ def _parse_accepted_terms_from_reply(
     """
     raw_prov = reply.get("accepted_provision_terms")
     raw_esc = reply.get("accepted_escrow_proposal")
+    raw_selection = reply.get("settlement_selection")
     raw_plan = reply.get("settlement_plan")
     raw_terms = reply.get("accepted_escrow_terms")
-    prov = ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
+    prov = (
+        ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
+    )
     esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
+    selection = (
+        SettlementSelection.model_validate(raw_selection)
+        if isinstance(raw_selection, dict)
+        else None
+    )
     terms = (
         [EscrowTerms.model_validate(item) for item in raw_terms]
         if isinstance(raw_terms, list)
@@ -239,7 +256,7 @@ def _parse_accepted_terms_from_reply(
         plan = SettlementPlan.model_validate(raw_plan)
     elif terms is not None:
         plan = SettlementPlan.model_validate([t.model_dump() for t in terms])
-    return prov, esc, plan, terms
+    return prov, esc, selection, plan, terms
 
 
 def _sign(message: str, private_key: str) -> tuple[str, int]:
@@ -319,6 +336,7 @@ class ResumeState:
     into the strategy and continue the round loop without going through
     ``/api/v1/negotiate/new`` again (the seller has the thread already).
     """
+
     negotiation_id: str
     transcript: list[NegotiationRound]
     last_seller_proposal: dict | None
@@ -336,6 +354,7 @@ def negotiate_with_seller(
     unit_count: Optional[float] = None,
     provision_terms: Optional[ProvisionTerms] = None,
     escrow_proposal: Optional[EscrowProposal] = None,
+    settlement_selection: Optional[SettlementSelection] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     chain: Optional[list[NegotiationMiddleware]] = None,
@@ -383,6 +402,7 @@ def negotiate_with_seller(
     # the negotiation thread); subsequent rounds don't re-echo them.
     accepted_prov: Optional[ProvisionTerms] = None
     accepted_esc: Optional[EscrowProposal] = None
+    accepted_selection: Optional[SettlementSelection] = None
     accepted_plan: Optional[SettlementPlan] = None
     accepted_terms: Optional[list[EscrowTerms]] = None
     if resume is not None:
@@ -431,10 +451,10 @@ def negotiate_with_seller(
                 "(the schema-tagged payload describing what the seller "
                 "will provision)"
             )
-        if escrow_proposal is None:
+        if (escrow_proposal is None) == (settlement_selection is None):
             raise RuntimeError(
-                "escrow_proposal is required for fresh negotiations "
-                "(chain_name + escrow_address + fields + expiration_unix)"
+                "exactly one of escrow_proposal or settlement_selection is "
+                "required for fresh negotiations"
             )
         # Translate per-unit bounds → absolute amounts (× unit_count).
         # Listings broadcast per-unit rates; once the unit count is
@@ -453,32 +473,45 @@ def negotiate_with_seller(
         # on an empty history and pin its proposal. Whether and where an
         # opening amount lands in the fields is the configured policy's
         # compatibility knowledge, not this loop's.
-        base_proposal = {
-            "chain_name": escrow_proposal.chain_name,
-            "escrow_address": escrow_proposal.escrow_address,
-            "fields": dict(escrow_proposal.fields or {}),
-            "literal_fields": dict(escrow_proposal.literal_fields or escrow_proposal.fields or {}),
-            "rates": [
-                r.model_dump() if hasattr(r, "model_dump") else dict(r)
-                for r in (escrow_proposal.rates or [])
-            ],
-            "demand": (
-                escrow_proposal.demand.model_dump()
-                if hasattr(escrow_proposal.demand, "model_dump")
-                else dict(escrow_proposal.demand)
-                if escrow_proposal.demand is not None
-                else None
+        if settlement_selection is not None:
+            base_proposal = {
+                "settlement_selection": settlement_selection.model_dump(),
+                "fields": {},
+            }
+        else:
+            assert escrow_proposal is not None
+            base_proposal = {
+                "chain_name": escrow_proposal.chain_name,
+                "escrow_address": escrow_proposal.escrow_address,
+                "fields": dict(escrow_proposal.fields or {}),
+                "literal_fields": dict(
+                    escrow_proposal.literal_fields or escrow_proposal.fields or {}
+                ),
+                "rates": [
+                    r.model_dump() if hasattr(r, "model_dump") else dict(r)
+                    for r in (escrow_proposal.rates or [])
+                ],
+                "demand": (
+                    escrow_proposal.demand.model_dump()
+                    if hasattr(escrow_proposal.demand, "model_dump")
+                    else dict(escrow_proposal.demand)
+                    if escrow_proposal.demand is not None
+                    else None
+                ),
+                "expiration_unix": escrow_proposal.expiration_unix,
+            }
+        opening = run_negotiation_chain(
+            chain,
+            [],
+            NegotiationContext(
+                direction="minimize",
+                our_reference_amount=ceiling_amount,
+                our_opening_amount=initial_amount,
+                our_escrow_proposal=base_proposal,
+                max_rounds=max_rounds,
+                intermediate=dict(policy_params or {}),
             ),
-            "expiration_unix": escrow_proposal.expiration_unix,
-        }
-        opening = run_negotiation_chain(chain, [], NegotiationContext(
-            direction="minimize",
-            our_reference_amount=ceiling_amount,
-            our_opening_amount=initial_amount,
-            our_escrow_proposal=base_proposal,
-            max_rounds=max_rounds,
-            intermediate=dict(policy_params or {}),
-        ))
+        )
         # The decision is honored, not second-guessed: a chain that
         # exits/rejects before opening means this buyer does not open
         # this negotiation — the seller is never contacted.
@@ -506,8 +539,10 @@ def negotiate_with_seller(
         }
         sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
         reply = _post(
-            f"{seller_url}/api/v1/negotiate/new", new_body,
-            signature=sig, timestamp=ts,
+            f"{seller_url}/api/v1/negotiate/new",
+            new_body,
+            signature=sig,
+            timestamp=ts,
             identity_identifier=buyer_address,
         )
         if on_round:
@@ -515,7 +550,13 @@ def negotiate_with_seller(
 
         neg_id = reply.get("negotiation_id")
         seller_action = reply.get("action")
-        accepted_prov, accepted_esc, accepted_plan, accepted_terms = _parse_accepted_terms_from_reply(reply)
+        (
+            accepted_prov,
+            accepted_esc,
+            accepted_selection,
+            accepted_plan,
+            accepted_terms,
+        ) = _parse_accepted_terms_from_reply(reply)
 
         if seller_action == "accept":
             return NegotiationOutcome(
@@ -526,6 +567,7 @@ def negotiate_with_seller(
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
                 accepted_escrow_proposal=accepted_esc,
+                settlement_selection=accepted_selection,
                 settlement_plan=accepted_plan,
                 accepted_escrow_terms=accepted_terms,
             )
@@ -542,19 +584,33 @@ def negotiate_with_seller(
             )
         # From here on seller_action should be "counter".
         if seller_action != "counter":
-            raise RuntimeError(f"Unexpected seller action on /api/v1/negotiate/new: {seller_action!r}")
+            raise RuntimeError(
+                f"Unexpected seller action on /api/v1/negotiate/new: {seller_action!r}"
+            )
         if not neg_id:
-            raise RuntimeError("/api/v1/negotiate/new returned counter but no negotiation_id")
+            raise RuntimeError(
+                "/api/v1/negotiate/new returned counter but no negotiation_id"
+            )
 
-        transcript.append(NegotiationRound(
-            round_number=0, sender="us", action="initial",
-            proposal=pinned_proposal,
-        ))
+        transcript.append(
+            NegotiationRound(
+                round_number=0,
+                sender="us",
+                action="initial",
+                proposal=pinned_proposal,
+            )
+        )
         seller_round0_proposal = reply.get("proposal")
-        transcript.append(NegotiationRound(
-            round_number=0, sender="them", action="counter",
-            proposal=seller_round0_proposal if isinstance(seller_round0_proposal, dict) else None,
-        ))
+        transcript.append(
+            NegotiationRound(
+                round_number=0,
+                sender="them",
+                action="counter",
+                proposal=seller_round0_proposal
+                if isinstance(seller_round0_proposal, dict)
+                else None,
+            )
+        )
         round_idx = 1
 
     # --- Rounds 1..N: /negotiate/{id} ----------------------------------
@@ -567,12 +623,14 @@ def negotiate_with_seller(
         # sees it as their_last_proposal.
         round_history = list(transcript)
         if not round_history or round_history[-1].sender != "them":
-            round_history.append(NegotiationRound(
-                round_number=len(round_history),
-                sender="them",
-                action="counter",
-                proposal=seller_counter_proposal,
-            ))
+            round_history.append(
+                NegotiationRound(
+                    round_number=len(round_history),
+                    sender="them",
+                    action="counter",
+                    proposal=seller_counter_proposal,
+                )
+            )
         ceiling_amount = (
             float(max_price) * float(unit_count)
             if unit_count is not None
@@ -607,13 +665,14 @@ def negotiate_with_seller(
                         "reason": "buyer_chain_no_decision",
                         "buyer_address": buyer_address,
                     },
-                    signature=sig, timestamp=ts,
+                    signature=sig,
+                    timestamp=ts,
                     identity_identifier=buyer_address,
                 )
             except Exception as notify_exc:
                 logger.warning(
-                    "Could not deliver the no-decision exit to the "
-                    "seller: %s", notify_exc,
+                    "Could not deliver the no-decision exit to the seller: %s",
+                    notify_exc,
                 )
             raise
 
@@ -632,8 +691,10 @@ def negotiate_with_seller(
 
         sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
         reply = _post(
-            f"{seller_url}/api/v1/negotiate/{neg_id}", body,
-            signature=sig, timestamp=ts,
+            f"{seller_url}/api/v1/negotiate/{neg_id}",
+            body,
+            signature=sig,
+            timestamp=ts,
             identity_identifier=buyer_address,
         )
         if on_round:
@@ -655,18 +716,24 @@ def negotiate_with_seller(
         if next_move.action == "accept":
             # We told the seller we accept; their reply should echo accept.
             if reply.get("action") == "accept":
-                reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
+                (
+                    reply_prov,
+                    reply_esc,
+                    reply_selection,
+                    reply_plan,
+                    reply_terms,
+                ) = _parse_accepted_terms_from_reply(reply)
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
                     agreed_amount=(
-                        _amount(reply.get("proposal"))
-                        or _amount(next_move.proposal)
+                        _amount(reply.get("proposal")) or _amount(next_move.proposal)
                     ),
                     unit_count=unit_count,
                     rounds=round_idx,
                     accepted_provision_terms=reply_prov or accepted_prov,
                     accepted_escrow_proposal=reply_esc or accepted_esc,
+                    settlement_selection=reply_selection or accepted_selection,
                     settlement_plan=reply_plan or accepted_plan,
                     accepted_escrow_terms=reply_terms or accepted_terms,
                 )
@@ -688,33 +755,49 @@ def negotiate_with_seller(
             )
 
         # next_move was counter → record both sides of this round.
-        transcript.append(NegotiationRound(
-            round_number=round_idx, sender="us", action="counter",
-            proposal=next_move.proposal,
-        ))
+        transcript.append(
+            NegotiationRound(
+                round_number=round_idx,
+                sender="us",
+                action="counter",
+                proposal=next_move.proposal,
+            )
+        )
         seller_reply_action = reply.get("action") or "counter"
         seller_reply_proposal = reply.get("proposal")
-        transcript.append(NegotiationRound(
-            round_number=round_idx,
-            sender="them",
-            action=seller_reply_action if seller_reply_action in ("counter", "accept", "exit", "reject") else "counter",
-            proposal=seller_reply_proposal if isinstance(seller_reply_proposal, dict) else None,
-        ))
+        transcript.append(
+            NegotiationRound(
+                round_number=round_idx,
+                sender="them",
+                action=seller_reply_action
+                if seller_reply_action in ("counter", "accept", "exit", "reject")
+                else "counter",
+                proposal=seller_reply_proposal
+                if isinstance(seller_reply_proposal, dict)
+                else None,
+            )
+        )
 
         seller_action = reply.get("action")
         if seller_action == "accept":
-            reply_prov, reply_esc, reply_plan, reply_terms = _parse_accepted_terms_from_reply(reply)
+            (
+                reply_prov,
+                reply_esc,
+                reply_selection,
+                reply_plan,
+                reply_terms,
+            ) = _parse_accepted_terms_from_reply(reply)
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
                 agreed_amount=(
-                    _amount(seller_reply_proposal)
-                    or _amount(next_move.proposal)
+                    _amount(seller_reply_proposal) or _amount(next_move.proposal)
                 ),
                 unit_count=unit_count,
                 rounds=round_idx,
                 accepted_provision_terms=reply_prov or accepted_prov,
                 accepted_escrow_proposal=reply_esc or accepted_esc,
+                settlement_selection=reply_selection or accepted_selection,
                 settlement_plan=reply_plan or accepted_plan,
                 accepted_escrow_terms=reply_terms or accepted_terms,
             )
@@ -727,7 +810,9 @@ def negotiate_with_seller(
                 rounds=round_idx,
             )
         if seller_action != "counter":
-            raise RuntimeError(f"Unexpected seller action mid-negotiation: {seller_action!r}")
+            raise RuntimeError(
+                f"Unexpected seller action mid-negotiation: {seller_action!r}"
+            )
 
         round_idx += 1
 

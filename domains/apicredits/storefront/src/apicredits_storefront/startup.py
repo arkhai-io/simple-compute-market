@@ -8,7 +8,9 @@ import logging
 from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
-logging.basicConfig(level=getattr(logging, str(settings.log_level).upper(), logging.INFO))
+logging.basicConfig(
+    level=getattr(logging, str(settings.log_level).upper(), logging.INFO)
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +83,12 @@ async def _startup_tasks() -> None:
         settings.negotiation_timeout_seconds,
     )
 
-    from apicredits_storefront.services.claims_runtime import claims_engine_loop
-
-    asyncio.create_task(claims_engine_loop())
+    settlement_worker = _container.resolved_settlement_worker
+    if settlement_worker is None:
+        raise RuntimeError("settlement servicing worker is not initialized")
+    asyncio.create_task(settlement_worker.run())
     logger.info(
-        "[STARTUP] Claims engine started (interval=%ss)",
+        "[STARTUP] Settlement servicing worker started (interval=%ss)",
         settings.get("claims_sweep_interval", 30),
     )
 
@@ -123,7 +126,9 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     admin_client = SiteCapacityAdminClient(authority, config.credits_admin_key())
     try:
         await admin_client.register_resource(
-            resource_id, total_units=total_units, resource_type="api_credits",
+            resource_id,
+            total_units=total_units,
+            resource_type="api_credits",
         )
     except SiteCapacityAdminClientError as exc:
         raise RuntimeError(
@@ -131,7 +136,8 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
         ) from exc
     logger.info(
         "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
-        resource_id, total_units,
+        resource_id,
+        total_units,
     )
 
 
@@ -162,6 +168,7 @@ async def _seed_demo_listing() -> None:
             offer = row.get("offer_resource") or {}
             if isinstance(offer, str):
                 import json as _json
+
                 try:
                     offer = _json.loads(offer)
                 except (ValueError, TypeError):
@@ -169,7 +176,8 @@ async def _seed_demo_listing() -> None:
             if isinstance(offer, dict) and offer.get("resource_id") == resource_id:
                 logger.info(
                     "[STARTUP] Demo listing for resource %s already present; "
-                    "skipping seed", resource_id,
+                    "skipping seed",
+                    resource_id,
                 )
                 return
 
@@ -187,16 +195,20 @@ async def _seed_demo_listing() -> None:
             from market_alkahest.alkahest import (
                 get_erc20_escrow_obligation_default,
             )
+
             escrow_address = get_erc20_escrow_obligation_default(
-                chain, config_path=chain_cfg.alkahest_address_config_path,
+                chain,
+                config_path=chain_cfg.alkahest_address_config_path,
             )
         price = str(seed.get("price_per_token", "1"))
-        accepted_escrows = [{
-            "chain_name": chain,
-            "escrow_address": str(escrow_address).lower(),
-            "literal_fields": {"token": str(seed["token"])},
-            "rates": [{"field": "amount", "per": "token", "value": price}],
-        }]
+        accepted_escrows = [
+            {
+                "chain_name": chain,
+                "escrow_address": str(escrow_address).lower(),
+                "literal_fields": {"token": str(seed["token"])},
+                "rates": [{"field": "amount", "per": "token", "value": price}],
+            }
+        ]
 
         result = await ListingService(sqlite_client=db).publish_from_quota(
             resource_id=resource_id,
@@ -208,7 +220,8 @@ async def _seed_demo_listing() -> None:
         )
         logger.info(
             "[STARTUP] Seeded demo listing %s (service=%s, registry=%s)",
-            result.get("listing_id"), seed.get("service_name"),
+            result.get("listing_id"),
+            seed.get("service_name"),
             result.get("registry_status"),
         )
     except Exception as exc:  # noqa: BLE001 — seed must not crash the storefront

@@ -31,39 +31,57 @@ snapshot once per call; the chain decides.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from decimal import Decimal
 from typing import Any
 
+from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from core_storefront.negotiation_sync import (
+    LIVE_LISTING_STATUSES,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
+from core_storefront.negotiation_sync import (
+    coerce_pinned_proposal as _coerce_pinned_proposal,
+)
+from core_storefront.negotiation_sync import (
+    create_sync_negotiation_thread as _create_sync_negotiation_thread,
+)
+from core_storefront.negotiation_sync import (
+    history_from_messages as _history_from_messages,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_accept_message as _record_buyer_accept_message,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_counter_message as _record_buyer_counter_message,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_exit_message as _record_buyer_exit_message,
+)
+from core_storefront.negotiation_sync import (
+    record_seller_decision_message as _record_seller_decision_message,
+)
+from domains.vms.listings import extract_compute_from_order
 from domains.vms.negotiation import storefront_round as vm_storefront_round
+from domains.vms.negotiation.policies import _amount_from_proposal
 from domains.vms.negotiation.storefront_round import (
     SellerRoundHook,
     SellerRoundResult,
+)
+from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_core.schemas import (
+    EscrowProposal,
+    SettlementObligation,
+    SettlementPlan,
+    SettlementSelection,
 )
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
 )
-from domains.vms.negotiation.policies import _amount_from_proposal
-
-from market_core.schemas import EscrowProposal
-from core_storefront.negotiation_sync import (
-    LIVE_LISTING_STATUSES,
-    OfferUnfulfillableError,
-    StorefrontPausedError,
-    coerce_pinned_proposal as _coerce_pinned_proposal,
-    create_sync_negotiation_thread as _create_sync_negotiation_thread,
-    history_from_messages as _history_from_messages,
-    record_buyer_accept_message as _record_buyer_accept_message,
-    record_buyer_counter_message as _record_buyer_counter_message,
-    record_buyer_exit_message as _record_buyer_exit_message,
-    record_seller_decision_message as _record_seller_decision_message,
-)
-from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from arkhai_vms import provision_duration_seconds, provision_start_utc
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +134,7 @@ def _seller_reference_amount(
     )
 
 
-async def _run_default_seller_round_policy(**kwargs: Any):
+async def _run_default_seller_round_policy(**kwargs: Any) -> SellerRoundResult:
     kwargs.setdefault("negotiation_config", _negotiation_settings())
     kwargs.setdefault("chains", _chain_settings())
     kwargs.setdefault("extra_policy_paths", _extra_policy_paths())
@@ -128,8 +146,8 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     # The round hook reads its availability snapshot through the
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
-    from market_storefront.services.capacity_client import build_capacity_client
     from market_storefront.domain_runtime import get_market_domain_contract
+    from market_storefront.services.capacity_client import build_capacity_client
 
     policy = get_market_domain_contract().storefront
     assert policy is not None
@@ -145,10 +163,7 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
 def _chain_config_paths() -> dict[str, str | None]:
     from market_storefront.utils.config import CHAINS
 
-    return {
-        name: chain.alkahest_address_config_path
-        for name, chain in CHAINS.items()
-    }
+    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
 def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
@@ -198,8 +213,7 @@ def _reject_unsupported_resource_shape_request(
     mismatched = {
         key: {"requested": requested[key], "listing": listing_compute.get(key)}
         for key in _DIMENSION_COMPUTE_KEYS
-        if requested.get(key) is not None
-        and requested[key] != listing_compute.get(key)
+        if requested.get(key) is not None and requested[key] != listing_compute.get(key)
     }
     if mismatched:
         raise OfferUnfulfillableError(
@@ -234,8 +248,101 @@ def _accepted_escrow_artifacts(
     return artifacts
 
 
+def _accepted_hosted_artifacts(
+    *,
+    selection: dict[str, Any],
+    option: dict[str, Any],
+    agreed_amount: int,
+    buyer_address: str,
+) -> dict[str, Any]:
+    if agreed_amount < 1:
+        raise OfferUnfulfillableError("hosted_amount_below_one_minor_unit")
+    accepted = SettlementSelection.model_validate(selection)
+    if accepted.option_id != option.get(
+        "option_id"
+    ) or accepted.mechanism != option.get("mechanism"):
+        raise OfferUnfulfillableError("settlement_selection_not_exact")
+    from market_storefront.utils.config import settings
+
+    claimant_address = str(settings.wallet.address or "")
+    if not claimant_address:
+        raise OfferUnfulfillableError("seller_wallet_address_unavailable")
+    params = dict(option.get("params") or {})
+    condition = params.get("condition")
+    if not isinstance(condition, dict):
+        raise OfferUnfulfillableError("hosted_condition_unavailable")
+    params["payer_address"] = buyer_address
+    params["claimant_address"] = claimant_address
+    plan = SettlementPlan(
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                amount=agreed_amount,
+                asset=str(option.get("asset") or ""),
+                expiration_unix=accepted.expiration_unix,
+                conditions=[condition],
+                mechanism=accepted.mechanism,
+                params=params,
+            )
+        ]
+    )
+    return {
+        "settlement_selection": accepted.model_dump(),
+        "settlement_plan": plan.model_dump(),
+    }
+
+
+def _accepted_settlement_artifacts(
+    *,
+    proposal: EscrowProposal | dict[str, Any] | None,
+    listing: dict[str, Any],
+    agreed_amount: int,
+    duration_seconds: int,
+    uses_scalar_amount: bool,
+    buyer_address: str,
+) -> dict[str, Any]:
+    proposal_dict = (
+        proposal.model_dump() if isinstance(proposal, EscrowProposal) else proposal
+    )
+    if isinstance(proposal_dict, dict) and isinstance(
+        proposal_dict.get("settlement_selection"), dict
+    ):
+        selection = SettlementSelection.model_validate(
+            proposal_dict["settlement_selection"]
+        )
+        options = listing.get("settlement_options") or []
+        if isinstance(options, str):
+            options = json.loads(options)
+        option = next(
+            (
+                item
+                for item in options
+                if isinstance(item, dict)
+                and item.get("option_id") == selection.option_id
+                and item.get("mechanism") == selection.mechanism
+            ),
+            None,
+        )
+        if option is None:
+            raise OfferUnfulfillableError("settlement_selection_not_exact")
+        return _accepted_hosted_artifacts(
+            selection=selection.model_dump(),
+            option=option,
+            agreed_amount=agreed_amount,
+            buyer_address=buyer_address,
+        )
+    return _accepted_escrow_artifacts(
+        proposal=proposal,
+        agreed_amount=agreed_amount,
+        duration_seconds=duration_seconds,
+        uses_scalar_amount=uses_scalar_amount,
+    )
+
+
 def lookup_pool_policy_tags(
-    sqlite_client: Any, listing_id: str | None,
+    sqlite_client: Any,
+    listing_id: str | None,
 ) -> dict[str, Any]:
     """A listing's mapped pool's currently cached ``policy_tags``, or ``{}``.
 
@@ -262,6 +369,7 @@ def lookup_pool_policy_tags(
             pool_id_for_listing,
             site_id_for_listing,
         )
+
         from market_storefront.services.site_projection_cache import (
             projection_caches,
         )
@@ -323,15 +431,20 @@ async def _place_capacity_hold(
 
     from market_storefront.utils.config import settings as _settings
 
-    ttl = float(getattr(
-        getattr(_settings, "capacity", None), "hold_ttl_seconds", 0,
-    ) or 0)
+    ttl = float(
+        getattr(
+            getattr(_settings, "capacity", None),
+            "hold_ttl_seconds",
+            0,
+        )
+        or 0
+    )
     if ttl <= 0:
         return
     try:
+        from domains.vms.listings.reconciler import site_id_for_listing
         from market_resource_pools.hints import capped_hold_seconds
 
-        from domains.vms.listings.reconciler import site_id_for_listing
         from market_storefront.services.capacity_client import build_capacity_client
         from market_storefront.services.vm_job_spec_service import (
             compute_capacity_claim_from_order,
@@ -341,7 +454,8 @@ async def _place_capacity_hold(
         capacity = build_capacity_client(lambda: sqlite_client)
         site_id = (
             site_id_for_listing(sqlite_client.db_path, listing_id)
-            if listing_id else None
+            if listing_id
+            else None
         )
         policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
         ttl = capped_hold_seconds(ttl, policy_tags)
@@ -359,12 +473,14 @@ async def _place_capacity_hold(
     except Exception as exc:
         logger.warning(
             "[NEGOTIATION] Could not place capacity hold for %s: %s",
-            negotiation_id, exc,
+            negotiation_id,
+            exc,
         )
         return
     if not held:
         stage_event(
-            "negotiation", "capacity_hold_unavailable",
+            "negotiation",
+            "capacity_hold_unavailable",
             negotiation_id=negotiation_id,
             listing_id=listing_id,
         )
@@ -377,7 +493,8 @@ async def _place_capacity_hold(
         expires_at=held.get("hold_expires_at"),
     )
     stage_event(
-        "negotiation", "capacity_hold_placed",
+        "negotiation",
+        "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
         capacity_reservation_id=held.get("capacity_reservation_id"),
@@ -414,12 +531,14 @@ async def _compute_round_zero_decision(
     Raises ``ValueError`` if the listing has no usable negotiation strategy
     (e.g. the offer/demand resources don't declare one).
     """
-    history = [NegotiationRound(
-        round_number=0,
-        sender="them",
-        action="initial",
-        proposal=their_proposal,
-    )]
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=their_proposal,
+        )
+    ]
     result = await _default_seller_round_hook(sqlite_client)(
         listing=listing,
         history=history,
@@ -444,7 +563,7 @@ async def start_sync_negotiation(
     sqlite_client: Any,
     our_listing_id: str,
     buyer_address: str,
-    proposal: EscrowProposal | None = None,
+    proposal: EscrowProposal | dict[str, Any] | None = None,
     provision_terms: Any = None,
     our_base_url: str,
     their_agent_url: str,
@@ -480,22 +599,19 @@ async def start_sync_negotiation(
     """
     vm_message_terms = _normalize_vm_message_terms(provision_terms)
     requested_duration_seconds = (
-        vm_message_terms.duration_seconds
-        if vm_message_terms is not None
-        else None
+        vm_message_terms.duration_seconds if vm_message_terms is not None else None
     )
     requested_start_utc = (
-        vm_message_terms.start_utc
-        if vm_message_terms is not None
-        else None
+        vm_message_terms.start_utc if vm_message_terms is not None else None
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
-    from domains.vms.listings.models import Listing
     from core_storefront.stage_log import stage_event
+    from domains.vms.listings.models import Listing
 
     # Check global pause flag and per-order pause flag before doing any work.
     from market_storefront.server import is_globally_paused
+
     if is_globally_paused():
         raise StorefrontPausedError("global")
 
@@ -504,7 +620,9 @@ async def start_sync_negotiation(
 
     our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id)
     if not our_order_dict:
-        raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
+        raise ValueError(
+            f"Order {our_listing_id} not found locally; seller has no matching listing"
+        )
 
     listing_status = (our_order_dict.get("status") or "").strip()
     if listing_status not in _LIVE_LISTING_STATUSES:
@@ -514,7 +632,9 @@ async def start_sync_negotiation(
         )
 
     _reject_unsupported_resource_shape_request(
-        vm_message_terms, our_order_dict=our_order_dict, listing_id=our_listing_id,
+        vm_message_terms,
+        our_order_dict=our_order_dict,
+        listing_id=our_listing_id,
     )
 
     proposal_dict = (
@@ -525,12 +645,14 @@ async def start_sync_negotiation(
 
     our_order = Listing.model_validate(our_order_dict)
 
-    history = [NegotiationRound(
-        round_number=0,
-        sender="them",
-        action="initial",
-        proposal=proposal_dict,
-    )]
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=proposal_dict,
+        )
+    ]
     try:
         round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
         round_result = await round_hook(
@@ -556,11 +678,15 @@ async def start_sync_negotiation(
         )
 
     policy_intermediate = round_result.intermediate or {}
+    accepted_selection = policy_intermediate.get("accepted_settlement_selection")
+    accepted_option = policy_intermediate.get("accepted_settlement_option")
     accepted_proposal_dict = policy_intermediate.get("accepted_escrow_proposal")
     accepted_proposal = (
         EscrowProposal.model_validate(accepted_proposal_dict)
         if isinstance(accepted_proposal_dict, dict)
         else proposal
+        if isinstance(proposal, EscrowProposal)
+        else None
     )
     uses_scalar_amount = bool(policy_intermediate.get("uses_scalar_amount", True))
     their_amount = _amount_from_proposal(proposal_dict)
@@ -583,6 +709,11 @@ async def start_sync_negotiation(
         buyer_escrow_proposal=(
             accepted_proposal.model_dump()
             if accepted_proposal is not None
+            else proposal_dict
+        ),
+        provision_terms=(
+            vm_message_terms.model_dump(mode="json")
+            if vm_message_terms is not None
             else None
         ),
         opening_sender=their_agent_url or buyer_address,
@@ -618,7 +749,8 @@ async def start_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=0,
         our_amount=our_amount,
@@ -650,9 +782,23 @@ async def start_sync_negotiation(
         if decision.action == "accept":
             response.update(artifacts)
         else:
-            response["accepted_escrow_proposal"] = artifacts[
-                "accepted_escrow_proposal"
-            ]
+            response["accepted_escrow_proposal"] = artifacts["accepted_escrow_proposal"]
+    elif isinstance(accepted_selection, dict) and isinstance(accepted_option, dict):
+        artifacts = _accepted_hosted_artifacts(
+            selection=accepted_selection,
+            option=accepted_option,
+            agreed_amount=int(
+                agreed_amount if decision.action == "accept" else our_amount
+            ),
+            buyer_address=buyer_address,
+        )
+        response["settlement_selection"] = artifacts["settlement_selection"]
+        if decision.action == "accept":
+            response["settlement_plan"] = artifacts["settlement_plan"]
+            await sqlite_client.commit_settlement_plan(
+                negotiation_id=neg_id,
+                settlement_plan=artifacts["settlement_plan"],
+            )
     return response
 
 
@@ -675,9 +821,9 @@ async def continue_sync_negotiation(
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
+    from core_storefront.stage_log import stage_event
     from domains.vms.listings import determine_strategy_from_order
     from domains.vms.listings.models import Listing
-    from core_storefront.stage_log import stage_event
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)
     if not thread:
@@ -689,7 +835,11 @@ async def continue_sync_negotiation(
         )
 
     our_listing_id = thread.get("our_listing_id")
-    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id) if our_listing_id else None
+    our_order_dict = (
+        await sqlite_client.load_listing(listing_id=our_listing_id)
+        if our_listing_id
+        else None
+    )
     if not our_order_dict:
         raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
     our_order = Listing.model_validate(our_order_dict)
@@ -705,12 +855,14 @@ async def continue_sync_negotiation(
     uses_scalar_amount = isinstance(pinned_fields, dict) and "amount" in pinned_fields
     our_amount = (
         _seller_reference_amount(our_order_dict, requested_duration_seconds)
-        if uses_scalar_amount else 0
+        if uses_scalar_amount
+        else 0
     )
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
-        m for m in messages
+        m
+        for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
         and m.get("sender") != buyer_address
@@ -719,8 +871,12 @@ async def continue_sync_negotiation(
     # Buyer-declared action short-circuits (accept / exit). No policy call.
     if buyer_action == "accept":
         last_seller_amount = next(
-            (int(Decimal(str(m["proposed_price"]))) for m in reversed(messages)
-             if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
+            (
+                int(Decimal(str(m["proposed_price"])))
+                for m in reversed(messages)
+                if m.get("action_taken") == "counter_offer"
+                and m.get("sender") != buyer_address
+            ),
             our_amount,
         )
         await _record_buyer_accept_message(
@@ -749,7 +905,8 @@ async def continue_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
         stage_event(
-            "negotiation", "accepted",
+            "negotiation",
+            "accepted",
             negotiation_id=neg_id,
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
@@ -757,14 +914,21 @@ async def continue_sync_negotiation(
         response = {
             "action": "accept",
         }
-        response.update(
-            _accepted_escrow_artifacts(
-                proposal=buyer_pinned_proposal,
-                agreed_amount=int(last_seller_amount),
-                duration_seconds=int(agreed_duration_seconds),
-                uses_scalar_amount=uses_scalar_amount,
-            )
+        artifacts = _accepted_settlement_artifacts(
+            proposal=buyer_pinned_proposal,
+            listing=our_order_dict,
+            agreed_amount=int(last_seller_amount),
+            duration_seconds=int(agreed_duration_seconds),
+            uses_scalar_amount=uses_scalar_amount,
+            buyer_address=buyer_address,
         )
+        response.update(artifacts)
+        settlement_plan = artifacts.get("settlement_plan")
+        if isinstance(settlement_plan, dict):
+            await sqlite_client.commit_settlement_plan(
+                negotiation_id=neg_id,
+                settlement_plan=settlement_plan,
+            )
         return response
 
     if buyer_action == "exit":
@@ -774,7 +938,8 @@ async def continue_sync_negotiation(
             our_amount=our_amount,
         )
         stage_event(
-            "negotiation", "exited",
+            "negotiation",
+            "exited",
             negotiation_id=neg_id,
             reason=buyer_reason or "buyer_exit",
         )
@@ -783,19 +948,24 @@ async def continue_sync_negotiation(
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
 
-    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    from market_storefront.utils.config import BASE_URL_OVERRIDE
+
     our_sender = BASE_URL_OVERRIDE or "seller"
     history = _history_from_messages(
-        messages, our_sender, buyer_pinned_proposal=buyer_pinned_proposal,
+        messages,
+        our_sender,
+        buyer_pinned_proposal=buyer_pinned_proposal,
     )
     # The buyer's just-recorded counter isn't in `messages` (loaded before
     # the txn) — append it so the chain sees it as their proposal.
-    history.append(NegotiationRound(
-        round_number=len(history),
-        sender="them",
-        action="counter",
-        proposal=buyer_proposal or buyer_pinned_proposal,
-    ))
+    history.append(
+        NegotiationRound(
+            round_number=len(history),
+            sender="them",
+            action="counter",
+            proposal=buyer_proposal or buyer_pinned_proposal,
+        )
+    )
     round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
     round_result = await round_hook(
         listing=our_order,
@@ -834,8 +1004,10 @@ async def continue_sync_negotiation(
     )
     decision = round_result.decision
     await _record_seller_decision(
-        neg_id=neg_id, our_amount=our_amount,
-        their_amount=buyer_amount, decision=decision,
+        neg_id=neg_id,
+        our_amount=our_amount,
+        their_amount=buyer_amount,
+        decision=decision,
     )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
@@ -860,7 +1032,8 @@ async def continue_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=len(our_previous_counters) + 1,
         our_amount=our_amount,
@@ -871,22 +1044,27 @@ async def continue_sync_negotiation(
     )
     response = decision.to_dict()
     if decision.action == "accept":
-        response.update(
-            _accepted_escrow_artifacts(
-                proposal=buyer_pinned_proposal,
-                agreed_amount=(
-                    int(decision_amount)
-                    if decision_amount is not None
-                    else int(our_amount)
-                ),
-                duration_seconds=int(
-                    requested_duration_seconds
-                    or our_order_dict.get("max_duration_seconds")
-                    or 3600
-                ),
-                uses_scalar_amount=uses_scalar_amount,
-            )
+        artifacts = _accepted_settlement_artifacts(
+            proposal=buyer_pinned_proposal,
+            listing=our_order_dict,
+            agreed_amount=(
+                int(decision_amount) if decision_amount is not None else int(our_amount)
+            ),
+            duration_seconds=int(
+                requested_duration_seconds
+                or our_order_dict.get("max_duration_seconds")
+                or 3600
+            ),
+            uses_scalar_amount=uses_scalar_amount,
+            buyer_address=buyer_address,
         )
+        response.update(artifacts)
+        settlement_plan = artifacts.get("settlement_plan")
+        if isinstance(settlement_plan, dict):
+            await sqlite_client.commit_settlement_plan(
+                negotiation_id=neg_id,
+                settlement_plan=settlement_plan,
+            )
     return response
 
 
@@ -908,7 +1086,5 @@ async def _record_seller_decision(
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,
-        decision_amount=(
-            int(decision_amount) if decision_amount is not None else None
-        ),
+        decision_amount=(int(decision_amount) if decision_amount is not None else None),
     )

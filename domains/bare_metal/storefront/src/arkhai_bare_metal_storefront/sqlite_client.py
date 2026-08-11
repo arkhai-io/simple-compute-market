@@ -18,8 +18,9 @@ from arkhai_bare_metal import (
     BareMetalTerms,
 )
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
-from core_storefront.sqlite_migrations import Migration
+from core_storefront.sqlite_migrations import MigrationLike
 from market_core import MarketDomainContract, validate_domain_contract
+from market_settlement_runtime import settlement_migrations
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
@@ -50,8 +51,8 @@ class SQLiteClient(CoreSQLiteClient):
         )
         super().__init__(db_path)
 
-    def _domain_migrations(self) -> tuple[Migration, ...]:
-        return BARE_METAL_STOREFRONT_MIGRATIONS
+    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
+        return (*settlement_migrations(), *BARE_METAL_STOREFRONT_MIGRATIONS)
 
     async def is_global_paused(self) -> bool:
         """Return the durable storefront-wide negotiation pause state."""

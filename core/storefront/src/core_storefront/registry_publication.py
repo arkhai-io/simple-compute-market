@@ -60,6 +60,7 @@ async def publish_listing_to_registries(
 
     offer_resource = ensure_json_obj(listing_dict.get("offer_resource"), {})
     accepted_escrows = ensure_json_obj(listing_dict.get("accepted_escrows"), [])
+    settlement_options = ensure_json_obj(listing_dict.get("settlement_options"), [])
     demands = ensure_json_obj(listing_dict.get("demands"), [])
     max_duration_seconds = listing_dict.get("max_duration_seconds")
 
@@ -69,6 +70,7 @@ async def publish_listing_to_registries(
                 listing_id=listing_id,
                 offer=offer_resource,
                 accepted_escrows=accepted_escrows,
+                settlement_options=settlement_options,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
                 storefront_url=listing_dict.get("seller") or storefront_url,
@@ -88,6 +90,7 @@ async def publish_listing_to_registries(
                         listing_id=listing_id,
                         offer_resource=offer_resource,
                         accepted_escrows=accepted_escrows,
+                        settlement_options=settlement_options,
                         demands=demands,
                         max_duration_seconds=max_duration_seconds,
                     )

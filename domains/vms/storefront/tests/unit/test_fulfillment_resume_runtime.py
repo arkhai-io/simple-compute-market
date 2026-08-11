@@ -1,11 +1,10 @@
+import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import sqlite3
-
 import pytest
-
 from market_fulfillment import VersionedEnvelope
+
 from market_storefront.services.fulfillment_resume_runtime import converge_escrow_once
 
 
@@ -45,15 +44,20 @@ async def test_known_fulfillment_resumes_without_schedule_or_begin():
         '"schema_version":1,"payload":{"escrow_uid":"escrow-1"}}',
     }
 
-    assert await converge_escrow_once(
-        escrow, sqlite_client=db, fulfillment_client=remote
-    ) is True
+    assert (
+        await converge_escrow_once(escrow, sqlite_client=db, fulfillment_client=remote)
+        is True
+    )
     remote.get_fulfillment_status.assert_awaited_once_with(
         "fulfillment-1", capacity_reservation_id="reservation-1"
     )
     remote.get_fulfillment_result.assert_awaited_once()
     db.update_escrow.assert_awaited_once()
-    assert db.update_escrow.await_args.kwargs["fulfillment_phase"] == "physical_result_recorded"
+    assert (
+        db.update_escrow.await_args.kwargs["fulfillment_phase"]
+        == "physical_result_recorded"
+    )
+
 
 @pytest.mark.asyncio
 async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
@@ -61,10 +65,12 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     sqlite3.connect(db_path).close()  # a real, valid (if empty) sqlite file
     db = SimpleNamespace(update_escrow=AsyncMock(), db_path=db_path)
     capacity = SimpleNamespace(
-        reserve=AsyncMock(return_value={
-            "capacity_reservation_id": "reservation-1",
-            "resource_id": "resource-1",
-        })
+        reserve=AsyncMock(
+            return_value={
+                "capacity_reservation_id": "reservation-1",
+                "resource_id": "resource-1",
+            }
+        )
     )
     remote = SimpleNamespace(
         schedule_resource=AsyncMock(
@@ -88,25 +94,30 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
         "capacity_reservation_id": None,
         "settlement_resource_id": None,
         "fulfillment_id": None,
-        "fulfillment_context": __import__("json").dumps({
-            "kind": "vm.storefront.fulfillment-context",
-            "schema_version": 1,
-            "payload": {
-                "escrow_uid": "escrow-1",
-                "listing_id": "listing-1",
-                "duration_seconds": 7200,
-                "required_attributes": {"gpu_count": 1},
-                "fulfillment_request": request,
-            },
-        }),
+        "fulfillment_context": __import__("json").dumps(
+            {
+                "kind": "vm.storefront.fulfillment-context",
+                "schema_version": 1,
+                "payload": {
+                    "escrow_uid": "escrow-1",
+                    "listing_id": "listing-1",
+                    "duration_seconds": 7200,
+                    "required_attributes": {"gpu_count": 1},
+                    "fulfillment_request": request,
+                },
+            }
+        ),
     }
 
-    assert await converge_escrow_once(
-        escrow,
-        sqlite_client=db,
-        fulfillment_client=remote,
-        capacity_client=capacity,
-    ) is False
+    assert (
+        await converge_escrow_once(
+            escrow,
+            sqlite_client=db,
+            fulfillment_client=remote,
+            capacity_client=capacity,
+        )
+        is False
+    )
 
     capacity.reserve.assert_awaited_once_with(
         claim={"gpu_count": 1},
@@ -122,9 +133,12 @@ async def test_missing_identifiers_replay_exact_persisted_request(tmp_path):
     )
     assert db.update_escrow.await_count == 3
 
+
 @pytest.mark.asyncio
 async def test_post_physical_convergence_records_ready_and_claim():
-    from market_storefront.services.fulfillment_resume_runtime import converge_post_physical_delivery
+    from market_storefront.services.fulfillment_resume_runtime import (
+        converge_post_physical_delivery,
+    )
 
     db = SimpleNamespace(
         update_escrow=AsyncMock(),
@@ -134,10 +148,11 @@ async def test_post_physical_convergence_records_ready_and_claim():
     capacity = SimpleNamespace(commit=AsyncMock())
     register = AsyncMock()
     submit = AsyncMock(return_value="attestation-1")
-    claim = AsyncMock()
+    bind_fulfillment = AsyncMock()
     escrow = {
         "escrow_uid": "escrow-1",
         "negotiation_id": "neg-1",
+        "obligation_ref": "obligation-1",
         "chain_name": "base-sepolia",
         "escrow_address": "0xabc",
         "capacity_reservation_id": "reservation-1",
@@ -152,30 +167,39 @@ async def test_post_physical_convergence_records_ready_and_claim():
             "payload": {"vm_target": "tenant-1"},
         },
     }
-    assert await converge_post_physical_delivery(
-        escrow=escrow,
-        context=context,
-        sqlite_client=db,
-        capacity_client=capacity,
-        connection_details={"host": "kvm-1", "vm_name": "tenant-1"},
-        authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
-        register_lease=register,
-        submit_fulfillment=submit,
-        submit_claim_fn=claim,
-        alkahest_client=object(),
-    ) is True
+    assert (
+        await converge_post_physical_delivery(
+            escrow=escrow,
+            context=context,
+            sqlite_client=db,
+            capacity_client=capacity,
+            connection_details={"host": "kvm-1", "vm_name": "tenant-1"},
+            authentication={"tenant": {"password": "secret", "key_type": "ed25519"}},
+            register_lease=register,
+            submit_fulfillment=submit,
+            bind_fulfillment_fn=bind_fulfillment,
+            alkahest_client=object(),
+        )
+        is True
+    )
     submit.assert_awaited_once()
     assert submit.await_args.kwargs["allow_submit"] is True
     assert any(
-        call.kwargs.get("status") == "ready" and call.kwargs.get("fulfillment_phase") == "complete"
+        call.kwargs.get("status") == "ready"
+        and call.kwargs.get("fulfillment_phase") == "complete"
         for call in db.update_escrow.await_args_list
     )
-    claim.assert_awaited_once()
+    bind_fulfillment.assert_awaited_once_with(
+        obligation_ref="obligation-1",
+        fulfillment_ref="attestation-1",
+    )
 
 
 @pytest.mark.asyncio
 async def test_ambiguous_onchain_recovery_never_blindly_resubmits():
-    from market_storefront.services.fulfillment_resume_runtime import converge_post_physical_delivery
+    from market_storefront.services.fulfillment_resume_runtime import (
+        converge_post_physical_delivery,
+    )
 
     db = SimpleNamespace(
         update_escrow=AsyncMock(),

@@ -46,8 +46,10 @@ def test_serve_command_delegates_process_options(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0
-    assert calls == [{
-        "host": "127.0.0.1",
-        "port": 8123,
-        "root_path": "/seller/bare-metal",
-    }]
+    assert calls == [
+        {
+            "host": "127.0.0.1",
+            "port": 8123,
+            "root_path": "/seller/bare-metal",
+        }
+    ]

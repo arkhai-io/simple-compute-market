@@ -21,7 +21,21 @@ class Project:
 
 
 PROJECTS: dict[str, Project] = {
-    "kit/site": Project("kit/site", "arkhai-kit-site", ("kit/site/tests",), ("dist-kits",)),
+    "kit/settlement-runtime": Project(
+        "kit/settlement-runtime",
+        "arkhai-kit-settlement-runtime",
+        ("kit/settlement-runtime/tests",),
+        ("dist-kits",),
+    ),
+    "kit/alkahest": Project(
+        "kit/alkahest",
+        "arkhai-kit-alkahest",
+        ("kit/alkahest/tests",),
+        ("dist-alkahest", "dist-kits"),
+    ),
+    "kit/site": Project(
+        "kit/site", "arkhai-kit-site", ("kit/site/tests",), ("dist-kits",)
+    ),
     "kit/resource-pools": Project(
         "kit/resource-pools",
         "arkhai-kit-resource-pools",
@@ -33,6 +47,24 @@ PROJECTS: dict[str, Project] = {
         "arkhai-kit-fulfillment",
         ("kit/fulfillment/tests",),
         ("dist-kits",),
+    ),
+    "domains/vms/storefront": Project(
+        "domains/vms/storefront",
+        "arkhai-vms-storefront",
+        ("domains/vms/storefront/tests",),
+        ("dist",),
+    ),
+    "domains/apicredits/storefront": Project(
+        "domains/apicredits/storefront",
+        "arkhai-apicredits-storefront",
+        ("domains/apicredits/storefront/tests",),
+        ("dist",),
+    ),
+    "domains/bare_metal/storefront": Project(
+        "domains/bare_metal/storefront",
+        "arkhai-bare-metal-storefront",
+        ("domains/bare_metal/storefront/tests",),
+        ("dist",),
     ),
     "provisioning/compute/service": Project(
         "provisioning/compute/service",
@@ -52,6 +84,12 @@ PROJECTS: dict[str, Project] = {
 }
 
 IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
+    "kit/settlement-runtime": (
+        "kit/alkahest",
+        "domains/vms/storefront",
+        "domains/apicredits/storefront",
+        "domains/bare_metal/storefront",
+    ),
     "kit/fulfillment": (
         "kit/site",
         "kit/resource-pools",
@@ -96,8 +134,12 @@ def _projects_for_files(files: list[str]) -> set[str]:
 def _load_manifest(path: Path) -> set[str]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     values = payload.get("validation_projects")
-    if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
-        raise ValueError("scope file must contain a string list named validation_projects")
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) for value in values
+    ):
+        raise ValueError(
+            "scope file must contain a string list named validation_projects"
+        )
     return set(values)
 
 

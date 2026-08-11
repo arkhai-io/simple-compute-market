@@ -2,6 +2,7 @@ from alkahest_py import EnvTestManager, MockERC20, AlkahestClient
 import pprint
 import asyncio
 
+
 def main() -> None:
     env = EnvTestManager()
     pp = pprint.PrettyPrinter()
@@ -11,7 +12,7 @@ def main() -> None:
     mock_erc20.transfer(env.bob, 90000000000)
 
     port = int(env.rpc_url.split(":")[2].split("/")[0])
-    
+
     print("rpc_url:", env.rpc_url)
     print(f"rpc_port: {port}")
     print("For local development, deploy contracts with:")

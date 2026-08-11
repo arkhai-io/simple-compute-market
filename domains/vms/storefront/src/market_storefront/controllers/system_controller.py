@@ -1,4 +1,5 @@
 """System controller — health, liveness, and stage events."""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,17 +34,25 @@ class SystemController:
         self._db = db
         self._svc = system_svc
 
-    @router.get("/health", response_model=HealthResponse, summary="Kubernetes liveness probe")
+    @router.get(
+        "/health", response_model=HealthResponse, summary="Kubernetes liveness probe"
+    )
     async def health_bare(self) -> HealthResponse:
         return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/health", response_model=HealthResponse,
-                summary="Versioned health alias")
+    @router.get(
+        "/api/v1/system/health",
+        response_model=HealthResponse,
+        summary="Versioned health alias",
+    )
     async def health_versioned(self) -> HealthResponse:
         return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/status", response_model=HealthResponse,
-                summary="Full diagnostic status (includes registry + pause state)")
+    @router.get(
+        "/api/v1/system/status",
+        response_model=HealthResponse,
+        summary="Full diagnostic status (includes registry + pause state)",
+    )
     async def system_status(self) -> HealthResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
@@ -73,8 +82,11 @@ class SystemController:
 
         if not stream:
             rows = await self._db.list_stage_events(
-                after_id=since_id, limit=limit,
-                stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
+                after_id=since_id,
+                limit=limit,
+                stage=stage,
+                listing_id=listing_id,
+                negotiation_id=negotiation_id,
             )
             return StageEventResponse(events=rows, count=len(rows))
 
@@ -82,8 +94,11 @@ class SystemController:
             cursor = since_id
             while True:
                 rows = await self._db.list_stage_events(
-                    after_id=cursor, limit=50,
-                    stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
+                    after_id=cursor,
+                    limit=50,
+                    stage=stage,
+                    listing_id=listing_id,
+                    negotiation_id=negotiation_id,
                 )
                 for row in rows:
                     cursor = row["id"]

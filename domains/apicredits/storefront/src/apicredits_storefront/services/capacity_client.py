@@ -88,7 +88,8 @@ def _make_listing_reconcile_subscriber(
             closed = await close_token_listings_after_capacity_change(db, client)
             if closed:
                 stage_event(
-                    "provision", "token_listings_closed",
+                    "provision",
+                    "token_listings_closed",
                     resource_id=delta.resource_id,
                     site=delta.site,
                     capacity_version=delta.version,
@@ -98,7 +99,8 @@ def _make_listing_reconcile_subscriber(
             reopened = await reopen_token_listings_after_capacity_change(db, client)
             if reopened:
                 stage_event(
-                    "provision", "token_listings_reopened",
+                    "provision",
+                    "token_listings_reopened",
                     resource_id=delta.resource_id,
                     site=delta.site,
                     capacity_version=delta.version,
@@ -123,15 +125,13 @@ def _aggregate_for(
     placement = PLACEMENT_POLICIES.get(placement_name)
     if placement is None:
         logger.warning(
-            "[CAPACITY] Unknown placement policy %r — using fill_first "
-            "(known: %s)", placement_name, sorted(PLACEMENT_POLICIES),
+            "[CAPACITY] Unknown placement policy %r — using fill_first (known: %s)",
+            placement_name,
+            sorted(PLACEMENT_POLICIES),
         )
         placement = fill_first
     aggregate = AggregateCapacityClient(
-        {
-            name: SiteCapacityClient(url, admin_key)
-            for name, url in sites.items()
-        },
+        {name: SiteCapacityClient(url, admin_key) for name, url in sites.items()},
         placement=placement,
     )
     aggregate.subscribe(
@@ -209,9 +209,15 @@ async def capacity_events_poller_loop() -> None:
         await close_token_listings_after_capacity_change(db, aggregate)
         await reopen_token_listings_after_capacity_change(db, aggregate)
 
-    await asyncio.gather(*(
-        site_events_poller(
-            aggregate, name, client, interval, full_reconcile=_full_reconcile,
+    await asyncio.gather(
+        *(
+            site_events_poller(
+                aggregate,
+                name,
+                client,
+                interval,
+                full_reconcile=_full_reconcile,
+            )
+            for name, client in site_clients.items()
         )
-        for name, client in site_clients.items()
-    ))
+    )

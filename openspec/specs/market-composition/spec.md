@@ -3,9 +3,7 @@
 ## Purpose
 
 Define the dependency direction and role/domain/plugin boundaries that keep market orchestration schema-opaque.
-
 ## Requirements
-
 ### Requirement: Schema-opaque core orchestration
 Core role packages MUST own discovery, negotiation, settlement, and servicing control flow without importing a concrete market domain or settlement mechanism.
 
@@ -59,6 +57,103 @@ A domain MUST declare optional capabilities and supply the typed hook set requir
 #### Scenario: Declared capability is incomplete
 - **WHEN** a domain declares a capability but omits a required hook
 - **THEN** composition rejects the plugin with an actionable capability validation error
+
+### Requirement: Kit-owned single settlement runtime
+The mechanism-neutral commercial-settlement lifecycle MUST live in a foundation kit and
+MUST be composed by role/domain roots. It MUST use one stable per-obligation identity and
+one operation journal for materialization, authoritative status reconciliation, condition
+checking, collection, expired reclaim, retries, and uncertain acknowledgements. A domain
+MUST supply accepted-plan semantics, fulfillment, configuration, status projection, and
+real failure actions; a mechanism kit MUST supply the conditional-escrow adapter. Neither
+core carrier packages nor the runtime kit may import a concrete domain or deployed
+service.
+
+#### Scenario: A domain settles a deal
+
+- **WHEN** a composing domain accepts and fulfills a settlement obligation
+- **THEN** lifecycle transitions and idempotency come from the shared runtime, while the
+  domain supplies only its plan, fulfillment, projection, configuration, and actions
+
+#### Scenario: A second settlement mechanism is installed
+
+- **WHEN** a composition registers another conditional-escrow adapter
+- **THEN** it uses the same obligation records, operation leases, worker, and aggregate
+  status rather than introducing a mechanism-specific lifecycle
+
+#### Scenario: Settlement is interrupted and resumed
+
+- **WHEN** a process stops after an operation is reserved or its acknowledgement is
+  uncertain
+- **THEN** recovery reloads the exact obligation and stable operation identity and
+  reconciles or retries without guessing an obligation or duplicating a financial effect
+
+#### Scenario: A domain has no fulfillment authority
+
+- **WHEN** a domain can verify settlement but cannot produce a real immutable fulfillment
+  reference
+- **THEN** composition exposes that verified-only boundary and does not install a no-op
+  executor, synthetic fulfillment, or collectable claim
+
+### Requirement: No parallel settlement lifecycle
+
+A production composition MUST NOT retain an escrow-UID claim engine, dual-write claim
+projection, domain-local settlement orchestration copy, or compatibility alias that can
+advance the same obligation outside the shared runtime.
+
+#### Scenario: Legacy claim state is migrated
+
+- **WHEN** existing claim rows are converted into stable obligation records
+- **THEN** every immutable snapshot is validated before one atomic conversion, conflicts
+  roll back the conversion, and subsequent writes use only the shared runtime
+
+#### Scenario: Domain compensation differs
+
+- **WHEN** VM provisioning, API-credit issuance, or another domain effect fails
+- **THEN** the shared ordered dispatcher invokes that domain's registered real actions at
+  the existing side-effect boundary and does not interpret domain payloads or invent a
+  generic money-movement action
+
+### Requirement: Thin hosted consumer boundary
+The VM storefront MAY compose `market_hosted_settlement` over the released
+`hosted_settlement_client`, but marketplace packages MUST NOT contain Stripe,
+EVM/RPC, webhook, financial database, provider identity, or duplicate
+wire/signature implementations. Stripe funds remain platform-custodied; EAS
+and arbiter compatibility evaluates only a release predicate and is not
+on-chain custody.
+
+#### Scenario: Hosted settlement is installed
+- **WHEN** the storefront enables `fiat.stripe.v1`
+- **THEN** it registers the thin adapter in the same settlement runtime and
+  imports no hosted service implementation or marketplace-internal auth into
+  the released client contract
+
+### Requirement: Thin hosted settlement composition
+
+The marketplace MUST integrate hosted fiat through a foundation-kit adapter registered with the existing settlement runtime. The adapter MAY depend on the released hosted client, core carriers, and settlement runtime, but MUST NOT contain or import the Stripe SDK, EVM/RPC gateway, webhook handling, financial database models, provider credentials/IDs, or duplicate hosted wire/signature implementations.
+
+#### Scenario: VM composition enables hosted settlement
+- **WHEN** the pinned hosted client and adapter are configured
+- **THEN** VM settlement uses the same obligation records, operation journal, worker, and failure dispatcher as Alkahest with mechanism effects supplied by the adapter
+
+#### Scenario: Other domains are installed
+- **WHEN** API-credit or bare-metal packages run without hosted settlement enabled
+- **THEN** they acquire no hosted-client or Stripe dependency and their composition remains unchanged
+
+### Requirement: Cross-repository authority boundary
+
+The hosted repository MUST own the public HTTP contract/client, Stripe and EAS integrations, connected-account bindings, provider identities, webhook inbox, financial state, condition registry, image/chart, admin tooling, and release process. This repository MUST own market negotiation, accepted plans, fulfillment state, generic lifecycle, VM policy/UX, and the thin adapter. The boundary MUST use released wheels and versioned image/OpenAPI artifacts only; it MUST NOT use a shared database, source path, editable dependency, copied model, or in-repository hosted-service Deployment.
+
+#### Scenario: Hosted contract changes
+- **WHEN** the service publishes a new incompatible contract
+- **THEN** marketplace CI and readiness reject it until the exact client/manifest pin and conformance fixtures are updated together
+
+### Requirement: Independent request authentication
+
+The hosted client and service MUST use their released body-bound request-signing contract. Existing marketplace registry, storefront, and signed-operation authentication modules and development behavior MUST remain unchanged and MUST NOT become a cross-repository source dependency.
+
+#### Scenario: Hosted request is signed
+- **WHEN** the adapter invokes the external authority
+- **THEN** signing binds operation, resource, canonical body hash, and timestamp under the released client contract without importing an internal marketplace auth module
 
 ## Evidence
 

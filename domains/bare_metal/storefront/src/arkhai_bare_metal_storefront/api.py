@@ -48,7 +48,9 @@ def _admin(runtime: BareMetalStorefrontRuntime, supplied: str | None) -> None:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-def _listing_response(runtime: BareMetalStorefrontRuntime, row: dict[str, Any]) -> dict[str, Any]:
+def _listing_response(
+    runtime: BareMetalStorefrontRuntime, row: dict[str, Any]
+) -> dict[str, Any]:
     raw = row.get("offer_resource")
     if isinstance(raw, str):
         raw = json.loads(raw)

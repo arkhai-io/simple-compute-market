@@ -1,27 +1,38 @@
 """API-credits storefront SQLite client.
 
 The domain-neutral market-state persistence lives in
-``core_storefront.sqlite_client``; this subclass adds the one
-domain-owned table: ``credit_deal_terms``, the per-negotiation record of
-what is being bought (quantity + key disposition, fixed at round 0).
-The VM analog keeps duration on the shared thread row; credits terms are
-richer, so they live beside the thread keyed by negotiation_id —
-settlement reads them back when it submits issuance.
+``core_storefront.sqlite_client``. This subclass adds
+``credit_deal_terms`` and the immutable public-row link to the shared
+settlement obligation. Quantity and key disposition are fixed at round
+zero and read back when settlement submits issuance.
 """
 
 from __future__ import annotations
 
 import asyncio
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
+from core_storefront.sqlite_migrations import MigrationLike
+from market_settlement_runtime import settlement_migrations
 
 from .config import settings
+from .migrations import APICREDITS_MIGRATIONS
 
 
 class SQLiteClient(CoreSQLiteClient):
     """Core market-state client + the API-credits deal-terms table."""
+
+    _ESCROW_COLS = (
+        *CoreSQLiteClient._ESCROW_COLS,
+        "obligation_ref",
+        "obligation_index",
+    )
+
+    def _domain_migrations(self) -> tuple[MigrationLike, ...]:
+        return (*settlement_migrations(), *APICREDITS_MIGRATIONS)
 
     def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:
         cur.execute(
@@ -65,7 +76,9 @@ class SQLiteClient(CoreSQLiteClient):
         await asyncio.to_thread(_save)
 
     async def load_credit_terms(
-        self, *, negotiation_id: str,
+        self,
+        *,
+        negotiation_id: str,
     ) -> dict[str, Any] | None:
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
@@ -87,6 +100,61 @@ class SQLiteClient(CoreSQLiteClient):
             }
 
         return await asyncio.to_thread(_load)
+
+    async def bind_escrow_obligation(
+        self,
+        *,
+        escrow_uid: str,
+        obligation_ref: str,
+        obligation_index: int,
+    ) -> dict[str, Any]:
+        """Persist verified obligation identity without permitting rebinding."""
+        if not obligation_ref.strip():
+            raise ValueError("obligation_ref must not be empty")
+        if obligation_index < 0:
+            raise ValueError("obligation_index must be non-negative")
+
+        def _bind() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT obligation_ref, obligation_index FROM escrows "
+                    "WHERE escrow_uid = ?",
+                    (escrow_uid,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Unknown escrow {escrow_uid}")
+                existing_ref, existing_index = row
+                if existing_ref is not None and (
+                    str(existing_ref) != obligation_ref
+                    or int(existing_index) != obligation_index
+                ):
+                    raise ValueError(
+                        f"escrow {escrow_uid} is already bound to a different obligation"
+                    )
+                conn.execute(
+                    "UPDATE escrows SET obligation_ref = ?, obligation_index = ?, "
+                    "updated_at = ? WHERE escrow_uid = ?",
+                    (
+                        obligation_ref,
+                        obligation_index,
+                        datetime.now().isoformat(),
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_bind)
+        row = await self.load_escrow(escrow_uid=escrow_uid)
+        if row is None:
+            raise RuntimeError(f"escrow {escrow_uid} disappeared after binding")
+        return row
 
 
 _sqlite_client: SQLiteClient | None = None

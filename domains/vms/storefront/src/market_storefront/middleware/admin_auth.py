@@ -16,6 +16,7 @@ Or per-endpoint::
     async def pause(...): ...
 
 """
+
 from __future__ import annotations
 
 from fastapi import HTTPException, Security
@@ -29,6 +30,7 @@ _admin_key_header = APIKeyHeader(
     auto_error=False,
     description="Admin API key. Required for all /admin/* endpoints and admin actions.",
 )
+
 
 def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
     """FastAPI dependency that enforces the X-Admin-Key header.

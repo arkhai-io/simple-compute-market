@@ -770,29 +770,18 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
+        accepted_escrows: list[dict[str, Any]] | None = None,
+        settlement_options: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
-        """POST /listings/create.
-
-        ``accepted_escrows`` lists the escrow shapes the seller will accept
-        for this listing. Each entry pins ``(chain_name, escrow_address)``
-        plus a partial ``ObligationData`` advertisement via the ``fields``
-        map, with the per-hour rate in ``price_per_hour``.
-
-        ``max_duration_seconds`` is the optional ceiling on lease duration
-        (None = unlimited). Buyers supply the actual duration at
-        negotiation init time; total payment is computed at agreement as
-        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
-        ``paused=True`` to create the listing in local SQLite without
-        publishing to the registry; call ``resume_listing`` to publish.
-        """
+        """Create a listing with one or more supported settlement choices."""
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "accepted_escrows": accepted_escrows,
+            "accepted_escrows": accepted_escrows or [],
+            "settlement_options": settlement_options or [],
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
@@ -1554,29 +1543,18 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        accepted_escrows: list[dict[str, Any]],
+        accepted_escrows: list[dict[str, Any]] | None = None,
+        settlement_options: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
-        """POST /listings/create.
-
-        ``accepted_escrows`` lists the escrow shapes the seller will accept
-        for this listing. Each entry pins ``(chain_name, escrow_address)``
-        plus a partial ``ObligationData`` advertisement via the ``fields``
-        map, with the per-hour rate in ``price_per_hour``.
-
-        ``max_duration_seconds`` is the optional ceiling on lease duration
-        (None = unlimited). Buyers supply the actual duration at
-        negotiation init time; total payment is computed at agreement as
-        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
-        ``paused=True`` to create the listing in local SQLite without
-        publishing to the registry; call ``resume_listing`` to publish.
-        """
+        """Create a listing with one or more supported settlement choices."""
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "accepted_escrows": accepted_escrows,
+            "accepted_escrows": accepted_escrows or [],
+            "settlement_options": settlement_options or [],
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,

@@ -11,6 +11,7 @@ The check is best-effort: it activates only when the slice carries a
 through unchecked — those flows pre-date the hosts table or come from
 remote listings being mirrored into the local DB and aren't ours to gate.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,8 +21,7 @@ from typing import Any, Protocol
 class CapacityStore(Protocol):
     db_path: str
 
-    async def get_host(self, *, name: str) -> dict[str, Any] | None:
-        ...
+    async def get_host(self, *, name: str) -> dict[str, Any] | None: ...
 
 
 @dataclass
@@ -46,9 +46,7 @@ class CapacityExceededError(ValueError):
         self.host_name = host_name
         self.violations = violations
         joined = "; ".join(str(v) for v in violations)
-        super().__init__(
-            f"Host '{host_name}' over-committed: {joined}"
-        )
+        super().__init__(f"Host '{host_name}' over-committed: {joined}")
 
 
 async def check_slice_fits_host(
@@ -106,12 +104,14 @@ async def check_slice_fits_host(
         if lim is None:
             continue
         if requested[dim] + used[dim] > lim:
-            violations.append(CapacityViolation(
-                dimension=dim,
-                requested=requested[dim],
-                limit=lim,
-                used_excluding_this=used[dim],
-            ))
+            violations.append(
+                CapacityViolation(
+                    dimension=dim,
+                    requested=requested[dim],
+                    limit=lim,
+                    used_excluding_this=used[dim],
+                )
+            )
 
     if violations:
         raise CapacityExceededError(host_name=host_name, violations=violations)

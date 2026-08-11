@@ -17,7 +17,7 @@ objects are registered by domain packages (the VM domain registers
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TypeAlias
 
 
 @dataclass(frozen=True)
@@ -42,19 +42,49 @@ class PolicyParam:
 
 
 @dataclass(frozen=True)
+class SettlementPreferenceCandidate:
+    """Immutable policy view of one already-constrained settlement choice."""
+
+    identity: str
+    position: int
+    chain_name: str
+    escrow_address: str
+    token_address: str | None
+    unit_price: int | None
+
+
+@dataclass(frozen=True)
+class SettlementPreferenceContext:
+    """Immutable listing context shared by every candidate in one decision."""
+
+    listing_id: str | None
+    chain_name: str
+    token_contract_filter: str | None
+
+
+SettlementPreferenceOutput: TypeAlias = str | tuple[str, ...] | None
+SettlementPreferenceHook: TypeAlias = Callable[
+    [tuple[SettlementPreferenceCandidate, ...], SettlementPreferenceContext],
+    SettlementPreferenceOutput,
+]
+
+
+@dataclass(frozen=True)
 class BuyerPolicy:
     """A named buyer negotiation policy.
 
     ``middlewares`` is the rest of the chain after the pinned-shape
     guard the loader prepends. ``compatible`` judges one listing
     ``accepted_escrows`` entry — tuple selection offers the policy only
-    formats it claims. ``derive_prices`` turns raw CLI parameter values
-    plus the candidate listings into the per-hour (initial, max) pair
-    in base units, or ``(None, None)`` when underivable or declined;
-    policies with no scalar notion may leave it None. It receives the
-    caller's canonical interactivity disposition as ``interactive=``
-    (core computes it from --yes + TTY; a policy never re-derives it
-    from the environment) and may prompt only when it is True.
+    formats it claims. ``prefer_settlement`` may select or rank only the
+    immutable, already-constrained candidates it receives; ``None`` preserves
+    balance and list-order fallback. ``derive_prices`` turns raw CLI parameter
+    values plus the candidate listings into the per-hour (initial, max) pair
+    in base units, or ``(None, None)`` when underivable or declined; policies
+    with no scalar notion may leave it None. It receives the caller's
+    canonical interactivity disposition as ``interactive=`` (core computes it
+    from --yes + TTY; a policy never re-derives it from the environment) and
+    may prompt only when it is True.
     """
 
     name: str
@@ -63,9 +93,8 @@ class BuyerPolicy:
     compatible: Callable[[dict[str, Any]], bool] = field(
         default=lambda entry: True,
     )
-    derive_prices: Optional[
-        Callable[..., tuple[Optional[int], Optional[int]]]
-    ] = None
+    prefer_settlement: SettlementPreferenceHook | None = None
+    derive_prices: Optional[Callable[..., tuple[Optional[int], Optional[int]]]] = None
 
 
 _REGISTRY: dict[str, BuyerPolicy] = {}
@@ -110,31 +139,38 @@ def inject_policy_cli_params(fn: Any, policy: BuyerPolicy) -> Any:
 
     sig = inspect.signature(fn)
     params = [
-        p for p in sig.parameters.values()
+        p
+        for p in sig.parameters.values()
         if p.kind is not inspect.Parameter.VAR_KEYWORD
     ]
     taken = {p.name for p in params}
     for pp in policy.cli_params:
         if pp.name in taken:
             continue
-        params.append(inspect.Parameter(
-            pp.name,
-            inspect.Parameter.KEYWORD_ONLY,
-            default=typer.Option(pp.default, pp.cli_flag, help=pp.help),
-            annotation=pp.annotation,
-        ))
+        params.append(
+            inspect.Parameter(
+                pp.name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=typer.Option(pp.default, pp.cli_flag, help=pp.help),
+                annotation=pp.annotation,
+            )
+        )
     if "policy_param" not in taken:
-        params.append(inspect.Parameter(
-            "policy_param",
-            inspect.Parameter.KEYWORD_ONLY,
-            default=typer.Option(
-                None, "--policy-param", "-P",
-                help="Extra negotiation-policy parameter as name=value. "
-                     "Repeatable — the escape hatch for policy knobs "
-                     "without a named flag; values reach the policy "
-                     "chain's context verbatim.",
-            ),
-            annotation=Optional[list[str]],
-        ))
+        params.append(
+            inspect.Parameter(
+                "policy_param",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=typer.Option(
+                    None,
+                    "--policy-param",
+                    "-P",
+                    help="Extra negotiation-policy parameter as name=value. "
+                    "Repeatable — the escape hatch for policy knobs "
+                    "without a named flag; values reach the policy "
+                    "chain's context verbatim.",
+                ),
+                annotation=Optional[list[str]],
+            )
+        )
     fn.__signature__ = sig.replace(parameters=params)
     return fn

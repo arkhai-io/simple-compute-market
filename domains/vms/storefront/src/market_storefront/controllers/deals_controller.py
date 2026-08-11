@@ -109,7 +109,8 @@ class DealsController:
 
         count = await self._db.count_heartbeats(escrow_uid)
         stage_event(
-            "service", "heartbeat_recorded",
+            "service",
+            "heartbeat_recorded",
             deal_ref=escrow_uid,
             signer=body.buyer_address,
             count=count,

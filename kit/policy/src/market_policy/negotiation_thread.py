@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class NegotiationMessage:
     """A single message in a negotiation thread."""
+
     round: int
     sender: str
     our_price: int | str | float | None
@@ -47,7 +48,7 @@ class NegotiationThreadTransaction:
             component: Component name for logging (e.g., "NEGOTIATION", "ACCEPT_OFFER")
         """
         self.component = component
-        self.thread_store = None
+        self.thread_store: NegotiationThreadStore | None = None
 
     async def __aenter__(self):
         """Enter context manager and get thread store."""
@@ -101,7 +102,7 @@ class NegotiationThreadTransaction:
             if not oid:
                 continue
             canceled = await self.thread_store._sqlite.cancel_negotiations_for_listing(
-                order_id=oid,
+                listing_id=oid,
                 except_negotiation_id=except_negotiation_id,
             )
             for entry in canceled:
@@ -129,8 +130,10 @@ class NegotiationThreadTransaction:
             logger.warning(f"[{self.component}] No thread store available")
             return set()
 
-        active_negotiations = await self.thread_store._sqlite.get_active_negotiations_for_listing(
-            order_id=order_id
+        active_negotiations = (
+            await self.thread_store._sqlite.get_active_negotiations_for_listing(
+                listing_id=order_id
+            )
         )
 
         active_order_ids = set()
@@ -182,7 +185,9 @@ class NegotiationThreadTransaction:
                 negotiation_id=negotiation_id,
                 terminal_state=state,
             )
-            logger.info(f"[{self.component}] Marked negotiation {negotiation_id} as {state}")
+            logger.info(
+                f"[{self.component}] Marked negotiation {negotiation_id} as {state}"
+            )
         except Exception as e:
             logger.error(f"[{self.component}] Failed to mark terminal: {e}")
 
@@ -198,6 +203,7 @@ class NegotiationThreadTransaction:
         requested_duration_seconds: int | None = None,
         requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict | None = None,
+        provision_terms: dict | None = None,
     ) -> None:
         """Get or create negotiation thread
 
@@ -239,6 +245,7 @@ class NegotiationThreadTransaction:
                 requested_duration_seconds=requested_duration_seconds,
                 requested_start_utc=requested_start_utc,
                 buyer_escrow_proposal=buyer_escrow_proposal,
+                provision_terms=provision_terms,
             )
             logger.debug(f"[{self.component}] Created thread {negotiation_id}")
 
@@ -281,13 +288,13 @@ class NegotiationThreadTransaction:
 class NegotiationThreadStore:
     """
     SQLite-backed store for negotiation threads.
-    
+
     Implements the corecursive negotiation thread structure from CGT:
     - Thread accumulation: Thread[t] = Thread[t-1] + Message[t]
     - Terminal condition detection
     - Thread history for policy evaluation
     """
-    
+
     def __init__(
         self,
         sqlite_client: NegotiationThreadPersistencePort,
@@ -303,7 +310,7 @@ class NegotiationThreadStore:
         """
         self._sqlite = sqlite_client
         self._identity = identity
-    
+
     async def create_thread(
         self,
         negotiation_id: str,
@@ -317,6 +324,7 @@ class NegotiationThreadStore:
         requested_duration_seconds: int | None = None,
         requested_start_utc: str | None = None,
         buyer_escrow_proposal: dict | None = None,
+        provision_terms: dict | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
 
@@ -346,44 +354,44 @@ class NegotiationThreadStore:
             requested_duration_seconds=requested_duration_seconds,
             requested_start_utc=requested_start_utc,
             buyer_escrow_proposal=buyer_escrow_proposal,
+            provision_terms=provision_terms,
         )
         logger.debug(
             f"[NEGOTIATION THREAD] Created thread {negotiation_id} "
             f"for orders {our_listing_id} <-> {their_listing_id} "
             f"agents {our_agent_id} <-> {their_agent_id}"
         )
-    
+
     async def get_thread_info(
         self,
         negotiation_id: str,
         owner_id: str,
     ) -> Dict[str, Any] | None:
         """Get negotiation thread metadata.
-        
+
         Args:
             negotiation_id: Unique negotiation identifier
             owner_id: ID of the agent requesting the info
-            
+
         Returns:
             Dictionary with thread info including our_initial_price and our_strategy,
             or None if thread doesn't exist.
         """
         return await self._sqlite.get_thread_info(
-            negotiation_id=negotiation_id,
-            owner_id=owner_id
+            negotiation_id=negotiation_id, owner_id=owner_id
         )
-    
+
     async def get_thread(self, negotiation_id: str) -> List[Dict[str, Any]]:
         """Get negotiation thread history.
-        
+
         Args:
             negotiation_id: Unique negotiation identifier
-            
+
         Returns:
             List of message dictionaries (empty list if thread doesn't exist)
         """
         return await self._sqlite.load_negotiation_thread(negotiation_id=negotiation_id)
-    
+
     async def add_message(
         self,
         negotiation_id: str,
@@ -423,30 +431,32 @@ class NegotiationThreadStore:
             timestamp=timestamp,
         )
 
-        logger.debug(f"[NEGOTIATION THREAD] Added message to {negotiation_id}, round {round_num}, action: {action_taken}")
+        logger.debug(
+            f"[NEGOTIATION THREAD] Added message to {negotiation_id}, round {round_num}, action: {action_taken}"
+        )
 
         return round_num
-    
+
     async def check_terminal(self, negotiation_id: str) -> tuple[bool, str | None]:
         """Check if negotiation has reached a terminal condition.
-        
+
         Terminal conditions:
         - Both parties ACCEPT_OFFER (success)
         - Both parties REJECT_OFFER (failure)
         - EXIT_NEGOTIATION (forced termination)
-        
+
         Args:
             negotiation_id: Unique negotiation identifier
-            
+
         Returns:
             Tuple of (is_terminal, terminal_state)
             terminal_state: "success" | "failure" | "timeout" | None
         """
         thread = await self.get_thread(negotiation_id)
-        
+
         if len(thread) == 0:
             return False, None
-        
+
         # Check for EXIT_NEGOTIATION
         if thread[-1]["action_taken"] == "EXIT_NEGOTIATION":
             await self._sqlite.update_negotiation_thread_terminal(
@@ -454,36 +464,39 @@ class NegotiationThreadStore:
                 terminal_state="timeout",
             )
             return True, "timeout"
-        
+
         # Check for ACCEPT-ACCEPT (success)
         if len(thread) >= 2:
             last_two = thread[-2:]
-            if (last_two[0]["action_taken"] == "ACCEPT_OFFER" and 
-                last_two[1]["action_taken"] == "ACCEPT_OFFER"):
+            if (
+                last_two[0]["action_taken"] == "ACCEPT_OFFER"
+                and last_two[1]["action_taken"] == "ACCEPT_OFFER"
+            ):
                 await self._sqlite.update_negotiation_thread_terminal(
                     negotiation_id=negotiation_id,
                     terminal_state="success",
                 )
                 return True, "success"
-        
+
         # Check for REJECT-REJECT (failure)
         if len(thread) >= 2:
             last_two = thread[-2:]
-            if (last_two[0]["action_taken"] == "REJECT_OFFER" and 
-                last_two[1]["action_taken"] == "REJECT_OFFER"):
+            if (
+                last_two[0]["action_taken"] == "REJECT_OFFER"
+                and last_two[1]["action_taken"] == "REJECT_OFFER"
+            ):
                 await self._sqlite.update_negotiation_thread_terminal(
                     negotiation_id=negotiation_id,
                     terminal_state="failure",
                 )
                 return True, "failure"
-        
+
         return False, None
-    
+
     async def clear_thread(self, negotiation_id: str) -> None:
         """Clear a negotiation thread (after terminal condition reached)."""
         await self._sqlite.delete_negotiation_thread(negotiation_id=negotiation_id)
         logger.debug(f"[NEGOTIATION THREAD] Cleared thread {negotiation_id}")
-
 
 
 # Global thread store instance (will be initialized by agent)

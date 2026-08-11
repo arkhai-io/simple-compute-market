@@ -1,5 +1,15 @@
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Index
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    DateTime,
+    Text,
+    JSON,
+    Enum as SQLEnum,
+    ForeignKey,
+    Index,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import enum
@@ -17,17 +27,29 @@ class Publisher(Base):
     indexer — correlating a publisher across registries goes through the
     shared ``(scheme, identifier)`` claims, not this surrogate id.
     """
+
     __tablename__ = "publishers"
 
     publisher_id = Column(Integer, primary_key=True, autoincrement=True)
     # Where buyers reach this publisher's storefront to negotiate. Set from
     # the publish payload on first sighting.
     storefront_url = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
-    identities = relationship("PublisherIdentity", back_populates="publisher", cascade="all, delete-orphan")
-    listings = relationship("Listing", back_populates="publisher", cascade="all, delete-orphan")
+    identities = relationship(
+        "PublisherIdentity", back_populates="publisher", cascade="all, delete-orphan"
+    )
+    listings = relationship(
+        "Listing", back_populates="publisher", cascade="all, delete-orphan"
+    )
 
 
 class PublisherIdentity(Base):
@@ -37,13 +59,20 @@ class PublisherIdentity(Base):
     lowercased wallet addresses. One row per publisher today; the seam for
     linking additional identities (other chains/schemes) later.
     """
+
     __tablename__ = "identities"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    publisher_id = Column(Integer, ForeignKey("publishers.publisher_id", ondelete="CASCADE"), nullable=False)
+    publisher_id = Column(
+        Integer,
+        ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
+        nullable=False,
+    )
     scheme = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
 
     publisher = relationship("Publisher", back_populates="identities")
 
@@ -63,17 +92,41 @@ class Listing(Base):
     __tablename__ = "listings"
 
     listing_id = Column(String, primary_key=True)
-    publisher_id = Column(Integer, ForeignKey("publishers.publisher_id", ondelete="CASCADE"), nullable=False)
-    offer_resource = Column(JSON, nullable=False)  # registry-specific shape (e.g. ComputeResource)
-    accepted_escrows = Column(JSON, nullable=True)  # settlement-schema blob; opaque to the indexer
-    demands = Column(JSON, nullable=True)  # listing-level arbiter demand blob; opaque to the indexer
+    publisher_id = Column(
+        Integer,
+        ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    offer_resource = Column(
+        JSON, nullable=False
+    )  # registry-specific shape (e.g. ComputeResource)
+    accepted_escrows = Column(
+        JSON, nullable=True
+    )  # settlement-schema blob; opaque to the indexer
+    settlement_options = Column(
+        JSON, nullable=True
+    )  # mechanism-neutral settlement choices
+    demands = Column(
+        JSON, nullable=True
+    )  # listing-level arbiter demand blob; opaque to the indexer
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)
     oracle_address = Column(Text, nullable=True)
-    status = Column(SQLEnum(OrderStatusEnum, name="liststatusenum"), nullable=False, default=OrderStatusEnum.open)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    status = Column(
+        SQLEnum(OrderStatusEnum, name="liststatusenum"),
+        nullable=False,
+        default=OrderStatusEnum.open,
+    )
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
     publisher = relationship("Publisher", back_populates="listings")
 
@@ -105,15 +158,16 @@ class ApiKey(Base):
     unconsulted for it. When set, the matching route dependency requires
     ``Authorization: Bearer <raw-key>`` and verifies via hash lookup.
     """
+
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)  # human label e.g. "alice-buyer"
     key_hash = Column(String, nullable=False, unique=True)  # sha256(raw_key)
     scope = Column(String, nullable=False, server_default="read")  # "read" | "write"
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (
-        Index("idx_api_keys_revoked_at", "revoked_at"),
-    )
+    __table_args__ = (Index("idx_api_keys_revoked_at", "revoked_at"),)

@@ -34,6 +34,7 @@ from core_buyer.negotiation_client import (
     negotiate_with_seller as _core_negotiate_with_seller,
 )
 from market_alkahest.schemas import EscrowProposal
+from market_core.schemas import SettlementSelection
 from market_policy.negotiation_middleware import NegotiationMiddleware
 
 from arkhai_vms import VmProvisionTerms
@@ -81,6 +82,7 @@ def negotiate_with_seller(
     max_price: float,
     provision_terms: Optional[VmProvisionTerms] = None,
     escrow_proposal: Optional[EscrowProposal] = None,
+    settlement_selection: Optional[SettlementSelection] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     chain: Optional[list[NegotiationMiddleware]] = None,
@@ -101,10 +103,10 @@ def negotiate_with_seller(
                 "provision_terms is required for fresh negotiations "
                 "(what the seller will provision: duration, ssh_key, compute)"
             )
-        if escrow_proposal is None:
+        if (escrow_proposal is None) == (settlement_selection is None):
             raise RuntimeError(
-                "escrow_proposal is required for fresh negotiations "
-                "(chain_name + escrow_address + fields + expiration_unix)"
+                "exactly one of escrow_proposal or settlement_selection is "
+                "required for fresh negotiations"
             )
         duration_seconds = provision_terms.duration_seconds
         # Translate per-hour bounds → absolute amounts (× duration / 3600).
@@ -124,12 +126,11 @@ def negotiate_with_seller(
         initial_price=initial_price,
         max_price=max_price,
         unit_count=(
-            float(duration_seconds) / 3600.0
-            if duration_seconds is not None
-            else None
+            float(duration_seconds) / 3600.0 if duration_seconds is not None else None
         ),
         provision_terms=provision_terms,
         escrow_proposal=escrow_proposal,
+        settlement_selection=settlement_selection,
         max_rounds=max_rounds,
         on_round=on_round,
         chain=chain,

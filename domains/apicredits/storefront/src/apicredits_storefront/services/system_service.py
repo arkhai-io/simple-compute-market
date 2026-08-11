@@ -36,7 +36,9 @@ class SystemService:
             checks["credits_service"] = await self._credits_service_check()
 
         configured = _container.configured_chain_names()
-        checks["alkahest"] = ",".join(sorted(configured)) if configured else "unconfigured"
+        checks["alkahest"] = (
+            ",".join(sorted(configured)) if configured else "unconfigured"
+        )
 
         def _check_is_healthy(key: str, value: str) -> bool:
             if value in ("ok", "unconfigured"):

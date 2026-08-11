@@ -33,6 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-kit-policy \
+        --refresh-package arkhai-kit-settlement-runtime \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-config \
@@ -72,6 +73,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-core-registry-client \
         --refresh-package arkhai-kit-policy \
+        --refresh-package arkhai-kit-settlement-runtime \
         --refresh-package arkhai-kit-alkahest \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-config \

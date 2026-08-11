@@ -76,7 +76,9 @@ def _stale_threads(db_path: str, cutoff: datetime) -> list[dict]:
 
 async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
     """Run one watchdog pass. Returns the number of threads abandoned."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.negotiation_timeout_seconds)
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=settings.negotiation_timeout_seconds
+    )
     stale = _stale_threads(sqlite_client.db_path, cutoff)
     if not stale:
         return 0
@@ -85,7 +87,9 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
         nid = thread["negotiation_id"]
         logger.warning(
             "negotiation_watchdog: marking %s as abandoned (updated_at=%s, cutoff=%s)",
-            nid, thread["updated_at"], cutoff.isoformat(),
+            nid,
+            thread["updated_at"],
+            cutoff.isoformat(),
         )
         try:
             await sqlite_client.update_negotiation_thread_terminal(
@@ -94,7 +98,9 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
             )
         except Exception as exc:
             logger.warning(
-                "negotiation_watchdog: failed to terminate thread %s: %s", nid, exc,
+                "negotiation_watchdog: failed to terminate thread %s: %s",
+                nid,
+                exc,
             )
             continue
         try:
@@ -130,7 +136,9 @@ async def watchdog_loop() -> None:
             await asyncio.sleep(settings.negotiation_watchdog_interval)
             n = await _watchdog_tick(sqlite_client)
             if n:
-                logger.info("negotiation_watchdog_loop: abandoned %d stale thread(s)", n)
+                logger.info(
+                    "negotiation_watchdog_loop: abandoned %d stale thread(s)", n
+                )
         except asyncio.CancelledError:
             logger.info("negotiation_watchdog_loop: cancelled, shutting down")
             break

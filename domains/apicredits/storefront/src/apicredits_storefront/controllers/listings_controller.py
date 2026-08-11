@@ -33,7 +33,9 @@ router = APIRouter(prefix="/api/v1", tags=["listings"])
 class PublishFromQuotaRequest(BaseModel):
     """Seller's quota-backed publish request."""
 
-    resource_id: str = Field(description="Quota resource in the credits service's ledger.")
+    resource_id: str = Field(
+        description="Quota resource in the credits service's ledger."
+    )
     service_name: str
     accepted_escrows: list[dict[str, Any]]
     description: str | None = None
@@ -71,11 +73,16 @@ class ListingsController:
         paused: bool | None = Query(default=None),
     ) -> ListingListResponse:
         listings = await self._db.list_listings(
-            status=status, paused=paused, limit=limit, offset=offset,
+            status=status,
+            paused=paused,
+            limit=limit,
+            offset=offset,
         )
         return ListingListResponse(
-            listings=listings, count=len(listings),
-            limit=limit, offset=offset,
+            listings=listings,
+            count=len(listings),
+            limit=limit,
+            offset=offset,
         )
 
     @router.get(
@@ -87,7 +94,8 @@ class ListingsController:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise HTTPException(
-                status_code=404, detail=f"Listing {listing_id} not found",
+                status_code=404,
+                detail=f"Listing {listing_id} not found",
             )
         if "paused" not in row:
             row["paused"] = False
@@ -103,11 +111,13 @@ class ListingsController:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise HTTPException(
-                status_code=404, detail=f"Listing {listing_id} not found",
+                status_code=404,
+                detail=f"Listing {listing_id} not found",
             )
         await self._db.set_listing_paused(listing_id=listing_id, paused=True)
         return PauseListingResponse(
-            listing_id=listing_id, paused=True,
+            listing_id=listing_id,
+            paused=True,
             message="Listing paused. New negotiations will receive 503.",
         )
 
@@ -121,7 +131,8 @@ class ListingsController:
         row = await self._db.load_listing(listing_id=listing_id)
         if not row:
             raise HTTPException(
-                status_code=404, detail=f"Listing {listing_id} not found",
+                status_code=404,
+                detail=f"Listing {listing_id} not found",
             )
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from apicredits_storefront.services.publication_service import (
@@ -131,7 +142,8 @@ class ListingsController:
         publish_result = await publish_order_to_registry(row)
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
-            listing_id=listing_id, paused=False,
+            listing_id=listing_id,
+            paused=False,
             registry_status=registry_status,
             message=f"Listing resumed and {registry_status} to registry.",
         )
@@ -143,7 +155,8 @@ class ListingsController:
         dependencies=[Depends(make_seller_auth_dep("create_listing"))],
     )
     async def publish_from_quota(
-        self, body: PublishFromQuotaRequest,
+        self,
+        body: PublishFromQuotaRequest,
     ) -> PublishFromQuotaResponse:
         try:
             result = await self._listing_svc.publish_from_quota(

@@ -87,13 +87,16 @@ async def validate_publish(body: ValidatePublishRequest) -> ValidatePublishRespo
         "storefront_url": body.storefront_url,
         "offer_resource": body.offer_resource,
         "accepted_escrows": body.accepted_escrows,
+        "settlement_options": body.settlement_options,
         "demands": body.demands,
         "max_duration_seconds": body.max_duration_seconds,
     }
 
     errors = [
         f"{_format_path(err)}: {err.message}"
-        for err in sorted(_validator().iter_errors(candidate), key=lambda e: list(e.absolute_path))
+        for err in sorted(
+            _validator().iter_errors(candidate), key=lambda e: list(e.absolute_path)
+        )
     ]
 
     return ValidatePublishResponse(
@@ -101,5 +104,6 @@ async def validate_publish(body: ValidatePublishRequest) -> ValidatePublishRespo
         listing_id=body.listing_id,
         offer_resource_type=_derive_offer_resource_type(body.offer_resource),
         accepted_escrows_count=len(body.accepted_escrows),
+        settlement_options_count=len(body.settlement_options),
         errors=errors,
     )

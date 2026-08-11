@@ -1,6 +1,7 @@
 """Tests for filter-aware discovery + auto/interactive price derivation
 on `market buy`.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,11 +12,18 @@ from unittest import mock
 import pytest
 import typer
 
-from market_core.schemas import EscrowProposal, EscrowTerms
-from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
+from market_core.schemas import (
+    EscrowProposal,
+    EscrowTerms,
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+)
+from arkhai_vms import make_vm_provision_terms
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
+    NegotiationResult,
     extract_seller_min_price,
     make_legacy_negotiate_hook,
     make_legacy_settle_hook,
@@ -23,6 +31,10 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
 )
 from domains.vms.buyer.cli_helpers import parse_filter_options
+from domains.vms.buyer.buy_cli import (
+    _make_hosted_settle_hook,
+    _select_hosted_option,
+)
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -30,13 +42,139 @@ def _escrow_proposal() -> EscrowProposal:
         chain_name="anvil",
         escrow_address="0x" + "cd" * 20,
         fields={"token": "0x" + "ab" * 20},
-        demands=[{
-            "chain_name": "anvil",
-            "arbiter": "0x" + "cd" * 20,
-            "demand_data": {"recipient": "0x" + "f" * 40},
-        }],
+        demands=[
+            {
+                "chain_name": "anvil",
+                "arbiter": "0x" + "cd" * 20,
+                "demand_data": {"recipient": "0x" + "f" * 40},
+            }
+        ],
         expiration_unix=1_800_000_000,
     )
+
+
+def _hosted_option() -> SettlementOption:
+    rates = [RateValue(field="amount", value=125)]
+    params = {"account_ref": "acct-seller"}
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rates=rates,
+            params=params,
+        ),
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rates=rates,
+        params=params,
+    )
+
+
+def test_select_hosted_option_pins_exact_listed_choice():
+    option = _hosted_option()
+    listing = {"settlement_options": [option.model_dump(mode="json")]}
+
+    selection = _select_hosted_option(
+        listing,
+        mechanism="fiat.stripe.v1",
+        option_id=option.option_id,
+        expiration_unix=1_800_000_000,
+    )
+
+    assert selection is not None
+    assert selection.option_id == option.option_id
+    assert selection.expiration_unix == 1_800_000_000
+
+
+def test_select_hosted_option_rejects_unlisted_choice():
+    option = _hosted_option()
+
+    assert (
+        _select_hosted_option(
+            {"settlement_options": [option.model_dump(mode="json")]},
+            mechanism="fiat.stripe.v1",
+            option_id="0" * 64,
+            expiration_unix=1_800_000_000,
+        )
+        is None
+    )
+
+
+def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
+    monkeypatch,
+):
+    from market_core.schemas import SettlementObligation, SettlementPlan
+    from domains.vms.buyer.buyer_client import NegotiationOutcome
+
+    starts: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.start_hosted_settlement",
+        lambda **kwargs: starts.append(kwargs)
+        or {
+            "settlement_ref": "settlement-1",
+            "status": "requires_action",
+            "action": {
+                "kind": "redirect",
+                "url": "https://checkout.example/session",
+                "expires_at_unix": 1_800_000_000,
+            },
+            "action_kind": "redirect",
+            "action_expires_at_unix": 1_800_000_000,
+        },
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.wait_for_hosted_settlement",
+        lambda **_kwargs: {"status": "ready"},
+    )
+    opened: list[str] = []
+    events: list[tuple[str, dict[str, Any]]] = []
+    hook = _make_hosted_settle_hook(
+        config=BuyConfig(
+            registry_urls=["http://registry"],
+            buyer_address="0x" + "1" * 40,
+            buyer_private_key="0x" + "2" * 64,
+        ),
+        provision=make_vm_provision_terms(
+            duration_seconds=3600,
+            ssh_public_key="ssh-ed25519 AAAA",
+        ),
+        poll_interval=0,
+        total_timeout=5,
+        sleep=lambda _seconds: None,
+        open_url=lambda url: opened.append(url),
+    )
+    outcome = NegotiationOutcome(
+        status="agreed",
+        negotiation_id="neg-1",
+        agreed_amount=125,
+        settlement_plan=SettlementPlan(
+            obligations=[
+                SettlementObligation(
+                    payer="buyer",
+                    claimant="seller",
+                    amount=125,
+                    asset="usd",
+                    expiration_unix=1_800_000_000,
+                    mechanism="fiat.stripe.v1",
+                )
+            ]
+        ),
+    )
+
+    result = hook(
+        NegotiationResult(
+            match={"listing_id": "L1", "seller": "http://seller"},
+            outcome=outcome,
+        ),
+        lambda stage, body: events.append((stage, body)),
+    )
+
+    assert opened == ["https://checkout.example/session"]
+    assert starts[0]["negotiation_id"] == "neg-1"
+    assert len(starts[0]["obligation_ref"]) == 64
+    assert result.status == "ready"
+    assert result.escrow_uid == "settlement-1"
+    assert all("url" not in body for _, body in events)
 
 
 def _build_escrow_proposal():
@@ -44,17 +182,19 @@ def _build_escrow_proposal():
 
 
 def _stub_build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
-    return [EscrowTerms(
-        maker="buyer",
-        escrow_contract="0x" + "ee" * 20,
-        obligation_data={
-            "arbiter": "0x" + "cd" * 20,
-            "demand": "0x" + "00" * 32,
-            "token": proposal.fields["token"],
-            "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
-        },
-        expiration_unix=proposal.expiration_unix,
-    )]
+    return [
+        EscrowTerms(
+            maker="buyer",
+            escrow_contract="0x" + "ee" * 20,
+            obligation_data={
+                "arbiter": "0x" + "cd" * 20,
+                "demand": "0x" + "00" * 32,
+                "token": proposal.fields["token"],
+                "amount": int(float(agreed_amount) * max(duration_seconds, 1) / 3600),
+            },
+            expiration_unix=proposal.expiration_unix,
+        )
+    ]
 
 
 def _fail_build_escrow_terms(*_a, **_kw):
@@ -118,22 +258,49 @@ def _run_buy_with_legacy_hooks(
 
 class TestExtractSellerMinPrice:
     def test_list_with_rate(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
-                                          "rates": [{"field": "amount", "per": "hour", "value": "1500"}]}]}
+        listing = {
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0xE",
+                    "rates": [{"field": "amount", "per": "hour", "value": "1500"}],
+                }
+            ]
+        }
         assert extract_seller_min_price(listing) == 1500
 
     def test_string_json_list(self):
-        listing = {"accepted_escrows": json.dumps([{"chain_name": "anvil", "escrow_address": "0xE",
-                                                     "rates": [{"field": "amount", "per": "hour", "value": "9000"}]}])}
+        listing = {
+            "accepted_escrows": json.dumps(
+                [
+                    {
+                        "chain_name": "anvil",
+                        "escrow_address": "0xE",
+                        "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
+                    }
+                ]
+            )
+        }
         assert extract_seller_min_price(listing) == 9000
 
     def test_missing_rate_returns_none(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE"}]}
+        listing = {
+            "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE"}]
+        }
         assert extract_seller_min_price(listing) is None
 
     def test_unparseable_rate_returns_none(self):
-        listing = {"accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
-                                          "rates": [{"field": "amount", "per": "hour", "value": "not-a-number"}]}]}
+        listing = {
+            "accepted_escrows": [
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0xE",
+                    "rates": [
+                        {"field": "amount", "per": "hour", "value": "not-a-number"}
+                    ],
+                }
+            ]
+        }
         assert extract_seller_min_price(listing) is None
 
     def test_empty_accepted_escrows_returns_none(self):
@@ -157,7 +324,9 @@ class TestQueryRegistryFilters:
                 __exit__=lambda *a: False,
             )
 
-        monkeypatch.setattr("core_buyer.orchestration.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "core_buyer.orchestration.urllib.request.urlopen", fake_urlopen
+        )
         return captured
 
     def test_no_filters_sends_only_status(self, monkeypatch):
@@ -219,9 +388,14 @@ class TestRunBuyDerivePrices:
         def fake_negotiate(**kwargs):
             seen_prices.append((kwargs["initial_price"], kwargs["max_price"]))
             from domains.vms.buyer.buyer_client import NegotiationOutcome
+
             return NegotiationOutcome(
-                status="exited", agreed_amount=None, rounds=1, reason="exited",
-                negotiation_id="neg-1", duration_seconds=3600,
+                status="exited",
+                agreed_amount=None,
+                rounds=1,
+                reason="exited",
+                negotiation_id="neg-1",
+                duration_seconds=3600,
             )
 
         monkeypatch.setattr(
@@ -230,19 +404,37 @@ class TestRunBuyDerivePrices:
         )
 
         constraints = BuyConstraints()  # prices None
-        provision = make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        provision = make_vm_provision_terms(
+            duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA"
+        )
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
         )
         matches = [
-            {"listing_id": "L1", "seller": "http://s1",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
-                                    "rates": [{"field": "amount", "per": "hour", "value": "100"}]}]},
-            {"listing_id": "L2", "seller": "http://s2",
-             "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0xE",
-                                    "rates": [{"field": "amount", "per": "hour", "value": "200"}]}]},
+            {
+                "listing_id": "L1",
+                "seller": "http://s1",
+                "accepted_escrows": [
+                    {
+                        "chain_name": "anvil",
+                        "escrow_address": "0xE",
+                        "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+                    }
+                ],
+            },
+            {
+                "listing_id": "L2",
+                "seller": "http://s2",
+                "accepted_escrows": [
+                    {
+                        "chain_name": "anvil",
+                        "escrow_address": "0xE",
+                        "rates": [{"field": "amount", "per": "hour", "value": "200"}],
+                    }
+                ],
+            },
         ]
 
         def derive(match):
@@ -250,11 +442,14 @@ class TestRunBuyDerivePrices:
             return base, base * 2
 
         result = _run_buy_with_legacy_hooks(
-            config=config, constraints=constraints, provision=provision,
+            config=config,
+            constraints=constraints,
+            provision=provision,
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("escrow shouldn't run on exited"),
-            matches=matches, max_matches_to_try=2,
+            matches=matches,
+            max_matches_to_try=2,
             derive_prices=derive,
         )
 
@@ -268,14 +463,18 @@ class TestRunBuyDerivePrices:
         def fake_negotiate(**kwargs):
             called["negotiate"] = True
             from domains.vms.buyer.buyer_client import NegotiationOutcome
+
             return NegotiationOutcome(status="exited", rounds=0)
 
         monkeypatch.setattr(
-            "core_buyer.orchestration.negotiate_with_seller", fake_negotiate,
+            "core_buyer.orchestration.negotiate_with_seller",
+            fake_negotiate,
         )
 
         constraints = BuyConstraints()
-        provision = make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        provision = make_vm_provision_terms(
+            duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA"
+        )
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
@@ -283,16 +482,20 @@ class TestRunBuyDerivePrices:
         )
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
         result = _run_buy_with_legacy_hooks(
-            config=config, constraints=constraints, provision=provision,
+            config=config,
+            constraints=constraints,
+            provision=provision,
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
-            matches=matches, max_matches_to_try=1,
+            matches=matches,
+            max_matches_to_try=1,
         )
         assert called["negotiate"] is False
         assert result.status == "exited"
         assert any(
-            "BuyConstraints.initial_price and max_price are None" in (a.get("error") or "")
+            "BuyConstraints.initial_price and max_price are None"
+            in (a.get("error") or "")
             for a in result.attempts
         )
 
@@ -304,19 +507,27 @@ class TestRunBuyDerivePrices:
 
 def _agree_negotiate_factory(price: int = 100):
     """Build a fake negotiate_with_seller that always agrees at the given price."""
+
     def fake(**kwargs):
         from domains.vms.buyer.buyer_client import NegotiationOutcome
+
         provision_terms = kwargs.get("provision_terms")
         escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
-            status="agreed", agreed_amount=price, rounds=2, reason=None,
+            status="agreed",
+            agreed_amount=price,
+            rounds=2,
+            reason=None,
             negotiation_id="neg-id",
             duration_seconds=(
-                provision_terms.duration_seconds if provision_terms is not None else None
+                provision_terms.duration_seconds
+                if provision_terms is not None
+                else None
             ),
             accepted_provision_terms=provision_terms,
             accepted_escrow_proposal=escrow_proposal,
         )
+
     return fake
 
 
@@ -338,7 +549,9 @@ class TestConfirmSettlementGate:
         return BuyConstraints(initial_price=50, max_price=200)
 
     def _provision(self):
-        return make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
+        return make_vm_provision_terms(
+            duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA"
+        )
 
     def test_confirm_returning_false_aborts_before_escrow(self, monkeypatch):
         """User decline keeps the on-chain side completely untouched."""
@@ -352,8 +565,11 @@ class TestConfirmSettlementGate:
             provision=self._provision(),
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
-            create_escrow=lambda escrows: pytest.fail("escrow MUST NOT run when declined"),
-            matches=matches, max_matches_to_try=1,
+            create_escrow=lambda escrows: pytest.fail(
+                "escrow MUST NOT run when declined"
+            ),
+            matches=matches,
+            max_matches_to_try=1,
             on_event=lambda stage, body: events.append((stage, body)),
             confirm_settlement=lambda terms, listing: False,
         )
@@ -382,7 +598,10 @@ class TestConfirmSettlementGate:
         )
         monkeypatch.setattr(
             "core_buyer.orchestration.wait_for_settlement",
-            lambda **kw: {"status": "ready", "result": {"connection_details": "ssh ..."}},
+            lambda **kw: {
+                "status": "ready",
+                "result": {"connection_details": "ssh ..."},
+            },
         )
 
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
@@ -393,7 +612,8 @@ class TestConfirmSettlementGate:
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
-            matches=matches, max_matches_to_try=1,
+            matches=matches,
+            max_matches_to_try=1,
             confirm_settlement=lambda terms, listing: True,
         )
 
@@ -426,7 +646,8 @@ class TestConfirmSettlementGate:
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
-            matches=matches, max_matches_to_try=1,
+            matches=matches,
+            max_matches_to_try=1,
         )
         assert escrow_count["n"] == 1
         assert result.status == "ready"
@@ -446,7 +667,8 @@ class TestConfirmSettlementGate:
             build_escrow_proposal=_build_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
-            matches=matches, max_matches_to_try=1,
+            matches=matches,
+            max_matches_to_try=1,
             confirm_settlement=boom,
         )
         assert result.status == "exited"

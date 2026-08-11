@@ -41,12 +41,7 @@ from market_policy.buyer_policy import (
 
 
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
-    """Pull the seller's per-unit floor out of a registry listing dict.
-
-    Reads the primary rate on ``accepted_escrows[0]`` — the per-unit
-    token rate advertised on the seller's first accepted escrow tuple.
-    Returns ``None`` for hidden-reserve listings (empty ``rates``).
-    """
+    """Return the primary per-unit rate from the first settlement choice."""
     from market_alkahest.schemas import primary_rate_value
 
     accepted = listing.get("accepted_escrows") or []
@@ -54,13 +49,23 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
         try:
             accepted = json.loads(accepted)
         except (ValueError, TypeError):
-            return None
-    if not isinstance(accepted, list) or not accepted:
+            accepted = []
+    options = listing.get("settlement_options") or []
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except (ValueError, TypeError):
+            options = []
+    choices = (
+        accepted
+        if isinstance(accepted, list) and accepted
+        else options
+        if isinstance(options, list)
+        else []
+    )
+    if not choices or not isinstance(choices[0], dict):
         return None
-    first = accepted[0]
-    if not isinstance(first, dict):
-        return None
-    amount = primary_rate_value(first)
+    amount = primary_rate_value(choices[0])
     return float(amount) if amount is not None else None
 
 
@@ -85,9 +90,7 @@ def entry_uses_scalar_amount(entry: dict[str, Any]) -> bool:
     if not isinstance(literals, dict):
         return False
     return (
-        "token" in literals
-        and "tokenId" not in literals
-        and "token_id" not in literals
+        "token" in literals and "tokenId" not in literals and "token_id" not in literals
     )
 
 
@@ -95,24 +98,24 @@ _SCALAR_PARAMS = (
     PolicyParam(
         name="initial_price",
         help="Opening bid per negotiation in human / whole-token units, "
-             "per-unit rate (per hour for compute, per token for API "
-             "credits). Scaled by the token's on-chain decimals "
-             "before being sent. Optional — when omitted, opens at the "
-             "seller's advertised price.",
+        "per-unit rate (per hour for compute, per token for API "
+        "credits). Scaled by the token's on-chain decimals "
+        "before being sent. Optional — when omitted, opens at the "
+        "seller's advertised price.",
     ),
     PolicyParam(
         name="max_price",
         help="Ceiling per negotiation in human / whole-token units, "
-             "per-unit rate. Optional — when omitted, equals the "
-             "advertised price.",
+        "per-unit rate. Optional — when omitted, equals the "
+        "advertised price.",
     ),
     PolicyParam(
         name="price_markup",
         annotation=float,
         default=1.5,
         help="Ceiling headroom when --initial-price alone is given "
-             "(max = advertised × markup). The listed_price default "
-             "needs none.",
+        "(max = advertised × markup). The listed_price default "
+        "needs none.",
     ),
 )
 
@@ -164,9 +167,7 @@ def derive_scalar_prices(
 
     if max_price is None and anchor is not None:
         max_price = (
-            int(round(anchor * price_markup))
-            if initial_price is not None
-            else anchor
+            int(round(anchor * price_markup)) if initial_price is not None else anchor
         )
     if initial_price is None and anchor is not None:
         initial_price = anchor
@@ -175,7 +176,8 @@ def derive_scalar_prices(
         typer.secho(
             "No matched listing carries an advertised price (all hidden-reserve); "
             "pass --initial-price / --max-price explicitly.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         return None, None
 
@@ -198,27 +200,32 @@ def derive_scalar_prices(
         + (f" (anchored on advertised={anchor})" if anchor is not None else "")
     )
     if interactive and not typer.confirm(
-        "Proceed with these listings at these prices?", default=True,
+        "Proceed with these listings at these prices?",
+        default=True,
     ):
         return None, None
     return initial_price, max_price
 
 
-LISTED_PRICE_POLICY = register_buyer_policy(BuyerPolicy(
-    name="listed_price",
-    middlewares=("listed_price",),
-    cli_params=_SCALAR_PARAMS,
-    compatible=entry_uses_scalar_amount,
-    derive_prices=derive_scalar_prices,
-))
+LISTED_PRICE_POLICY = register_buyer_policy(
+    BuyerPolicy(
+        name="listed_price",
+        middlewares=("listed_price",),
+        cli_params=_SCALAR_PARAMS,
+        compatible=entry_uses_scalar_amount,
+        derive_prices=derive_scalar_prices,
+    )
+)
 
-BISECTION_POLICY = register_buyer_policy(BuyerPolicy(
-    name="bisection",
-    middlewares=("bisection",),
-    cli_params=_SCALAR_PARAMS,
-    compatible=entry_uses_scalar_amount,
-    derive_prices=derive_scalar_prices,
-))
+BISECTION_POLICY = register_buyer_policy(
+    BuyerPolicy(
+        name="bisection",
+        middlewares=("bisection",),
+        cli_params=_SCALAR_PARAMS,
+        compatible=entry_uses_scalar_amount,
+        derive_prices=derive_scalar_prices,
+    )
+)
 
 
 def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
@@ -242,9 +249,13 @@ def configured_buyer_policy(*, strict: bool = False) -> BuyerPolicy:
     from .buyer_config import resolve_config_value
 
     try:
-        name = resolve_config_value(
-            toml_path="negotiation.policy", default=DEFAULT_BUYER_POLICY,
-        ).strip() or DEFAULT_BUYER_POLICY
+        name = (
+            resolve_config_value(
+                toml_path="negotiation.policy",
+                default=DEFAULT_BUYER_POLICY,
+            ).strip()
+            or DEFAULT_BUYER_POLICY
+        )
     except Exception:
         if strict:
             raise

@@ -117,6 +117,29 @@ deployment topology:
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
 
+## Hosted settlement consumer configuration
+
+Hosted fiat settlement is disabled by default. Enabling
+`[hosted_settlement]` requires an HTTPS service URL (loopback HTTP is
+development-only), authority/environment identity, exact manifest digest and
+contract version, required capability list, request-signing credential, and
+operator-owned resolver IDs. Resolver entries may select a configured
+marketplace chain and evidence mode; negotiated data never supplies an RPC
+URL, service URL, or signing key.
+
+The marketplace Helm chart renders only these storefront consumer settings.
+It does not deploy the hosted API/worker, migrations, database, ingress, EAS
+signer, Stripe credentials, or provider state. Those belong to the hosted
+service's independent release and chart. Enabled storefront startup verifies
+the exact health manifest/API/capabilities before accepting traffic.
+
+Local cross-repository E2E runs the normal VM stack with
+`compose.hosted-settlement.yml`. The overlay accepts only an image reference
+plus verified `sha256:` digest, a staged signed-release directory, and
+operator-generated service/storefront configuration files. It runs the
+service-owned migration, API, and single reconciliation worker against one
+shared volume; it never builds or imports the sibling service source.
+
 ## Current limits
 
 This document describes the pattern as implemented for services with

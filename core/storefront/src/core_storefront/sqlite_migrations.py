@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from typing import Any
+from typing import Any, Protocol
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -28,9 +28,17 @@ class Migration:
     apply: Callable[[sqlite3.Connection], None]
 
 
+class MigrationLike(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def apply(self) -> Callable[[sqlite3.Connection], None]: ...
+
+
 def apply_schema_migrations(
     conn: sqlite3.Connection,
-    extra_migrations: Sequence[Migration] = (),
+    extra_migrations: Sequence[MigrationLike] = (),
 ) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
@@ -100,12 +108,13 @@ def _add_column_if_missing(
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
-
 # ---------------------------------------------------------------------------
 # Legacy accepted_escrows backfill — synthesis is domain vocabulary.
 # ---------------------------------------------------------------------------
 
-_accepted_escrows_synthesizer: Callable[[Any], list[dict[str, Any]] | None] | None = None
+_accepted_escrows_synthesizer: Callable[[Any], list[dict[str, Any]] | None] | None = (
+    None
+)
 
 
 def set_accepted_escrows_synthesizer(
@@ -164,9 +173,7 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
             ("buyer", "TEXT"),
             ("matched_offer_id", "TEXT"),
         ):
-            _add_column_if_missing(
-                conn, "negotiation_threads", column_name, column_sql
-            )
+            _add_column_if_missing(conn, "negotiation_threads", column_name, column_sql)
 
     if _needs_rebuild(conn, "negotiation_threads", ("agreed_price",)):
         conn.execute("DROP TABLE IF EXISTS negotiation_threads__amount_migration")
@@ -188,6 +195,7 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
               requested_duration_seconds INTEGER,
               requested_start_utc TEXT,
               buyer_escrow_proposal TEXT,
+              provision_terms TEXT,
               agreed_price TEXT,
               agreed_duration_seconds INTEGER,
               agreed_at TEXT,
@@ -202,14 +210,16 @@ def _migrate_negotiation_amount_columns(conn: sqlite3.Connection) -> None:
                 negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status, created_at,
                 updated_at, terminal_state, requested_duration_seconds,
-                requested_start_utc, buyer_escrow_proposal, agreed_price,
-                agreed_duration_seconds, agreed_at, buyer, matched_offer_id
+                requested_start_utc, buyer_escrow_proposal, provision_terms,
+                agreed_price, agreed_duration_seconds, agreed_at, buyer,
+                matched_offer_id
             )
             SELECT negotiation_id, our_listing_id, their_listing_id,
                    our_agent_id, their_agent_id, status, created_at,
                    updated_at, terminal_state, requested_duration_seconds,
                    NULL,
                    buyer_escrow_proposal,
+                   provision_terms,
                    CASE WHEN agreed_price IS NULL THEN NULL ELSE CAST(agreed_price AS TEXT) END,
                    agreed_duration_seconds, agreed_at, buyer, matched_offer_id
             FROM negotiation_threads__amount_migration
@@ -315,7 +325,10 @@ def _migrate_escrows_and_listings(conn: sqlite3.Connection) -> None:
     """Migrate legacy settlement/listing columns to escrows/thread tables."""
     if _table_exists(conn, "settlement_jobs") and not _table_exists(conn, "escrows"):
         conn.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
-        for old_idx in ("idx_settlement_jobs_status", "idx_settlement_jobs_negotiation"):
+        for old_idx in (
+            "idx_settlement_jobs_status",
+            "idx_settlement_jobs_negotiation",
+        ):
             conn.execute(f"DROP INDEX IF EXISTS {old_idx}")
 
     if _table_exists(conn, "escrows"):
@@ -332,9 +345,7 @@ def _migrate_escrows_and_listings(conn: sqlite3.Connection) -> None:
             ("buyer", "TEXT"),
             ("matched_offer_id", "TEXT"),
         ):
-            _add_column_if_missing(
-                conn, "negotiation_threads", column_name, column_sql
-            )
+            _add_column_if_missing(conn, "negotiation_threads", column_name, column_sql)
 
     if _table_exists(conn, "listings"):
         for column_name, column_sql in (
@@ -465,6 +476,22 @@ def _migrate_capacity_holds_reservation_id(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_negotiation_provision_terms(conn: sqlite3.Connection) -> None:
+    if _table_exists(conn, "negotiation_threads"):
+        _add_column_if_missing(
+            conn,
+            "negotiation_threads",
+            "provision_terms",
+            "TEXT",
+        )
+        _add_column_if_missing(
+            conn,
+            "negotiation_threads",
+            "settlement_plan",
+            "TEXT",
+        )
+
+
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_000_listing_resource_timestamps",
@@ -481,5 +508,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260722_001_capacity_holds_reservation_id",
         _migrate_capacity_holds_reservation_id,
+    ),
+    Migration(
+        "20260810_003_negotiation_provision_terms",
+        _migrate_negotiation_provision_terms,
     ),
 )

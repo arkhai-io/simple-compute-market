@@ -11,12 +11,21 @@ import time
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Path, Body, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Path,
+    Body,
+    Request,
+)
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from src.db.database import get_db
-from src.db.models import Listing, OrderStatusEnum
+from src.db.models import Listing
 from src.api.api_key_auth import require_read_access, require_write_access
 from src.api.filter_eval import FilterParamError, build_criteria, evaluate_all
 from src.api.filter_spec import compute_etag, get_loaded_spec
@@ -34,7 +43,10 @@ _MAX_TIMESTAMP_SKEW = 300  # 5 minutes
 
 def _check_timestamp(timestamp: int) -> None:
     if abs(int(time.time()) - timestamp) > _MAX_TIMESTAMP_SKEW:
-        raise HTTPException(status_code=401, detail="Timestamp too old or too far in future (max 5 minutes)")
+        raise HTTPException(
+            status_code=401,
+            detail="Timestamp too old or too far in future (max 5 minutes)",
+        )
 
 
 def _publisher_signer_identity(publisher) -> Optional[Identity]:
@@ -71,11 +83,16 @@ async def publish_listing(
 
     if not signature or timestamp is None:
         raise HTTPException(
-            status_code=401, detail="Signature and timestamp required to publish",
+            status_code=401,
+            detail="Signature and timestamp required to publish",
         )
     _check_timestamp(timestamp)
     if not verify_order_signature(
-        "create_listing", identity.identifier, timestamp, signature, identity,
+        "create_listing",
+        identity.identifier,
+        timestamp,
+        signature,
+        identity,
     ):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
@@ -84,18 +101,22 @@ async def publish_listing(
         raise HTTPException(status_code=400, detail="listing_id is required")
 
     publisher = ensure_publisher_for_identity(
-        db, identity, storefront_url=body.get("storefront_url"),
+        db,
+        identity,
+        storefront_url=body.get("storefront_url"),
     )
 
     existing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
     if existing:
         if existing.publisher_id != publisher.publisher_id:
             raise HTTPException(
-                status_code=403, detail="Listing is owned by another publisher",
+                status_code=403,
+                detail="Listing is owned by another publisher",
             )
         update_fields = {
             "offer_resource": body.get("offer_resource"),
             "accepted_escrows": body.get("accepted_escrows"),
+            "settlement_options": body.get("settlement_options"),
             "demands": body.get("demands"),
             "max_duration_seconds": body.get("max_duration_seconds"),
             "oracle_address": body.get("oracle_address"),
@@ -113,6 +134,7 @@ async def publish_listing(
             publisher_id=publisher.publisher_id,
             offer_resource=body.get("offer_resource", {}),
             accepted_escrows=body.get("accepted_escrows", []),
+            settlement_options=body.get("settlement_options", []),
             demands=body.get("demands", []),
             max_duration_seconds=body.get("max_duration_seconds"),
             oracle_address=body.get("oracle_address"),
@@ -139,7 +161,9 @@ _RESERVED_QUERY_PARAMS = {"status", "limit", "offset", "publisher"}
 async def query_listings(
     request: Request,
     status: Optional[str] = Query("open", description="Filter by listing status"),
-    publisher: Optional[str] = Query(None, description="Filter by publisher signing identifier (e.g. wallet address)"),
+    publisher: Optional[str] = Query(
+        None, description="Filter by publisher signing identifier (e.g. wallet address)"
+    ),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     if_match: Optional[str] = Header(None, alias="If-Match"),
@@ -161,21 +185,25 @@ async def query_listings(
         if normalized != current_etag:
             raise HTTPException(
                 status_code=412,
-                detail={"error": "filter-spec etag mismatch", "current_etag": current_etag},
+                detail={
+                    "error": "filter-spec etag mismatch",
+                    "current_etag": current_etag,
+                },
             )
 
     query = db.query(Listing)
     if status:
         query = query.filter(Listing.status == validate_order_status(status))
     if publisher:
-        pub = find_publisher_by_identity(db, Identity(scheme="eip191", identifier=publisher))
+        pub = find_publisher_by_identity(
+            db, Identity(scheme="eip191", identifier=publisher)
+        )
         if pub is None:
             return {"items": [], "count": 0, "total_after_filter": 0}
         query = query.filter(Listing.publisher_id == pub.publisher_id)
 
     filter_params = {
-        k: v for k, v in request.query_params.items()
-        if k not in _RESERVED_QUERY_PARAMS
+        k: v for k, v in request.query_params.items() if k not in _RESERVED_QUERY_PARAMS
     }
     try:
         criteria = build_criteria(spec, filter_params)
@@ -183,7 +211,9 @@ async def query_listings(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     rows = query.order_by(desc(Listing.created_at)).all()
-    matched = [order_to_dict(row) for row in rows if evaluate_all(order_to_dict(row), criteria)]
+    matched = [
+        order_to_dict(row) for row in rows if evaluate_all(order_to_dict(row), criteria)
+    ]
     page = matched[offset : offset + limit]
 
     return {
@@ -219,7 +249,9 @@ async def update_listing(
                 detail="Signature and timestamp required for authenticated listings",
             )
         _check_timestamp(timestamp)
-        if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer):
+        if not verify_order_signature(
+            "update_listing", listing_id, timestamp, signature, signer
+        ):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
     if "status" in body:
@@ -255,7 +287,11 @@ async def get_listing(
     return {"listing": order_to_dict(listing)}
 
 
-@router.delete("/listings/{listing_id}", status_code=204, dependencies=[Depends(require_write_access)])
+@router.delete(
+    "/listings/{listing_id}",
+    status_code=204,
+    dependencies=[Depends(require_write_access)],
+)
 async def delete_listing(
     listing_id: str = Path(..., description="Listing ID"),
     signature: Optional[str] = Query(None, description="EIP-191 signature"),
@@ -270,9 +306,14 @@ async def delete_listing(
     signer = _publisher_signer_identity(listing.publisher)
     if signer is not None:
         if not signature or timestamp is None:
-            raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated listings")
+            raise HTTPException(
+                status_code=401,
+                detail="Signature and timestamp required for authenticated listings",
+            )
         _check_timestamp(timestamp)
-        if not verify_order_signature("delete_listing", listing_id, timestamp, signature, signer):
+        if not verify_order_signature(
+            "delete_listing", listing_id, timestamp, signature, signer
+        ):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
     db.delete(listing)

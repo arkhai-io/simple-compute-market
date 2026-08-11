@@ -4,27 +4,36 @@ These are buyer-facing protocol endpoints. Auth is EIP-191 signed by
 the buyer (not the X-Admin-Key scheme). The signing requirement is
 documented in the OpenAPI description; no FastAPI Security scheme applies.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi_utils.cbv import cbv
-from pydantic import ValidationError
-
-import market_storefront.container as _container
-from market_storefront.middleware import buyer_auth
 from core_storefront.models.negotiation_models import (
     NegotiateContinueRequest,
     NegotiateContinueResponse,
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi_utils.cbv import cbv
+from pydantic import ValidationError
+
+import market_storefront.container as _container
+from market_storefront.middleware import buyer_auth
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
+
+
+def _proposal_payload(proposal: Any, settlement_selection: Any) -> Any:
+    if proposal is not None:
+        return proposal
+    if settlement_selection is not None:
+        return {"settlement_selection": settlement_selection.model_dump()}
+    return None
 
 
 @cbv(router)
@@ -56,7 +65,9 @@ class NegotiateController:
             start_sync_negotiation,
         )
 
-        buyer_auth._verify(request, "negotiate_new", body.listing_id, body.buyer_address)
+        buyer_auth._verify(
+            request, "negotiate_new", body.listing_id, body.buyer_address
+        )
 
         base_url = BASE_URL_OVERRIDE or ""
         try:
@@ -65,31 +76,44 @@ class NegotiateController:
                 our_listing_id=body.listing_id,
                 buyer_address=body.buyer_address,
                 provision_terms=body.provision_terms,
-                proposal=body.proposal,
+                proposal=_proposal_payload(
+                    body.proposal,
+                    body.settlement_selection,
+                ),
                 our_base_url=base_url,
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
             )
         except StorefrontPausedError as exc:
-            raise HTTPException(status_code=503, detail={
-                "error": "paused", "reason": exc.reason,
-                "hint": "Storefront or listing is paused; use admin API to advance or resume",
-            })
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "paused",
+                    "reason": exc.reason,
+                    "hint": "Storefront or listing is paused; use admin API to advance or resume",
+                },
+            )
         except OfferUnfulfillableError as exc:
-            raise HTTPException(status_code=409, detail={
-                "error": "offer_unfulfillable",
-                "reason": exc.reason,
-                "listing_id": exc.listing_id,
-                "hint": (
-                    "Seller refused: listing is not in a state that can accept "
-                    "new negotiations, or no matching compute is currently "
-                    "available. Try a different listing."
-                ),
-            })
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "offer_unfulfillable",
+                    "reason": exc.reason,
+                    "listing_id": exc.listing_id,
+                    "hint": (
+                        "Seller refused: listing is not in a state that can accept "
+                        "new negotiations, or no matching compute is currently "
+                        "available. Try a different listing."
+                    ),
+                },
+            )
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail={
-                "error": "incompatible_provision_terms",
-                "reason": str(exc),
-            })
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "incompatible_provision_terms",
+                    "reason": str(exc),
+                },
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
@@ -116,15 +140,25 @@ class NegotiateController:
 
         buyer_auth._verify(request, "negotiate_continue", neg_id, body.buyer_address)
 
-        if body.action == "counter" and body.proposal is None:
-            raise HTTPException(status_code=400, detail="'proposal' required for counter")
+        if (
+            body.action == "counter"
+            and body.proposal is None
+            and body.settlement_selection is None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="'proposal' or 'settlement_selection' required for counter",
+            )
 
         try:
             result = await continue_sync_negotiation(
                 sqlite_client=self._db,
                 neg_id=neg_id,
                 buyer_action=body.action,
-                buyer_proposal=body.proposal,
+                buyer_proposal=_proposal_payload(
+                    body.proposal,
+                    body.settlement_selection,
+                ),
                 buyer_reason=body.reason,
                 buyer_address=body.buyer_address,
             )

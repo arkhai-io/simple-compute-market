@@ -110,9 +110,27 @@ That cost is why bare metal has been a storefront skeleton and why API credits c
 
 Extracting that machinery into kit changes what adding a domain means. A Kubernetes-pod domain, an inference-token domain, or a model-training domain becomes codecs, a contract, and configuration rather than a fork of the VM storefront. The two domains delivered here are both the beneficiaries and the proof: bare metal because it has none of the machinery, API credits because it has a complete parallel copy, so composing them exercises both directions.
 
-**Current state.** Kit's layering discipline holds where kit has been reached: `kit/policy`, `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` carry no domain vocabulary at all. The problem is the concerns that never reached it.
+**Current state.** Kit's layering discipline now includes
+`kit/settlement-runtime`: one stable per-obligation operation journal,
+conditional-escrow client port, servicing worker, and failure dispatcher are
+composed by VM and API-credit storefronts. Bare metal composes exact
+verified-plan registration and adoption but truthfully remains
+fulfillment-unavailable. `kit/policy`, `kit/identity`, `kit/fulfillment`,
+`kit/config`, and `kit/alkahest` likewise carry no domain vocabulary.
 
-Eight cross-cutting storefront concerns are implemented twice and absent once. Measured across the VM and API-credits storefronts: `sync_negotiation` 914 against 609 lines, `capacity_client` 556 against 217, `failure_policy` 392 against 182, `settlement_jobs` 368 against 274, `claims_runtime` 224 against 128, `publication_service` 215 against 193, `negotiation_watchdog` 138 against 110, `alkahest_service` 65 against 58. Bare metal has none of them, which is why its storefront is 1,930 lines against the VM storefront's 14,408 — not simpler, incomplete.
+The remaining cross-cutting copies are synchronous negotiation, capacity,
+publication, negotiation watchdog, and chain-client construction. Those
+concerns still make a new storefront domain larger than its codecs, contract,
+configuration, and genuine domain actions.
+
+Settlement assigns stable identity to every accepted-plan obligation, journals
+materialize/status/check/collect/reclaim attempts, persists opaque mechanism
+state across retry, preserves partial outcomes, and supports directional
+interval payments and seller penalty bonds. VM and API-credit roots use this
+runtime for exact verified-obligation adoption, fulfillment binding, and
+collection. Their connection details, credentials, capacity repair, refund,
+and issuance rollback remain at their real domain boundaries rather than
+becoming generic settlement state.
 
 Neither new domain is deployable or testable end to end. Bare metal has no stack definition, and no end-to-end scenario references either domain: every deal path the repository proves is a VM deal path.
 
@@ -124,7 +142,6 @@ The domain layer's own structure is better than the duplication suggests. All th
 |---|---|
 | No seam exists for kit-owned storefront runtime, and no rule prevents an extraction leaving copies behind | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
 | The synchronous negotiation runtime is implemented twice and absent once | [`kit-owned-negotiation-runtime`](../../openspec/changes/kit-owned-negotiation-runtime/) |
-| Settlement orchestration, claim servicing, and failure handling are implemented twice and absent once | [`kit-owned-settlement-runtime`](../../openspec/changes/kit-owned-settlement-runtime/) |
 | The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
 | Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 
@@ -155,6 +172,19 @@ Nothing else about a hold has changed. A reservation carries no rate, no funding
 | The shipped default granted unfunded exclusivity, and framed the safe value as a performance trade | [`default-no-pre-settlement-capacity-hold`](../../openspec/changes/default-no-pre-settlement-capacity-hold/) |
 
 Restoring a non-zero hold default is `billable-capacity-reservations`' own work: the posture above is a denial of capability that this goal exists to buy back.
+
+---
+
+## Hosted settlement release status
+
+The marketplace consumer path for `fiat.stripe.v1` is owned by
+[`add-hosted-fiat-settlement`](../../openspec/changes/add-hosted-fiat-settlement/).
+It remains an active change until the independently released client/image
+manifest is pinned and cross-repository success, refund, restart,
+distribution, signature, SBOM, and provenance evidence passes. External
+Stripe test credentials, a reachable webhook, a supported EAS endpoint, and a
+deployment cluster are evidence gates, not reasons to weaken the authority
+boundary or describe platform custody as on-chain escrow.
 
 ---
 

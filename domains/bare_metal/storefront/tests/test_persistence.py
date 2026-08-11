@@ -106,24 +106,42 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
 
     restarted = SQLiteClient(str(path))
 
-    assert await restarted.load_bare_metal_listing_payload(
-        listing_id="listing-1",
-    ) == listing
-    assert await restarted.load_bare_metal_message(
-        negotiation_id="neg-1",
-    ) == artifacts["message"]
-    assert await restarted.load_bare_metal_terms(
-        negotiation_id="neg-1",
-    ) == artifacts["terms"]
-    assert await restarted.load_bare_metal_materialization(
-        negotiation_id="neg-1",
-    ) == artifacts["materialization"]
-    assert await restarted.load_bare_metal_receipt(
-        negotiation_id="neg-1",
-    ) == artifacts["receipt"]
-    assert await restarted.load_bare_metal_result(
-        negotiation_id="neg-1",
-    ) == artifacts["result"]
+    assert (
+        await restarted.load_bare_metal_listing_payload(
+            listing_id="listing-1",
+        )
+        == listing
+    )
+    assert (
+        await restarted.load_bare_metal_message(
+            negotiation_id="neg-1",
+        )
+        == artifacts["message"]
+    )
+    assert (
+        await restarted.load_bare_metal_terms(
+            negotiation_id="neg-1",
+        )
+        == artifacts["terms"]
+    )
+    assert (
+        await restarted.load_bare_metal_materialization(
+            negotiation_id="neg-1",
+        )
+        == artifacts["materialization"]
+    )
+    assert (
+        await restarted.load_bare_metal_receipt(
+            negotiation_id="neg-1",
+        )
+        == artifacts["receipt"]
+    )
+    assert (
+        await restarted.load_bare_metal_result(
+            negotiation_id="neg-1",
+        )
+        == artifacts["result"]
+    )
 
 
 @pytest.mark.asyncio
@@ -149,12 +167,18 @@ async def test_artifact_updates_are_isolated_by_column_and_negotiation(
         message=other,
     )
 
-    assert await client.load_bare_metal_terms(
-        negotiation_id="neg-1",
-    ) == artifacts["terms"]
-    assert await client.load_bare_metal_message(
-        negotiation_id="neg-2",
-    ) == other
+    assert (
+        await client.load_bare_metal_terms(
+            negotiation_id="neg-1",
+        )
+        == artifacts["terms"]
+    )
+    assert (
+        await client.load_bare_metal_message(
+            negotiation_id="neg-2",
+        )
+        == other
+    )
     assert await client.load_bare_metal_terms(negotiation_id="neg-2") is None
 
 

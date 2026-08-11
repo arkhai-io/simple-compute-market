@@ -17,6 +17,7 @@ back-compat with clients that predate the headers. When both are
 present, they must agree; otherwise the request is rejected as a
 mismatched identity claim.
 """
+
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
@@ -62,6 +63,7 @@ def _verify(
 # enclosing endpoint's declared parameters.
 # ---------------------------------------------------------------------------
 
+
 def negotiate_new_auth(body, request: Request) -> None:
     """Depends for POST /negotiate/new.
 
@@ -70,6 +72,7 @@ def negotiate_new_auth(body, request: Request) -> None:
     the same name here.
     """
     from core_storefront.models.negotiation_models import NegotiateNewRequest
+
     if not isinstance(body, NegotiateNewRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "negotiate_new", body.listing_id, body.buyer_address)
@@ -78,6 +81,7 @@ def negotiate_new_auth(body, request: Request) -> None:
 def negotiate_continue_auth(neg_id: str, body, request: Request) -> None:
     """Depends for POST /negotiate/{neg_id}."""
     from core_storefront.models.negotiation_models import NegotiateContinueRequest
+
     if not isinstance(body, NegotiateContinueRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "negotiate_continue", neg_id, body.buyer_address)
@@ -86,6 +90,7 @@ def negotiate_continue_auth(neg_id: str, body, request: Request) -> None:
 def settle_escrow_auth(escrow_uid: str, body, request: Request) -> None:
     """Depends for POST /settle/{escrow_uid}."""
     from core_storefront.models.settle_models import SettleRequest
+
     if not isinstance(body, SettleRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "settle_escrow", escrow_uid, body.buyer_address)
@@ -94,6 +99,7 @@ def settle_escrow_auth(escrow_uid: str, body, request: Request) -> None:
 def deal_heartbeat_auth(escrow_uid: str, body, request: Request) -> None:
     """Depends for POST /deals/{escrow_uid}/heartbeat."""
     from core_storefront.models.deal_models import DealHeartbeatRequest
+
     if not isinstance(body, DealHeartbeatRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
     _verify(request, "deal_heartbeat", escrow_uid, body.buyer_address)
@@ -105,5 +111,7 @@ def settle_status_auth(escrow_uid: str, buyer_address: str, request: Request) ->
     ``buyer_address`` is a Query param declared on the endpoint.
     """
     if not buyer_address:
-        raise HTTPException(status_code=400, detail="Missing 'buyer_address' query param")
+        raise HTTPException(
+            status_code=400, detail="Missing 'buyer_address' query param"
+        )
     _verify(request, "settle_status", escrow_uid, buyer_address)

@@ -6,7 +6,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from market_core.schemas import EscrowProposal
+from market_core.schemas import EscrowProposal, SettlementPlan
+from market_settlement_runtime import SettlementRuntime
 
 from .models import (
     BareMetalSettleRequest,
@@ -23,7 +24,7 @@ class SettlementRequestError(ValueError):
         self.status_code = status_code
 
 
-VerifyEscrow = Callable[..., Awaitable[None]]
+VerifyEscrow = Callable[..., Awaitable[int]]
 PlanBuilder = Callable[..., dict[str, Any]]
 
 
@@ -35,6 +36,7 @@ class BareMetalSettlementService:
     chain_config_paths: Mapping[str, str | None]
     build_plan: PlanBuilder
     verify_escrow: VerifyEscrow
+    settlement_runtime: SettlementRuntime
 
     @staticmethod
     def _response(
@@ -70,27 +72,6 @@ class BareMetalSettlementService:
         buyer_identity: str,
     ) -> BareMetalSettleResponse:
         existing = await self.db.load_escrow(escrow_uid=escrow_uid)
-        if existing is not None:
-            thread = await self._owned_thread(
-                negotiation_id=request.negotiation_id,
-                buyer_identity=buyer_identity,
-            )
-            proposal = EscrowProposal.model_validate(
-                thread.get("buyer_escrow_proposal"),
-            )
-            if (
-                existing.get("negotiation_id") == request.negotiation_id
-                and existing.get("status") == "settlement_verified"
-                and existing.get("chain_name") == proposal.chain_name
-                and str(existing.get("escrow_address", "")).lower()
-                == proposal.escrow_address.lower()
-            ):
-                return self._response(
-                    escrow_uid=escrow_uid,
-                    negotiation_id=request.negotiation_id,
-                )
-            raise SettlementRequestError("escrow identity already belongs to another state")
-
         thread = await self._owned_thread(
             negotiation_id=request.negotiation_id,
             buyer_identity=buyer_identity,
@@ -105,10 +86,14 @@ class BareMetalSettlementService:
             negotiation_id=request.negotiation_id,
         )
         if terms is None or terms.duration_seconds != duration:
-            raise SettlementRequestError("bare-metal agreement terms are missing or inconsistent")
+            raise SettlementRequestError(
+                "bare-metal agreement terms are missing or inconsistent"
+            )
         listing = await self.db.load_listing(listing_id=thread["our_listing_id"])
         if listing is None:
-            raise SettlementRequestError("negotiated listing not found", status_code=404)
+            raise SettlementRequestError(
+                "negotiated listing not found", status_code=404
+            )
         offer = await self.db.load_bare_metal_listing_payload(
             listing_id=thread["our_listing_id"],
         )
@@ -118,29 +103,86 @@ class BareMetalSettlementService:
             or offer.physical_host_id != terms.physical_host_id
             or terms.listing_ref != thread["our_listing_id"]
         ):
-            raise SettlementRequestError("bare-metal agreement no longer matches its listing")
-        proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
-        client = self.chain_clients.get(proposal.chain_name)
-        if client is None:
             raise SettlementRequestError(
-                f"settlement chain {proposal.chain_name!r} is unavailable",
-                status_code=503,
+                "bare-metal agreement no longer matches its listing"
             )
+        proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
         primary = await self.db.load_primary_escrow_for_negotiation(
             negotiation_id=request.negotiation_id,
         )
         if primary is not None and primary.get("escrow_uid") != escrow_uid:
             raise SettlementRequestError("negotiation already has a primary escrow")
+        if existing is not None and (
+            existing.get("negotiation_id") != request.negotiation_id
+            or existing.get("status") != "settlement_verified"
+            or existing.get("chain_name") != proposal.chain_name
+            or str(existing.get("escrow_address", "")).lower()
+            != proposal.escrow_address.lower()
+        ):
+            raise SettlementRequestError(
+                "escrow identity already belongs to another state"
+            )
 
         try:
-            self.build_plan(
+            artifacts = self.build_plan(
                 proposal=proposal,
                 agreed_amount=int(agreed_amount),
                 duration_seconds=terms.duration_seconds,
                 seller_wallet_address=self.seller_wallet,
                 chain_config_paths=self.chain_config_paths,
             )
-            await self.verify_escrow(
+            plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
+        except SettlementRequestError:
+            raise
+        except Exception as exc:
+            raise SettlementRequestError(
+                "settlement verification failed",
+                status_code=400,
+            ) from exc
+        obligations = tuple(
+            obligation.model_dump(mode="json") for obligation in plan.obligations
+        )
+        if not obligations:
+            raise SettlementRequestError(
+                "accepted settlement plan has no obligations",
+                status_code=400,
+            )
+
+        records = None
+        if existing is not None:
+            try:
+                records = await self.settlement_runtime.register_plan(
+                    agreement_ref=request.negotiation_id,
+                    obligations=list(obligations),
+                )
+            except Exception as exc:
+                raise SettlementRequestError(
+                    "settlement plan conflicts with accepted terms"
+                ) from exc
+            adopted = [
+                record
+                for record in records
+                if record.mechanism_ref == escrow_uid
+                and record.materialization_state == "materialized"
+            ]
+            if len(adopted) == 1:
+                return self._response(
+                    escrow_uid=escrow_uid,
+                    negotiation_id=request.negotiation_id,
+                )
+            if any(record.mechanism_ref == escrow_uid for record in records):
+                raise SettlementRequestError(
+                    "verified settlement adoption is incomplete"
+                )
+
+        client = self.chain_clients.get(proposal.chain_name)
+        if client is None:
+            raise SettlementRequestError(
+                f"settlement chain {proposal.chain_name!r} is unavailable",
+                status_code=503,
+            )
+        try:
+            matched_index = await self.verify_escrow(
                 escrow_uid=escrow_uid,
                 seller_wallet=self.seller_wallet,
                 agreed_price=int(agreed_amount),
@@ -160,24 +202,63 @@ class BareMetalSettlementService:
                 "settlement verification failed",
                 status_code=400,
             ) from exc
-        inserted = await self.db.insert_escrow(
-            escrow_uid=escrow_uid,
-            negotiation_id=request.negotiation_id,
-            chain_name=proposal.chain_name,
-            escrow_address=proposal.escrow_address,
-            is_primary=True,
-            status="settlement_verified",
-        )
-        if not inserted:
-            raced = await self.db.load_escrow(escrow_uid=escrow_uid)
-            if not raced or (
-                raced.get("negotiation_id") != request.negotiation_id
-                or raced.get("chain_name") != proposal.chain_name
-                or str(raced.get("escrow_address", "")).lower()
-                != proposal.escrow_address.lower()
-                or raced.get("status") != "settlement_verified"
-            ):
-                raise SettlementRequestError("conflicting escrow settlement")
+        if (
+            isinstance(matched_index, bool)
+            or not isinstance(matched_index, int)
+            or matched_index < 0
+            or matched_index >= len(obligations)
+        ):
+            raise SettlementRequestError(
+                "settlement verification returned no exact obligation",
+                status_code=400,
+            )
+
+        if records is None:
+            try:
+                records = await self.settlement_runtime.register_plan(
+                    agreement_ref=request.negotiation_id,
+                    obligations=list(obligations),
+                )
+            except Exception as exc:
+                raise SettlementRequestError(
+                    "settlement plan conflicts with accepted terms"
+                ) from exc
+
+        try:
+            outcome = await self.settlement_runtime.adopt(
+                records[matched_index].obligation_ref,
+                local_role="seller",
+                mechanism_ref=escrow_uid,
+                receipt=None,
+                condition_anchor=None,
+                mechanism_state=None,
+                worker_id="bare-metal-verified",
+            )
+        except Exception as exc:
+            raise SettlementRequestError(
+                "conflicting verified settlement adoption"
+            ) from exc
+        if outcome.status != "succeeded":
+            raise SettlementRequestError("verified settlement adoption is incomplete")
+        if existing is None:
+            inserted = await self.db.insert_escrow(
+                escrow_uid=escrow_uid,
+                negotiation_id=request.negotiation_id,
+                chain_name=proposal.chain_name,
+                escrow_address=proposal.escrow_address,
+                is_primary=True,
+                status="settlement_verified",
+            )
+            if not inserted:
+                raced = await self.db.load_escrow(escrow_uid=escrow_uid)
+                if not raced or (
+                    raced.get("negotiation_id") != request.negotiation_id
+                    or raced.get("chain_name") != proposal.chain_name
+                    or str(raced.get("escrow_address", "")).lower()
+                    != proposal.escrow_address.lower()
+                    or raced.get("status") != "settlement_verified"
+                ):
+                    raise SettlementRequestError("conflicting escrow settlement")
         return self._response(
             escrow_uid=escrow_uid,
             negotiation_id=request.negotiation_id,
@@ -196,6 +277,24 @@ class BareMetalSettlementService:
             negotiation_id=str(escrow["negotiation_id"]),
             buyer_identity=buyer_identity,
         )
+        try:
+            aggregate = await self.settlement_runtime.get_status(
+                str(escrow["negotiation_id"])
+            )
+        except Exception as exc:
+            raise SettlementRequestError(
+                "verified settlement lifecycle is unavailable"
+            ) from exc
+        adopted = [
+            obligation
+            for obligation in aggregate.obligations
+            if obligation.mechanism_ref == escrow_uid
+            and obligation.materialization_state == "materialized"
+        ]
+        if len(adopted) != 1 or adopted[0].fulfillment_ref is not None:
+            raise SettlementRequestError(
+                "verified settlement lifecycle is inconsistent"
+            )
         return BareMetalSettleStatusResponse(
             escrow_uid=escrow_uid,
             negotiation_id=str(escrow["negotiation_id"]),

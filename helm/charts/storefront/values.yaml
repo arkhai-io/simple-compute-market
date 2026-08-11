@@ -52,6 +52,8 @@ agents:
       # Required when the registry sets requireWriteApiKey. Never commit a
       # real token; inject via --set at render/deploy time.
       registryAuthToken: ""
+      # Optional distinct account-owner signing credential. Defaults to privKey.
+      hostedSettlementRequestCredential: ""
     # config.* lands in the rendered storefront.toml. Keys map 1:1 to the
     # storefront schema in market_storefront.utils.config (which reads top-level
     # keys + [provisioning] / [negotiation] / [pricing] sections — no [seller] prefix).
@@ -90,6 +92,30 @@ agents:
           geminiApiKey: ""
       chain:
         name: "anvil"
+      hostedSettlement:
+        enabled: false
+        baseUrl: ""
+        authorityId: ""
+        environment: ""
+        expectedAuthority: ""
+        expectedManifestDigest: ""
+        contractVersion: "0.1.0"
+        expectedSchemaVersion: 3
+        requestTimeoutSeconds: 10
+        preflightTimeoutSeconds: 5
+        allowInsecureLoopback: false
+        requiredCapabilities:
+          - "conditional-escrow.v1"
+          - "stripe-connect-separate-charges-transfers.v1"
+          - "portable-attestation.v1"
+          - "eas-arbiter.v1"
+        # Resolver IDs are operator-owned keys; no RPC URL or signing key
+        # belongs in this marketplace chart.
+        resolvers: {}
+        # example:
+        #   eas-main:
+        #     chainName: "ethereum_sepolia"
+        #     evidenceMode: "eas.v1"
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.

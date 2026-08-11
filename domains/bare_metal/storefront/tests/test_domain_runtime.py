@@ -32,6 +32,7 @@ def test_storefront_contract_validates_current_bare_metal_capabilities() -> None
     ):
         assert not contract.has_capability(capability)
         assert contract.capability(capability) is None
+    assert contract.fulfillment is None
 
 
 def test_storefront_contract_retains_bare_metal_codecs() -> None:

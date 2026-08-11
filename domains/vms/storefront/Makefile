@@ -9,13 +9,24 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
 DIST_DIR ?= ../../../.dist
+HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.1.0-trust.json
+HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
+HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
+	python ../../../scripts/verify-hosted-release.py \
+	--trust $(HOSTED_RELEASE_TRUST) \
+	--manifest $(HOSTED_RELEASE_MANIFEST) \
+	--wheel $(HOSTED_CLIENT_WHEEL)
 
-.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration
+.PHONY: build build-images build-no-cache deploy deploy-storefront init reinit test test-unit test-integration verify-hosted-release
 
-init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
+verify-hosted-release:
+	$(VERIFY_HOSTED_RELEASE)
+
+init: verify-hosted-release ## Resolve deps from verified wheels and create .venv.
 	uv sync --find-links $(DIST_DIR)
 
-reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
+reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 	uv sync --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core                    --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-storefront         --reinstall-package arkhai-core-storefront \
@@ -24,6 +35,9 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-kit-settlement-runtime  --reinstall-package arkhai-kit-settlement-runtime \
+	--upgrade-package arkhai-hosted-settlement-client --reinstall-package arkhai-hosted-settlement-client \
+	--upgrade-package arkhai-kit-hosted-settlement     --reinstall-package arkhai-kit-hosted-settlement \
 	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \
 	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
 	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \

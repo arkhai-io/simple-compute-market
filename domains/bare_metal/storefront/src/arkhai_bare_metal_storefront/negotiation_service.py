@@ -59,7 +59,9 @@ def _proposal_amount(proposal: EscrowProposal) -> int | None:
         return raw
     if isinstance(raw, str) and raw.strip().isdigit():
         return int(raw.strip())
-    raise NegotiationRequestError("proposal amount must be a non-negative integer", status_code=400)
+    raise NegotiationRequestError(
+        "proposal amount must be a non-negative integer", status_code=400
+    )
 
 
 def _seller_reference_amount(

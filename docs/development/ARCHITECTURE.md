@@ -52,7 +52,7 @@ plan    = settle(terms)
 receipt = service(plan)
 ```
 
-Core owns the structure around these phases: signed transport, round sequencing, persistence mechanics, deterministic handoffs, and lifecycle engines. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities. Composition roots wire concrete domain and kit implementations into role packages.
+Core owns schema-opaque carriers and role structure around these phases: signed transport, round sequencing, persistence mechanics, and deterministic handoffs. Domain packages own listing vocabulary, message content, validation, deterministic interpretation of terms, fulfillment requirements, and result vocabulary. Kit packages own reusable mechanisms and authorities, including the single commercial-settlement obligation lifecycle. Composition roots wire concrete domain and kit implementations into role packages.
 
 Two hooks remain separate when core-owned machinery or a typed invariant sits between them. They may be merged when the core does nothing between them and the split would expose only implementation detail.
 
@@ -80,7 +80,7 @@ Core carrier packages must not import domain vocabulary. Domain packages may imp
 
 Kit is not a flat peer group. It has an explicit one-way hierarchy:
 
-1. **Foundation capabilities** — identity, configuration, generic policy, and settlement-mechanism primitives.
+1. **Foundation capabilities** — identity, configuration, generic policy, settlement-mechanism primitives, and `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle.
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
 3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
 
@@ -94,6 +94,16 @@ kit/resource-pools ─────> foundation only
 ```
 
 Dependencies never point upward. Imports guarded by `TYPE_CHECKING` still count as architectural dependencies. Kit packages never import deployed services or domain adapters.
+
+The settlement-runtime distribution is
+`arkhai-kit-settlement-runtime`, imported as
+`market_settlement_runtime`. It owns stable obligation identity, the operation
+journal and work leases, conditional-escrow client ports, materialize/status/
+check/collect/reclaim transitions, durable servicing, and ordered failure
+dispatch. Storefront composition roots inject database repositories,
+mechanism clients, domain fulfillment and projection callables, and real
+failure actions. The kit does not import a storefront, domain, mechanism, or
+provider SDK.
 
 The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fulfillment`. It owns both scheduling and provider-neutral fulfillment contracts. Keeping those contracts together avoids a reverse dependency from resource-pool administration into provisioning execution while preserving module-level separation between pure carriers and operational scheduling.
 
@@ -239,7 +249,7 @@ Terms
 
 ### Settlement servicing
 
-Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or abandon/reclaim expired obligations. Core owns the lifecycle engine; kit codecs own mechanism translation; domain policy selects and interprets conditions.
+Settlement materializes agreed terms into a mechanism-neutral plan. Servicing may outlive fulfillment and repeatedly evaluate conditions, collect claims, accept heartbeats, or reclaim expired obligations. The settlement-runtime kit owns one stable per-obligation lifecycle and operation journal; mechanism kits translate and execute opaque conditional-escrow calls; domain policy selects and interprets conditions. A verified-only domain may register and adopt an obligation, but servicing does not begin until its composition binds a real immutable fulfillment reference.
 
 ```text
 Terms → SettlementPlan → active obligations → Receipt
@@ -386,3 +396,23 @@ The fulfillment kit owns provider-neutral acceptance orchestration. It loads an 
 ### Atomic workload-lifecycle cutovers
 
 A schema cutover that transfers ownership of active workloads between persistence models must treat the workload and its known provider-operation identity as authoritative. The compute provisioner's legacy VM lease conversion validates the complete candidate population and writes fulfillment aggregates atomically before retiring the legacy table. Any unsafe ambiguity rolls back the entire conversion; unused pre-release reservation rows must not override or obscure an active lease.
+
+## Hosted fiat settlement boundary
+
+`fiat.stripe.v1` is a second mechanism behind the kit-owned settlement
+runtime. The marketplace owns deterministic options and accepted plans, VM
+fulfillment, work leases, and opaque public settlement state. The separately
+released hosted settlement service is the sole financial authority: it owns
+Stripe custody, connected accounts, Checkout, transfers, refunds, provider
+recovery, EAS/RPC access, and condition authorization. Platform-custodied
+Stripe funds are never on-chain escrow. EAS and Alkahest-arbiter compatibility
+supplies only a release predicate.
+
+The VM storefront consumes the released `hosted_settlement_client` through
+the thin `market_hosted_settlement` adapter. Buyer requests go to the
+storefront's `/api/v1/settlements` routes, never directly to the authority.
+Marketplace persistence contains opaque settlement references, lifecycle
+states, action kind/expiry, condition anchors, safe fulfillment references,
+and opaque receipts. Checkout URLs are retrieved for an immediate response
+and are not written to marketplace databases or run logs.
+
