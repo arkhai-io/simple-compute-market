@@ -20,6 +20,7 @@ from typing import Any
 
 from core_storefront.settlement_lifecycle import ClaimRecord, ClaimsEngine
 from core_storefront.stage_log import stage_event
+from market_storefront.lifecycle import is_paused
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,6 @@ async def claims_engine_loop() -> None:
 
     sqlite_client = SQLiteClient(db_path=settings.db_path)
     engine = build_claims_engine(sqlite_client)
-    from market_storefront.lifecycle import is_paused
-
     interval = float(getattr(settings, "claims_sweep_interval", 30))
     await engine.run(interval_seconds=interval, paused=is_paused)
 

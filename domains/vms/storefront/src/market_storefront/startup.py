@@ -309,5 +309,5 @@ async def _startup_tasks() -> None:
                 _start_capacity_events_poller,
             ),
         ),
-        task_logger=logger,
+        logger=logger,
     )

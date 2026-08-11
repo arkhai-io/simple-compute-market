@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from market_storefront.utils.config import settings
 from market_storefront.utils.sqlite_client import SQLiteClient
 from core_storefront.stage_log import stage_event
+from market_storefront.lifecycle import is_paused
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +126,6 @@ async def watchdog_loop() -> None:
         settings.negotiation_watchdog_interval,
         settings.negotiation_timeout_seconds,
     )
-    from market_storefront.lifecycle import is_paused
-
     while True:
         try:
             await asyncio.sleep(settings.negotiation_watchdog_interval)

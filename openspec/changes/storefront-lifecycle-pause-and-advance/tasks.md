@@ -94,6 +94,28 @@ response than the underlying call already produces.
       and Section 4 changes it. Any stage that stops advancing needs an explicit advance,
       not a longer timeout.
  **Done.** Re-checked after conversion: no stage asserts on claims, resume-worker, or negotiation-watchdog output, so none needed an advance. The controls exist for the moment one does.
+## 4b. Startup wiring, and the interval a pause has to wait for
+
+- [x] 4b.1 Fix `run_storefront_startup_steps(..., task_logger=logger)`. A rename of
+      `logger=` to `task_logger=` across `startup.py` caught one call too many, and the
+      storefront exited 3 at container start with `TypeError: got an unexpected keyword
+      argument`. Every suite passed: `_startup_tasks` runs only inside a live
+      application lifespan, so nothing below the end-to-end level executes it. **Done.**
+- [x] 4b.2 Add `tests/unit/test_startup_wiring.py`, which walks `startup.py` for every
+      call to the step runner and the loop registry and validates each keyword against
+      the real signature. Verified against the defect: reintroducing it turns the test
+      red. Recorded because the first version of this test inspected the `_start_*`
+      helpers instead and passed against the very defect it was written for — the
+      offending call was in `_startup_tasks`, which that inspection never reached.
+      **Done.**
+- [x] 4b.3 Shorten the timer intervals in the two e2e storefront configs only —
+      `negotiation_watchdog_interval`, `claims_sweep_interval`, and
+      `fulfillment_resume_sweep_interval` to 2s, against shipped defaults of 60s and
+      30s. A loop can only observe a pause at the end of an interval, so the shipped
+      values would make a scenario wait a minute before asserting anything. This changes
+      when a loop notices, never what it does, and production keeps the shipped values.
+      **Done.**
+
 ## 5. Documentation
 
 - [x] 5.1 Rewrite the `pause`/`resume` endpoint summaries and `AdminPauseResponse`

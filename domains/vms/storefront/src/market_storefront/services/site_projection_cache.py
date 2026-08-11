@@ -18,6 +18,7 @@ from market_storefront.services.capacity_client import (
     remote_site_clients,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront.lifecycle import is_paused
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +174,6 @@ async def site_projection_poller_loop() -> None:
     interval = float(
         getattr(getattr(config.settings, "capacity", None), "poll_interval", 5) or 5
     )
-    from market_storefront.lifecycle import is_paused
-
     while True:
         try:
             if is_paused():

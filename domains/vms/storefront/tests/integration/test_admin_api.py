@@ -13,6 +13,7 @@ directly (same as production).
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import AsyncIterator
 from unittest.mock import patch
@@ -24,6 +25,8 @@ from fastapi import FastAPI
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 import market_storefront.container as _container
+from core_storefront.app_startup import StorefrontBackgroundTask
+from market_storefront import lifecycle
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
@@ -298,11 +301,6 @@ class TestPauseHaltsTimerLoops:
     """
 
     async def test_pause_reports_every_registered_loop_as_paused(self, client):
-        import asyncio
-
-        from core_storefront.app_startup import StorefrontBackgroundTask
-        from market_storefront import lifecycle
-
         c, _ = client
 
         async def _forever() -> None:
@@ -324,11 +322,6 @@ class TestPauseHaltsTimerLoops:
             lifecycle.reset_for_tests()
 
     async def test_resume_reports_them_running_again(self, client):
-        import asyncio
-
-        from core_storefront.app_startup import StorefrontBackgroundTask
-        from market_storefront import lifecycle
-
         c, _ = client
 
         async def _forever() -> None:

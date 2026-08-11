@@ -61,8 +61,12 @@ def is_paused() -> bool:
 
     Reads the storefront's single pause flag rather than keeping a second one:
     "paused" must mean one thing to the negotiation path and to the loops, or an
-    operator could pause and get half of it. Imported inside the function
-    because `server` imports this module during startup.
+    operator could pause and get half of it.
+
+    Imported inside the function because the loop modules import this one at
+    module scope and `server` imports them; hoisting it produces
+    `ImportError: cannot import name 'is_paused' from partially initialized
+    module`, verified by attempting the move rather than assumed.
     """
     from market_storefront.server import is_globally_paused
 

@@ -517,3 +517,29 @@ race; it is a way of agreeing not to look at it.
 The instrument now exists to look at it: with the poller halted,
 `monotonic-listing-reconciliation` either reproduces on a named advance or does not
 reproduce at all, and that is the next question to answer.
+
+---
+
+# Run 31493466153 — the stack never came up
+
+No pytest summary because no test ran. `alice-storefront` exited 3 during
+`compose up --wait`:
+
+```
+TypeError: run_storefront_startup_steps() got an unexpected keyword argument 'task_logger'
+```
+
+Self-inflicted, and instructive about where this repository's coverage ends. Routing the
+five loop starts through a new registry meant renaming their `logger=` keyword to
+`task_logger=`; the rename was applied across `startup.py` and caught a sixth call — the
+step runner itself, which takes `logger=`. Every suite passed, because `_startup_tasks`
+runs only inside a live application lifespan and nothing below the end-to-end level
+executes it. The first signal was a container exit code.
+
+A unit test now walks `startup.py` for every call to the step runner and the loop
+registry and validates each keyword against the real signature, and it fails when the
+defect is reintroduced. Worth noting the first version of that test did not: it inspected
+the `_start_*` helper functions, which is where the rename was *correct*, and passed
+cleanly against the live defect. A guard written from the shape of the fix rather than
+from the shape of the failure proves nothing, and the only way to know which one you have
+written is to reintroduce the defect and watch the test go red.

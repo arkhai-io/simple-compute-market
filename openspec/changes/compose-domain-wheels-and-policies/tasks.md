@@ -784,6 +784,38 @@ provisioning to completion, and they found a control that has never worked.
       non-deterministic (`storefront-lifecycle-pause-and-advance`). A reader who finds this
       red should not have to rediscover which is which. **Done.**
 
+### 18. A project that ships its own modules must reinstall itself
+
+Three runs in this campaign were misread because a venv held a wheel older than the
+source it shadowed. Folded in here rather than made its own change: it is a Makefile
+defect in the same wheel-ownership area this change already owns.
+
+The mechanism: a `force-include` wheel installs its modules into its own virtual
+environment, its tests import them from there, and `uv sync` will not replace a wheel
+whose version has not changed. A source edit is invisible until something forces a
+reinstall, so the suite runs against whatever was installed first. The failure is
+plausible rather than obviously wrong — a missing capability and an unexpected keyword
+both look exactly like defects in the change under review.
+
+- [x] 18.1 Add the project's own distribution to `reinit` in `domains/apicredits`,
+      `domains/apicredits/buyer`, and `domains/vms/buyer` — the three whose wheels
+      force-include modules the source tree also carries. The other twelve projects that
+      omit themselves use a `src` layout, where installed and source resolve to one
+      import path and staleness is benign, so they are deliberately left alone. **Done.**
+- [x] 18.2 Add `scripts/tests/test_reinit_self_reinstall.py`, discovering force-include
+      projects from `pyproject.toml` rather than a hardcoded list, and failing if the
+      discovery matches nothing so the check cannot pass by finding no projects.
+      **Done.**
+- [x] 18.3 Verify the reported failure was this and not a defect: `make test` in
+      `domains/apicredits/buyer` reported the domain contract declaring no negotiation
+      capability and `answer_key_challenge` unresolvable, while the source declares both.
+      Through its own target with the fix applied: 20 passed. **Done.**
+- [ ] 18.4 Run `make test` for `domains/apicredits` and `domains/vms/buyer` against
+      rebuilt venvs and record whether either surfaces a defect its suite had been
+      shadowing. Not run in this session.
+- [x] 18.5 Tombstone `openspec/changes/reinstall-self-owned-wheels/`, which briefly
+      existed as a separate change. **Done.**
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

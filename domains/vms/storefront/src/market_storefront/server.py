@@ -63,6 +63,9 @@ def _set_globally_paused(value: bool) -> dict[str, str]:
     confirm what is actually idle rather than only that the flag was set.
     """
     global _GLOBALLY_PAUSED
+    # Local for the same reason `lifecycle.is_paused` imports this module
+    # locally: the two reference each other, and the loop modules import
+    # `lifecycle` at module scope while this module imports them.
     from market_storefront import lifecycle
 
     _GLOBALLY_PAUSED = value

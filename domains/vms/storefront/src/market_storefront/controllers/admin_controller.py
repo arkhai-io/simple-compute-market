@@ -39,7 +39,15 @@ from market_storefront.models.capacity_admin_models import (
     UsageStartedEventRequest,
 )
 from market_storefront.server import _set_globally_paused
-from market_storefront.services.capacity_client import remote_site_clients
+from market_storefront.negotiation_watchdog import _watchdog_tick
+from market_storefront.services.capacity_client import (
+    full_capacity_reconcile,
+    remote_site_clients,
+)
+from market_storefront.services.claims_runtime import build_claims_engine
+from market_storefront.services.fulfillment_resume_runtime import (
+    resume_incomplete_fulfillments_once,
+)
 from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.failure_policy import (
     FulfillmentFailureContext,
@@ -134,8 +142,6 @@ class AdminController:
         summary="Run one claims sweep now (admin)",
     )
     async def run_claims_cycle(self) -> dict:
-        from market_storefront.services.claims_runtime import build_claims_engine
-
         engine = build_claims_engine(self._db)
         processed = await engine.tick()
         return {"loop": "claims_engine", "processed": int(processed)}
@@ -145,10 +151,6 @@ class AdminController:
         summary="Run one fulfillment-resume sweep now (admin)",
     )
     async def run_fulfillment_resume_cycle(self) -> dict:
-        from market_storefront.services.fulfillment_resume_runtime import (
-            resume_incomplete_fulfillments_once,
-        )
-
         await resume_incomplete_fulfillments_once(sqlite_client=self._db)
         return {"loop": "fulfillment_resume"}
 
@@ -157,8 +159,6 @@ class AdminController:
         summary="Run one negotiation-watchdog sweep now (admin)",
     )
     async def run_negotiation_watchdog_cycle(self) -> dict:
-        from market_storefront.negotiation_watchdog import _watchdog_tick
-
         swept = await _watchdog_tick(self._db)
         return {"loop": "negotiation_watchdog", "swept": int(swept)}
 
@@ -178,10 +178,6 @@ class AdminController:
         needs per-kind routing needs a one-cycle drain extracted from
         `site_events_poller`, which does not exist yet.
         """
-        from market_storefront.services.capacity_client import (
-            full_capacity_reconcile,
-        )
-
         await full_capacity_reconcile()
         return {"loop": "capacity_events_poller", "reconciled": True}
 

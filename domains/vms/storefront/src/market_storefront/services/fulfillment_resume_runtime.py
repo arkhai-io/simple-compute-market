@@ -32,6 +32,7 @@ from market_storefront.services.vm_fulfillment_service import (
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient, get_sqlite_client
+from market_storefront.lifecycle import is_paused
 
 logger = logging.getLogger(__name__)
 
@@ -664,8 +665,6 @@ async def fulfillment_resume_loop() -> None:
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
-    from market_storefront.lifecycle import is_paused
-
     db = SQLiteClient(get_sqlite_client().db_path)
     while True:
         # Checked before the sweep, not during: a paused storefront must not be
