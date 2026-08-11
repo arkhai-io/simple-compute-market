@@ -12,8 +12,9 @@ from core_storefront.app_startup import (
     StorefrontBackgroundTask,
     StorefrontStartupStep,
     run_storefront_startup_steps,
-    start_storefront_background_task,
 )
+
+from market_storefront.lifecycle import start_registered_loop
 
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
@@ -193,7 +194,7 @@ def _start_negotiation_watchdog() -> None:
         watchdog_loop as _neg_watchdog_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
             name="negotiation_watchdog",
             task_factory=_neg_watchdog_loop,
@@ -205,21 +206,21 @@ def _start_negotiation_watchdog() -> None:
                 settings.negotiation_timeout_seconds,
             ),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
 def _start_claims_engine() -> None:
     from market_storefront.services.claims_runtime import claims_engine_loop
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
             name="claims_engine",
             task_factory=claims_engine_loop,
             log_message="[STARTUP] Claims engine started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -228,14 +229,14 @@ def _start_fulfillment_resume() -> None:
         fulfillment_resume_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
             name="fulfillment_resume",
             task_factory=fulfillment_resume_loop,
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -243,12 +244,12 @@ def _start_capacity_events_poller() -> None:
     # Tail every authority's capacity-event feed after provisioning preflight.
     from market_storefront.services.capacity_client import capacity_events_poller_loop
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
             name="capacity_events_poller",
             task_factory=capacity_events_poller_loop,
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -263,12 +264,12 @@ def _start_site_projection_poller() -> None:
         site_projection_poller_loop,
     )
 
-    start_storefront_background_task(
+    start_registered_loop(
         StorefrontBackgroundTask(
             name="site_projection_poller",
             task_factory=site_projection_poller_loop,
         ),
-        logger=logger,
+        task_logger=logger,
     )
 
 
@@ -308,5 +309,5 @@ async def _startup_tasks() -> None:
                 _start_capacity_events_poller,
             ),
         ),
-        logger=logger,
+        task_logger=logger,
     )

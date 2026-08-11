@@ -296,12 +296,62 @@ def seller_wallet() -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module", autouse=True)
+def paused_storefront(storefront_admin_client):
+    """Hold the storefront paused for the whole module, and advance deliberately.
+
+    Every side effect a scenario asserts on should be one the scenario asked
+    for. While the storefront's timer loops run, a stage's observation races
+    them: a listing reconciled a second later reads differently than one
+    reconciled a second earlier, and an assertion that samples the wrong side of
+    that window fails for reasons unrelated to what it tests. Waiting for the
+    system to settle instead is what `docs/development/TESTING.md` forbids, and
+    it cannot prove ordering even when it passes.
+
+    So the loops stop here and stages advance them one cycle at a time through
+    `advance_storefront`. Resume happens in teardown only: resuming restarts the
+    capacity-events poller, which re-positions at the feed head and runs a full
+    reconcile, and that is a state change no assertion should sit behind.
+
+    This does not detect race conditions and is not meant to. These scenarios
+    prove cross-service contracts; concurrency is the jurisdiction of the levels
+    below them.
+    """
+    result = storefront_admin_client.admin_pause()
+    halted = {name: state for name, state in (result.loops or {}).items()
+              if state != "stopped"}
+    assert not halted, (
+        f"storefront reported these loops still running after a pause: {halted}. "
+        "An assertion made now would be racing whichever one is still writing."
+    )
+    log.info("[lifecycle] storefront paused; loops=%s", result.loops)
+    yield
+    try:
+        storefront_admin_client.admin_resume()
+    except Exception as exc:
+        log.warning("[teardown] could not resume the storefront: %s", exc)
+
+
+def advance_storefront(storefront_admin_client, loop: str) -> dict:
+    """Run one cycle of a paused storefront loop and return what it reports.
+
+    `loop` is one of `claims`, `fulfillment-resume`, `negotiation-watchdog`,
+    `capacity-events`. Each calls the operation the timer was already invoking,
+    so a stage advances production behaviour rather than a test-only path.
+    """
+    result = storefront_admin_client.admin_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] advanced %s: %s", loop, result)
+    return result
+
+
+@pytest.fixture(scope="module", autouse=True)
 def ensure_storefront_resumed(storefront_admin_client):
     """Yield to let the module run; then unconditionally clear global pause if set.
 
-    Safety net in case an unexpected error leaves the storefront paused between
-    runs. Admin pause/resume is no longer tested in this module (moved to the
-    smoke suite), so this fixture should rarely need to act.
+    Safety net for a module that failed before `paused_storefront` could resume.
+    Pause/resume semantics are proven in the storefront's own integration suite,
+    not here and not in the smoke suite: a smoke test runs against a deployed
+    stack, and pausing one halts its background work for real, which is not a
+    side effect a wiring check should have.
     """
     yield
     try:

@@ -32,6 +32,11 @@ class HealthResponse(BaseModel):
     status: str
     checks: dict[str, str] = Field(default_factory=dict)
     paused: bool | None = None
+    # Per timer loop: "running", "stopped", "cancelled", or "exited". Reported
+    # beside `paused` because the flag and the loops can disagree — a loop that
+    # exited on its own is neither running nor deliberately halted, and a single
+    # boolean would report that as healthy.
+    loops: dict[str, str] | None = None
     agent_id: str | None = None
     chain_id: int | None = None
     resource_count: int | None = None
@@ -43,8 +48,17 @@ class HealthResponse(BaseModel):
 
 
 class AdminPauseResponse(BaseModel):
+    """Response for POST /api/v1/admin/pause and /resume.
+
+    `loops` reports each timer loop's state after the call. Pause halts them as
+    well as refusing new negotiations, so a bare `paused` boolean would say the
+    flag was set without saying whether the background work actually stopped —
+    which is the substantive half of what pause now means.
+    """
+
     paused: bool
     message: str = ""
+    loops: dict[str, str] = Field(default_factory=dict)
 
 
 class StageEventResponse(BaseModel):

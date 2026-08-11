@@ -386,7 +386,9 @@ The compute provisioner runs three independent timer-driven workers, composed on
 
 ## Operator lifecycle controls
 
-Long-running lifecycle workers may expose authenticated one-cycle controls when deterministic recovery, testability, or customer-issue diagnosis requires them. A manual cycle must invoke the same production handler as the timer-driven worker; it must not implement alternate lifecycle transitions. Diagnostic responses are bounded and may expose aggregate state counts, claim ages, and failure counts, but not credentials or unbounded provider payloads.
+Long-running lifecycle workers may expose authenticated one-cycle controls when deterministic recovery, testability, or customer-issue diagnosis requires them. A manual cycle must invoke the same production handler as the timer-driven worker; it must not implement alternate lifecycle transitions.
+
+This applies to storefronts as well as the compute provisioner. A storefront's pause control halts every timer loop it runs — negotiation watchdog, claims engine, fulfillment resume, capacity-event poller, projection poller — in addition to refusing new negotiations, so a paused storefront changes no state on its own. Each halted loop is advanced one cycle through its own control, and those controls run while paused, since running while paused is their purpose. Where a loop's work has no callable unit of its own, the control invokes the nearest production handler that covers it and records what that handler does differently; it never reimplements the loop body. Diagnostic responses are bounded and may expose aggregate state counts, claim ages, and failure counts, but not credentials or unbounded provider payloads.
 
 ## Testing strategy
 

@@ -121,6 +121,27 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
+**Lifecycle discipline — pause, verify, advance:** A system-integration scenario
+drives timer-driven work rather than waiting for it. Both the compute
+provisioner and the storefront expose operator lifecycle controls: pause halts
+every timer loop, and a per-loop control runs one cycle on demand by invoking
+the same operation the loop invokes. A scenario pauses once at setup, asserts
+what an action did before anything else can react, advances one cycle, and
+asserts again.
+
+This is the same rule as "no sleeps" seen from the other side. A sleep waits for
+a loop; an advance runs it. Waiting cannot prove ordering even when it passes,
+and it converts a defect that reorders two writes into a test that fails half
+the time — which is how a listing-reconciliation defect in this repository was
+reproduced three times before it could be characterised.
+
+Resuming is itself a state change: a restarted capacity-events poller
+re-positions at its feed head and runs a full reconcile. A scenario therefore
+resumes in teardown, never between assertions.
+
+Scenarios do not detect race conditions, and are not meant to. They prove
+cross-service contracts; concurrency belongs to the levels below them.
+
 ### 3. Smoke Tests (Deployment Validation)
 
 **What they cover:** Stateless, idempotent verification that a deployed

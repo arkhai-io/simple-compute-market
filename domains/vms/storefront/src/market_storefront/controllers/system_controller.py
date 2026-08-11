@@ -16,6 +16,7 @@ from core_storefront.models.system_models import (
     HealthResponse,
     StageEventResponse,
 )
+from market_storefront.lifecycle import loop_states
 from market_storefront.server import is_globally_paused
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,11 @@ class SystemController:
     async def system_status(self) -> HealthResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
+        # Per-loop state alongside the flag: "paused" says the flag is set, and
+        # this says whether the background work actually stopped. The two can
+        # disagree — a loop that exited on its own reports neither running nor
+        # stopped — and collapsing them into one boolean would hide that.
+        body["loops"] = loop_states()
         return HealthResponse(**body)
 
     @router.get(

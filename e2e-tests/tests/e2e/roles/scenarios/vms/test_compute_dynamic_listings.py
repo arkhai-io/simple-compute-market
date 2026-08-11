@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import require_state
+from tests.e2e.roles.scenarios.vms.conftest import advance_storefront, require_state
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DYNAMIC_HOST,
     E2E_FUNGIBLE_HOSTS,
@@ -232,19 +232,25 @@ class TestComputeDynamicListings:
         }
         assert expected_closed.issubset(set(result.closed_listing_ids))
 
-        # Read once, deliberately. A capacity-delta reconciliation can reopen these
-        # listings from an availability view older than this reservation, so this
-        # assertion is currently racing the storefront's one-second poller and will
-        # fail when it lands on the wrong side. Both the race and the reopen are
-        # real: the reopen is `monotonic-listing-reconciliation`, and the racing is
-        # what `storefront-lifecycle-pause-and-advance` removes by pausing the
-        # poller and advancing it explicitly. Waiting for the system to settle would
-        # hide both, and `docs/development/TESTING.md` forbids it.
-        statuses = _listing_statuses(
-            storefront_admin_client,
-            dynamic_state.listing_ids_by_gpu_count,
+        # Asserted twice, on either side of one deliberate reconcile. The
+        # storefront is paused, so the first read observes only what the reserve
+        # itself did — no reconciliation can have run in between. The second read
+        # observes exactly one reconcile and no more. A listing that reopens
+        # across that advance is a defect with nowhere to hide, where the same
+        # reopen under a running poller was a race that reproduced about half the
+        # time (`monotonic-listing-reconciliation`).
+        assert _listing_statuses(
+            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
+        ) == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
+            "the reserve did not close the oversized slices"
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}
+        advance_storefront(storefront_admin_client, "capacity-events")
+        statuses = _listing_statuses(
+            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
+        )
+        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
+            "one capacity reconcile reopened slices whose capacity is held"
+        )
         dynamic_state.capacity_reservation_id = result.capacity_reservation_id
         dynamic_state.reserve_closed_listing_ids = list(
             expected_closed.intersection(result.closed_listing_ids)
@@ -266,11 +272,13 @@ class TestComputeDynamicListings:
         )
 
         assert result["state"] == "leased"
+        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client,
-            dynamic_state.listing_ids_by_gpu_count,
+            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}
+        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
+            "usage starting must not release capacity — the slices stay closed"
+        )
         dynamic_state.usage_started = True
 
     def test_04_capacity_release_reopens_oversized_listings(
@@ -291,11 +299,13 @@ class TestComputeDynamicListings:
         assert set(dynamic_state.reserve_closed_listing_ids).issubset(
             set(result["reopened_listing_ids"])
         )
+        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client,
-            dynamic_state.listing_ids_by_gpu_count,
+            storefront_admin_client, dynamic_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}
+        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}, (
+            "releasing capacity did not reopen every slice"
+        )
         log.info("[dynamic] released reservation %s; statuses=%s", dynamic_state.capacity_reservation_id, statuses)
 
 
@@ -410,11 +420,14 @@ class TestFungibleComputeDynamicListings:
         assert result.extra.get("pool_id") == FUNGIBLE_POOL_ID or result.pool_id == FUNGIBLE_POOL_ID
         assert result.gpu_count == 2
         assert result.closed_listing_ids == []
+        advance_storefront(storefront_admin_client, "capacity-events")
         statuses = _listing_statuses(
-            storefront_admin_client,
-            fungible_state.listing_ids_by_gpu_count,
+            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
         )
-        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}
+        assert statuses == {1: "open", 2: "open", 3: "open", 4: "open"}, (
+            "a 2x reserve against a two-member pool leaves a 4-GPU member free, "
+            "so every slice stays sellable"
+        )
         fungible_state.reservation_2x_id = result.capacity_reservation_id
 
     def test_03_reserve_4x_closes_oversized_pool_slices(
@@ -438,9 +451,16 @@ class TestFungibleComputeDynamicListings:
             fungible_state.listing_ids_by_gpu_count[4],
         }
         assert expected_closed.issubset(set(result.closed_listing_ids))
-        statuses = _listing_statuses(
-            storefront_admin_client,
-            fungible_state.listing_ids_by_gpu_count,
+        assert _listing_statuses(
+            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
+        ) == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
+            "the 4x reserve did not close the oversized pool slices"
         )
-        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}
+        advance_storefront(storefront_admin_client, "capacity-events")
+        statuses = _listing_statuses(
+            storefront_admin_client, fungible_state.listing_ids_by_gpu_count,
+        )
+        assert statuses == {1: "open", 2: "open", 3: "closed", 4: "closed"}, (
+            "one capacity reconcile reopened pool slices whose capacity is held"
+        )
         fungible_state.reservation_4x_id = result.capacity_reservation_id

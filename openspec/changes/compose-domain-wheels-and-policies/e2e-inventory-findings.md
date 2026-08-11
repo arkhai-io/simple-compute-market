@@ -494,3 +494,26 @@ ordering between the subscriber and the inline close is not settled by their log
 and a freshness gate alone may not be the whole fix. Every derived-listing status
 assertion in that scenario now polls for the converged state rather than only the one that
 failed first; the reserve responses' own `closed_listing_ids` remain strictly asserted.
+
+---
+
+# Methodology change, 2026-08-11
+
+The four listing-status assertions in the dynamic-listing scenario have been through three
+shapes in this campaign, and the third is the one that holds.
+
+They began as a single sample taken immediately after a reserve, which raced the
+storefront's one-second capacity poller and failed roughly half the time. They were then
+made to poll until the state settled, which passed — and was wrong: it is the sleep
+`docs/development/TESTING.md` forbids, it cannot prove ordering even when green, and it
+would have hidden the reopen defect rather than surfacing it. They are now asserted twice
+around one deliberate advance, against a storefront paused for the whole module.
+
+The middle step is the one worth remembering. It was introduced during implementation
+rather than designed, it made the suite green, and the greenness is precisely what would
+have let it become the pattern. A tolerance that makes a race pass is not a fix for the
+race; it is a way of agreeing not to look at it.
+
+The instrument now exists to look at it: with the poller halted,
+`monotonic-listing-reconciliation` either reproduces on a named advance or does not
+reproduce at all, and that is the next question to answer.

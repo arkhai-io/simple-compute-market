@@ -48,9 +48,23 @@ def is_globally_paused() -> bool:
     return _GLOBALLY_PAUSED
 
 
-def _set_globally_paused(value: bool) -> None:
+def _set_globally_paused(value: bool) -> dict[str, str]:
+    """Set the pause flag and halt or restart every timer loop with it.
+
+    Pause means the storefront changes no state on its own: it refuses new
+    negotiations *and* stops its background work. Covering only the request path
+    would leave five loops writing while the storefront reports itself paused,
+    which is surprising to an operator and unusable for a scenario that needs to
+    observe side effects in order.
+
+    Returns the resulting per-loop state so a caller can report what actually
+    stopped rather than only that the flag was set.
+    """
     global _GLOBALLY_PAUSED
+    from market_storefront import lifecycle
+
     _GLOBALLY_PAUSED = value
+    return lifecycle.pause_loops() if value else lifecycle.resume_loops()
 
 
 # ---------------------------------------------------------------------------

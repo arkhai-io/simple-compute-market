@@ -150,6 +150,10 @@ class HealthResponse:
     status: str = "ok"          # "ok" | "degraded"
     checks: dict[str, str] = field(default_factory=dict)
     paused: bool | None = None  # present on /api/v1/system/status only
+    # Per timer loop state, present on /api/v1/system/status. Read this rather
+    # than `paused` to confirm a pause halted the background work: the flag says
+    # what was requested, this says what actually stopped.
+    loops: dict[str, str] | None = None
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
@@ -160,7 +164,7 @@ class HealthResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
-            "status", "checks", "paused", "agent_id", "chain_id",
+            "status", "checks", "paused", "loops", "agent_id", "chain_id",
             "resource_count", "site_projections", "listing_mode_explanations",
         }
         raw_chain_id = d.get("chain_id")
@@ -169,6 +173,7 @@ class HealthResponse:
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
             paused=d.get("paused"),
+            loops=d.get("loops"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
@@ -510,18 +515,26 @@ class NegotiationActionResponse:
 
 @dataclass
 class AdminPauseResponse:
-    """Response from POST /admin/pause or /admin/resume."""
+    """Response from POST /admin/pause or /admin/resume.
+
+    `loops` maps each timer loop's name to its state after the call. Pause halts
+    the storefront's background work as well as refusing new negotiations, so a
+    caller confirming a pause took effect reads this rather than `paused`.
+    """
 
     paused: bool = False
     message: str = ""
+    loops: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AdminPauseResponse":
-        known = {"paused", "message"}
+        known = {"paused", "message", "loops"}
+        loops = d.get("loops")
         return cls(
             paused=bool(d.get("paused", False)),
             message=d.get("message", ""),
+            loops=dict(loops) if isinstance(loops, dict) else {},
             extra={k: v for k, v in d.items() if k not in known},
         )
 

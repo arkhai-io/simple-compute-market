@@ -289,6 +289,131 @@ class TestAdminPause:
         assert status.paused is True
 
 
+class TestPauseHaltsTimerLoops:
+    """Pause halts background work as well as refusing negotiations.
+
+    The endpoint returning 200 has never proven the loops stopped; after this
+    became the substantive half of what pause means, the response reports each
+    loop's state and a caller can verify it.
+    """
+
+    async def test_pause_reports_every_registered_loop_as_stopped(self, client):
+        import asyncio
+
+        from core_storefront.app_startup import StorefrontBackgroundTask
+        from market_storefront import lifecycle
+
+        c, _ = client
+
+        async def _forever() -> None:
+            while True:
+                await asyncio.sleep(3600)
+
+        lifecycle.reset_for_tests()
+        try:
+            lifecycle.start_registered_loop(
+                StorefrontBackgroundTask(name="claims_engine", task_factory=_forever)
+            )
+            await asyncio.sleep(0)
+
+            result = await c.admin_pause()
+
+            assert result.paused is True
+            assert result.loops == {"claims_engine": "stopped"}
+        finally:
+            lifecycle.reset_for_tests()
+
+    async def test_resume_reports_them_running_again(self, client):
+        import asyncio
+
+        from core_storefront.app_startup import StorefrontBackgroundTask
+        from market_storefront import lifecycle
+
+        c, _ = client
+
+        async def _forever() -> None:
+            while True:
+                await asyncio.sleep(3600)
+
+        lifecycle.reset_for_tests()
+        try:
+            lifecycle.start_registered_loop(
+                StorefrontBackgroundTask(name="claims_engine", task_factory=_forever)
+            )
+            await c.admin_pause()
+
+            result = await c.admin_resume()
+            await asyncio.sleep(0)
+
+            assert result.paused is False
+            assert result.loops == {"claims_engine": "running"}
+        finally:
+            lifecycle.reset_for_tests()
+
+
+class TestLifecycleAdvance:
+    """Each advance runs one cycle of a loop and works while paused.
+
+    Running while paused is the entire purpose: a scenario pauses once at setup
+    and advances deliberately, so an advance that respected the pause would be
+    unusable.
+    """
+
+    async def test_requires_admin_key(self, client_no_key):
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.admin_run_lifecycle_cycle("claims")
+        assert "403" in str(exc_info.value)
+
+    async def test_claims_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause()
+
+        result = await c.admin_run_lifecycle_cycle("claims")
+
+        assert result["loop"] == "claims_engine"
+        assert "processed" in result
+
+    async def test_fulfillment_resume_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause()
+
+        result = await c.admin_run_lifecycle_cycle("fulfillment-resume")
+
+        assert result["loop"] == "fulfillment_resume"
+
+    async def test_negotiation_watchdog_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause()
+
+        result = await c.admin_run_lifecycle_cycle("negotiation-watchdog")
+
+        assert result["loop"] == "negotiation_watchdog"
+        assert "swept" in result
+
+    async def test_capacity_events_cycle_calls_the_shared_reconcile(self, client):
+        """The advance and the poller must invoke the same function.
+
+        A manual cycle that reconciled differently from the timer would prove
+        nothing about production, which is why the reconcile was lifted out of
+        the poller's closure to module scope rather than reimplemented here.
+        """
+        c, _ = client
+        await c.admin_pause()
+        calls: list[int] = []
+
+        async def _record() -> None:
+            calls.append(1)
+
+        with patch(
+            "market_storefront.services.capacity_client.full_capacity_reconcile",
+            _record,
+        ):
+            result = await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert result["loop"] == "capacity_events_poller"
+        assert calls == [1]
+
+
 # ---------------------------------------------------------------------------
 # POST /admin/resume
 # ---------------------------------------------------------------------------

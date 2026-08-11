@@ -527,6 +527,22 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    async def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+    Runs one cycle of a storefront timer loop, calling the same operation the
+    loop invokes. Deliberately usable while the storefront is paused — that is
+    when a caller advances a halted loop one step at a time.
+    
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return await self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
+        )
+
     async def admin_interrupt_deal(
         self, escrow_uid: str, *, reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None, dry_run: bool = False,
@@ -1390,6 +1406,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /admin/resume  (admin key required)"""
         return AdminPauseResponse.from_dict(
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
+        )
+
+    def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+    Runs one cycle of a storefront timer loop, calling the same operation the
+    loop invokes. Deliberately usable while the storefront is paused — that is
+    when a caller advances a halted loop one step at a time.
+    
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
         )
 
     def admin_interrupt_deal(

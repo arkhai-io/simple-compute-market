@@ -73,22 +73,119 @@ class AdminController:
     @router.post(
         "/pause",
         response_model=AdminPauseResponse,
-        summary="Pause new negotiations globally (admin)",
+        summary="Pause the storefront: refuse new negotiations and halt timer loops (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
-        _set_globally_paused(True)
+        """Stop the storefront changing state on its own.
+
+        New negotiations receive 503, and every timer-driven loop — negotiation
+        watchdog, claims engine, fulfillment resume, capacity-events poller,
+        site-projection poller — is halted. Each loop's work stays reachable
+        through its own lifecycle route below, which is how an operator or a
+        scenario advances one step at a time while paused.
+        """
+        loops = _set_globally_paused(True)
         return AdminPauseResponse(
-            paused=True, message="Storefront paused. New negotiations will receive 503."
+            paused=True,
+            message=(
+                "Storefront paused. New negotiations will receive 503 and no timer "
+                "loop will run until resumed; advance one with "
+                "/api/v1/admin/lifecycle/{loop}/run-cycle."
+            ),
+            loops=loops,
         )
 
     @router.post(
         "/resume",
         response_model=AdminPauseResponse,
-        summary="Resume new negotiations globally (admin)",
+        summary="Resume the storefront: accept negotiations and restart timer loops (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
-        _set_globally_paused(False)
-        return AdminPauseResponse(paused=False, message="Storefront resumed.")
+        """Restart everything pause halted.
+
+        Resuming is not free of side effects: the capacity-events poller keeps
+        its feed position in memory, so a restarted poller re-positions at the
+        feed head and runs one full listing reconcile — the same path it takes
+        after a process restart. A caller that needs to observe state without
+        that reconcile should stay paused and advance deliberately.
+        """
+        loops = _set_globally_paused(False)
+        return AdminPauseResponse(
+            paused=False,
+            message=(
+                "Storefront resumed. Timer loops restarted; the capacity-events "
+                "poller re-reconciles from the feed head on restart."
+            ),
+            loops=loops,
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle advance — run one cycle of a halted loop.
+    #
+    # Each route calls the operation its loop was already invoking, and returns
+    # what that operation returns. None of them drives an iteration of the loop
+    # itself, and none implements a transition the loop does not: a manual cycle
+    # that behaved differently from the timer would prove nothing about
+    # production. Mirrors the provisioning service's `check-leases` and
+    # `fulfillment-convergence/run-cycle` controls, including that they run
+    # while paused — running while paused is the entire purpose.
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/claims/run-cycle",
+        summary="Run one claims sweep now (admin)",
+    )
+    async def run_claims_cycle(self) -> dict:
+        from market_storefront.services.claims_runtime import build_claims_engine
+
+        engine = build_claims_engine(self._db)
+        processed = await engine.tick()
+        return {"loop": "claims_engine", "processed": int(processed)}
+
+    @router.post(
+        "/lifecycle/fulfillment-resume/run-cycle",
+        summary="Run one fulfillment-resume sweep now (admin)",
+    )
+    async def run_fulfillment_resume_cycle(self) -> dict:
+        from market_storefront.services.fulfillment_resume_runtime import (
+            resume_incomplete_fulfillments_once,
+        )
+
+        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
+        return {"loop": "fulfillment_resume"}
+
+    @router.post(
+        "/lifecycle/negotiation-watchdog/run-cycle",
+        summary="Run one negotiation-watchdog sweep now (admin)",
+    )
+    async def run_negotiation_watchdog_cycle(self) -> dict:
+        from market_storefront.negotiation_watchdog import _watchdog_tick
+
+        swept = await _watchdog_tick(self._db)
+        return {"loop": "negotiation_watchdog", "swept": int(swept)}
+
+    @router.post(
+        "/lifecycle/capacity-events/run-cycle",
+        summary="Reconcile derived listings against site capacity now (admin)",
+    )
+    async def run_capacity_events_cycle(self) -> dict:
+        """Run the storefront's own listing reconcile.
+
+        The poller's per-event drain has no callable unit — the work is inline in
+        the loop body — so this calls `full_capacity_reconcile`, the reconcile
+        that poller invokes at startup and after a ledger reset. It runs both the
+        close and reopen passes unconditionally, where the delta subscriber runs
+        one or both depending on the delta's kind, so this exercises a superset
+        of the subscriber's reaction rather than an identical path. A caller that
+        needs per-kind routing needs a one-cycle drain extracted from
+        `site_events_poller`, which does not exist yet.
+        """
+        from market_storefront.services.capacity_client import (
+            full_capacity_reconcile,
+        )
+
+        await full_capacity_reconcile()
+        return {"loop": "capacity_events_poller", "reconciled": True}
 
     @router.post(
         "/deals/{escrow_uid}/interrupt",

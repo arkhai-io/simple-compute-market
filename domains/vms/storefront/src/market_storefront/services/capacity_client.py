@@ -539,35 +539,50 @@ async def capacity_events_poller_loop() -> None:
     aggregate = build_capacity_client(lambda: get_sqlite_client())
     site_clients = remote_site_clients(aggregate)
 
-    async def _full_reconcile() -> None:
-        from market_storefront.services.publication_service import (
-            close_stale_compute_listings_after_capacity_change,
-            reopen_available_compute_listings_after_capacity_change,
-        )
-        # Both reconcilers need the home site and the configured site count to
-        # tell "this site has no capacity" from "no site was asked". Derived from
-        # the same client map the per-delta path uses, so the periodic reconcile
-        # and the event-driven one cannot disagree about which site is home.
-        home_site = next(iter(site_clients), None)
-        if home_site is None:
-            return
-        db_path = get_sqlite_client().db_path
-        availability = await member_availability_view(aggregate, db_path)
-        await close_stale_compute_listings_after_capacity_change(
-            db_path,
-            home_site=home_site,
-            configured_site_count=len(site_clients),
-            member_availability=availability,
-        )
-        await reopen_available_compute_listings_after_capacity_change(
-            db_path,
-            home_site=home_site,
-            member_availability=availability,
-        )
-
     await asyncio.gather(*(
         site_events_poller(
-            aggregate, name, client, interval, full_reconcile=_full_reconcile,
+            aggregate, name, client, interval,
+            full_reconcile=full_capacity_reconcile,
         )
         for name, client in site_clients.items()
     ))
+
+
+async def full_capacity_reconcile() -> None:
+    """Reconcile every derived listing against current site capacity.
+
+    The poller runs this at startup and after a ledger reset, and the admin
+    lifecycle route runs it to advance a halted poller by one step. Module-level
+    rather than a closure inside the poller precisely so both callers invoke the
+    same function: a manual cycle that reconciled differently from the timer
+    would prove nothing about production.
+
+    Both reconcilers need the home site and the configured site count to tell
+    "this site has no capacity" from "no site was asked". Both are derived from
+    the same client map the per-delta path uses, so the periodic reconcile and
+    the event-driven one cannot disagree about which site is home.
+    """
+    from market_storefront.services.publication_service import (
+        close_stale_compute_listings_after_capacity_change,
+        reopen_available_compute_listings_after_capacity_change,
+    )
+    from market_storefront.utils.sqlite_client import get_sqlite_client
+
+    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    site_clients = remote_site_clients(aggregate)
+    home_site = next(iter(site_clients), None)
+    if home_site is None:
+        return
+    db_path = get_sqlite_client().db_path
+    availability = await member_availability_view(aggregate, db_path)
+    await close_stale_compute_listings_after_capacity_change(
+        db_path,
+        home_site=home_site,
+        configured_site_count=len(site_clients),
+        member_availability=availability,
+    )
+    await reopen_available_compute_listings_after_capacity_change(
+        db_path,
+        home_site=home_site,
+        member_availability=availability,
+    )
