@@ -121,67 +121,67 @@ found the response carries no usable pool identity either, and that the comment 
 why asserts an authority the site does hold. See `design.md`'s "Placement identity is
 echoed from the claim, never reported by the site".
 
-- [ ] 10.1 Confirm 9.2's open item is closed by inspection: `vm_host` is in
+- [x] 10.1 Confirm 9.2's open item is closed by inspection: `vm_host` is in
       `/reservations`' strip set today. Record the finding rather than the checkmark alone —
-      9.2 recorded it as not done and needing a decision.
-- [ ] 10.2 Add `pool_id` and `member_id` to the strip set in
+      9.2 recorded it as not done and needing a decision. **Done.** `vm_host` is in the strip set; 9.2's "not done, decision needed" note was stale. Recorded rather than silently ticked.
+- [x] 10.2 Add `pool_id` and `member_id` to the strip set in
       `kit/site/src/market_site/router.py`'s reserve route. Stripping rather than returning
       a present-and-`None` field is the point: the `None` is what produced
       `admin_controller`'s `reserved.get("pool_id") or (reserved.get("attributes") or {}).get("pool_id")`
-      fallback chain, which only reads the attribute because the first term is always empty.
-- [ ] 10.3 Replace `_match_payload`'s "pool/member are storefront (aggregator) concepts the
+      fallback chain, which only reads the attribute because the first term is always empty. **Done.** Both added, with the reason stated at the route: reporting either would advertise a placement scheduling may move.
+- [x] 10.3 Replace `_match_payload`'s "pool/member are storefront (aggregator) concepts the
       site does not know" comment in `kit/site/src/market_site/ledger.py`. The site owns
       pool membership; the reason the field is absent is that a reservation commits to a
       site and a shape and to nothing narrower, so reporting the pool the site happened to
       match would advertise a placement scheduling is free to change. `member_id` is
-      aggregator bookkeeping with no site-side meaning. State both reasons separately.
-- [ ] 10.4 Source `ReserveCapacityResponse`'s `resource_id` and `pool_id` from the request's
+      aggregator bookkeeping with no site-side meaning. State both reasons separately. **Done.** Replaced. The site does own pool membership; the field is absent because a reservation commits to no pool, and `member_id` has no site-side meaning — stated as two reasons.
+- [x] 10.4 Source `ReserveCapacityResponse`'s `resource_id` and `pool_id` from the request's
       own claim in `domains/vms/storefront/src/market_storefront/controllers/admin_controller.py`,
       not from the reservation payload. A claim that pins either already carries it; a claim
-      that pins neither must report neither.
-- [ ] 10.5 Make `resource_id` optional on both response models —
+      that pins neither must report neither. **Done.** Sourced from `body.required_attributes`; the `attributes["pool_id"]` fallback chain is gone.
+- [x] 10.5 Make `resource_id` optional on both response models —
       `market_storefront/models/capacity_admin_models.py` (currently a required `str`) and
       `core/storefront-client/src/storefront_client/models.py` (currently defaults to `""`,
       which reads as a present empty identity rather than an absent one). Keep the two in
-      step and cover them with the sync/async parity contract test `TESTING.md` requires.
-- [ ] 10.6 Audit the remaining reservation-payload readers for the same pattern:
+      step and cover them with the sync/async parity contract test `TESTING.md` requires. **Done.** `str | None` on both, and `from_dict` now yields `None` rather than `""` so absent reads as absent.
+- [x] 10.6 Audit the remaining reservation-payload readers for the same pattern:
       `fulfillment_resume_runtime`'s `settlement_resource_id` write (guarded, so it now
       persists `None` on every recovery — confirm that is correct rather than assumed, since
       the fulfillment scheduler owns that selection) and `vm_job_spec_service`'s
       `selected["resource_id"]`/`selected["vm_host"]` off `probe()`, which the probe route
       does not strip. Record the probe asymmetry as a finding for
       `negotiation-capacity-feasibility-probe`, which owns that payload's shape; do not
-      change it here.
-- [ ] 10.7 Extend task 2.7's boundary-contract test to cover `pool_id` and `member_id`, so
-      the assertion protects every future caller rather than the fields known in July.
-- [ ] 10.8 Integration test the admin reservation path through the real router for both
+      change it here. **Done.** `fulfillment_resume_runtime` persists `None` and that is correct — the fulfillment scheduler owns `settlement_resource_id`. `vm_job_spec_service` reads `probe()`, which the probe route does not strip; documented at that call site and left for `negotiation-capacity-feasibility-probe`, which owns the payload's shape.
+- [x] 10.7 Extend task 2.7's boundary-contract test to cover `pool_id` and `member_id`, so
+      the assertion protects every future caller rather than the fields known in July. **Done.** All six fields, plus a separate test asserting the pool is omitted *even though the site owns pools* — the two assertions mean different things.
+- [x] 10.8 Integration test the admin reservation path through the real router for both
       claim shapes: a resource-pinned claim reports its resource and no pool, a pool-scoped
       claim reports its pool and no resource, and neither raises. The unit level cannot
       catch this — `_match_payload` includes `resource_id` in-process and only the HTTP
       boundary strips it, which is why the defect survived a green suite.
-
+ **Done.** Both claim shapes, through the real router. Also made `tests/fake_site.py` strip the same set, which immediately exposed a second live instance: `test_abandon_truncation.py` was reading `reserved["resource_id"]` and passing only against a fake that lied about the wire shape.
 ### Section 10 closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, scoped to this section.
 
-- [ ] 10.9 **Comment hygiene.** Run `make check-comment-hygiene`. Read 10.3's and 10.4's
+- [x] 10.9 **Comment hygiene.** Run `make check-comment-hygiene`. Read 10.3's and 10.4's
       comments directly: both replace text that stated the wrong reason, and a comment
       asserting an authority the code does not hold is a defect in this change rather than a
-      wording preference.
-- [ ] 10.10 **Import placement.** Nothing in this section is expected to add an import;
-      confirm rather than assume, and record the disposition.
-- [ ] 10.11 **Documentation compliance.** The opaque-reservation requirement in
+      wording preference. **Done.** `make check-comment-hygiene` clean; both replaced comments read directly.
+- [x] 10.10 **Import placement.** Nothing in this section is expected to add an import;
+      confirm rather than assume, and record the disposition. **Done.** No import added by this section.
+- [x] 10.11 **Documentation compliance.** The opaque-reservation requirement in
       `openspec/specs/site-capacity/spec.md` already covers physical-resource identity.
       Confirm whether it also covers pool identity as written; if it does not, the delta is
-      a spec amendment, not an in-code comment.
-- [ ] 10.12 **Narrative compression.** Keep these notes at final behaviour and evidence
-      once implemented; the trace belongs in `design.md`.
-- [ ] 10.13 **Roadmap currency.** Goal 1's gap row for this change names stale
+      a spec amendment, not an in-code comment. **Done.** The existing opaque-reservation requirement covers physical-resource identity and does not name pool identity; the reason pool identity is withheld is different (deferred placement, not privacy), so it is recorded in `design.md` and belongs in a spec amendment rather than being read into the existing requirement.
+- [x] 10.12 **Narrative compression.** Keep these notes at final behaviour and evidence
+      once implemented; the trace belongs in `design.md`. **Done.** Notes held at final behaviour and evidence; the trace is in `design.md`.
+- [x] 10.13 **Roadmap currency.** Goal 1's gap row for this change names stale
       physical-placement fields on the fulfillment path, which this section extends to the
       admin path without changing the gap's shape. Confirm at closeout and record the
-      disposition explicitly rather than omitting the step.
-- [ ] 10.14 **Promotion.** Add this section's rows to the design-promotion record.
-
+      disposition explicitly rather than omitting the step. **Done.** Goal 1's gap row for this change already names stale physical-placement fields on the fulfillment path; extending that to the admin path does not change the gap's shape, so no roadmap edit is owed.
+- [x] 10.14 **Promotion.** Add this section's rows to the design-promotion record.
+ **Done.** Two rows added to `design.md`'s promotion record.
 ### Section 10 design-promotion record
 
 See `design.md`'s "Design-promotion record" table.

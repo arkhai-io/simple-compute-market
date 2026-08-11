@@ -463,6 +463,7 @@ tool and leave the two copies to drift. The change is between steps 6 and 7 —
 | The RL strategy's laziness is the strategy module and its dependency graph, not torch itself — torch is already function-scoped | Corrected mid-change; recorded in `design.md` and guarded by a test | Applied |
 | A fungible pool is several executors with one capacity declaration each, never several declarations on one executor; the bucket projection's `resource_count` is what makes it fungible | Owned by `capacity-resource-administration` §4b's spec delta; encoded here only as scenario setup | At archival |
 | The negotiation inventory guard reads the bucket snapshot, not either projection — recorded as a correction in `e2e-inventory-findings.md` | Change history only; the permanent contract is `openspec/specs/site-capacity/spec.md`'s existing accounting boundary | Applied |
+| A test double must answer every question the service it substitutes answers, and answer it identically where the answer is a validation decision | Enforced by a parity test in `provisioning/compute/service/tests/unit/services/test_programmable_mock.py`; the general principle is already in `docs/development/TESTING.md`'s client-parity rule | Applied |
 
 ## 11. E2E capacity setup
 
@@ -482,70 +483,70 @@ it into its own change rather than widen this one.
 
 ### 11a. Setup model
 
-- [ ] 11a.1 Confirm by inspection before writing anything: `_find_candidate` reads
+- [x] 11a.1 Confirm by inspection before writing anything: `_find_candidate` reads
       `CapacityBucket` only; `register_resource` is the only thing that creates one; the
       resource-pool projection is host-row-shaped and the capacity-bucket projection is the
       fungible source; and a pool's `listing_mode` policy tag selects between them with a
       structural default of `specific_resource` at one member. Record any drift rather than
-      working around it.
-- [ ] 11a.2 Give each scenario its own executor host, and stop sharing `kvm1`. Every VM
+      working around it. **Done.** All four confirmed against the tree; no drift.
+- [x] 11a.2 Give each scenario its own executor host, and stop sharing `kvm1`. Every VM
       scenario currently seeds `attribute.vm_host=kvm1`, so under one-declaration-per-executor
       they cannot coexist — and the shared host is already what let one scenario's GPU count
       break another (see this change's `host_registry.py` docstring). Host names belong to the
-      scenario that registers them.
-- [ ] 11a.3 Keep a declaration's own id distinct from its executor's name, correlated by the
+      scenario that registers them. **Done.** Seven scenario-owned hosts replace the shared `kvm1`.
+- [x] 11a.3 Keep a declaration's own id distinct from its executor's name, correlated by the
       executor attribute. A specific-resource listing's `offer_resource.resource_id` becomes
       the claim's pinned `resource_id` via `compute_capacity_claim_from_order`, so the
       declaration must carry the commercial id the listing names, not the host alias. One
-      declaration per executor is still satisfied — one declaration claims one host.
-- [ ] 11a.4 Declare pool membership in the `pool_id` field, never in `attributes`. The
+      declaration per executor is still satisfied — one declaration claims one host. **Done.** Declarations keep the commercial resource id; `vm_host` carries the correlation.
+- [x] 11a.4 Declare pool membership in the `pool_id` field, never in `attributes`. The
       attribute spelling is read by nothing and is refused by
       `capacity-resource-administration` §4b.4.
-
+ **Done.** Passed as the field everywhere; no scenario sets it as an attribute.
 ### 11b. Shared helpers
 
-- [ ] 11b.1 Rework `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: add a pool
+- [x] 11b.1 Rework `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: add a pool
       helper over `create_pool`/`get_pool` carrying the scenario's `listing_mode` policy tag,
       make the host helper take a name and `pool_id` (both already on `HostCreate`/`HostUpdate`),
       and rename the capacity helper to say it declares sellable capacity rather than
       registering a resource. `SiteCapacityAdminClient.register_resource` already accepts
-      `pool_id`; nothing new is needed on any client.
-- [ ] 11b.2 Rewrite that module's header docstring. It states the site authority projects
+      `pool_id`; nothing new is needed on any client. **Done.** `register_e2e_pool`, `register_e2e_host(name, pool_id)`, `declare_e2e_capacity`, and `provision_e2e_executor` composing the three in dependency order. No client change was needed.
+- [x] 11b.2 Rewrite that module's header docstring. It states the site authority projects
       capacity by iterating host rows and that an unregistered host yields an empty
       projection — true of the resource-pool projection and irrelevant to the buckets every
-      claim actually matches against, which is the misreading that cost a debugging loop.
-- [ ] 11b.3 Keep `refresh_storefront_projections` as it is. Its refusal to treat
+      claim actually matches against, which is the misreading that cost a debugging loop. **Done.** Rewritten to lead with the three-store distinction and why the host-derived projection is not what claims match.
+- [x] 11b.3 Keep `refresh_storefront_projections` as it is. Its refusal to treat
       `unavailable`/`invalid` as an authoritative empty is what surfaced the poisoned
       projection at its cause instead of three layers downstream.
-
+ **Done.** Unchanged.
 ### 11c. Per-scenario setup
 
-- [ ] 11c.1 `test_compute_dynamic_listings.py`, fungible class: one pool tagged
+- [x] 11c.1 `test_compute_dynamic_listings.py`, fungible class: one pool tagged
       `listing_mode: fungible`, two executor hosts of four GPUs each, one declaration per
       host with `pool_id` set on the field. Confirm the existing 2× and 4× assertions still
       hold and why: slices are generated to `max_member_available_gpu_count`, not to the pool
       sum, so a 2× reserve on the first host leaves the ceiling at four, and a 4× reserve then
       lands on the second and drops it to two, closing 3× and 4×. Today those assertions pass
-      only because two declarations on one host double-count that host's GPUs.
-- [ ] 11c.2 `test_compute_dynamic_listings.py`, dynamic class: its own executor host and one
+      only because two declarations on one host double-count that host's GPUs. **Done.** Two executors, one declaration each, `listing_mode: fungible`. The existing 2×/4× assertions hold for the right reason now — previously they passed only because two declarations double-counted one host's GPUs.
+- [x] 11c.2 `test_compute_dynamic_listings.py`, dynamic class: its own executor host and one
       declaration, single-member pool, so the structural default resolves to
-      `specific_resource`.
-- [ ] 11c.3 `test_full_deal.py`, `test_full_deal_buyer_cli.py`, `test_buy_oneshot_buyer_cli.py`,
+      `specific_resource`. **Done.** Own host, single-member pool, `specific_resource`.
+- [x] 11c.3 `test_full_deal.py`, `test_full_deal_buyer_cli.py`, `test_buy_oneshot_buyer_cli.py`,
       `test_multi_registry.py`, `test_non_erc20_settlement.py`: each declares capacity for its
       own host in its existing executor-host stage, carrying the `region` and `gpu_model` its
       listing advertises. Those two are what `has_matching_inventory_guard` compares by
       equality, so a declaration missing either reproduces the failure the stage exists to
-      prevent.
-- [ ] 11c.4 Correct the stage-05a assertion message in `test_full_deal.py` and
+      prevent. **Done.** All five, each with its own host and a declaration carrying its listing's `region` and `gpu_model`. `test_multi_registry` needed two — Alice's negotiation asserts `counter`, so her resource needs a declaration in her own region. `test_non_erc20_settlement`'s `kvm{index}` was always `kvm1`, since each parametrized run passes one case; it now derives a host from `case.name`.
+- [x] 11c.4 Correct the stage-05a assertion message in `test_full_deal.py` and
       `test_full_deal_buyer_cli.py`. It attributes any non-`counter` decision to
       `BUYER_INITIAL_PRICE` being above the seller floor; the observed decision was `reject`
       from an inventory guard that never evaluated price, and the message sent a debugging
-      loop after a pricing problem that did not exist. Distinguish `reject` from `accept`.
-- [ ] 11c.5 Confirm mock-mode provisioning tolerates hosts other than `kvm1` — the compose
+      loop after a pricing problem that did not exist. Distinguish `reject` from `accept`. **Done.** Run 31478292008 confirms the value: the message reported `reject` and pointed at the declaration rather than at `BUYER_INITIAL_PRICE`.
+- [x] 11c.5 Confirm mock-mode provisioning tolerates hosts other than `kvm1` — the compose
       profile runs `PROVISIONING_MODE=mock` and hosts are registered through the API, so this
       is expected to be free, but it is an assumption worth one deliberate check rather than
       a surprise mid-run.
-
+ **Done.** Confirmed by run 31478292008 — all seven scenario hosts registered and provisioned under the mock profile.
 ### 11c-bis. Pool creation requires provider configuration (found in run 31476576548)
 
 The first run of Section 11 failed earlier than any of its own assertions: every
@@ -553,60 +554,108 @@ The first run of Section 11 failed earlier than any of its own assertions: every
 provider='ansible'`, so no pool, host, or declaration was created and all eleven
 failures were one cascade. Two facts settle the fix.
 
-- [ ] 11c-bis.1 A scenario has no profile-independent `playbook_path` to supply.
+- [x] 11c-bis.1 A scenario has no profile-independent `playbook_path` to supply.
       The correct value is `/dev/null` under the mock profile and a container path
       under docker and Helm. Read the system `default` pool's `provider_config`
       instead and pass it through: the migration seeds that pool from the service's
       own active settings, making it the one place a scenario can read a valid value
       for whatever profile the stack is running under. Assert loudly when it carries
-      no `playbook_path` rather than substituting a guess.
-- [ ] 11c-bis.2 Reconcile an existing pool's `listing_mode` rather than accepting
+      no `playbook_path` rather than substituting a guess. **Done.** Reads the `default` pool's `provider_config` and passes it through, asserting loudly when it carries no `playbook_path`.
+- [x] 11c-bis.2 Reconcile an existing pool's `listing_mode` rather than accepting
       it, matching the host helper. A pool surviving an earlier run may carry a
-      different mode, and the mode decides how the scenario's listings publish.
-- [ ] 11c-bis.3 Pin the contract the helper now depends on where the pool API owns
+      different mode, and the mode decides how the scenario's listings publish. **Done.** `patch_pool` reconciles a surviving pool's `listing_mode`.
+- [x] 11c-bis.3 Pin the contract the helper now depends on where the pool API owns
       it: the default pool exposes a usable `playbook_path`, and a pool created by
       copying its provider configuration is accepted. Added to
-      `provisioning/compute/service/tests/integration/test_pools_api.py`.
-- [ ] 11c-bis.4 Fix the fidelity gap those tests exposed in
+      `provisioning/compute/service/tests/integration/test_pools_api.py`. **Done.** Two tests in `test_pools_api.py`.
+- [x] 11c-bis.4 Fix the fidelity gap those tests exposed in
       `provisioning/compute/service/tests/integration/conftest.py`: `db_engine`
       seeded the default `ResourcePool` row but not its `AnsiblePoolConfig`, while
       its own comment claimed to mirror the migration's guarantee. A caller reading
       the default pool's `provider_config` saw an empty mapping under test and a
       populated one in every deployment — exactly the divergence class that let the
       reserve-response defect ship.
-
+ **Done.** `db_engine` now seeds the default pool's `AnsiblePoolConfig` as the migration does. Both 11c-bis.3 tests failed until it did — the fixture was a half-mirror of its own stated guarantee.
 ### 11d. Verification
 
-- [ ] 11d.1 Run `make -C e2e-tests test-e2e` — the target the workflow runs, not a
-      scenario-by-scenario path, since naming a path overrides the configured `testpaths`.
-- [ ] 11d.2 Expect the nine failures to resolve as: five projection-stage failures and the
+- [x] 11d.1 Run `make -C e2e-tests test-e2e` — the target the workflow runs, not a
+      scenario-by-scenario path, since naming a path overrides the configured `testpaths`. **Done.** Run via the workflow's own `make -C e2e-tests test-e2e`.
+- [x] 11d.2 Expect the nine failures to resolve as: five projection-stage failures and the
       fungible 409 from this section; both `05a` and `b4` from this section's declarations;
       `test_02_admin_reserve_2x` only once `fix-vm-fulfillment-capacity-boundary` §10 lands.
       If any scenario fails for a different reason, stop and record it before adjusting setup —
-      the last loop's cost came from fixing a symptom whose cause was elsewhere.
-- [ ] 11d.3 Disclose which suites ran and which did not. A local docker-compose run has been
+      the last loop's cost came from fixing a symptom whose cause was elsewhere. **Partly done, two runs.** Run 31476576548: all eleven failures were one cascade from my own defect — `PoolCreate` with `provider="ansible"` requires `provider_config.playbook_path` and I supplied none, so no pool, host, or declaration was created. Fixed as 11c-bis. Run 31478292008: `1 failed, 66 passed, 39 skipped`. Every setup stage, both `05a`s, and `test_02_admin_reserve_2x` are green; zero 500s, zero `several capacity resources`, zero `KeyError`, zero `'resource_pool': 'invalid'` in the compose logs. The one remaining failure is `b4`, which now negotiates, escrows, and settles and fails at `begin_fulfillment` — a pre-existing defect this section's work exposed by reaching that call for the first time, tracked as section 12.
+- [x] 11d.3 Disclose which suites ran and which did not. A local docker-compose run has been
       unavailable since 2026-07-29 (see `refactor-e2e-fulfillment-lifecycle`), so this
       section's verification may be a CI run rather than a local one, and saying so is part of
       the result.
-
+ **Done.** Disclosed per fileset: no docker-compose run is available in the implementation session, so scenario collection plus the affected unit/integration suites were run locally and the e2e evidence comes from CI runs 31476576548 and 31478292008.
 ### 11e. Section 11 closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, scoped to this section. Section 10's
 closeout is complete and stays as it is.
 
-- [ ] 11e.1 **Comment hygiene.** Run `make check-comment-hygiene`. These are test files, so
+- [x] 11e.1 **Comment hygiene.** Run `make check-comment-hygiene`. These are test files, so
       the mechanical target is unlikely to fire; read 11b.2's rewritten docstring and each
       scenario's stage docstring directly, since several currently explain the setup in terms
-      of the projection rather than the buckets their claims match.
-- [ ] 11e.2 **Import placement.** Confirm no function-level import is added by the helper
-      rework, and record the disposition.
-- [ ] 11e.3 **Documentation compliance.** This section adds no permanent documentation: the
+      of the projection rather than the buckets their claims match. **Done.** `make check-comment-hygiene` clean; the rewritten helper docstring and each stage docstring read directly.
+- [x] 11e.2 **Import placement.** Confirm no function-level import is added by the helper
+      rework, and record the disposition. **Done.** No function-level import added.
+- [x] 11e.3 **Documentation compliance.** This section adds no permanent documentation: the
       setup model it encodes is `site-capacity`'s existing accounting boundary, and the two
       new normative requirements belong to `capacity-resource-administration` §4b's spec
-      delta. Confirm that remains true rather than assuming it.
-- [ ] 11e.4 **Narrative compression.** Compress these notes to final scenario shape and the
-      run evidence once green; the diagnosis stays in `e2e-inventory-findings.md`.
-- [ ] 11e.5 **Roadmap currency.** No roadmap goal changes: this is scenario setup, and the
+      delta. Confirm that remains true rather than assuming it. **Done.** No permanent documentation owed by this section; the two normative requirements remain `capacity-resource-administration` §4b's spec delta.
+- [x] 11e.4 **Narrative compression.** Compress these notes to final scenario shape and the
+      run evidence once green; the diagnosis stays in `e2e-inventory-findings.md`. **Done.** Notes held at final scenario shape and run evidence; the diagnosis stays in `e2e-inventory-findings.md`.
+- [x] 11e.5 **Roadmap currency.** No roadmap goal changes: this is scenario setup, and the
       production gaps it exposed are already owned by rows under Goal 1 and Goal 2. Recorded
-      explicitly as a deliberate finding rather than an omitted step.
-- [ ] 11e.6 **Promotion.** Add this section's rows to the design-promotion record.
+      explicitly as a deliberate finding rather than an omitted step. **Done.** No roadmap change: scenario setup, and the production gaps it exposed are already owned by rows under Goal 1 and Goal 2.
+- [x] 11e.6 **Promotion.** Add this section's rows to the design-promotion record.
+ **Done.** Rows added to the design-promotion record.
+## 12. Mock Ansible service diverged from the service it stands in for
+
+Found by run 31478292008, the first run to reach `begin_fulfillment` at all. Pre-existing
+and independent of this change's subject; recorded here because Section 11's work is what
+exposed it and because leaving it would keep `b4` red.
+
+`AnsibleFulfillmentProvider.prepare_create` validates pool `extra_vars` against
+`AnsibleJobService.reserved_var_keys`, which passes through to the Ansible service.
+`MockAnsibleService` does not implement it, so under the mock profile the call raised
+`AttributeError`, surfaced as a 500 on `POST /api/v1/fulfillment/begin`, and reached the
+buyer as `Provisioning failed: Internal Server Error` — four layers from its cause.
+
+- [x] 12.1 Implement `reserved_var_keys` on `MockAnsibleService` by borrowing the real
+      implementation rather than reproducing it. The answer is a validation decision, not
+      I/O: a mock computing its own set would accept pool configuration production refuses.
+      The file already establishes this pattern — `parse_playbook_result` delegates to a
+      real instance for exactly the same reason. **Done.**
+- [x] 12.2 Add an interface-parity test asserting the mock implements every public method of
+      the real service. `MockAnsibleService`'s own docstring promises this and nothing
+      checked it, which is why `reserved_var_keys` could be added to one side alone.
+      **Done.** It failed immediately on a second, latent divergence — `lookup_public_host`,
+      absent from the mock and reachable today only because `parse_playbook_result` routes
+      through a real instance. Borrowed the same way.
+- [x] 12.3 Assert the two services return the *same* reserved set for the same params, not
+      merely that the method exists, plus a concrete floor so parity cannot be satisfied by
+      two empty sets. **Done.**
+- [x] 12.4 Note why the existing provider unit test could not catch this:
+      `test_ansible_fulfillment_provider.py`'s `job_service` fixture injects the real
+      `AnsibleService.reserved_var_keys` onto a `MagicMock`, so it exercises the real
+      implementation on both sides and never the mock. Left as it is — it tests the
+      provider's collision logic correctly; the gap was the absent parity check, now
+      12.2. **Done.**
+
+### Section 12 closeout
+
+- [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method
+      docstrings state why borrowing is correct rather than convenient. **Done.**
+- [x] 12.6 **Import placement.** The added `AnsibleService` import is module level, beside
+      the three names the file already imported from that module. **Done.**
+- [x] 12.7 **Documentation compliance.** No permanent documentation owed: a test double
+      matching the interface it substitutes is a testing convention, and
+      `docs/development/TESTING.md`'s sync/async client-parity rule already states the
+      general principle this applies to a different pair. **Done.**
+- [x] 12.8 **Narrative compression.** Held at final behaviour and evidence. **Done.**
+- [x] 12.9 **Roadmap currency.** No roadmap impact — a mock completeness defect changes no
+      goal's current state. Recorded explicitly rather than omitted. **Done.**
+- [x] 12.10 **Promotion.** Row added to the design-promotion record below. **Done.**

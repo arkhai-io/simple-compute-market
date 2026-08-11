@@ -348,3 +348,30 @@ both storefronts for the rest of the run, which is the five new failures. The gu
 correct; a fungible pool is two hosts, not two declarations on one. Section 11 fixes the
 setup, and `capacity-resource-administration` §4b moves the refusal to write time so one bad
 declaration cannot take a site's projection down again.
+
+---
+
+# Run 31478292008 — `1 failed, 66 passed, 39 skipped`
+
+Section 11's setup model holds. Every executor-host stage, both `05a`s, the fungible
+reserve, and `test_02_admin_reserve_2x` are green. The compose logs contain no 500,
+no `several capacity resources`, no `KeyError`, and no `'resource_pool': 'invalid'`.
+
+The one remaining failure, `b4`, now gets much further: it negotiates (round 0 counter,
+round 1 accept), agrees at 8500, creates the escrow, settles, and fails while polling
+provisioning. Cause traced in the compose logs to
+`AttributeError: 'ProgrammableMockAnsibleService' object has no attribute
+'reserved_var_keys'` on `POST /api/v1/fulfillment/begin`, rendered to the buyer as
+`Provisioning failed: Internal Server Error`.
+
+That is a pre-existing divergence between the mock Ansible service and the service it
+substitutes, not a capacity defect — `reserved_var_keys` was added to the real service
+without the mock following, and no run had reached `begin_fulfillment` before now to
+notice. Owned by section 12 of this change's plan.
+
+Worth recording as a pattern, because this is the third instance in three runs: a test
+double that does not match the real thing hides the defect until an outer layer reaches
+it. `fake_site.py` returned reservation fields the real router strips; the provisioning
+integration `db_engine` seeded a pool without the provider config the migration gives it;
+`MockAnsibleService` lacked a method the real service has. Each was invisible to every
+suite and visible only to the nightly e2e.
