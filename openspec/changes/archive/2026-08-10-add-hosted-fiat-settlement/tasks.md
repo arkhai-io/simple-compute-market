@@ -3,11 +3,11 @@
 ## 1. Released consumer boundary
 
 - [x] 1.1 Pin and verify hosted release `0.1.0`: manifest
-  `ded5117d39dc38cd365d5502011ae65e6b4714b44c0dc1afe8b616a1bbae615a`,
+  `3f9bb7ab579fdc5388b97d7bbf28d4cb647e0b5f2bc40eb8f4ec93d8083d1da7`,
   client wheel
-  `354c99691aa99e22792a900ab7bb4137e101a27d0c90be9973f5fdafb999fe80`,
+  `82a1493adb10536ce8c234251ece9128e3cb95817a2230d10a04e6a2444438ca`,
   image
-  `sha256:3aea49495b272745f5b9c9171cf5550565ef8387462969c9eee48f0cd3035d36`,
+  `sha256:3c88f345f0c9aed22348ec8ec9ae89eefd73a2f5ccbcbece60841298ed9be44b`,
   API `0.1.0`, schema `3`, capabilities, provenance, SBOM, repository/workflow,
   source revision, and signer without an editable sibling dependency.
 - [x] 1.2 Add byte-compatible settlement option/selection carriers, typed hosted
@@ -46,11 +46,12 @@
   packaging/release-signature, comment-hygiene, and targeted strict OpenSpec
   checks. Repository-wide strict OpenSpec remains nonzero only for six unrelated
   pre-existing active changes.
-- [x] 4.3 Record unavailable external checks without simulated evidence:
-  deployed Helm (no cluster/credentials), Stripe test transfer/refund and
-  reachable webhook (no credentials/endpoint), supported EAS testnet evidence
-  (no RPC/EAS endpoint or funded signer), and protected publisher workflow
-  execution (no release permission).
+- [x] 4.3 Verify supplied Stripe credentials as non-live and record the
+  authoritative external blocker without simulated evidence: the platform has
+  no connected accounts and Connect is not enabled, so connected-account
+  transfer/refund cannot run; no reachable webhook, Kubernetes cluster,
+  supported EAS testnet endpoint/funded signer, or protected publisher
+  permission was provided.
 - [x] 4.4 Promote durable behavior and rationale to the owning permanent specs,
   architecture, deployment, release, roadmap, and authoring documentation;
   complete comment/import hygiene, the design-promotion record, and archive.

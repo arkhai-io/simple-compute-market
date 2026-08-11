@@ -10,20 +10,20 @@
     "eas-arbiter.v1"
   ],
   "manifest_filename": "release-manifest.json",
-  "manifest_sha256": "ded5117d39dc38cd365d5502011ae65e6b4714b44c0dc1afe8b616a1bbae615a",
+  "manifest_sha256": "3f9bb7ab579fdc5388b97d7bbf28d4cb647e0b5f2bc40eb8f4ec93d8083d1da7",
   "authority_id": "local-release-authority",
   "authority_address": "0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63",
   "repository": "arkhai/hosted-settlement-service",
-  "workflow_ref": ".github/workflows/release.yml@local/9eb071e7213eb1c978363b0dd3fd02d37c0690a1",
-  "source_commit": "9eb071e7213eb1c978363b0dd3fd02d37c0690a1",
+  "workflow_ref": ".github/workflows/release.yml@local/17590279817dcb48ef1337810d6b6d3169680b64",
+  "source_commit": "17590279817dcb48ef1337810d6b6d3169680b64",
   "client_wheel": {
     "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",
     "distribution": "arkhai-hosted-settlement-client",
     "version": "0.1.0",
-    "sha256": "354c99691aa99e22792a900ab7bb4137e101a27d0c90be9973f5fdafb999fe80"
+    "sha256": "82a1493adb10536ce8c234251ece9128e3cb95817a2230d10a04e6a2444438ca"
   },
   "service_image": {
     "reference": "localhost/arkhai-hosted-settlement-service",
-    "digest": "sha256:3aea49495b272745f5b9c9171cf5550565ef8387462969c9eee48f0cd3035d36"
+    "digest": "sha256:3c88f345f0c9aed22348ec8ec9ae89eefd73a2f5ccbcbece60841298ed9be44b"
   }
 }
