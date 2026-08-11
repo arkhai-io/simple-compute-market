@@ -1164,10 +1164,10 @@ class TestStage09c_LeaseRegistered:
         assert vm_host, (
             f"Lease missing vm_host; required for stage 10a provider teardown operation: {lease!r}"
         )
-        assert lease.get("create_job_id"), (
-            f"Expected a tracked Ansible create job on the admin lease view, "
-            f"got: {lease}"
-        )
+        # Not `create_job_id` — the legacy executor-job identity, written only when
+        # a caller registers a lease with an Ansible job id. A deal on the durable
+        # fulfillment path has none, by the same rule that keeps
+        # `provisioning_job_id` empty on settle status.
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
         )

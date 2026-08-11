@@ -76,6 +76,18 @@ response than the underlying call already produces.
 
 - [x] 4.1 Pause the storefront in each VM scenario's readiness stage and leave it paused
       for the run. Resume belongs in teardown only, since resume itself reconciles. **Revised and done.** An autouse fixture was replaced by an explicit `test_00_pauses_the_storefront` stage calling `pause_storefront`, which asserts every loop reports `paused`. A scenario should name the state it depends on, and this also keeps the pause with the scenario that wants it — the API-credits scenario shares the module and drives a storefront with no such control.
+- [ ] 4.2b **Open — the remaining scenarios.** Run 31495188400 showed the converted
+      scenario free of the reconciliation flap while `test_full_deal_buyer_cli`'s 09b
+      still hit it: a listing closed, reopened three seconds later while its capacity was
+      held, and closed again. Converting the full-deal scenarios needs care the dynamic
+      one did not — they drive settlement through the buyer CLI while the storefront's
+      fulfillment-resume and claims loops would be paused, and whether either is
+      load-bearing for that flow is unverified. Determine that before converting, rather
+      than pausing and discovering it from a stalled stage.
+- [x] 4.3b Assert the durable fulfillment identity at 09c, not `create_job_id`. That
+      field is written only when a caller registers a lease with an Ansible job id, so a
+      deal on the durable path never has one — the third instance in this campaign of a
+      scenario asserting on the identity the old path produced. **Done.**
 - [x] 4.2 Convert every assertion that currently depends on a loop having run into an
       explicit advance followed by the assertion. Work scenario by scenario rather than
       failure by failure: a stage that passes today because a sweep happened to fire is as

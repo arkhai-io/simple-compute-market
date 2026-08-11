@@ -543,3 +543,31 @@ the `_start_*` helper functions, which is where the rename was *correct*, and pa
 cleanly against the live defect. A guard written from the shape of the fix rather than
 from the shape of the failure proves nothing, and the only way to know which one you have
 written is to reintroduce the defect and watch the test go red.
+
+---
+
+# Run 31495188400 — `2 failed, 84 passed, 21 skipped`
+
+The stack came up and the suite got further than it ever has: 84 passing, 21 skipped.
+Both prior fixes are confirmed working — `settlement_resource_id` now reads
+`compute-e2e-deal-001` on the lease, and the dynamic-listing scenario's pause-and-advance
+stages pass.
+
+**`09c` — a legacy field on the durable path.** The stage asserted
+`lease["create_job_id"]`, described as "a tracked Ansible create job". That field is only
+ever written by a caller registering a lease with an Ansible job id; a deal that went
+through the durable fulfillment path has none, by exactly the rule that keeps
+`provisioning_job_id` empty on settle status. The third instance of this shape in this
+campaign, after `resource_id` and `fulfillment_id`: a scenario asserting on the identity
+the old path produced, reached for the first time now that the flow runs to completion.
+Both full-deal variants now assert the durable identity instead.
+
+**`09b` (buyer CLI) — `monotonic-listing-reconciliation`, in an unconverted scenario.**
+The listing was closed at 13:18:23 and reopened at 13:18:26 by a reconciliation for
+`compute-e2e-deal-001` while its capacity was still held, then closed again at 13:18:29.
+The same flap, in a scenario that does not pause the storefront — only the
+dynamic-listing scenario has been converted so far.
+
+That is the useful signal from this run: the two scenarios that pause do not exhibit the
+flap and the ones that do not pause still do. The conversion works; it just has not been
+applied to the rest of the suite yet.

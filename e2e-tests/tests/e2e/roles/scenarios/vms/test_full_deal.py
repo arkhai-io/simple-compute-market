@@ -1256,9 +1256,20 @@ class TestStage09c_LeaseRegistered:
             f"sold as ({E2E_RESOURCE_ID!r})"
         )
         assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
-        assert lease.get("create_job_id"), (
-            f"Expected a tracked Ansible create job on the admin lease view, "
-            f"got: {lease}"
+        # Not `create_job_id`. That field is the legacy executor-job identity and
+        # is only ever written by a caller registering a lease with an Ansible job
+        # id; a deal that went through the durable fulfillment path has none, by
+        # the same rule that keeps `provisioning_job_id` empty on settle status.
+        # The durable identity is the fulfillment id, captured at 08b.
+        assert deal_state.fulfillment_id, (
+            "no durable fulfillment identity for this deal — 08b should have "
+            f"recorded one. Lease: {lease}"
+        )
+        fulfillment = provisioning_client.get_fulfillment_status(
+            deal_state.fulfillment_id
+        )
+        assert fulfillment.get("state"), (
+            f"fulfillment {deal_state.fulfillment_id} has no state: {fulfillment}"
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
