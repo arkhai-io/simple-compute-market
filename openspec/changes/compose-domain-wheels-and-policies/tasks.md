@@ -741,6 +741,49 @@ executing stages found three defects plus one already-filed race. None is a regr
       `closed_listing_ids` stays strictly asserted, so the synchronous contract is
       unchanged. **Done.**
 
+### 16. Operator convergence control was never wired (run 31483777656)
+
+79 pass, 24 skip. The two `09a` failures are the first execution of a stage that drives
+provisioning to completion, and they found a control that has never worked.
+
+- [x] 16.1 Pass the fulfillment convergence watchdog into `SystemService`. The endpoint,
+      the service method, and the watchdog all existed; `_system_service` never passed it,
+      so `force_fulfillment_convergence` returned "not initialised" and the operator
+      one-cycle control 503'd in every deployment. `ARCHITECTURE.md`'s "Operator lifecycle
+      controls" describes this control as available and requires that a manual cycle invoke
+      the same production handler — it could not, because it had no handler. **Done.**
+- [x] 16.2 Pass it in the provisioning integration fixture too, which built `SystemService`
+      directly and omitted it. The fixture looked wired and was not — the fourth instance
+      this campaign of a test double diverging from production composition. **Done.**
+- [x] 16.3 Integration coverage that one cycle returns a summary rather than an
+      initialisation error, and that the summary's shape is stable across repeated cycles.
+      Both fail against the previous wiring. **Done.**
+- [x] 16.4 A unit test on `_system_service` itself asserting the watchdog reaches the
+      runtime factory. A provider that drops an argument fails nowhere at import time; it
+      fails at the one call site that needs it, which here was reachable only from an
+      end-to-end stage. **Done.**
+- [x] 16.5 Poll for convergence at every derived-listing status assertion in the
+      dynamic-listing scenario, not only the one that failed first. The fungible pool shows
+      the same reopen flap, triggered by a *registration* delta — `register_resource` emits
+      a `released`-kind event for a new resource — and one of its reserves reported closing
+      listings that a read immediately after observed open. Both observations are recorded
+      in `monotonic-listing-reconciliation`, including that the write ordering between the
+      subscriber and an inline close is not settled by their log order. **Done.**
+
+### 17. The convergence-polling stopgap is withdrawn
+
+- [x] 17.1 Remove `_await_listing_statuses` and restore single-sample status assertions
+      in the dynamic-listing scenario. It polled on a sleep, which
+      `docs/development/TESTING.md`'s async discipline forbids, and it was introduced in
+      this change rather than designed — the repository's answer to a timer-driven loop is
+      an operator control that halts and steps it, not a tolerance in the assertion. The
+      four assertions now fail honestly against a known defect instead of passing by
+      waiting. **Done.**
+- [x] 17.2 State both causes at the assertion: the reopen itself
+      (`monotonic-listing-reconciliation`) and the racing that makes observing it
+      non-deterministic (`storefront-lifecycle-pause-and-advance`). A reader who finds this
+      red should not have to rediscover which is which. **Done.**
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

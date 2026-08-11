@@ -467,3 +467,30 @@ Worth recording that the earlier guess would have been wrong. Both readings offe
 run 31479739305 were plausible and neither was correct, and the fix that "would have
 worked" — unioning the release response with listings reopened since a snapshot — would
 have masked a defect that lets a storefront advertise capacity it cannot serve.
+
+---
+
+# Run 31483777656 — `3 failed, 79 passed, 24 skipped`
+
+Five more passing, four fewer skipped. Both `09a` failures are the first execution of the
+stage that drives provisioning to completion, and they found an operator control that has
+never worked in any deployment: `POST /api/v1/system/fulfillment-convergence/run-cycle`
+answers `503 fulfillment_convergence_watchdog not initialised`, because the container's
+`_system_service` provider never passed the watchdog it builds two lines away.
+`ARCHITECTURE.md` documents this control as available and requires a manual cycle to
+invoke the same production handler; it had no handler at all.
+
+The provisioning integration fixture built `SystemService` without it too — the fourth
+test double this campaign that looked like production and wasn't (`fake_site`'s reserve
+response, `db_engine`'s default pool, `MockAnsibleService`'s method surface, now this).
+Fixed both, and added a unit test on the provider function itself, because a provider that
+drops an argument fails nowhere at import time.
+
+The third failure is `monotonic-listing-reconciliation` again, in the fungible pool this
+time, and it adds two facts to that change: a *registration* delta triggers a reopen pass
+(`register_resource` emits a `released` kind for a new resource), and an inline reserve
+reported closing two listings that a read immediately afterwards observed open — so write
+ordering between the subscriber and the inline close is not settled by their log order,
+and a freshness gate alone may not be the whole fix. Every derived-listing status
+assertion in that scenario now polls for the converged state rather than only the one that
+failed first; the reserve responses' own `closed_listing_ids` remain strictly asserted.

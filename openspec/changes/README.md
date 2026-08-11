@@ -174,6 +174,7 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 
 | Change | Status | Acceptance boundary |
 |---|---|---|
+| [`storefront-lifecycle-pause-and-advance`](storefront-lifecycle-pause-and-advance/) | design phase; not yet planned | A paused storefront halts every timer loop, and a manual cycle advances one on demand — the contract the provisioning service already follows. Scenarios drive lifecycle by pause-verify-advance instead of waiting for convergence |
 | [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; 22 of 25 tasks complete | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 

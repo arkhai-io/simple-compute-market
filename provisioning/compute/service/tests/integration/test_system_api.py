@@ -368,3 +368,43 @@ class TestEvaluateJob:
             assert resp.get("would_pause") is True
         finally:
             await test_client.delete_mock_rule(rule_id)
+
+
+class TestFulfillmentConvergenceControl:
+    """POST /api/v1/system/fulfillment-convergence/run-cycle.
+
+    An operator one-cycle control is only useful if it drives the same worker the
+    timer drives. The endpoint, the service method, and the watchdog all existed,
+    and nothing passed the watchdog into the service — so every call answered
+    "not initialised" and the control was unreachable in every deployment. No test
+    exercised it, and the end-to-end stage that would have is downstream of stages
+    that were skipping.
+    """
+
+    async def test_running_one_cycle_reports_a_summary_not_an_init_error(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+
+        result = await client.run_fulfillment_convergence_cycle()
+
+        assert "error" not in result, (
+            f"convergence control is not wired to a watchdog: {result}"
+        )
+        assert isinstance(result, dict) and result, (
+            f"expected a cycle summary, got {result!r}"
+        )
+
+    async def test_the_cycle_is_idempotent_on_an_empty_aggregate(
+        self, client_and_queue,
+    ):
+        """Nothing to converge is a normal answer, not a failure."""
+        client, _ = client_and_queue
+
+        first = await client.run_fulfillment_convergence_cycle()
+        second = await client.run_fulfillment_convergence_cycle()
+
+        assert "error" not in first and "error" not in second
+        assert set(first) == set(second), (
+            f"cycle summary shape is not stable: {first} then {second}"
+        )

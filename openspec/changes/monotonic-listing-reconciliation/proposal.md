@@ -30,6 +30,24 @@ reason: closing on a stale-but-larger availability view is conservative, and reo
 on one is not. Under-advertising corrects itself harmlessly; over-advertising sells
 something that is not there.
 
+**Second occurrence, end-to-end run 31483777656.** The same shape in a fungible pool,
+where the reopen is triggered by a *registration* delta rather than a release:
+
+```
+10:51:33.331  reserve 2 of a 2-member pool -> closes nothing        (correct)
+10:51:33.597  reconciliation at version 10 (compute-e2e-fungible-b)
+              -> reopens the 3x and 4x pool slices
+10:51:33.617  reserve 4 -> reports closing 3x and 4x                (correct)
+              ... and a read immediately after observes them open
+```
+
+Two details this adds to the picture. `register_resource` emits a `released`-kind delta
+for a newly registered resource, so registering capacity — not only releasing it —
+triggers a reopen pass. And the write ordering between the subscriber's reopen and an
+inline reserve's close is not determined by their log order, so an inline close can be
+reported and then lost. Whether the fix must also serialize those two writers, or only
+gate the reopen on freshness, is part of this change's open question 2.
+
 ## What Changes
 
 - Make reopen decisions monotonic with respect to observed capacity version: a

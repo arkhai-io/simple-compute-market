@@ -12,6 +12,9 @@ settled is where the freshness constraint belongs, and that decides the plan:
    window sooner at the cost of a synchronous fetch inside a subscriber.
 3. Does the same reasoning apply to the bare-metal storefront's reconciliation, or is
    that path structured differently enough to need its own answer?
+4. Is a freshness gate on the reopen sufficient, or must the subscriber's reconciliation
+   and an inline reserve's close be serialized? The second occurrence shows an inline
+   close reported and then not observed, which a freshness gate alone would not explain.
 
 Once those are resolved, this file gets a real plan, ending with the closeout task
 defined in `openspec/README.md#plan-closeout-requirements`.
