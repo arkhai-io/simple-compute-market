@@ -236,11 +236,28 @@ def db_engine():
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
     # fixture builds schema directly rather than through the migration.
-    from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
+    #
+    # The migration seeds the default pool's provider configuration in the same
+    # transaction, from the service's own active settings, so the pool is usable
+    # as a provider-config template. Seeding only the pool row left this fixture
+    # a half-mirror: a caller reading the default pool's `provider_config` saw an
+    # empty mapping here and a populated one in every deployment.
+    from compute_provisioning_service.db.models import (
+        AnsiblePoolConfig,
+        DEFAULT_POOL_ID,
+        ResourcePool,
+    )
     with Session(engine) as session:
         session.add(ResourcePool(
             id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
             enabled=True, policy_tags={},
+        ))
+        session.flush()
+        session.add(AnsiblePoolConfig(
+            pool_id=DEFAULT_POOL_ID,
+            playbook_path="playbooks/vm-operations.yaml",
+            inventory_group="__unused__",
+            extra_vars={},
         ))
         session.commit()
     return engine

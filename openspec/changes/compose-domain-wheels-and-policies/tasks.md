@@ -546,6 +546,35 @@ it into its own change rather than widen this one.
       is expected to be free, but it is an assumption worth one deliberate check rather than
       a surprise mid-run.
 
+### 11c-bis. Pool creation requires provider configuration (found in run 31476576548)
+
+The first run of Section 11 failed earlier than any of its own assertions: every
+`POST /api/v1/pools/` returned 400 `provider_config.playbook_path is required for
+provider='ansible'`, so no pool, host, or declaration was created and all eleven
+failures were one cascade. Two facts settle the fix.
+
+- [ ] 11c-bis.1 A scenario has no profile-independent `playbook_path` to supply.
+      The correct value is `/dev/null` under the mock profile and a container path
+      under docker and Helm. Read the system `default` pool's `provider_config`
+      instead and pass it through: the migration seeds that pool from the service's
+      own active settings, making it the one place a scenario can read a valid value
+      for whatever profile the stack is running under. Assert loudly when it carries
+      no `playbook_path` rather than substituting a guess.
+- [ ] 11c-bis.2 Reconcile an existing pool's `listing_mode` rather than accepting
+      it, matching the host helper. A pool surviving an earlier run may carry a
+      different mode, and the mode decides how the scenario's listings publish.
+- [ ] 11c-bis.3 Pin the contract the helper now depends on where the pool API owns
+      it: the default pool exposes a usable `playbook_path`, and a pool created by
+      copying its provider configuration is accepted. Added to
+      `provisioning/compute/service/tests/integration/test_pools_api.py`.
+- [ ] 11c-bis.4 Fix the fidelity gap those tests exposed in
+      `provisioning/compute/service/tests/integration/conftest.py`: `db_engine`
+      seeded the default `ResourcePool` row but not its `AnsiblePoolConfig`, while
+      its own comment claimed to mirror the migration's guarantee. A caller reading
+      the default pool's `provider_config` saw an empty mapping under test and a
+      populated one in every deployment — exactly the divergence class that let the
+      reserve-response defect ship.
+
 ### 11d. Verification
 
 - [ ] 11d.1 Run `make -C e2e-tests test-e2e` — the target the workflow runs, not a

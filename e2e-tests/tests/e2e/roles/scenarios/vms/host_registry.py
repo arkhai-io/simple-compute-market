@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from vm_provisioning_operator import PoolCreate
+from vm_provisioning_operator import PoolCreate, PoolUpdate
 from vm_provisioning_operator.client import ProvisioningError
 from vm_provisioning_operator.models import HostCreate, HostUpdate
 
@@ -67,6 +67,10 @@ E2E_FUNGIBLE_HOSTS = ("kvm-fungible-a", "kvm-fungible-b")
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
 #: `fungible` above one member. Sharing the system `default` pool would let adding a
 #: scenario silently change how another scenario's listings are published.
+#: The pool the provisioning service seeds from its own active configuration. Read
+#: for its provider configuration, never used to hold a scenario's capacity.
+SYSTEM_DEFAULT_POOL_ID = "default"
+
 E2E_BUY_POOL_ID = "compute-e2e-buy-pool"
 E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
@@ -87,22 +91,58 @@ def register_e2e_pool(
     passed explicitly rather than defaulted because the structural fallback —
     `specific_resource` at exactly one member — is only accidentally right for a
     pool about to gain a second member.
+
+    The provider configuration is inherited from the system `default` pool rather
+    than written here. An Ansible pool must carry a `playbook_path`, and its correct
+    value is deployment-specific — `/dev/null` under the mock profile, a container
+    path under docker, another under Helm. Copying the default pool's configuration
+    keeps a scenario's pools provisioning exactly the way that deployment already
+    provisions, and means a scenario never encodes a path belonging to one profile.
     """
     # Narrow on purpose: a 404 means "not created yet", which is the point of the
     # lookup. A transport or auth failure means the service is unreachable, and
     # creating on top of that would report success over an error.
     try:
-        return provisioning_client.get_pool(pool_id)
+        existing = provisioning_client.get_pool(pool_id)
     except ProvisioningError:
-        pass
+        existing = None
+
+    if existing is not None:
+        # Reconcile rather than accept, the same way the host helper does: a pool
+        # surviving an earlier run may carry a different mode, and the mode decides
+        # how this scenario's listings are published.
+        if (existing.policy_tags or {}).get("listing_mode") != listing_mode:
+            provisioning_client.patch_pool(pool_id, PoolUpdate(
+                policy_tags={**(existing.policy_tags or {}), "listing_mode": listing_mode},
+            ))
+            return provisioning_client.get_pool(pool_id)
+        return existing
 
     provisioning_client.create_pool(PoolCreate(
         id=pool_id,
         label=label or pool_id,
         provider="ansible",
         policy_tags={"listing_mode": listing_mode},
+        provider_config=_default_pool_provider_config(provisioning_client),
     ))
     return provisioning_client.get_pool(pool_id)
+
+
+def _default_pool_provider_config(provisioning_client: Any) -> dict[str, Any]:
+    """The system default pool's provider configuration.
+
+    The default pool is seeded from the provisioning service's own active
+    configuration, so it is the one place a scenario can read a valid
+    `playbook_path` for whatever profile the stack is running under.
+    """
+    default_pool = provisioning_client.get_pool(SYSTEM_DEFAULT_POOL_ID)
+    config = dict(getattr(default_pool, "provider_config", None) or {})
+    assert config.get("playbook_path"), (
+        f"the {SYSTEM_DEFAULT_POOL_ID!r} pool reports no playbook_path "
+        f"({config!r}); an Ansible pool cannot be created without one, and this "
+        "scenario has no profile-independent value to substitute"
+    )
+    return config
 
 
 def register_e2e_host(
