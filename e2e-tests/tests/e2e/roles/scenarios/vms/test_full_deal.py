@@ -720,6 +720,11 @@ class TestStage05a_EvaluateNegotiate:
             "available capacity declaration matches this listing's region and "
             "gpu_model. Check that stage 00f1's declaration exists and carries both."
         )
+        # Every stage from 05b onward gates on this. Nothing set it, so the whole
+        # tail of this scenario — negotiation, escrow, settlement, provisioning,
+        # lease, teardown — has been skipping rather than running, and a skip
+        # reports as a pass at the suite level.
+        deal_state._evaluate_negotiate_passed = True
 
 
 class TestStage05b_NegotiationStartsAndVisible:
@@ -1245,7 +1250,11 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == E2E_RESOURCE_ID
+        assert lease.get("settlement_resource_id") == E2E_RESOURCE_ID, (
+            "scheduling bound this deal to "
+            f"{lease.get('settlement_resource_id')!r}, not the resource it was "
+            f"sold as ({E2E_RESOURCE_ID!r})"
+        )
         assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
         assert lease.get("create_job_id"), (
             f"Expected a tracked Ansible create job on the admin lease view, "
@@ -1256,7 +1265,7 @@ class TestStage09c_LeaseRegistered:
         )
 
         deal_state.deal_lease = lease_view
-        deal_state.reserved_resource_id = lease.get("resource_id")
+        deal_state.reserved_resource_id = lease.get("settlement_resource_id")
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         log.info(

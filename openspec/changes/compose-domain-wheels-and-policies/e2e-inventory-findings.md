@@ -404,3 +404,32 @@ real thing this time. What replaced it is subtler and worth naming for the next 
 a helper-wide default standing in for a value only the caller knows. `sellable_units=4`
 was wrong for six of nine scenarios and invisible until a scenario asserted on the one
 behaviour that reads it.
+
+---
+
+# Run 31481250887 — `1 failed, 67 passed, 38 skipped`
+
+`test_04` passes. Neither reading of that race needed a product fix: 13.1's correction to
+the declared units changed the delta's shape and the inline release now reports its own
+effect. Recorded because the alternative — patching the reopen path on a guess — was the
+tempting move and would have been wrong.
+
+`b5` fails one line further on, and it is the same defect class as the reserve response:
+`DealLease.refresh` read `resource_id` from a reservation payload that has never carried
+that key. The reservation exposes `settlement_resource_id`, set when scheduling binds a
+concrete resource; `resource_id` was always `None`. The assertion had simply never run,
+because `b4` failed in every previous run of this campaign.
+
+Chasing that found the larger problem. `require_state(deal_state, ...,
+"_evaluate_negotiate_passed")` gates stage 05b of both full-deal scenarios, and **nothing
+ever set that field**. Every stage from 05b to the end — negotiation, escrow, settlement,
+provisioning, lease registration, teardown — has been skipping. That is most of the 38
+skips, and it is why `09c`, which asserts the same lease shape `b5` just failed on, never
+executed to report it.
+
+The pattern worth carrying forward: a required-state gate that no stage satisfies is
+invisible in a green summary, because pytest reports a skip as neither failure nor pass.
+`require_state` was introduced to make a scenario name its own dependencies — which it does
+— but nothing checks that a declared dependency is ever produced. A test that asserts a
+state is set, or a suite-level check that every `require_state` key is written somewhere,
+would have caught this at introduction.

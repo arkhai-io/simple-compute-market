@@ -442,9 +442,17 @@ class TestStageB5_SellerAndLease:
         from tests.e2e.roles.scenarios.vms.conftest import DealLease
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == BUY_RESOURCE_ID, (
-            f"Lease bound to unexpected resource {lease.get('resource_id')!r}; "
-            f"expected {BUY_RESOURCE_ID!r}. Lease: {lease}"
+        assert lease.get("vm_host") == E2E_BUY_HOST, (
+            f"Lease bound to unexpected executor {lease.get('vm_host')!r}; "
+            f"expected {E2E_BUY_HOST!r}. Lease: {lease}"
+        )
+        assert lease.get("settlement_resource_id") == BUY_RESOURCE_ID, (
+            f"Scheduling bound this deal to {lease.get('settlement_resource_id')!r}, "
+            f"not the resource it was sold as ({BUY_RESOURCE_ID!r}). Lease: {lease}\n"
+            "A different resource here is not a test problem: scheduling considers "
+            "every enabled resource at the site and re-applies no attribute from the "
+            "admitted claim, so it may place a deal outside the region or hardware it "
+            "was negotiated for. That gap is real and separately owned."
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease, got {lease.get('status')!r}: {lease}"

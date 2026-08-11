@@ -444,7 +444,13 @@ class DealLease:
         return {
             "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
-            "resource_id": row.get("resource_id"),
+            # The reservation exposes no `resource_id`: its initial capacity
+            # accounting is private to the site authority, and the physical
+            # resource a deal ends up on is the scheduler's choice, recorded as
+            # `settlement_resource_id` once it binds one. Reading `resource_id`
+            # here returned None on every call — the key does not exist in the
+            # reservation contract.
+            "settlement_resource_id": row.get("settlement_resource_id"),
             "vm_host": row.get("vm_host"),
             "vm_target": row.get("vm_target"),
             "status": data.get("status"),

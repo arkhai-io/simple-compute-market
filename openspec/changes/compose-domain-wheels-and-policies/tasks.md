@@ -673,6 +673,42 @@ escrows, settles, and provisions. Two failures remain, and only one is mine.
       next run distinguishes them. Do not fix either reading before it does: three loops in
       this campaign were spent fixing a symptom whose cause was elsewhere.
 
+### 14. Lease assertions and a dead stage gate (found in run 31481250887)
+
+`test_04` passes — 13.1's change to the delta's shape was enough, so neither reading of
+that race needed a product fix. `b5` fails one line further on, and chasing it found a
+second, larger problem in the same file.
+
+- [x] 14.1 Assert the field the reservation contract actually carries. `DealLease.refresh`
+      read `row.get("resource_id")` from a reservation payload that has never had that key:
+      the initial capacity accounting is private to the site authority, and the physical
+      resource a deal lands on is the scheduler's choice, recorded as
+      `settlement_resource_id`. Every call returned `None`; the assertion had never run
+      before because `b4` failed in every previous run. Surfaced `settlement_resource_id`
+      instead, and updated the three assertion sites plus the `reserved_resource_id`
+      capture that feeds a later claim. **Done.**
+- [x] 14.2 Also assert the lease's executor identity in `b5`. `vm_host` is carried and is
+      the observable binding; asserting both distinguishes "bound to the wrong machine"
+      from "bound to the right machine under a different resource identity". **Done.**
+- [x] 14.3 Word the `settlement_resource_id` mismatch message as a product finding rather
+      than a test problem. Scheduling considers every enabled resource at the site and
+      re-applies no attribute from the admitted claim, so a mismatch means a deal was placed
+      outside the region or hardware it was negotiated for — which is
+      `revalidate-deal-requirements-at-scheduling`'s subject, not this scenario's.
+      **Done.**
+- [x] 14.4 Set `_evaluate_negotiate_passed` at the end of stage 05a in both full-deal
+      scenarios. Every stage from 05b onward requires it and nothing ever set it, so the
+      entire tail of both scenarios — negotiation, escrow, settlement, provisioning, lease
+      registration, teardown — has been skipping, and a skip reports as a pass at the suite
+      level. This is why 38 of 106 tests skip and why `09c`, the stage that would have
+      caught 14.1 years earlier, has never executed. **Done.**
+
+**Expect the next run to report more failures, not fewer.** 14.4 unblocks roughly two dozen
+stages that have never executed in this campaign, several of which assert on paths no run
+has exercised. That is the fix working: a scenario that skips its own subject is worth less
+than one that fails it. Read the new failures as first-execution findings rather than
+regressions, and attribute each before changing anything.
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method
