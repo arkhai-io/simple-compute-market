@@ -125,9 +125,15 @@ async def watchdog_loop() -> None:
         settings.negotiation_watchdog_interval,
         settings.negotiation_timeout_seconds,
     )
+    from market_storefront.lifecycle import is_paused
+
     while True:
         try:
             await asyncio.sleep(settings.negotiation_watchdog_interval)
+            # Before the sweep, so a paused storefront never abandons a thread a
+            # scenario is about to assert on.
+            if is_paused():
+                continue
             n = await _watchdog_tick(sqlite_client)
             if n:
                 logger.info("negotiation_watchdog_loop: abandoned %d stale thread(s)", n)

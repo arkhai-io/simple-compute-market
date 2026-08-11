@@ -80,16 +80,18 @@ class AdminController:
 
         New negotiations receive 503, and every timer-driven loop — negotiation
         watchdog, claims engine, fulfillment resume, capacity-events poller,
-        site-projection poller — is halted. Each loop's work stays reachable
-        through its own lifecycle route below, which is how an operator or a
-        scenario advances one step at a time while paused.
+        site-projection poller — performs no further cycle. The loops are held
+        idle rather than stopped, so none is interrupted part-way and none loses
+        its position. Each loop's work stays reachable through its own lifecycle
+        route below, which is how an operator or a scenario advances one step at
+        a time while paused.
         """
         loops = _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True,
             message=(
                 "Storefront paused. New negotiations will receive 503 and no timer "
-                "loop will run until resumed; advance one with "
+                "loop will run a cycle until resumed; advance one with "
                 "/api/v1/admin/lifecycle/{loop}/run-cycle."
             ),
             loops=loops,
@@ -101,21 +103,17 @@ class AdminController:
         summary="Resume the storefront: accept negotiations and restart timer loops (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
-        """Restart everything pause halted.
+        """Return every loop to work.
 
-        Resuming is not free of side effects: the capacity-events poller keeps
-        its feed position in memory, so a restarted poller re-positions at the
-        feed head and runs one full listing reconcile — the same path it takes
-        after a process restart. A caller that needs to observe state without
-        that reconcile should stay paused and advance deliberately.
+        Nothing is restarted: the loops were held idle rather than stopped, so
+        each simply performs its next cycle. The capacity-events poller keeps its
+        feed position across the pause and continues from it rather than
+        re-converging from the feed head.
         """
         loops = _set_globally_paused(False)
         return AdminPauseResponse(
             paused=False,
-            message=(
-                "Storefront resumed. Timer loops restarted; the capacity-events "
-                "poller re-reconciles from the feed head on restart."
-            ),
+            message="Storefront resumed. Timer loops will run their next cycle.",
             loops=loops,
         )
 

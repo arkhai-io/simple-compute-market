@@ -121,27 +121,6 @@ the callback, and `await asyncio.wait_for(event.wait(), timeout=...)`
 before proceeding. If no such seam exists yet where a test needs one,
 adding it is the correct fix, not a sleep.
 
-**Lifecycle discipline — pause, verify, advance:** A system-integration scenario
-drives timer-driven work rather than waiting for it. Both the compute
-provisioner and the storefront expose operator lifecycle controls: pause halts
-every timer loop, and a per-loop control runs one cycle on demand by invoking
-the same operation the loop invokes. A scenario pauses once at setup, asserts
-what an action did before anything else can react, advances one cycle, and
-asserts again.
-
-This is the same rule as "no sleeps" seen from the other side. A sleep waits for
-a loop; an advance runs it. Waiting cannot prove ordering even when it passes,
-and it converts a defect that reorders two writes into a test that fails half
-the time — which is how a listing-reconciliation defect in this repository was
-reproduced three times before it could be characterised.
-
-Resuming is itself a state change: a restarted capacity-events poller
-re-positions at its feed head and runs a full reconcile. A scenario therefore
-resumes in teardown, never between assertions.
-
-Scenarios do not detect race conditions, and are not meant to. They prove
-cross-service contracts; concurrency belongs to the levels below them.
-
 ### 3. Smoke Tests (Deployment Validation)
 
 **What they cover:** Stateless, idempotent verification that a deployed
@@ -187,6 +166,31 @@ The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
+
+**Lifecycle discipline — pause, verify, advance:** A scenario drives
+timer-driven work rather than waiting for it. It pauses the services whose
+loops it depends on, asserts what an action did before anything can react,
+advances one cycle deliberately, and asserts again.
+
+This is the "no sleeps" rule of the integration level seen from the other side.
+A sleep waits for a loop; an advance runs it. Waiting cannot establish ordering
+even when it succeeds, and it turns a defect that reorders two writes into an
+intermittent failure rather than a reproducible one. Polling until an expected
+state appears is the same thing wearing a different name.
+
+The two services expose different control surfaces, and a scenario should not
+assume one from the other. The storefront has a single pause that holds all of
+its timer loops idle, plus a per-loop control that runs one cycle. The compute
+provisioner has no global pause: its lease watchdog has its own pause gate, and
+its other recovery workers expose one-cycle controls without one. In both, a
+manual cycle invokes the same operation the loop invokes.
+
+Resuming is itself a state change, so a scenario resumes in teardown rather than
+between assertions.
+
+Scenarios established this way do not detect race conditions and are not meant
+to. They prove cross-service contracts; concurrency belongs to the levels above
+in this document.
 
 ## Agent-Driven Capacity Harness
 

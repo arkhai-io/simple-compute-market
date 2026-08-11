@@ -530,10 +530,10 @@ class StorefrontClient(_StorefrontClientBase):
     async def admin_run_lifecycle_cycle(self, loop: str) -> dict:
         """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
 
-    Runs one cycle of a storefront timer loop, calling the same operation the
-    loop invokes. Deliberately usable while the storefront is paused — that is
-    when a caller advances a halted loop one step at a time.
-    
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
         `loop` is one of `claims`, `fulfillment-resume`,
         `negotiation-watchdog`, `capacity-events`.
         """
@@ -1411,10 +1411,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def admin_run_lifecycle_cycle(self, loop: str) -> dict:
         """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
 
-    Runs one cycle of a storefront timer loop, calling the same operation the
-    loop invokes. Deliberately usable while the storefront is paused — that is
-    when a caller advances a halted loop one step at a time.
-    
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
         `loop` is one of `claims`, `fulfillment-resume`,
         `negotiation-watchdog`, `capacity-events`.
         """

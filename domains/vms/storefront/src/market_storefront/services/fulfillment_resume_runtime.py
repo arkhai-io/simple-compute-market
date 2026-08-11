@@ -664,7 +664,12 @@ async def fulfillment_resume_loop() -> None:
     from market_storefront.utils.config import settings
 
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
+    from market_storefront.lifecycle import is_paused
+
     db = SQLiteClient(get_sqlite_client().db_path)
     while True:
-        await resume_incomplete_fulfillments_once(sqlite_client=db)
+        # Checked before the sweep, not during: a paused storefront must not be
+        # part-way through re-driving an escrow when a scenario reads its state.
+        if not is_paused():
+            await resume_incomplete_fulfillments_once(sqlite_client=db)
         await asyncio.sleep(interval)

@@ -17,17 +17,17 @@ must be converted in the same commit that can stop it.
 - [x] 1.3 Make `_set_globally_paused(True)` cancel every registered task and `False`
       restart them from the same factories. State at the registry why cancellation rather
       than a flag each loop consults: two loop bodies are in core and cannot see a
-      VM-local flag, and one concept implemented two ways would be worse than a blunt one. **Done.** `_set_globally_paused` cancels or restarts through the registry, with the two-core-bodied-loops reasoning stated there.
+      VM-local flag, and one concept implemented two ways would be worse than a blunt one. **Revised and done.** Cancellation was replaced by a pause flag each loop consults once per cycle, after review found that `Task.cancel()` only *requests* cancellation and could interrupt a cycle part-way — the exact property task 1.4 was written to protect. Two `core_storefront` loops take the predicate as an optional keyword defaulting to `None`; the three VM-local loops read it directly. See `design.md`.
 - [x] 1.4 Document the capacity poller's cursor consequence where it is true rather than
       where it is convenient: the poller's `last_applied` is loop-local, so a resume
       re-positions at the feed head and re-runs its full reconcile. Self-healing, and the
-      reason a scenario resumes only at teardown. **Done.** Recorded on the registry module, on `resume`'s route docstring, and in the scenario fixture that depends on it.
+      reason a scenario resumes only at teardown. **No longer applicable, and better for it.** The cursor consequence was an artefact of cancellation. A loop held idle keeps its feed position, so resume continues rather than re-converging from the feed head. The claim was removed from the registry module, the resume route, `ARCHITECTURE.md`, and `design.md` rather than left as a stale caveat.
 - [x] 1.5 Make pause and resume idempotent — pausing a paused storefront cancels nothing
       twice, resuming a running one starts no duplicate task. A duplicated poller would be
-      invisible until two reconciles raced. **Done.** Both idempotent; resume replaces nothing already running.
+      invisible until two reconciles raced. **Done.** Both idempotent by construction — setting a flag twice is setting it once.
 - [x] 1.6 Focused tests: pause stops each named task; resume restarts each; both are
       idempotent; a paused storefront still refuses new negotiations exactly as before.
- **Done.** `tests/unit/test_lifecycle_registry.py` — 7 tests, including that a loop which exits on its own reports `exited` rather than `running` or `stopped`.
+ **Done.** `tests/unit/test_lifecycle_registry.py` — 8 tests asserting behaviour rather than bookkeeping: a running loop does work, a paused loop does none across ten intervals, pausing does not stop the task, resuming returns *the same* task to work, and a loop that exits on its own reports `exited` rather than `paused`.
 ## 2. Per-loop advance controls
 
 Each endpoint calls the operation the loop was already invoking and returns what that
@@ -52,7 +52,13 @@ response than the underlying call already produces.
       `docs/development/TESTING.md` requires. **Done.** `admin_run_lifecycle_cycle` on both clients, plus `tests/test_lifecycle_client_parity.py`.
 - [x] 2.7 Focused tests: each advance invokes its underlying operation exactly once and
       propagates its result; each works while paused, since that is when it is used.
- **Done.** Five integration tests, all exercising the routes while paused; the capacity one asserts the shared reconcile is the function called.
+ **Partly done.** Five integration tests exercise the routes while paused through the real typed client. Three assert the route's contract, not invocation count — the note previously claimed "exactly once and propagates its result", which those tests do not establish, and the claim is withdrawn rather than the tests overstated. The capacity test no longer patches `full_capacity_reconcile`: patching an owned production function is the mocked-internals shape `TESTING.md` forbids. Two attempts to replace it with an observable listing transition did not produce one against `tests/fake_site` for a reason not yet identified, so it asserts only what it can honestly observe and the transition assertion is recorded as owed in 2.8.
+- [ ] 2.8 **Owed.** Assert a lifecycle advance through an observable state transition
+      rather than through its return contract, at least for the capacity-events control.
+      This is the assertion 2.7 wanted and could not produce against the current fake;
+      identifying why the reconcile finds nothing to change there is the first step, and
+      that answer is adjacent to `monotonic-listing-reconciliation`.
+
 ## 3. Observable pause state
 
 - [x] 3.1 Report per-loop running state on the admin status surface, read from the task
@@ -69,7 +75,7 @@ response than the underlying call already produces.
 ## 4. Scenario backport — all scenarios, this change
 
 - [x] 4.1 Pause the storefront in each VM scenario's readiness stage and leave it paused
-      for the run. Resume belongs in teardown only, since resume itself reconciles. **Done.** `paused_storefront`, a module-scoped autouse fixture, pauses at setup and asserts every loop reported `stopped` — a pause that half-took would otherwise be discovered as a flaky assertion later.
+      for the run. Resume belongs in teardown only, since resume itself reconciles. **Revised and done.** An autouse fixture was replaced by an explicit `test_00_pauses_the_storefront` stage calling `pause_storefront`, which asserts every loop reports `paused`. A scenario should name the state it depends on, and this also keeps the pause with the scenario that wants it — the API-credits scenario shares the module and drives a storefront with no such control.
 - [x] 4.2 Convert every assertion that currently depends on a loop having run into an
       explicit advance followed by the assertion. Work scenario by scenario rather than
       failure by failure: a stage that passes today because a sweep happened to fire is as
@@ -81,7 +87,7 @@ response than the underlying call already produces.
       rather than a race. **Done.** Each reserve now asserts twice: once before anything can react, once after exactly one reconcile. Strictly stronger than either previous form.
 - [x] 4.4 Audit the API-credits scenario. It runs against a storefront this change does
       not cover, so it keeps its current behaviour; confirm it does not share a fixture
-      that pauses, and record the asymmetry where a reader will meet it. **Done.** The API-credits scenario shares this conftest, so it now pauses the *VM* storefront it does not use, which is harmless; it drives `credits-storefront`, which this change does not cover. Asymmetry recorded in `design.md`.
+      that pauses, and record the asymmetry where a reader will meet it. **Done.** With the pause now an explicit stage rather than autouse, the API-credits scenario simply does not call it and is unaffected. The limitation that its storefront has no lifecycle controls is recorded permanently in the `storefront-publication` spec delta, not only in change history.
 - [x] 4.5 Re-check the stages that the claims engine, resume worker, and negotiation
       watchdog currently carry silently — `design.md`'s impact assessment found no
       assertion on any of them, but the assessment was made against the suite as it is,
@@ -117,13 +123,13 @@ response than the underlying call already produces.
 Per `openspec/README.md#plan-closeout-requirements`.
 
 - [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and read the touched
-      docstrings directly — several currently describe pause as negotiation-only. **Done.** `make check-comment-hygiene` clean on the clean copy. Read the touched docstrings directly: the pause and resume routes, the registry module, the extracted reconcile, and the scenario fixture all describe present behaviour and none references this change.
+      docstrings directly — several currently describe pause as negotiation-only. **Redone.** The first pass claimed the touched docstrings had been read directly and had not: review found a docstring body indented four spaces inside an eight-space docstring, with trailing whitespace, in both client variants. Fixed. `make check-comment-hygiene` clean, and the touched docstrings now genuinely read: the pause and resume routes, the registry module, the extracted reconcile, and the scenario fixture all describe present behaviour and none references this change.
 - [x] 7.2 **Import placement.** Review imports this change adds; the loop modules use
       function-level imports deliberately in places, so check each against the section's
-      own diff rather than relocating on sight. **Done.** The advance routes use function-level imports deliberately, matching every other route in that controller — the storefront's admin module defers service imports to keep app import cost off the request path, and hoisting four of them would break that pattern for no gain. `lifecycle.py`'s `core_storefront.app_startup` import is module level; `server.py`'s `lifecycle` import is function level to avoid a cycle, verified by attempting the move and reading the failure rather than assuming.
+      own diff rather than relocating on sight. **Done, confirmed by the repository owner.** The advance routes use function-level imports deliberately, matching every other route in that controller — the storefront's admin module defers service imports to keep app import cost off the request path, and hoisting four of them would break that pattern for no gain. `lifecycle.py`'s `core_storefront.app_startup` import is module level; `server.py`'s `lifecycle` import is function level to avoid a cycle, verified by attempting the move and reading the failure rather than assuming.
 - [x] 7.3 **Documentation compliance.** Re-check the accepted decisions against
       `openspec/README.md`'s placement rules, including that the VM-local scope and the
-      API-credits asymmetry are recorded somewhere permanent rather than only here. **Done.** Placement re-checked against `openspec/README.md`: the pause contract and the manual-cycle contract go to `openspec/specs/storefront-publication/spec.md`, the scenario methodology to `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`, and the operator-control generalisation to `ARCHITECTURE.md` — the last two are applied in this fileset, the spec deltas are named in the promotion record and synchronize at archival. The VM-local scope and the API-credits asymmetry are recorded in `design.md`, which is change history; if that asymmetry outlives this change it belongs in the storefront specification instead, and the kit extraction is the moment to move it.
+      API-credits asymmetry are recorded somewhere permanent rather than only here. **Done, after being reopened.** The change originally carried no `specs/` directory at all, so nothing was promoted — the earlier note reasoned about archival synchronization while providing nothing to synchronize. Two deltas now exist: `specs/storefront-publication/spec.md` (pause semantics, cycle-boundary observation, per-loop state, manual cycles while paused, and the API-credits limitation as current state) and `specs/test-compatibility/spec.md` (pause-verify-advance). Placement re-checked against `openspec/README.md`: the pause contract and the manual-cycle contract go to `openspec/specs/storefront-publication/spec.md`, the scenario methodology to `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`, and the operator-control generalisation to `ARCHITECTURE.md` — the last two are applied in this fileset, the spec deltas are named in the promotion record and synchronize at archival. The VM-local scope and the API-credits asymmetry are recorded in `design.md`, which is change history; if that asymmetry outlives this change it belongs in the storefront specification instead, and the kit extraction is the moment to move it.
 - [x] 7.4 **Narrative compression.** Compress completed-task notes to final behaviour,
       validation evidence, and promotion destinations. **Done.** Task notes held at final behaviour, evidence, and destinations; the rejected alternatives and the claims-engine assessment stay in `design.md`.
 - [x] 7.5 **Roadmap currency.** Determine whether this affects a goal's current state.

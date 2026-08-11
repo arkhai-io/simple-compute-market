@@ -144,8 +144,10 @@ async def claims_engine_loop() -> None:
 
     sqlite_client = SQLiteClient(db_path=settings.db_path)
     engine = build_claims_engine(sqlite_client)
+    from market_storefront.lifecycle import is_paused
+
     interval = float(getattr(settings, "claims_sweep_interval", 30))
-    await engine.run(interval_seconds=interval)
+    await engine.run(interval_seconds=interval, paused=is_paused)
 
 
 async def submit_claim(

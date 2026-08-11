@@ -44,6 +44,7 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
+from market_storefront.lifecycle import is_paused
 from core_storefront.capacity_remote import (
     site_events_poller,
 )
@@ -543,6 +544,7 @@ async def capacity_events_poller_loop() -> None:
         site_events_poller(
             aggregate, name, client, interval,
             full_reconcile=full_capacity_reconcile,
+            paused=is_paused,
         )
         for name, client in site_clients.items()
     ))

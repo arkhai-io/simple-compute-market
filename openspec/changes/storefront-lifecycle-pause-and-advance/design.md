@@ -91,10 +91,9 @@ a review.
 
 ### Pause is checked at the top of a cycle, never mid-cycle
 
-**Superseded 2026-08-11** by "Pause stops the loops by cancelling their tasks": two loop
-bodies are in core and cannot consult a VM-local flag, so cancellation replaces
-flag-checking. The property this entry was protecting — no partial sweep, no half-advanced
-cursor — is preserved differently and is recorded there.
+**Stands, after a detour.** A cancellation-based mechanism briefly replaced this while
+core was out of scope, and did not preserve the property — see "Pause holds the loops idle
+behind a flag" below for why, and for the reversal.
 
 Each loop consults the flag before doing work and skips to its next interval otherwise.
 No task is cancelled, no cursor advances, no partial sweep is left behind. The capacity
@@ -132,8 +131,9 @@ removes.
 ## Risks / Trade-offs
 
 - **[A paused storefront looks healthy but does nothing]** → The system status surface
-  already reports `paused`; it should report which loops are halted rather than a bare
-  boolean, so an operator who paused and forgot has one place to see it.
+  reports each loop's state rather than a bare boolean, so an operator who paused and
+  forgot has one place to see it, and a loop that died is distinguishable from one held
+  idle.
 - **[A stage forgets to advance and fails on a later assertion]** → Real, and the failure
   message will point at the assertion rather than the missing advance. Mitigated by
   pausing in one place (the readiness stage) and by naming the advance control after what
@@ -162,23 +162,34 @@ core helper and does **not** get this behaviour. That is a deliberate, recorded 
 rather than an oversight, and it resolves when storefront runtime moves to kit under
 Goal 4.
 
-### Pause stops the loops by cancelling their tasks; resume restarts them
+### Pause holds the loops idle behind a flag each one consults per cycle
 
-Two of the five loop bodies live in core — the claims engine's `run()` and the capacity
-poller's `site_events_poller` — so a VM-local flag cannot be consulted inside them. The
-uniform VM-local mechanism that needs no core change is to hold the task handles the
-startup helper already returns and cancel them on pause, restarting on resume.
+**Revised 2026-08-11**, replacing an earlier decision to cancel the loops' tasks. That
+decision followed from a constraint that has since been lifted: with `core_storefront`
+out of scope, a VM-local flag could not be seen by the two loop bodies that live there,
+and cancellation was the only uniform mechanism left. Core is now in scope for a minimal
+change, which makes the better mechanism available, so the earlier decision is replaced
+rather than layered over — it was a workaround for a constraint, not a conclusion.
 
-Uniform beats mixed: flag-checking the three VM-local loops and cancelling the two core
-ones would implement one concept two ways, and a reader would have to know which loop is
-which to predict pause's behaviour.
+Each loop consults a pause predicate once per cycle, before any work. The two core loops
+— `site_events_poller` and `ClaimsEngine.run` — take it as an optional keyword defaulting
+to `None`, so every other caller including the API-credits storefront is unaffected; the
+three VM-local loops read it directly.
 
-One consequence is real and belongs in the spec rather than a comment: the capacity
-poller's `last_applied` cursor is loop-local, so cancelling loses it, and a restart
-re-positions at the feed head and re-runs its full reconcile. That is self-healing by
-design — it is the same path the poller takes after a restart or a ledger reset — but it
-means resume performs a reconciliation, so a scenario resumes at teardown, never
-mid-assertion.
+Cancellation was the weaker mechanism on every axis that matters here. `Task.cancel()`
+only *requests* cancellation: the coroutine observes it at whatever await it happens to be
+sitting on, which may be part-way through a reconcile that has written some of its rows.
+A flag checked before a cycle begins means every cycle either ran to completion or never
+started, which is the property this change actually needs and which the earlier decision
+claimed to preserve without doing so. Cancellation also discards loop-local state — the
+capacity poller's feed position above all — forcing a resumed poller to re-converge from
+the feed head, and it opens a window in which a restarted loop can overlap a predecessor
+still unwinding. Holding a live task idle has none of these consequences: nothing is torn
+down, nothing is interrupted, and resume is a flag flip rather than a restart.
+
+The cost is that a paused loop is a live task doing nothing, which a reader might mistake
+for a leak. The status surface answers that directly by reporting each loop as `paused`
+rather than as `running`.
 
 ### Advance calls the work the loop was calling, per loop, and returns what that work returns
 

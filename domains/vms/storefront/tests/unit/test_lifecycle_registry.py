@@ -1,8 +1,15 @@
-"""Pause halts every registered timer loop; resume restarts exactly what stopped.
+"""A paused storefront's loops run no cycle, and nothing is torn down to achieve it.
 
-These are the properties an end-to-end scenario relies on when it pauses once at
-setup and advances deliberately: nothing runs on its own while paused, and
-resuming does not leave two copies of a loop racing each other.
+These are the properties an end-to-end scenario relies on when it pauses once and
+advances deliberately: while paused, no loop does work; the loops are still alive,
+so nothing was interrupted part-way and no loop-local position was lost; and
+resuming needs no restart, so there is no window where two copies of a loop
+overlap.
+
+The pause gate is checked at the top of a cycle rather than delivered as a
+cancellation. That is the difference between "every cycle either ran completely
+or never began" and "some cycle was stopped at whatever await it happened to be
+sitting on", and the tests below pin the first.
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ import asyncio
 import pytest
 
 from core_storefront.app_startup import StorefrontBackgroundTask
-from market_storefront import lifecycle
+from market_storefront import lifecycle, server
 
 
 @pytest.fixture(autouse=True)
@@ -20,118 +27,138 @@ async def _clean_registry():
     """Async so teardown runs inside the test's event loop.
 
     A sync fixture tears down after the loop has closed, and cancelling a task
-    then raises `Event loop is closed` — which would report as an error in the
-    registry rather than in the fixture.
+    then raises `Event loop is closed` — reported against the registry rather
+    than the fixture.
     """
+    server._set_globally_paused(False)
     lifecycle.reset_for_tests()
     yield
     lifecycle.reset_for_tests()
-    # Let the cancellations the reset requested actually be delivered, so a
-    # pending task does not outlive the loop and print a destroyed-task warning.
+    server._set_globally_paused(False)
     await asyncio.sleep(0)
 
 
-def _forever(started: asyncio.Event | None = None):
+def _counting_loop(counter: list[int], *, interval: float = 0.001):
+    """A loop shaped like the real ones: gate first, then work."""
+
     async def _loop() -> None:
-        if started is not None:
-            started.set()
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(interval)
+            if lifecycle.is_paused():
+                continue
+            counter.append(1)
 
     return _loop
 
 
-class TestPauseHaltsEveryLoop:
-    async def test_registered_loops_report_running_before_a_pause(self):
+async def _let_loops_run(cycles: int = 5, interval: float = 0.001) -> None:
+    await asyncio.sleep(interval * cycles * 3)
+
+
+class TestPauseHoldsEveryLoopIdle:
+    async def test_a_running_loop_does_work(self):
+        counter: list[int] = []
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever())
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
+
+        await _let_loops_run()
+
+        assert counter, "the loop should be doing work before anything pauses it"
+
+    async def test_a_paused_loop_does_no_work_at_all(self):
+        counter: list[int] = []
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="beta", task_factory=_forever())
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
-        await asyncio.sleep(0)
+        await _let_loops_run()
 
-        assert lifecycle.loop_states() == {"alpha": "running", "beta": "running"}
+        server._set_globally_paused(True)
+        counter.clear()
+        await _let_loops_run(cycles=10)
 
-    async def test_pause_stops_all_of_them(self):
-        started = asyncio.Event()
+        assert counter == [], (
+            "a paused loop performed work — the whole contract is that a paused "
+            "storefront changes no state on its own"
+        )
+
+    async def test_pausing_does_not_stop_the_task(self):
+        """Idle, not torn down.
+
+        The task staying alive is what preserves loop-local state across a pause
+        — the capacity poller's feed position above all — and what removes any
+        possibility of a half-finished cycle.
+        """
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever(started))
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop([]))
         )
+        await _let_loops_run()
+
+        server._set_globally_paused(True)
+
+        assert not lifecycle._HANDLES["alpha"].done()
+        assert lifecycle.loop_states() == {"alpha": "paused"}
+
+    async def test_resuming_returns_the_same_loop_to_work(self):
+        counter: list[int] = []
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="beta", task_factory=_forever())
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
-        await asyncio.wait_for(started.wait(), timeout=1)
+        before = lifecycle._HANDLES["alpha"]
+        server._set_globally_paused(True)
+        await _let_loops_run()
 
-        states = lifecycle.pause_loops()
+        server._set_globally_paused(False)
+        counter.clear()
+        await _let_loops_run()
 
-        assert states == {"alpha": "stopped", "beta": "stopped"}
-        assert lifecycle.registered_loop_names() == ["alpha", "beta"], (
-            "a paused loop keeps its registration — resume restarts it from the "
-            "same factory it was started from"
+        assert counter, "resuming did not return the loop to work"
+        assert lifecycle._HANDLES["alpha"] is before, (
+            "resume replaced the task — a restart would lose loop-local position "
+            "and could overlap a predecessor"
         )
-
-    async def test_resume_restarts_everything_pause_stopped(self):
-        lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever())
-        )
-        lifecycle.pause_loops()
-
-        states = lifecycle.resume_loops()
-        await asyncio.sleep(0)
-
-        assert states["alpha"] == "running"
 
 
 class TestIdempotence:
-    """Pause and resume are operator controls; a second call must not fail or
-    duplicate. A duplicated poller would be invisible until two reconciliations
-    raced, which is the defect class this control exists to make observable."""
-
     async def test_pausing_twice_is_harmless(self):
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever())
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop([]))
         )
-        lifecycle.pause_loops()
 
-        assert lifecycle.pause_loops() == {"alpha": "stopped"}
+        server._set_globally_paused(True)
+        states = server._set_globally_paused(True)
 
-    async def test_resuming_twice_starts_one_loop_not_two(self):
-        lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever())
-        )
-        lifecycle.pause_loops()
-
-        lifecycle.resume_loops()
-        await asyncio.sleep(0)
-        first = lifecycle._HANDLES["alpha"]
-        lifecycle.resume_loops()
-        await asyncio.sleep(0)
-
-        assert lifecycle._HANDLES["alpha"] is first, (
-            "resume must not replace a running loop — the old task would keep "
-            "running unreferenced alongside the new one"
-        )
+        assert states == {"alpha": "paused"}
 
     async def test_resuming_a_never_paused_storefront_changes_nothing(self):
+        counter: list[int] = []
         lifecycle.start_registered_loop(
-            StorefrontBackgroundTask(name="alpha", task_factory=_forever())
+            StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
-        await asyncio.sleep(0)
         before = lifecycle._HANDLES["alpha"]
 
-        lifecycle.resume_loops()
+        states = server._set_globally_paused(False)
 
+        assert states == {"alpha": "running"}
         assert lifecycle._HANDLES["alpha"] is before
 
 
 class TestLoopStateReporting:
-    async def test_a_loop_that_exits_on_its_own_is_not_reported_as_stopped(self):
-        """A crashed loop is neither running nor deliberately halted.
+    async def test_every_registered_loop_is_reported(self):
+        for name in ("alpha", "beta"):
+            lifecycle.start_registered_loop(
+                StorefrontBackgroundTask(name=name, task_factory=_counting_loop([]))
+            )
+        await asyncio.sleep(0)
+
+        assert sorted(lifecycle.loop_states()) == ["alpha", "beta"]
+        assert lifecycle.registered_loop_names() == ["alpha", "beta"]
+
+    async def test_a_loop_that_exits_on_its_own_is_not_reported_as_paused(self):
+        """A crashed loop is neither working nor deliberately idle.
 
         Reporting it as either would hide the crash behind an operator control's
-        vocabulary, which is exactly the kind of quiet failure the status
-        surface exists to prevent.
+        vocabulary, which is what the status surface exists to prevent.
         """
         async def _exits() -> None:
             return None
@@ -141,5 +168,6 @@ class TestLoopStateReporting:
         )
         await asyncio.sleep(0)
         await asyncio.sleep(0)
+        server._set_globally_paused(True)
 
         assert lifecycle.loop_states()["alpha"] == "exited"

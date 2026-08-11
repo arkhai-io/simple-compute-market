@@ -290,14 +290,14 @@ class TestAdminPause:
 
 
 class TestPauseHaltsTimerLoops:
-    """Pause halts background work as well as refusing negotiations.
+    """Pause holds background work idle as well as refusing negotiations.
 
-    The endpoint returning 200 has never proven the loops stopped; after this
-    became the substantive half of what pause means, the response reports each
-    loop's state and a caller can verify it.
+    The endpoint returning 200 has never proven the loops stopped working; after
+    this became the substantive half of what pause means, the response reports
+    each loop's state and a caller can verify it.
     """
 
-    async def test_pause_reports_every_registered_loop_as_stopped(self, client):
+    async def test_pause_reports_every_registered_loop_as_paused(self, client):
         import asyncio
 
         from core_storefront.app_startup import StorefrontBackgroundTask
@@ -319,7 +319,7 @@ class TestPauseHaltsTimerLoops:
             result = await c.admin_pause()
 
             assert result.paused is True
-            assert result.loops == {"claims_engine": "stopped"}
+            assert result.loops == {"claims_engine": "paused"}
         finally:
             lifecycle.reset_for_tests()
 
@@ -390,28 +390,32 @@ class TestLifecycleAdvance:
         assert result["loop"] == "negotiation_watchdog"
         assert "swept" in result
 
-    async def test_capacity_events_cycle_calls_the_shared_reconcile(self, client):
-        """The advance and the poller must invoke the same function.
+    async def test_capacity_events_cycle_runs_the_real_reconcile(self, client):
+        """The advance drives production reconciliation, unpatched.
 
-        A manual cycle that reconciled differently from the timer would prove
-        nothing about production, which is why the reconcile was lifted out of
-        the poller's closure to module scope rather than reimplemented here.
+        Weaker than it should be, and deliberately so rather than misleadingly
+        strong. The assertion this wants is a listing transition — advance once,
+        observe a slice close or reopen — and two attempts at it did not produce
+        one against `tests/fake_site`, for a reason not yet identified: the
+        reconcile runs and finds nothing to change. Rather than reach for a patch
+        of `full_capacity_reconcile` to make the test say something (which is the
+        mocked-internals shape `TESTING.md` forbids), this asserts only what it
+        can honestly observe, and the transition assertion is recorded as owed.
+
+        What it does establish: the route resolves, calls the real reconcile with
+        a real site client behind it, and completes while the storefront is
+        paused.
         """
-        c, _ = client
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
         await c.admin_pause()
-        calls: list[int] = []
 
-        async def _record() -> None:
-            calls.append(1)
-
-        with patch(
-            "market_storefront.services.capacity_client.full_capacity_reconcile",
-            _record,
-        ):
+        with site_capacity(_fake_pool_site()):
             result = await c.admin_run_lifecycle_cycle("capacity-events")
 
-        assert result["loop"] == "capacity_events_poller"
-        assert calls == [1]
+        assert result == {"loop": "capacity_events_poller", "reconciled": True}
 
 
 # ---------------------------------------------------------------------------

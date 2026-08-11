@@ -159,12 +159,26 @@ class ClaimsEngine:
 
     # -- sweep ----------------------------------------------------------
 
-    async def run(self, interval_seconds: float = 30.0) -> None:
-        """Watchdog loop: sweep until cancelled, never let a sweep crash it."""
+    async def run(
+        self,
+        interval_seconds: float = 30.0,
+        *,
+        paused: Callable[[], bool] | None = None,
+    ) -> None:
+        """Watchdog loop: sweep until cancelled, never let a sweep crash it.
+
+        ``paused``, when supplied, is consulted once per cycle before the
+        sweep. A paused cycle performs no sweep, so no claim is submitted,
+        collected, or reclaimed while it holds. ``tick`` remains the unit of
+        work either way, so a caller driving one sweep on demand exercises
+        exactly what this loop exercises.
+        """
         logger.info("[CLAIMS] engine started (interval=%ss)", interval_seconds)
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
+                if paused is not None and paused():
+                    continue
                 n = await self.tick()
                 if n:
                     logger.info("[CLAIMS] sweep processed %d claim(s)", n)

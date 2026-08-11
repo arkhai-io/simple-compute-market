@@ -28,6 +28,7 @@ async def site_events_poller(
     interval: float,
     *,
     full_reconcile: Callable[[], Awaitable[None]],
+    paused: Callable[[], bool] | None = None,
 ) -> None:
     """Tail one site authority's capacity-event feed into the local bus.
 
@@ -40,6 +41,16 @@ async def site_events_poller(
     ``client`` is a ``kit/site-client`` ``SiteCapacityClient`` (typed
     here as ``Any`` to avoid a dependency this package doesn't otherwise
     need); only ``events_after`` and ``base_url`` are used.
+
+    ``paused``, when supplied, is consulted once per cycle before any work.
+    A paused cycle does nothing at all: it does not read the feed, advance
+    the position, emit a delta, or reconcile. Checking at the top of the
+    cycle rather than interrupting one is what makes the pause safe -- the
+    feed position and any in-flight reconcile belong to a cycle that either
+    ran completely or did not begin, never to one stopped halfway. The
+    position is loop-local and survives a pause for the same reason, so a
+    resumed poller continues from where it left off rather than
+    re-converging from the feed head.
     """
     last_applied: int | None = None
     logger.info(
@@ -48,6 +59,9 @@ async def site_events_poller(
     )
     while True:
         try:
+            if paused is not None and paused():
+                await asyncio.sleep(interval)
+                continue
             if last_applied is None:
                 _, last_applied = await client.events_after(0, limit=1)
                 await full_reconcile()

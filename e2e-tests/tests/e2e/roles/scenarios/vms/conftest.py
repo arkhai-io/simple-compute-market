@@ -295,40 +295,39 @@ def seller_wallet() -> str:
 # Teardown — ensure global pause is cleared after each test module run
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module", autouse=True)
-def paused_storefront(storefront_admin_client):
-    """Hold the storefront paused for the whole module, and advance deliberately.
+def pause_storefront(storefront_admin_client) -> dict[str, str]:
+    """Hold the storefront's timer loops idle, and prove they are.
+
+    Called from a scenario's own readiness stage rather than an autouse fixture:
+    a scenario should name the state it depends on, and pausing a service is a
+    dependency as much as registering a host is. It also keeps the pause with
+    the scenario that wants it — the API-credits scenario shares this module and
+    drives a different storefront, which has no such control.
 
     Every side effect a scenario asserts on should be one the scenario asked
-    for. While the storefront's timer loops run, a stage's observation races
-    them: a listing reconciled a second later reads differently than one
-    reconciled a second earlier, and an assertion that samples the wrong side of
-    that window fails for reasons unrelated to what it tests. Waiting for the
-    system to settle instead is what `docs/development/TESTING.md` forbids, and
-    it cannot prove ordering even when it passes.
+    for. While the timer loops run, a stage's observation races them: a listing
+    reconciled a second later reads differently than one reconciled a second
+    earlier. Waiting for the system to settle instead is what
+    `docs/development/TESTING.md` forbids, and it cannot establish ordering even
+    when it passes.
 
-    So the loops stop here and stages advance them one cycle at a time through
-    `advance_storefront`. Resume happens in teardown only: resuming restarts the
-    capacity-events poller, which re-positions at the feed head and runs a full
-    reconcile, and that is a state change no assertion should sit behind.
-
-    This does not detect race conditions and is not meant to. These scenarios
-    prove cross-service contracts; concurrency is the jurisdiction of the levels
-    below them.
+    Loops are held idle, not stopped: nothing is torn down, no cycle is cut in
+    half, and the capacity poller keeps its feed position. Resume belongs in
+    teardown all the same — a resumed loop runs its next cycle whenever it
+    likes, and no assertion should sit behind that.
     """
     result = storefront_admin_client.admin_pause()
-    halted = {name: state for name, state in (result.loops or {}).items()
-              if state != "stopped"}
-    assert not halted, (
-        f"storefront reported these loops still running after a pause: {halted}. "
-        "An assertion made now would be racing whichever one is still writing."
+    still_working = {
+        name: state for name, state in (result.loops or {}).items()
+        if state != "paused"
+    }
+    assert not still_working, (
+        f"storefront reported these loops still active after a pause: "
+        f"{still_working}. An assertion made now would be racing whichever one "
+        "is still writing."
     )
     log.info("[lifecycle] storefront paused; loops=%s", result.loops)
-    yield
-    try:
-        storefront_admin_client.admin_resume()
-    except Exception as exc:
-        log.warning("[teardown] could not resume the storefront: %s", exc)
+    return result.loops or {}
 
 
 def advance_storefront(storefront_admin_client, loop: str) -> dict:
@@ -345,13 +344,17 @@ def advance_storefront(storefront_admin_client, loop: str) -> dict:
 
 @pytest.fixture(scope="module", autouse=True)
 def ensure_storefront_resumed(storefront_admin_client):
-    """Yield to let the module run; then unconditionally clear global pause if set.
+    """Yield to let the module run; then resume the storefront if it is paused.
 
-    Safety net for a module that failed before `paused_storefront` could resume.
-    Pause/resume semantics are proven in the storefront's own integration suite,
-    not here and not in the smoke suite: a smoke test runs against a deployed
-    stack, and pausing one halts its background work for real, which is not a
-    side effect a wiring check should have.
+    This is the resume half of `pause_storefront`, and the only place resuming
+    belongs: a resumed loop runs its next cycle whenever it likes, so no
+    assertion should sit behind one. It also covers a module that failed partway
+    and left the storefront paused for the next one.
+
+    Pause/resume semantics themselves are proven in the storefront's own
+    integration suite, not here and not in the smoke suite: a smoke test runs
+    against a deployed stack, and pausing one halts its background work for
+    real, which is not a side effect a wiring check should have.
     """
     yield
     try:

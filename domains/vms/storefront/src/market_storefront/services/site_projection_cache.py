@@ -173,8 +173,17 @@ async def site_projection_poller_loop() -> None:
     interval = float(
         getattr(getattr(config.settings, "capacity", None), "poll_interval", 5) or 5
     )
+    from market_storefront.lifecycle import is_paused
+
     while True:
         try:
+            if is_paused():
+                # A paused storefront serves the projection generation it already
+                # holds. Refreshing it is a state change like any other, and
+                # `POST /api/v1/admin/capacity/projections/refresh` is how a
+                # caller asks for one deliberately.
+                await asyncio.sleep(interval)
+                continue
             if not _caches:
                 await load_site_projections()
             else:

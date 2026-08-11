@@ -17,7 +17,11 @@ from dataclasses import dataclass, field
 import pytest
 
 from src.settings import settings
-from tests.e2e.roles.scenarios.vms.conftest import advance_storefront, require_state
+from tests.e2e.roles.scenarios.vms.conftest import (
+    advance_storefront,
+    pause_storefront,
+    require_state,
+)
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DYNAMIC_HOST,
     E2E_FUNGIBLE_HOSTS,
@@ -57,6 +61,7 @@ ACCEPTED_ESCROWS = [{
 
 @dataclass
 class DynamicListingState:
+    storefront_paused: dict = field(default_factory=dict)
     resources_seeded: bool = False
     executor_host_registered: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
@@ -120,6 +125,18 @@ def _listing_statuses(storefront_admin_client, ids_by_gpu_count: dict[int, str])
 
 
 class TestComputeDynamicListings:
+    def test_00_pauses_the_storefront(
+        self, storefront_admin_client, dynamic_state: DynamicListingState
+    ):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        Named as a stage rather than hidden in a fixture because every later
+        assertion depends on it: with the loops running, a listing status read
+        after a reserve races the capacity poller's next cycle. Advances are
+        explicit from here on.
+        """
+        dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
+
     def test_00_imports_4x_compute_resource(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
