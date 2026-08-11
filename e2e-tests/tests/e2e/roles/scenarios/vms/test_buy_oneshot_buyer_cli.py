@@ -46,10 +46,11 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     require_state,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_BUY_HOST,
+    E2E_BUY_POOL_ID,
     E2E_HOST_GPU_COUNT,
-    E2E_HOST_NAME,
+    provision_e2e_executor,
     refresh_storefront_projections,
-    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -178,7 +179,8 @@ class TestStageB1_ResourceSeed:
 
 class TestStageB1a_ExecutorHostRegistry:
     def test_b1a_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, deal_state: DealState,
     ):
         """Register the executor host the seeded buy resource sits on.
 
@@ -196,10 +198,27 @@ class TestStageB1a_ExecutorHostRegistry:
         """
         require_state(deal_state, "_resources_seeded")
 
-        host = register_e2e_host(provisioning_client)
-        assert host.name == E2E_HOST_NAME
+        # The host is executor identity; the capacity declaration is what `probe`,
+        # `reserve`, and the seller's inventory guard match against, and only a
+        # declaration creates one. With the host alone, B4's negotiation is refused
+        # `no_matching_inventory` even though discovery found the listing. The
+        # declared attributes mirror this scenario's listing, since the guard
+        # compares region and gpu_model by equality.
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_BUY_HOST,
+            pool_id=E2E_BUY_POOL_ID,
+            resource_id=BUY_RESOURCE_ID,
+            attributes={
+                "gpu_model": BUY_GPU_MODEL,
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        assert host.name == E2E_BUY_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"executor host {E2E_BUY_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
         )
 
@@ -208,7 +227,7 @@ class TestStageB1a_ExecutorHostRegistry:
         deal_state._executor_host_registered = True
         log.info(
             "[B1a] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+            E2E_BUY_HOST, host.gpu_count, sorted(sites),
         )
 
 # ===========================================================================

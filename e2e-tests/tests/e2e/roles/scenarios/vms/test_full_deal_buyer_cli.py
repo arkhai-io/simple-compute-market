@@ -99,10 +99,11 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     require_state,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_DEAL_CLI_HOST,
+    E2E_DEAL_CLI_POOL_ID,
     E2E_HOST_GPU_COUNT,
-    E2E_HOST_NAME,
+    provision_e2e_executor,
     refresh_storefront_projections,
-    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -175,7 +176,7 @@ PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses provider teardown
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
 """
 
 # ===========================================================================
@@ -343,14 +344,22 @@ class TestStage00f_ResourceSeed:
 
 class TestStage00f1_ExecutorHostRegistry:
     def test_00f1_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, deal_state: DealState,
     ):
-        """Register the executor host the seeded resource sits on.
+        """Register this scenario's executor and declare its sellable capacity.
 
-        The site authority projects capacity by iterating host rows, so with no
-        host registered the projection is empty, every later inventory match
-        fails, and the storefront refuses each negotiation with
-        `no_matching_inventory` — several stages from the cause.
+        Two separate stores, and both are required. The host is executor identity;
+        the capacity declaration is what `probe`, `reserve`, and the seller's
+        inventory guard all match against, and only a declaration creates one.
+        With the host alone, every inventory match fails and the storefront refuses
+        each negotiation with `no_matching_inventory` — several stages from the
+        cause. The declaration's categorical attributes mirror the seeded listing,
+        because the guard compares `region` and `gpu_model` by equality.
+
+        The executor is this scenario's own. Sharing one across scenarios is
+        incompatible with one declaration per executor, and previously let one
+        scenario's GPU count decide another's reservation.
 
         Registered through the admin API rather than a mounted inventory file:
         `inventory_path` is docker-compose-specific while the canonical Helm
@@ -361,10 +370,21 @@ class TestStage00f1_ExecutorHostRegistry:
         """
         require_state(deal_state, "_resources_seeded")
 
-        host = register_e2e_host(provisioning_client)
-        assert host.name == E2E_HOST_NAME
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_DEAL_CLI_HOST,
+            pool_id=E2E_DEAL_CLI_POOL_ID,
+            resource_id="compute-e2e-deal-001",
+            attributes={
+                "gpu_model": "RTX 5080",
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        assert host.name == E2E_DEAL_CLI_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"executor host {E2E_DEAL_CLI_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
         )
 
@@ -373,7 +393,7 @@ class TestStage00f1_ExecutorHostRegistry:
         deal_state._executor_host_registered = True
         log.info(
             "[00f1] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+            E2E_DEAL_CLI_HOST, host.gpu_count, sorted(sites),
         )
 
 
@@ -685,14 +705,14 @@ class TestStage05a_EvaluateNegotiate:
             f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
-            f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
-            "This means BUYER_INITIAL_PRICE >= seller floor. Lower it so the strategy "
-            "counters at round 0 — otherwise force_accept in 06b will 409 on an "
-            "already-terminal negotiation."
+            f"Round-0 strategy returned {result.decision!r}, expected 'counter'. "
+            "'accept' means BUYER_INITIAL_PRICE >= the seller floor — lower it, or "
+            "force_accept in 06b will 409 on an already-terminal negotiation. "
+            "'reject' is a different failure and price is not involved: the seller's "
+            "guards run before any concession, and the inventory guard vetoes when no "
+            "available capacity declaration matches this listing's region and "
+            "gpu_model. Check that stage 00f1's declaration exists and carries both."
         )
-        deal_state._evaluate_negotiate_passed = True
-        log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
-                 result.decision, result.decision_reason, result.strategy)
 
 
 class TestStage05b_BuyerCliDrivesNegotiation:

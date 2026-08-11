@@ -29,8 +29,9 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_NON_ERC20_POOL_ID,
+    provision_e2e_executor,
     refresh_storefront_projections,
-    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -162,17 +163,28 @@ def _settlement_cases() -> list[SettlementCase]:
     ]
 
 
+def _case_host(case: SettlementCase) -> str:
+    """This case's own executor.
+
+    One declaration per executor is the site authority's accounting boundary, and
+    each parametrized case declares its own resource — so cases cannot share a
+    machine. The previous `kvm{index}` was always `kvm1`, since every run passes a
+    single case.
+    """
+    return f"kvm-{case.name}"
+
+
 def _resource_csv(cases: list[SettlementCase]) -> str:
     lines = [
         "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
         "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
         "attribute.vm_host"
     ]
-    for index, case in enumerate(cases, start=1):
+    for case in cases:
         lines.append(
             f'{case.resource_id},compute.gpu,rtx5080,count,1,available,'
             f'{_SELLER_RATE},{_MOCK_ERC20_A},,RTX 5080,90.0,'
-            f'"California, US",kvm{index}'
+            f'"California, US",{_case_host(case)}'
         )
     return "\n".join(lines) + "\n"
 
@@ -301,6 +313,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     storefront_admin_client,
     provisioning_client,
     provisioning_test_client,
+    site_capacity_admin_client,
     buyer_config,
     seller_wallet,
 ):
@@ -313,11 +326,23 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     )
     assert import_result.failed_count == 0, import_result
 
-    # The seeded row declares `attribute.vm_host`, and the site authority projects
-    # capacity by iterating host rows, so the host must exist before anything
-    # matches inventory. Registration used to happen in an autouse fixture, which
-    # made it setup no scenario named.
-    register_e2e_host(provisioning_client)
+    # Two stores, both required: the host is executor identity, and the capacity
+    # declaration is what `probe`, `reserve`, and the inventory guard match
+    # against. Only a declaration creates one, so with the host alone every
+    # inventory match fails. Registration used to happen in an autouse fixture,
+    # which made it setup no scenario named.
+    provision_e2e_executor(
+        provisioning_client,
+        site_capacity_admin_client,
+        host=_case_host(case),
+        pool_id=E2E_NON_ERC20_POOL_ID,
+        resource_id=case.resource_id,
+        attributes={
+            "gpu_model": "RTX 5080",
+            "region": "California, US",
+            "sla": "90.0",
+        },
+    )
     refresh_storefront_projections(storefront_admin_client)
 
     listing_resp = storefront_admin_client.create_listing(

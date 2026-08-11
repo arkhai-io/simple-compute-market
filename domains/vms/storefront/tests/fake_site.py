@@ -19,6 +19,32 @@ from unittest.mock import patch
 import httpx
 
 
+#: Fields `kit/site`'s reserve route removes before answering. Mirrored here
+#: because a reservation commits to a site and a shape and to nothing narrower:
+#: scheduling may rebind it to another resource in another pool at the same
+#: site, so the resource and pool matched at admission are not reservation
+#: facts. A fake that returned them would let a caller depend on a field the
+#: real wire never sends -- which is how a `KeyError: 'resource_id'` reached
+#: the nightly e2e with a green storefront suite.
+#: Keep in step with `market_site.router`'s reserve route.
+_STRIPPED_RESERVATION_FIELDS = frozenset({
+    "resource_id",
+    "pool_id",
+    "member_id",
+    "capacity_bucket_id",
+    "backing_resource_id",
+    "vm_host",
+})
+
+
+def _strip_placement(reservation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in reservation.items()
+        if key not in _STRIPPED_RESERVATION_FIELDS
+    }
+
+
 class FakeSite:
     """Dict-backed single-site capacity ledger."""
 
@@ -122,11 +148,11 @@ class FakeSite:
                 "deal_ref": body.get("deal_ref") or {},
             }
             self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"reservation": {
+            return httpx.Response(200, json={"reservation": _strip_placement({
                 **match,
                 "capacity_reservation_id": capacity_reservation_id,
                 "hold_expires_at": None,
-            }})
+            })})
 
         if path.endswith("/commit"):
             capacity_reservation_id = path.split("/")[-2]

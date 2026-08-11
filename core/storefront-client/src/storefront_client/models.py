@@ -546,12 +546,19 @@ class ReleaseReservationsResponse:
 
 @dataclass
 class ReserveCapacityResponse:
-    """Response from POST /api/v1/admin/portfolio/reservations."""
+    """Response from POST /api/v1/admin/portfolio/reservations.
+
+    `pool_id` and `resource_id` echo whichever the request's claim pinned, and
+    are `None` when the claim pinned neither -- absent, not empty. The site
+    authority reports neither the resource it matched nor that resource's pool,
+    because a reservation commits to a site and a shape and scheduling may
+    rebind it within that site.
+    """
 
     capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str = ""
+    resource_id: str | None = None
     gpu_count: int = 0
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
@@ -572,7 +579,7 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            resource_id=str(d.get("resource_id") or ""),
+            resource_id=str(d["resource_id"]) if d.get("resource_id") else None,
             gpu_count=int(d.get("gpu_count") or 0),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),

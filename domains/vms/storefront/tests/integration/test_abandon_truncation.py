@@ -37,7 +37,10 @@ async def test_truncates_the_ledger_lease_to_now(db):
             claim={}, deal_ref={"escrow_uid": "0xabandoned"},
         )
         await capacity.commit(
-            resource_id=reserved["resource_id"],
+            # The reservation response carries no resource_id -- the site strips
+            # placement identity, and commit resolves the backing resource from
+            # capacity_reservation_id itself.
+            resource_id=None,
             capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_start_utc="2099-01-01T00:00:00Z",
             lease_end_utc="2099-01-01 01:00",

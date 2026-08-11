@@ -23,12 +23,21 @@ class ReserveCapacityRequest(BaseModel):
 
 
 class ReserveCapacityResponse(BaseModel):
-    """Response from POST /api/v1/admin/portfolio/reservations."""
+    """Response from POST /api/v1/admin/portfolio/reservations.
+
+    `pool_id` and `resource_id` echo whichever the request's claim pinned. A
+    pool-scoped claim reports its pool and no resource; a resource-pinned claim
+    reports its resource and no pool; a claim pinning neither reports neither.
+    Both are absent rather than empty in that case, because the site authority
+    does not report the resource it matched or that resource's pool -- a
+    reservation commits to a site and a shape, and scheduling may rebind it
+    within that site.
+    """
 
     capacity_reservation_id: str
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str
+    resource_id: str | None = None
     gpu_count: int
     resource_state: str | None = None
     closed_listing_ids: list[str] = Field(default_factory=list)

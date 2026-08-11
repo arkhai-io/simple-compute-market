@@ -1008,29 +1008,33 @@ class AdminController:
             set(closed_listing_ids)
             | await self._closed_since_snapshot(open_listing_ids)
         )
+        # Pool and resource identity come from this request's own claim, never
+        # from the reservation. A reservation commits to a site and a shape and
+        # to nothing narrower, so the site reports neither the resource it
+        # matched nor that resource's pool -- reporting either would advertise a
+        # placement scheduling is free to move. A claim that pins one already
+        # carries it; a claim that pins neither correctly reports neither.
+        # See openspec/specs/site-capacity/spec.md#internal-capacity-accounting.
+        claim = body.required_attributes or {}
+        claimed_pool_id = claim.get("pool_id")
+        claimed_resource_id = claim.get("resource_id")
         stage_event(
             "portfolio",
             "capacity_reserved_by_admin",
             capacity_reservation_id=reserved.get("capacity_reservation_id"),
-            pool_id=reserved.get("pool_id"),
-            member_id=reserved.get("member_id"),
-            resource_id=reserved.get("resource_id"),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=reserved.get("allocated_gpu_count"),
             resource_state=reserved.get("state"),
             listing_id=body.listing_id,
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
-            "pool_id"
-        )
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
-            pool_id=str(pool_id) if pool_id else None,
-            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            member_id=None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,

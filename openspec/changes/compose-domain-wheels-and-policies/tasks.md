@@ -461,3 +461,123 @@ tool and leave the two copies to drift. The change is between steps 6 and 7 —
 | The generic catalogue primitive eventually belongs in a zero-dependency kit package, since `market_identity` and `core_buyer` cannot depend on `arkhai-kit-policy` | Deferred; recorded in `design.md` and owned by `kit-storefront-composition-seam` | Deferred |
 | Directory-level `force-include`, lazy facades, singleton catalogues, precedence overrides, and carrying policies on the domain contract | Rejected; retained in `design.md` only | Rejected |
 | The RL strategy's laziness is the strategy module and its dependency graph, not torch itself — torch is already function-scoped | Corrected mid-change; recorded in `design.md` and guarded by a test | Applied |
+| A fungible pool is several executors with one capacity declaration each, never several declarations on one executor; the bucket projection's `resource_count` is what makes it fungible | Owned by `capacity-resource-administration` §4b's spec delta; encoded here only as scenario setup | At archival |
+| The negotiation inventory guard reads the bucket snapshot, not either projection — recorded as a correction in `e2e-inventory-findings.md` | Change history only; the permanent contract is `openspec/specs/site-capacity/spec.md`'s existing accounting boundary | Applied |
+
+## 11. E2E capacity setup
+
+Added 2026-08-11. Section 9's verification is blocked by scenario setup rather than by
+anything this change's packaging or catalogue work owns, and `e2e-inventory-findings.md`'s
+correction section records why. This is test-only: no production file changes here. The
+production hardening that keeps the same mistake from recurring is planned as
+`capacity-resource-administration` §4b, and the admin reserve path's 500 as
+`fix-vm-fulfillment-capacity-boundary` §10 — both are prerequisites for a green run, and
+neither belongs in this change.
+
+Scope note: this section is scenario setup for a change whose acceptance boundary is
+wheel-owned domain code and composed policy catalogues. It is here because the e2e run is
+this change's own verification gate and the diagnosis lives in this directory, not because
+capacity setup belongs to it. If it grows past the tasks below, that is the signal to split
+it into its own change rather than widen this one.
+
+### 11a. Setup model
+
+- [ ] 11a.1 Confirm by inspection before writing anything: `_find_candidate` reads
+      `CapacityBucket` only; `register_resource` is the only thing that creates one; the
+      resource-pool projection is host-row-shaped and the capacity-bucket projection is the
+      fungible source; and a pool's `listing_mode` policy tag selects between them with a
+      structural default of `specific_resource` at one member. Record any drift rather than
+      working around it.
+- [ ] 11a.2 Give each scenario its own executor host, and stop sharing `kvm1`. Every VM
+      scenario currently seeds `attribute.vm_host=kvm1`, so under one-declaration-per-executor
+      they cannot coexist — and the shared host is already what let one scenario's GPU count
+      break another (see this change's `host_registry.py` docstring). Host names belong to the
+      scenario that registers them.
+- [ ] 11a.3 Keep a declaration's own id distinct from its executor's name, correlated by the
+      executor attribute. A specific-resource listing's `offer_resource.resource_id` becomes
+      the claim's pinned `resource_id` via `compute_capacity_claim_from_order`, so the
+      declaration must carry the commercial id the listing names, not the host alias. One
+      declaration per executor is still satisfied — one declaration claims one host.
+- [ ] 11a.4 Declare pool membership in the `pool_id` field, never in `attributes`. The
+      attribute spelling is read by nothing and is refused by
+      `capacity-resource-administration` §4b.4.
+
+### 11b. Shared helpers
+
+- [ ] 11b.1 Rework `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`: add a pool
+      helper over `create_pool`/`get_pool` carrying the scenario's `listing_mode` policy tag,
+      make the host helper take a name and `pool_id` (both already on `HostCreate`/`HostUpdate`),
+      and rename the capacity helper to say it declares sellable capacity rather than
+      registering a resource. `SiteCapacityAdminClient.register_resource` already accepts
+      `pool_id`; nothing new is needed on any client.
+- [ ] 11b.2 Rewrite that module's header docstring. It states the site authority projects
+      capacity by iterating host rows and that an unregistered host yields an empty
+      projection — true of the resource-pool projection and irrelevant to the buckets every
+      claim actually matches against, which is the misreading that cost a debugging loop.
+- [ ] 11b.3 Keep `refresh_storefront_projections` as it is. Its refusal to treat
+      `unavailable`/`invalid` as an authoritative empty is what surfaced the poisoned
+      projection at its cause instead of three layers downstream.
+
+### 11c. Per-scenario setup
+
+- [ ] 11c.1 `test_compute_dynamic_listings.py`, fungible class: one pool tagged
+      `listing_mode: fungible`, two executor hosts of four GPUs each, one declaration per
+      host with `pool_id` set on the field. Confirm the existing 2× and 4× assertions still
+      hold and why: slices are generated to `max_member_available_gpu_count`, not to the pool
+      sum, so a 2× reserve on the first host leaves the ceiling at four, and a 4× reserve then
+      lands on the second and drops it to two, closing 3× and 4×. Today those assertions pass
+      only because two declarations on one host double-count that host's GPUs.
+- [ ] 11c.2 `test_compute_dynamic_listings.py`, dynamic class: its own executor host and one
+      declaration, single-member pool, so the structural default resolves to
+      `specific_resource`.
+- [ ] 11c.3 `test_full_deal.py`, `test_full_deal_buyer_cli.py`, `test_buy_oneshot_buyer_cli.py`,
+      `test_multi_registry.py`, `test_non_erc20_settlement.py`: each declares capacity for its
+      own host in its existing executor-host stage, carrying the `region` and `gpu_model` its
+      listing advertises. Those two are what `has_matching_inventory_guard` compares by
+      equality, so a declaration missing either reproduces the failure the stage exists to
+      prevent.
+- [ ] 11c.4 Correct the stage-05a assertion message in `test_full_deal.py` and
+      `test_full_deal_buyer_cli.py`. It attributes any non-`counter` decision to
+      `BUYER_INITIAL_PRICE` being above the seller floor; the observed decision was `reject`
+      from an inventory guard that never evaluated price, and the message sent a debugging
+      loop after a pricing problem that did not exist. Distinguish `reject` from `accept`.
+- [ ] 11c.5 Confirm mock-mode provisioning tolerates hosts other than `kvm1` — the compose
+      profile runs `PROVISIONING_MODE=mock` and hosts are registered through the API, so this
+      is expected to be free, but it is an assumption worth one deliberate check rather than
+      a surprise mid-run.
+
+### 11d. Verification
+
+- [ ] 11d.1 Run `make -C e2e-tests test-e2e` — the target the workflow runs, not a
+      scenario-by-scenario path, since naming a path overrides the configured `testpaths`.
+- [ ] 11d.2 Expect the nine failures to resolve as: five projection-stage failures and the
+      fungible 409 from this section; both `05a` and `b4` from this section's declarations;
+      `test_02_admin_reserve_2x` only once `fix-vm-fulfillment-capacity-boundary` §10 lands.
+      If any scenario fails for a different reason, stop and record it before adjusting setup —
+      the last loop's cost came from fixing a symptom whose cause was elsewhere.
+- [ ] 11d.3 Disclose which suites ran and which did not. A local docker-compose run has been
+      unavailable since 2026-07-29 (see `refactor-e2e-fulfillment-lifecycle`), so this
+      section's verification may be a CI run rather than a local one, and saying so is part of
+      the result.
+
+### 11e. Section 11 closeout
+
+Per `openspec/README.md#plan-closeout-requirements`, scoped to this section. Section 10's
+closeout is complete and stays as it is.
+
+- [ ] 11e.1 **Comment hygiene.** Run `make check-comment-hygiene`. These are test files, so
+      the mechanical target is unlikely to fire; read 11b.2's rewritten docstring and each
+      scenario's stage docstring directly, since several currently explain the setup in terms
+      of the projection rather than the buckets their claims match.
+- [ ] 11e.2 **Import placement.** Confirm no function-level import is added by the helper
+      rework, and record the disposition.
+- [ ] 11e.3 **Documentation compliance.** This section adds no permanent documentation: the
+      setup model it encodes is `site-capacity`'s existing accounting boundary, and the two
+      new normative requirements belong to `capacity-resource-administration` §4b's spec
+      delta. Confirm that remains true rather than assuming it.
+- [ ] 11e.4 **Narrative compression.** Compress these notes to final scenario shape and the
+      run evidence once green; the diagnosis stays in `e2e-inventory-findings.md`.
+- [ ] 11e.5 **Roadmap currency.** No roadmap goal changes: this is scenario setup, and the
+      production gaps it exposed are already owned by rows under Goal 1 and Goal 2. Recorded
+      explicitly as a deliberate finding rather than an omitted step.
+- [ ] 11e.6 **Promotion.** Add this section's rows to the design-promotion record.

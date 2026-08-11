@@ -679,6 +679,76 @@ class TestFulfillmentEvents:
             "listing-4x",
         ]
 
+    async def test_admin_reserve_echoes_a_resource_pinned_claim_and_no_pool(
+        self, client,
+    ):
+        """A resource-pinned claim reports its resource and no pool.
+
+        The reservation response carries neither field -- the site strips both,
+        because a reservation commits to a site and a shape and scheduling may
+        rebind it within that site. So what comes back is the claim's own
+        pinning, and a claim that pinned no pool reports none rather than
+        reporting the pool the site happened to match.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        with site_capacity(_fake_pool_site()):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
+                },
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-pinned",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.resource_id == "pool-h200-1"
+        assert response.pool_id is None
+        assert response.member_id is None
+
+    async def test_admin_reserve_echoes_a_pool_scoped_claim_and_no_resource(
+        self, client,
+    ):
+        """A pool-scoped claim reports its pool and no resource.
+
+        The inverse of the test above, and the shape the fungible e2e scenario
+        drives. Reporting a resource here would name the host the site matched,
+        which fulfillment scheduling is free to move.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+        fake.add_resource(
+            "pool-h200-2",
+            4,
+            attributes={
+                "pool_id": "pool-h200",
+                "gpu_model": "H200",
+                "region": "California, US",
+                "vm_host": "host-2",
+            },
+        )
+
+        with site_capacity(fake):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "pool_id": "pool-h200",
+                    "gpu_count": 2,
+                },
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-pooled",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.pool_id == "pool-h200"
+        assert response.resource_id is None
+
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
         from tests.fake_site import site_capacity
 

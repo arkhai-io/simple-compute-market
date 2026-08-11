@@ -194,6 +194,44 @@ mock-transport client test plus existing e2e coverage — see
 remain open pending a repository-owner decision on priority, since GitHub
 Actions isn't part of the current local workflow.
 
+## Placement identity is echoed from the claim, never reported by the site (added 2026-08-11)
+
+Section 2 fixed the obligation-fulfillment path's dependence on `resource_id`/`vm_host` and
+added a boundary test for the reserve response's strip set. An e2e trace found the admin
+reservation path untouched: `admin_controller.reserve_capacity` still dereferences
+`reserved["resource_id"]` and returns 500. The same audit found two adjacent problems.
+
+**The response carries no usable pool identity.** `_match_payload` hardcodes
+`"pool_id": None` and `"member_id": None`, so `admin_controller` reads the pool from
+`attributes["pool_id"]` instead — a spelling nothing else consumes, and one
+`capacity-resource-administration` is about to reject outright. When it does, the admin
+response's pool identity becomes `None` with no fallback.
+
+**The comment explaining the absence is wrong about authority.** It reads "pool/member are
+storefront (aggregator) concepts the site does not know". The site owns pool membership:
+`CapacityBucket.pool_id` is a real column, both projections group by it, and admission
+matches on it.
+
+The correct reason is different and worth stating precisely, because it decides the fix. A
+capacity reservation defers the placement commitment on purpose: it commits to a site and
+to the reserved dimensions, and scheduling may later rebind it to another resource, in
+another pool at that site, without touching the deal. Reporting the pool the site happened
+to match at admission would advertise a decision that is explicitly free to change, and
+would invite a caller to treat it as durable — the same defect as reporting `resource_id`,
+one level up. So both fields are stripped, and `member_id` is stripped as aggregator
+bookkeeping with no site-side meaning.
+
+What the storefront reports instead is what it asked for. A claim pinning `resource_id` is
+the specific-resource opt-in, where the caller already knows the resource; a claim pinning
+`pool_id` is a pool-scoped purchase, where the caller already knows the pool. Neither needs
+the site to tell it. A claim pinning neither gets neither, which is the correct answer
+rather than a degraded one.
+
+Rejected — return the matched bucket's `pool_id`. It is the obvious reading of "the site is
+the pool authority", and it is wrong for the reason above: authority over pool membership is
+not authority to report a placement the reservation has not committed to. Recorded because
+the rejected version was proposed first and the distinction is easy to lose.
+
 ## Design-promotion record
 
 | Material decision | Permanent location |
@@ -203,5 +241,7 @@ Actions isn't part of the current local workflow.
 | Scheduled (reservation-bounded) dimensions, not the reservation's own dimensions unconditionally, are authoritative for what a provider builds | `openspec/specs/site-capacity/spec.md`, "Committed dimensions remain authoritative through scheduling" |
 | Providers derive shape from the scheduled settlement resource | `openspec/specs/physical-provisioning/spec.md`, "Provisioning shape comes from committed capacity" |
 | Capacity reservations negotiate pooled capacity, not a pinned physical resource; a negotiated shape change resizes the reservation; `resize_reservation` has no caller yet | `docs/development/ARCHITECTURE.md`, "Capacity reservation" |
+| A reservation commits to a site and a shape and to nothing narrower; the reserve response reports neither the matched resource nor its pool | `openspec/specs/site-capacity/spec.md`'s opaque-reservation-boundary requirement |
+| A caller needing placement identity echoes its own claim; the site is the pool authority but does not report a placement it has not committed to | `openspec/specs/site-capacity/spec.md`, "Capacity accounting is private to the site authority" |
 | `test-domain-dist-reinit` must not propagate an absolute `DIST_DIR` into the adapter's lock regeneration | In-code comment on the `Makefile` target; build tooling, not subsystem behavior, so no `openspec/specs` entry |
 

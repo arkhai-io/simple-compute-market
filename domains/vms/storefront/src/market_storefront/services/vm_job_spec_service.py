@@ -105,7 +105,17 @@ async def build_provisioning_job_spec(
     capacity: Any,
     vm_target_factory: Callable[[], str] | None = None,
 ) -> dict[str, Any] | None:
-    """Probe the capacity ledger (read-only) and build a VM job spec."""
+    """Probe the capacity ledger (read-only) and build a VM job spec.
+
+    `probe` is the one route on the capacity boundary that still returns
+    placement identity: `/probe` returns the ledger's match payload verbatim,
+    while `/reservations` strips `resource_id`, `pool_id`, `member_id`, and
+    `vm_host` because a reservation commits to no placement. So the two
+    dereferences below work, but only because that asymmetry exists. Anything
+    durable must key on `capacity_reservation_id` instead -- a probe match is a
+    read of the moment, and the resource it names may not be the one scheduling
+    later selects.
+    """
     capacity_claim = compute_capacity_claim_from_order(order_dict)
     selected = await capacity.probe(claim=capacity_claim)
     if not selected:

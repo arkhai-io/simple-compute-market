@@ -45,7 +45,9 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
         resource_id="kvm1",
         total_units=1,
         capacity={"gpu_count": 1},
-        attributes={"vm_host": "kvm1", "pool_id": "default"},
+        # Pool membership goes in the field, not attributes: the field is what
+        # admission and both projections read.
+        attributes={"vm_host": "kvm1"},
         pool_id="default",
     )
 
@@ -76,12 +78,43 @@ class TestOpaqueReservationBoundary:
         )
 
         assert reservation is not None
-        for leaked_field in ("resource_id", "capacity_bucket_id", "backing_resource_id"):
+        for leaked_field in (
+            "resource_id",
+            "pool_id",
+            "member_id",
+            "capacity_bucket_id",
+            "backing_resource_id",
+            "vm_host",
+        ):
             assert leaked_field not in reservation, (
                 f"{leaked_field!r} must not appear in a reservation response "
                 "-- it is the provisioning authority's private placement "
                 "accounting, not durable storefront-facing reservation identity"
             )
+
+    async def test_reserve_response_omits_pool_even_though_the_site_owns_pools(
+        self, site_app,
+    ):
+        """The site is the pool authority and still reports no pool here.
+
+        Distinct from the assertion above, which reads as "the site does not
+        know these". It does know: `CapacityBucket.pool_id` is authoritative
+        and the ledger's own resource payload carries it. What it must not do is
+        report the pool it matched as part of a reservation, because scheduling
+        may rebind that reservation to another pool at this site.
+        """
+        app, ledger = site_app
+        client = _client(app)
+
+        assert ledger.list_resources()[0]["pool_id"] == "default"
+
+        reservation = await client.reserve(
+            claim={"pool_id": "default", "gpu_count": 1},
+            deal_ref={"escrow_uid": "escrow-pool"},
+        )
+
+        assert reservation is not None
+        assert "pool_id" not in reservation
 
     async def test_commit_accepts_the_opaque_reservation_response_without_placement_fields(
         self, site_app,

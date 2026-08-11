@@ -277,3 +277,74 @@ capacity would populate itself.
 That any VM capacity resource has ever existed in the site ledger. Until one does,
 the projection has nothing to correlate and no amount of host or attribute work
 changes the outcome.
+
+---
+
+# Correction, 2026-08-11 (run after 31434830271: `9 failed, 55 passed, 42 skipped`)
+
+Two conclusions above are wrong, and one recommendation was applied in a shape that
+introduced five new failures. Recorded here rather than by editing the text above, so the
+reasoning that led to each is preserved.
+
+## The traced chain is wrong at one hop
+
+The chain above puts `_capacity_resource_inventory()` (`main.py:165`) under
+`GET /api/v1/capacity/snapshot`. That path does not exist. In `make_capacity_router`,
+`get_resource_inventory` is passed only into `SiteProjectionService`, which uses it for
+`resource_pools()` and nothing else; `capacity_buckets()` reads
+`ledger.list_resources()`. The `/snapshot` route calls `ledger.snapshot()` directly, which
+is `list_resources()` filtered to enabled rows — one `_resource_payload` per
+`CapacityBucket`.
+
+`_resource_payload` **does** emit a `state` key, `"available"` or `"leased"`.
+
+So the guard never received projection rows. It received bucket rows carrying exactly the
+key it filtered on, and the list was empty. The `state`-filter diagnosis, and the
+"consumer reading a projection with a local table's schema" framing built on it, do not
+hold.
+
+## Therefore the five failures were one cause, not two
+
+The "Settled" table above splits them by path. Both paths read `CapacityBucket`:
+`snapshot()` for the guard, `_find_candidate` for reserve. With no VM bucket in the ledger
+the guard saw an empty list and the reserve found no candidate. One cause, one fix.
+
+The current run confirms it. The `_row_is_available` rewrite landed, and the negotiation
+failures persist in exactly the scenarios that still declare no capacity resource
+(`RTX 5080` in `test_full_deal`, `RTX 4090` in `test_buy_oneshot_buyer_cli`), while the
+H200 scenarios that now declare one get past the guard. That rewrite is defensible if
+projection rows ever feed the guard — its own docstring shows the author believed they
+did — but it fixed something that was not the cause, which is why no previously-failing
+scenario became passing.
+
+## "Nothing registers VM capacity resources by design" is exact for publishing and wrong
+for selling
+
+The quoted passage from `capacity-resource-administration` is accurate, and the
+host-derived fallback genuinely is the designed path — for the **resource-pool
+projection**, which is what listing derivation reads. It produces no `CapacityBucket`, and
+`register_resource` is the only thing that does. Since `probe`, `reserve`, and the
+negotiation guard's `snapshot()` all read buckets, a host-seeded deployment can publish
+listings it cannot sell against. "That works, and it is why a host-seeded deployment
+publishes and sells today" is precise about the first verb and not the second.
+
+## `region` stays storefront-owned, and that does not block declaring it
+
+`pools-9`'s non-goal is about *ownership* and stands. It does not prevent an operator
+declaring `region` as a matchable attribute on a capacity declaration: the site ledger
+stores `attributes` as an opaque mapping it never interprets, and a claim speaks the site's
+resource-domain vocabulary by design. Declaring it is what step 2 above recommended and
+what Section 11 does. The real consequence to hold onto is that `region` then exists in two
+places — storefront commercial state and a site attribute — and the site cannot detect
+drift between them.
+
+## Step 2 was applied in a shape that sells hardware twice
+
+`register_e2e_capacity` landed, and the fungible scenario used it to declare
+`compute-e2e-fungible-a` and `-b` **both** on `vm_host=kvm1` — two four-GPU declarations on
+a host with four physical GPUs. `load_capacity_resource_inventory` refuses two declarations
+correlating to one host, so every subsequent `GET /site-resource-pools` returned 500 for
+both storefronts for the rest of the run, which is the five new failures. The guard is
+correct; a fungible pool is two hosts, not two declarations on one. Section 11 fixes the
+setup, and `capacity-resource-administration` §4b moves the refusal to write time so one bad
+declaration cannot take a site's projection down again.
