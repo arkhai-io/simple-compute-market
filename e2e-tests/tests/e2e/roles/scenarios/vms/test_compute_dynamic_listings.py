@@ -162,6 +162,7 @@ class TestComputeDynamicListings:
             site_capacity_admin_client,
             host=E2E_DYNAMIC_HOST,
             resource_id=DYNAMIC_RESOURCE_ID,
+            sellable_units=4,
             pool_id=DYNAMIC_POOL_ID,
             listing_mode="specific_resource",
             attributes={
@@ -351,6 +352,7 @@ class TestFungibleComputeDynamicListings:
                 site_capacity_admin_client,
                 host=host_name,
                 resource_id=member,
+                sellable_units=4,
                 pool_id=FUNGIBLE_POOL_ID,
                 listing_mode="fungible",
                 attributes={

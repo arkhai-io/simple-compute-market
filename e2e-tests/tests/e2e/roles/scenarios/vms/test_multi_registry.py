@@ -450,6 +450,7 @@ class TestStage02a1_ExecutorHostRegistry:
             host=E2E_MULTI_REGISTRY_HOST,
             pool_id=E2E_MULTI_REGISTRY_POOL_ID,
             resource_id="compute-mr-bob-001",
+            sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
                 "region": "California, US",
@@ -462,6 +463,7 @@ class TestStage02a1_ExecutorHostRegistry:
             host=f"{E2E_MULTI_REGISTRY_HOST}-ny",
             pool_id=E2E_MULTI_REGISTRY_POOL_ID,
             resource_id="compute-mr-alice-001",
+            sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
                 "region": "New York, US",

@@ -210,6 +210,7 @@ class TestStageB1a_ExecutorHostRegistry:
             host=E2E_BUY_HOST,
             pool_id=E2E_BUY_POOL_ID,
             resource_id=BUY_RESOURCE_ID,
+            sellable_units=1,
             attributes={
                 "gpu_model": BUY_GPU_MODEL,
                 "region": "California, US",

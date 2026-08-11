@@ -46,11 +46,15 @@ from vm_provisioning_operator import PoolCreate, PoolUpdate
 from vm_provisioning_operator.client import ProvisioningError
 from vm_provisioning_operator.models import HostCreate, HostUpdate
 
-#: GPUs per executor host. Must cover the largest single slice any scenario
-#: reserves — 4, in the dynamic-listings cases. A fungible pool's advertised total
-#: is this times its member count, but one reservation is still bounded by one
-#: member: slice listings are published up to the per-member ceiling, not the pool
-#: sum, because admission matches a single bucket.
+#: GPUs physically present on an executor host. Must cover the largest single
+#: slice any scenario reserves — 4, in the dynamic-listings cases.
+#:
+#: Deliberately not the same number as a declaration's sellable units. A host says
+#: what hardware exists; a declaration says how much of it is for sale, and the
+#: listing-reopen decision reads the declaration. Declaring four units for a
+#: scenario whose listing sells one leaves three available after the reserve, so
+#: the listing never closes — which is how this defaulted-to-4 and stayed
+#: invisible until a scenario asserted on listing closure.
 E2E_HOST_GPU_COUNT = 4
 
 #: One executor per scenario. Sharing `kvm1` across all of them is what coupled the
@@ -198,9 +202,15 @@ def declare_e2e_capacity(
     vm_host: str,
     attributes: dict[str, Any],
     pool_id: str,
-    gpu_count: int = E2E_HOST_GPU_COUNT,
+    sellable_units: int,
 ) -> dict[str, Any]:
     """Declare one executor's sellable capacity in the site ledger.
+
+    `sellable_units` has no default on purpose. It must equal what the scenario's
+    own seeded resource declares, because that number decides when a slice listing
+    closes: reserve one unit against a four-unit declaration and a 1x listing stays
+    open, since three remain. A helper-wide default is exactly the wrong shape for
+    a value only the scenario knows.
 
     `pool_id` is passed as the field, never inside `attributes`. The field is what
     admission and both projections read; an attribute of the same name is read by
@@ -214,10 +224,10 @@ def declare_e2e_capacity(
     """
     return site_admin_client.register_resource(
         resource_id,
-        total_units=gpu_count,
+        total_units=sellable_units,
         resource_type="compute.gpu",
         pool_id=pool_id,
-        capacity={"gpu_count": gpu_count},
+        capacity={"gpu_count": sellable_units},
         attributes={**attributes, "vm_host": vm_host},
     )
 
@@ -230,10 +240,15 @@ def provision_e2e_executor(
     resource_id: str,
     attributes: dict[str, Any],
     pool_id: str,
+    sellable_units: int,
     listing_mode: str = "specific_resource",
-    gpu_count: int = E2E_HOST_GPU_COUNT,
+    host_gpu_count: int = E2E_HOST_GPU_COUNT,
 ) -> Any:
     """Pool, executor host, and its one capacity declaration, in dependency order.
+
+    `sellable_units` is what the declaration offers and must match the scenario's
+    seeded resource; `host_gpu_count` is the hardware the executor has. They are
+    separate numbers, and conflating them keeps slice listings open.
 
     The pool must exist before a host can join it, and the host before a
     declaration correlates to it. Most scenarios want exactly this sequence once,
@@ -243,7 +258,7 @@ def provision_e2e_executor(
         provisioning_client, pool_id=pool_id, listing_mode=listing_mode,
     )
     host_row = register_e2e_host(
-        provisioning_client, name=host, pool_id=pool_id, gpu_count=gpu_count,
+        provisioning_client, name=host, pool_id=pool_id, gpu_count=host_gpu_count,
     )
     declare_e2e_capacity(
         site_admin_client,
@@ -251,7 +266,7 @@ def provision_e2e_executor(
         vm_host=host,
         attributes=attributes,
         pool_id=pool_id,
-        gpu_count=gpu_count,
+        sellable_units=sellable_units,
     )
     return host_row
 

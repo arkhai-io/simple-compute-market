@@ -169,11 +169,47 @@ cmd_logs() {
     fi
 }
 
+# dispatch -> watch -> logs, which is the whole loop and was being typed out by
+# hand three commands at a time. Deliberately still fetches the evidence when the
+# run fails: a red run is exactly when the logs are wanted, so a non-zero watch
+# must not skip the download. The run id is captured from dispatch rather than
+# re-resolved per subcommand, so a nightly run starting mid-loop cannot be
+# mistaken for this one.
+cmd_run() {
+    require_gh
+    local branch; branch="$(current_branch)"
+    require_pushed "$branch"
+    printf 'dispatching %s on %s\n' "$WORKFLOW" "$branch"
+    gh workflow run "$WORKFLOW" --ref "$branch"
+
+    # The run is not queryable the instant dispatch returns.
+    local run_id=""
+    local attempt
+    for attempt in 1 2 3 4 5 6; do
+        sleep 5
+        run_id="$(latest_run_id "$branch" || true)"
+        [ -n "$run_id" ] && break
+    done
+    if [ -z "$run_id" ]; then
+        die "dispatched, but the run id never became queryable — try: make e2e-status"
+    fi
+    printf 'run %s: %s\n' "$run_id" \
+        "$(gh run view "$run_id" --json url --jq .url 2>/dev/null || echo '(url unavailable)')"
+
+    local watch_status=0
+    cmd_watch "$run_id" || watch_status=$?
+
+    printf '\n'
+    cmd_logs "$run_id"
+    return "$watch_status"
+}
+
 usage() {
     cat <<'USAGE'
 usage: scripts/e2e-ci.sh <command>
 
-  dispatch      run the E2E workflow against the current branch on origin
+  run             dispatch, follow to completion, then download the evidence
+  dispatch        run the E2E workflow against the current branch on origin
   watch [RUN_ID]  follow a run until it finishes; newest for this branch by default
   status          list recent runs for this branch
   logs [RUN_ID]   download the scenario output and the compose-logs artifact
@@ -187,6 +223,7 @@ USAGE
 }
 
 case "${1:-}" in
+    run)      shift; cmd_run "$@" ;;
     dispatch) shift; cmd_dispatch "$@" ;;
     watch)    shift; cmd_watch "$@" ;;
     status)   shift; cmd_status "$@" ;;

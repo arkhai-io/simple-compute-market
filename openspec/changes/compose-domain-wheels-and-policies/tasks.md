@@ -645,6 +645,34 @@ buyer as `Provisioning failed: Internal Server Error` — four layers from its c
       provider's collision logic correctly; the gap was the absent parity check, now
       12.2. **Done.**
 
+### 13. Declared units must match the scenario's own resource (found in run 31479739305)
+
+`b4` is green: the mock's `reserved_var_keys` fix landed and the buy scenario negotiates,
+escrows, settles, and provisions. Two failures remain, and only one is mine.
+
+- [x] 13.1 Declare each scenario's own sellable units instead of defaulting to the host's
+      GPU count. Six of the nine seeded resources declare one unit and three declare four;
+      the helper declared four for all of them, so `b5`'s 1x listing stayed open after its
+      1x reserve — three units remained available. `sellable_units` is now a required
+      argument with no default, because it is a value only the scenario knows, and
+      `host_gpu_count` stays separate: a host says what hardware exists, a declaration says
+      how much is for sale. **Done.**
+- [ ] 13.2 **Open — needs one more run to attribute.**
+      `test_04_capacity_release_reopens_oversized_listings` asserts the release response
+      reports the listings it reopened and received an empty list. The compose log shows why
+      the list was empty: 24ms earlier, at 09:57:09.672, the capacity-delta subscriber
+      reopened those exact two listings in response to a delta on `compute-e2e-buy-001` —
+      a different resource, while two of the dynamic resource's four units were still held
+      and its 3x/4x listings were therefore not servable. Two readings fit, and the logs do
+      not separate them: either reopen decisions are not being recomputed per resource
+      against current availability, or this is the release-path twin of a race the reserve
+      path already handles (`reserve_capacity` unions `closed_listing_ids` with
+      `_closed_since_snapshot`, commented "the capacity-delta subscriber can race this
+      inline reconciliation"; the release path has no equivalent union). 13.1 changes the
+      shape of that delta — the buy resource now declares one unit rather than four — so the
+      next run distinguishes them. Do not fix either reading before it does: three loops in
+      this campaign were spent fixing a symptom whose cause was elsewhere.
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

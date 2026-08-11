@@ -376,6 +376,7 @@ class TestStage00f1_ExecutorHostRegistry:
             host=E2E_DEAL_CLI_HOST,
             pool_id=E2E_DEAL_CLI_POOL_ID,
             resource_id="compute-e2e-deal-001",
+            sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
                 "region": "California, US",

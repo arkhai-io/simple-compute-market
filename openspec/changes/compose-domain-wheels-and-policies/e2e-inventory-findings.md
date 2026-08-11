@@ -375,3 +375,32 @@ it. `fake_site.py` returned reservation fields the real router strips; the provi
 integration `db_engine` seeded a pool without the provider config the migration gives it;
 `MockAnsibleService` lacked a method the real service has. Each was invisible to every
 suite and visible only to the nightly e2e.
+
+---
+
+# Run 31479739305 — `2 failed, 66 passed, 38 skipped`
+
+`b4` passes. The buy scenario now discovers, negotiates to agreement at 8500, creates the
+escrow, settles, and provisions to `ready` — the first end-to-end VM deal this campaign has
+produced. Section 12's mock fix was the last thing in its way.
+
+Two failures remain and they are different in kind.
+
+**`b5` — mine.** It asserts the listing closes while capacity is held and found it open.
+Six of the nine seeded resources declare one sellable unit; the setup helper declared four
+for every scenario, so a 1x reserve left three available and the 1x listing never closed.
+Fixed in section 13.1 by making sellable units a required per-scenario argument, separate
+from the host's hardware count.
+
+**`test_04` — unattributed.** The release response reported no reopened listings because
+the capacity-delta subscriber had already reopened them 24ms earlier, on a delta belonging
+to a *different* resource, while the dynamic resource still held two of its four units. Two
+readings fit the same evidence — a reopen that is not recomputed per resource, or the
+release-path twin of the race `reserve_capacity` already unions around — and section 13.1
+changes the delta's shape enough for the next run to separate them. Left open deliberately.
+
+The pattern from the previous three runs did not recur: no test double diverged from the
+real thing this time. What replaced it is subtler and worth naming for the next reader —
+a helper-wide default standing in for a value only the caller knows. `sellable_units=4`
+was wrong for six of nine scenarios and invisible until a scenario asserted on the one
+behaviour that reads it.

@@ -337,6 +337,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         host=_case_host(case),
         pool_id=E2E_NON_ERC20_POOL_ID,
         resource_id=case.resource_id,
+        sellable_units=1,
         attributes={
             "gpu_model": "RTX 5080",
             "region": "California, US",
