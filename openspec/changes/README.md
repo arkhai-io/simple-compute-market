@@ -186,6 +186,7 @@ Changes with no campaign; each stands alone.
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
 | [`add-development-roadmap`](add-development-roadmap/) | implemented 2026-08-06; pending archive | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
+| [`monotonic-listing-reconciliation`](monotonic-listing-reconciliation/) | design phase; not yet planned | A capacity-delta reconciliation may reopen a derived listing using an availability view older than a reservation it does not yet know about, briefly advertising capacity the site cannot serve. Reproduced end to end; the freshness constraint's home is the open question |
 | [`deduplicate-dynaconf-bootstrap`](deduplicate-dynaconf-bootstrap/) | active | Parameterized kit/config construction with exact provisioning and e2e parity; storefront loader excluded. Useful precedent for the kit-composition extractions |
 
 ## Archived and superseded

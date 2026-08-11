@@ -647,10 +647,22 @@ class SettleResponse:
 
 @dataclass
 class SettleStatusResponse:
-    """Response from GET /api/v1/settle/{escrow_uid}/status."""
+    """Response from GET /api/v1/settle/{escrow_uid}/status.
+
+    Carries two different identities, and they are not interchangeable.
+    `fulfillment_id` is the durable fulfillment aggregate's identity and is the
+    field a caller should prefer; `fulfillment_uid` is the on-chain settlement
+    claim identity the storefront's settlement mechanism issues for escrow
+    arbitration. One escrow row legitimately carries both, meaning two different
+    things — see `docs/development/ARCHITECTURE.md`'s identifier table.
+
+    `provisioning_job_id` is the legacy ephemeral executor-job identity and is
+    always absent for a fulfillment that took the durable path.
+    """
 
     status: str = ""
     escrow_uid: str = ""
+    fulfillment_id: str | None = None
     fulfillment_uid: str | None = None
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
@@ -659,13 +671,14 @@ class SettleStatusResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "SettleStatusResponse":
         known = {
-            "status", "escrow_uid", "fulfillment_uid",
+            "status", "escrow_uid", "fulfillment_id", "fulfillment_uid",
             "provisioning_job_id", "tenant_credentials",
         }
         creds = d.get("tenant_credentials")
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
+            fulfillment_id=d.get("fulfillment_id"),
             fulfillment_uid=d.get("fulfillment_uid"),
             provisioning_job_id=d.get("provisioning_job_id"),
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,

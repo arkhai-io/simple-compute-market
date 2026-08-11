@@ -657,7 +657,8 @@ escrows, settles, and provisions. Two failures remain, and only one is mine.
       argument with no default, because it is a value only the scenario knows, and
       `host_gpu_count` stays separate: a host says what hardware exists, a declaration says
       how much is for sale. **Done.**
-- [ ] 13.2 **Open — needs one more run to attribute.**
+- [x] 13.2 **Attributed by run 31482372498 — see 15.4.** Neither reading was right: it is not the inline release path racing the subscriber but a reopen acting on an availability view older than the reservation it contradicts. Filed as `monotonic-listing-reconciliation`.
+- [x] 13.2a Original note, kept for the reasoning it records:
       `test_04_capacity_release_reopens_oversized_listings` asserts the release response
       reports the listings it reopened and received an empty list. The compose log shows why
       the list was empty: 24ms earlier, at 09:57:09.672, the capacity-delta subscriber
@@ -708,6 +709,37 @@ stages that have never executed in this campaign, several of which assert on pat
 has exercised. That is the fix working: a scenario that skips its own subject is worth less
 than one that fails it. Read the new failures as first-execution findings rather than
 regressions, and attribute each before changing anything.
+
+### 15. First-execution findings from the unblocked stages (run 31482372498)
+
+14.4 did what it was meant to: 74 pass where 67 did, skips fell 38 to 28, and the newly
+executing stages found three defects plus one already-filed race. None is a regression.
+
+- [x] 15.1 `settlement_resource_id` was null after a scheduling decision that happened.
+      `PhysicalSettlementScheduler` called `rebind_capacity` only when the selected
+      resource differed from the reservation's existing debit, so the ordinary
+      single-candidate case recorded nothing — while `schedule_assignment` durably
+      recorded the same fact, leaving the reservation and the settlement record
+      disagreeing. The ledger's assignment is already idempotent and takes a cheap path
+      on equality (records the marker, moves no debit, emits no event), so the call is
+      now unconditional. Two `kit/fulfillment` tests cover both branches and fail
+      against the previous code. **Done.**
+- [x] 15.2 `SettleStatusResponse` in `storefront-client` declared `fulfillment_uid` and
+      omitted `fulfillment_id`, while the server returns both and documents
+      `fulfillment_id` as the field a caller should prefer. Stage 08b asked for it and
+      got an `AttributeError`; the value had been landing in `extra` all along. Added,
+      with a docstring stating that the two identities are not interchangeable.
+      **Done.**
+- [x] 15.3 `b5`'s lease assertion now passes through 15.1. **Done.**
+- [x] 15.4 The dynamic-listing reopen race is reproduced with timings and filed as
+      `monotonic-listing-reconciliation`: a reconciliation for capacity version 5
+      reopened listings a version-7 reservation had just closed, and a later pass closed
+      them again 300ms later. This is the same behaviour 13.2 left open, now with enough
+      evidence to attribute — it is not a race in the inline release path but a
+      non-monotonic reopen. The scenario polls for the converged state rather than
+      sampling once, with the defect named at the assertion; the reserve response's own
+      `closed_listing_ids` stays strictly asserted, so the synchronous contract is
+      unchanged. **Done.**
 
 ### Section 12 closeout
 

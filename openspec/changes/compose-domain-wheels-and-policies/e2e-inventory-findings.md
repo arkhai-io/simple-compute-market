@@ -433,3 +433,37 @@ invisible in a green summary, because pytest reports a skip as neither failure n
 — but nothing checks that a declared dependency is ever produced. A test that asserts a
 state is set, or a suite-level check that every `require_state` key is written somewhere,
 would have caught this at introduction.
+
+---
+
+# Run 31482372498 — `4 failed, 74 passed, 28 skipped`
+
+The stage-gate fix worked: seven more tests pass and ten fewer skip, and the newly
+executing stages immediately found three defects. All four failures are first
+executions, not regressions.
+
+**`settlement_resource_id` null after scheduling.** `PhysicalSettlementScheduler`
+rebound capacity only when the selected resource differed from the reservation's
+existing debit, so the ordinary case — one candidate, already debited there — recorded
+nothing on the reservation while `schedule_assignment` durably recorded it on the
+settlement record. Two places carrying the same fact, disagreeing. The ledger's
+assignment already handles the equality case cheaply, so the call is unconditional now.
+
+**`fulfillment_id` missing from a typed client model.** The server returns it and
+documents it as the field to prefer; `storefront_client.SettleStatusResponse` declared
+`fulfillment_uid` instead and dropped `fulfillment_id` into `extra`. Stage 08b is the
+first caller ever to ask. Note these are two genuinely different identities — the
+durable fulfillment aggregate and the on-chain settlement claim — and one escrow row
+carries both.
+
+**The reopen race, finally attributed.** Two runs ago this looked like the release
+path racing the delta subscriber. With timings it is something else: a reconciliation
+for capacity version 5 reopened listings that a version-7 reservation had just closed,
+and a version-7 pass closed them again 300ms later. Reopening on a stale availability
+view over-advertises; closing on one is conservative. Filed as
+`monotonic-listing-reconciliation`.
+
+Worth recording that the earlier guess would have been wrong. Both readings offered in
+run 31479739305 were plausible and neither was correct, and the fix that "would have
+worked" — unioning the release response with listings reopened since a snapshot — would
+have masked a defect that lets a storefront advertise capacity it cannot serve.
