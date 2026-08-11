@@ -128,10 +128,10 @@ The domain layer's own structure is better than the duplication suggests. All th
 | The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
 | Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 
-A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
-
----|---|
 | Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| Two named-item registries remain mutable module-level state populated by import order — the buyer's aggregation policies, a public extension point whose lookup also writes to the registry it reads, and the identity verifiers. The negotiation and buyer-policy registries are now composed catalogues; the reusable primitive they were built on is `market_policy.catalogue` | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
+
+A compute-dimension name leaking into every domain's capacity declaration is a real defect but too small to own a gap row here; it rides with [`capacity-resource-administration`](../../openspec/changes/capacity-resource-administration/), which already rewrites the code that causes it.
 
 ---
 

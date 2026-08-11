@@ -11,6 +11,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from core_storefront.openapi import install_admin_key_openapi
+from core_storefront.services.negotiation_service import NegotiationService
+from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from fastapi import FastAPI
 
 import apicredits_storefront.container as _container
@@ -18,9 +21,6 @@ from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.utils.config import AGENT_ID, settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 from apicredits_storefront.utils.sync_negotiation import continue_sync_negotiation
-from core_storefront.openapi import install_admin_key_openapi
-from core_storefront.services.negotiation_service import NegotiationService
-from core_storefront.stage_log import set_stage_event_db_path, stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,9 @@ def run_serve(host: str = "0.0.0.0", port: int | None = None) -> None:
 
     resolved_port = port if port is not None else settings.port
     uvicorn.run(
-        app, host=host, port=resolved_port,
+        app,
+        host=host,
+        port=resolved_port,
         root_path=settings.gateway.root_path,
     )
 
@@ -69,8 +71,17 @@ async def lifespan(_: FastAPI):
         stage_event=stage_event,
     )
     _container.resolved_system_service = SystemService(
-        sqlite_client=sqlite_client, agent_id=AGENT_ID,
+        sqlite_client=sqlite_client,
+        agent_id=AGENT_ID,
     )
+    # Composed here rather than where it is consumed: configuration is resolved
+    # by this point, and composing once means a broken policy source fails
+    # startup instead of the first negotiation that reaches it.
+    from apicredits_storefront.utils.sync_negotiation import (
+        compose_policy_catalogue,
+    )
+
+    _container.resolved_policy_catalogue = compose_policy_catalogue()
 
     logger.info("[STARTUP] Singletons initialized")
     await _startup_tasks()
@@ -100,13 +111,23 @@ app.state.market_domain = get_market_domain_contract()
 install_admin_key_openapi(app, root_path=settings.gateway.root_path)
 
 # Controller imports after module-level app exists.
-from apicredits_storefront.controllers.system_controller import router as system_router          # noqa: E402
-from apicredits_storefront.controllers.listings_controller import router as listings_router      # noqa: E402
-from apicredits_storefront.controllers.negotiate_controller import router as negotiate_router    # noqa: E402
-from apicredits_storefront.controllers.negotiations_controller import router as negotiations_router  # noqa: E402
-from apicredits_storefront.controllers.settle_controller import (                                 # noqa: E402
+from apicredits_storefront.controllers.listings_controller import (
+    router as listings_router,
+)
+from apicredits_storefront.controllers.negotiate_controller import (
+    router as negotiate_router,
+)
+from apicredits_storefront.controllers.negotiations_controller import (
+    router as negotiations_router,
+)
+from apicredits_storefront.controllers.settle_controller import (
     admin_settle_router,
+)
+from apicredits_storefront.controllers.settle_controller import (
     router as settle_router,
+)
+from apicredits_storefront.controllers.system_controller import (
+    router as system_router,
 )
 
 app.include_router(system_router)

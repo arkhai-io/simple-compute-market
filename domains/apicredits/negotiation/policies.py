@@ -27,20 +27,20 @@ from __future__ import annotations
 
 import logging
 
-from domains.apicredits.listings.models import coerce_resource_dict
-from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
-    _amount_from_proposal,
-    _loads_json_list,
-    proposal_uses_scalar_amount,
-)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationDecision,
     NegotiationRound,
     NegotiationStep,
-    register_negotiation_middleware,
     their_last_proposal,
 )
+from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
+    _amount_from_proposal,
+    _loads_json_list,
+    proposal_uses_scalar_amount,
+)
+
+from domains.apicredits.listings.models import coerce_resource_dict
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,6 @@ def _is_round_zero(history: list[NegotiationRound]) -> bool:
     )
 
 
-@register_negotiation_middleware("api_credits_round_zero_guard")
 def api_credits_round_zero_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -151,7 +150,6 @@ def api_credits_round_zero_guard(
     return None, context
 
 
-@register_negotiation_middleware("credit_quota_guard")
 def credit_quota_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -188,7 +186,6 @@ def credit_quota_guard(
     )
 
 
-@register_negotiation_middleware("key_owned_by_buyer_wallet")
 def key_owned_by_buyer_wallet(
     history: list[NegotiationRound],
     context: NegotiationContext,
@@ -262,6 +259,6 @@ __all__ = [
     "KEY_REVOKED",
     "QUOTA_EXHAUSTED",
     "api_credits_round_zero_guard",
-    "key_owned_by_buyer_wallet",
     "credit_quota_guard",
+    "key_owned_by_buyer_wallet",
 ]

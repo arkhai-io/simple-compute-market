@@ -86,7 +86,6 @@ async def test_fresh_active_thread_is_left_alone(tmp_path):
 
     client = SQLiteClient(db_path=db_path)
     with settings_overrides(negotiation_timeout_seconds=1800):
-
         n = await _watchdog_tick(client)
 
     assert n == 0
@@ -100,13 +99,14 @@ async def test_already_terminal_thread_is_not_re_marked(tmp_path):
     _init_threads_table(db_path)
     old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     _insert_thread(
-        db_path, negotiation_id="neg-done-001",
-        updated_at=old_ts, terminal_state="success",
+        db_path,
+        negotiation_id="neg-done-001",
+        updated_at=old_ts,
+        terminal_state="success",
     )
 
     client = SQLiteClient(db_path=db_path)
     with settings_overrides(negotiation_timeout_seconds=1800):
-
         n = await _watchdog_tick(client)
 
     assert n == 0
@@ -124,13 +124,14 @@ async def test_mixed_threads_only_stale_active_abandoned(tmp_path):
     _insert_thread(db_path, negotiation_id="stale-b", updated_at=old_ts)
     _insert_thread(db_path, negotiation_id="fresh-c", updated_at=recent_ts)
     _insert_thread(
-        db_path, negotiation_id="done-d",
-        updated_at=old_ts, terminal_state="failure",
+        db_path,
+        negotiation_id="done-d",
+        updated_at=old_ts,
+        terminal_state="failure",
     )
 
     client = SQLiteClient(db_path=db_path)
     with settings_overrides(negotiation_timeout_seconds=1800):
-
         n = await _watchdog_tick(client)
 
     assert n == 2

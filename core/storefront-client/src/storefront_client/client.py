@@ -540,6 +540,19 @@ class StorefrontClient(_StorefrontClientBase):
             body, extra_headers=self._admin_headers(),
         )
 
+    async def admin_refresh_site_projections(self) -> dict[str, Any]:
+        """POST /admin/capacity/projections/refresh  (admin key required).
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just changed inventory at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return await self._post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {}, extra_headers=self._admin_headers(),
+        )
+
     async def admin_import_resources(
         self, csv_content: bytes, filename: str = "resources.csv"
     ) -> ImportResourcesResponse:
@@ -1390,6 +1403,19 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return self._post(
             f"/api/v1/admin/deals/{escrow_uid}/interrupt",
             body, extra_headers=self._admin_headers(),
+        )
+
+    def admin_refresh_site_projections(self) -> dict[str, Any]:
+        """POST /admin/capacity/projections/refresh  (admin key required).
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just changed inventory at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return self._post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {}, extra_headers=self._admin_headers(),
         )
 
     def admin_import_resources(

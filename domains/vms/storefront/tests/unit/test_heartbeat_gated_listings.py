@@ -96,6 +96,7 @@ def test_interruptible_posture_publishes_splitter_demands(tmp_path):
     import json
 
     from market_alkahest.alkahest import _load_override_config_cached
+
     from market_storefront.cli_publish import _demands_for_chains
 
     override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
@@ -107,9 +108,10 @@ def test_interruptible_posture_publishes_splitter_demands(tmp_path):
         _settings(interruptible_listings=True),
     ):
         demands = _demands_for_chains(_chains(path), {"base_sepolia"}, WALLET)
-    assert demands[0]["arbiter"] == get_erc20_splitter(
-        "base_sepolia", config_path=str(path)
-    ).lower()
+    assert (
+        demands[0]["arbiter"]
+        == get_erc20_splitter("base_sepolia", config_path=str(path)).lower()
+    )
     assert demands[0]["demand_data"] == {"oracle": WALLET.lower(), "data": "0x"}
 
 
@@ -117,6 +119,7 @@ def test_interruptible_posture_allows_explicit_refund_authority(tmp_path):
     import json
 
     from market_alkahest.alkahest import _load_override_config_cached
+
     from market_storefront.cli_publish import _demands_for_chains
 
     override = {"arbiters_addresses": {"erc20_splitter": SPLITTER}}
@@ -172,7 +175,7 @@ def test_interruptible_offer_resource_is_marked():
 
 
 def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
-    from domains.vms.settlement.proposals import (
+    from market_alkahest.proposals import (
         accepted_escrow_artifacts_from_proposal,
     )
 
@@ -196,11 +199,13 @@ def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
 
 
 def test_oracle_gated_plan_carries_heartbeat_service_terms():
-    demands = [{
-        "chain_name": "base_sepolia",
-        "arbiter": get_trusted_oracle_arbiter("base_sepolia"),
-        "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
-    }]
+    demands = [
+        {
+            "chain_name": "base_sepolia",
+            "arbiter": get_trusted_oracle_arbiter("base_sepolia"),
+            "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
+        }
+    ]
     out = _artifacts(demands)
     plan = out["settlement_plan"]
     assert plan["service_terms"]["heartbeat"] == {
@@ -215,11 +220,13 @@ def test_oracle_gated_plan_carries_heartbeat_service_terms():
 
 
 def test_recipient_gated_plan_has_no_heartbeat_terms():
-    demands = [{
-        "chain_name": "base_sepolia",
-        "arbiter": get_recipient_arbiter("base_sepolia"),
-        "demand_data": {"recipient": WALLET.lower()},
-    }]
+    demands = [
+        {
+            "chain_name": "base_sepolia",
+            "arbiter": get_recipient_arbiter("base_sepolia"),
+            "demand_data": {"recipient": WALLET.lower()},
+        }
+    ]
     out = _artifacts(demands)
     assert out["settlement_plan"]["service_terms"] == {}
 
@@ -238,11 +245,13 @@ def test_splitter_plan_carries_interruptible_service_terms(tmp_path):
     path = tmp_path / "alkahest_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
     _load_override_config_cached.cache_clear()
-    demands = [{
-        "chain_name": "base_sepolia",
-        "arbiter": get_erc20_splitter("base_sepolia", config_path=str(path)),
-        "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
-    }]
+    demands = [
+        {
+            "chain_name": "base_sepolia",
+            "arbiter": get_erc20_splitter("base_sepolia", config_path=str(path)),
+            "demand_data": {"oracle": WALLET.lower(), "data": "0x"},
+        }
+    ]
     out = _artifacts(
         demands,
         chain_config_paths={"base_sepolia": str(path)},
@@ -252,6 +261,4 @@ def test_splitter_plan_carries_interruptible_service_terms(tmp_path):
         "schema": "vms.interruptible.v1",
         "refund_authority": "seller_declared",
     }
-    assert plan["obligations"][0]["params"]["obligation_data"]["arbiter"] == (
-        SPLITTER
-    )
+    assert plan["obligations"][0]["params"]["obligation_data"]["arbiter"] == (SPLITTER)

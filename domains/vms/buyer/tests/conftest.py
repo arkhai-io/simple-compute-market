@@ -1,15 +1,12 @@
-"""Shared test fixtures.
+"""Test configuration for the VM buyer package.
 
-The buyer's runtime default chain is ``[rl]``, which needs torch + the
-compute domain on PYTHONPATH. The unit-test env deliberately ships
-neither (these tests cover transport + orchestration, not the strategy).
-Alias ``rl`` to ``bisection_middleware`` so the chain loader resolves
-without dragging torch into pytest.
+These tests cover transport and orchestration, not negotiation strategy.
+
+This module previously aliased the ``rl`` policy name to a cheap middleware so
+that the global chain loader could resolve it without importing torch. That
+alias is no longer needed, and could no longer work: names resolve against a
+catalogue each caller composes, so a test that needs a policy offers it to its
+own catalogue instead of mutating shared state that every other test inherits.
 """
 
 from __future__ import annotations
-
-from market_policy.negotiation_middleware import register_negotiation_middleware
-from domains.vms.negotiation.policies import bisection_middleware
-
-register_negotiation_middleware("rl")(bisection_middleware)

@@ -6,5 +6,6 @@ from market_site_client.client import (  # noqa: F401
     SiteCapacityAdminClient,
     SiteCapacityAdminClientError,
     SiteCapacityClient,
+    SyncSiteCapacityAdminClient,
 )
 from market_site_client.models import ResourceRegistration  # noqa: F401

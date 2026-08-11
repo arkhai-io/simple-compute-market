@@ -11,8 +11,6 @@ from typing import Any
 import pytest
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
-from web3 import Web3
-
 from market_alkahest.alkahest import (
     Erc1155DefaultEscrowCodec,
     NativeTokenDefaultEscrowCodec,
@@ -22,12 +20,18 @@ from market_alkahest.alkahest import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
+from web3 import Web3
+
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     delete_mock_rules_if_present,
     wait_for_stage_event,
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    refresh_storefront_projections,
+    register_e2e_host,
+)
 
 log = logging.getLogger(__name__)
 
@@ -308,6 +312,13 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         filename=f"{case.name}-settlement-resource.csv",
     )
     assert import_result.failed_count == 0, import_result
+
+    # The seeded row declares `attribute.vm_host`, and the site authority projects
+    # capacity by iterating host rows, so the host must exist before anything
+    # matches inventory. Registration used to happen in an autouse fixture, which
+    # made it setup no scenario named.
+    register_e2e_host(provisioning_client)
+    refresh_storefront_projections(storefront_admin_client)
 
     listing_resp = storefront_admin_client.create_listing(
         agent_wallet_address=seller_wallet,

@@ -33,17 +33,23 @@ import logging
 from importlib import resources
 
 import pytest
-
 from market_alkahest.alkahest import (
     get_alkahest_network,
     get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
+
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
+)
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_HOST_GPU_COUNT,
+    E2E_HOST_NAME,
+    refresh_storefront_projections,
+    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -165,6 +171,45 @@ class TestStageB1_ResourceSeed:
         deal_state._resources_seeded = True
         log.info("[B1] Imported buy resource %s", BUY_RESOURCE_ID)
 
+
+# ===========================================================================
+# Phase B1a — executor host registry + projection sync
+# ===========================================================================
+
+class TestStageB1a_ExecutorHostRegistry:
+    def test_b1a_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client, deal_state: DealState
+    ):
+        """Register the executor host the seeded buy resource sits on.
+
+        The site authority projects capacity by iterating host rows. With no host
+        registered the projection is empty, so B4's negotiation is refused with
+        `no_matching_inventory` even though discovery found the listing —
+        the failure lands three stages from its cause.
+
+        Registered through the admin API rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The storefront is then told to pull
+        projections immediately and the pull is asserted, rather than sleeping
+        out the poller interval.
+        """
+        require_state(deal_state, "_resources_seeded")
+
+        host = register_e2e_host(provisioning_client)
+        assert host.name == E2E_HOST_NAME
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
+        )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        deal_state._executor_host_registered = True
+        log.info(
+            "[B1a] Executor host %s registered (gpus=%s); projections confirmed for %s",
+            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+        )
 
 # ===========================================================================
 # Phase B2 — create + publish listing (so discovery can find it)

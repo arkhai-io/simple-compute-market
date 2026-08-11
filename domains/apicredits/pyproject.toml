@@ -32,6 +32,7 @@ only-include = ["__init__.py"]
 "negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
 "negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
 "negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
+"negotiation/policy_sources.py" = "domains/apicredits/negotiation/policy_sources.py"
 "negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
 "negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
 "settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"

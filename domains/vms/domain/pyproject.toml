@@ -7,11 +7,27 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2",
     "arkhai-core>=0.2.0",
+    # The listing models read Alkahest escrow shapes, and the negotiation
+    # policies are middlewares in the policy kit's vocabulary. Both are imported
+    # at module scope by modules this wheel always ships, so both are runtime
+    # dependencies rather than extras.
+    "arkhai-kit-alkahest",
+    "arkhai-kit-policy",
 ]
 
 [project.optional-dependencies]
 storefront = [
     "arkhai-core-storefront>=0.2.0",
+]
+
+# RL negotiation strategy — inference only. Declared here rather than on each
+# role's package because the strategy is offered to both, and a role that
+# installs this extra is asking for the same optional capability. Runs trained
+# pufferlib checkpoints from arkhai_vms/negotiation/rl/models/ without pulling in
+# pufferlib itself; the architecture is reproduced inline in
+# arkhai_common.ArkhaiInferencePolicy (state-dict compatible).
+rl = [
+    "torch>=2.7.0",
 ]
 
 [project.entry-points."market.storefront_domains"]
@@ -23,9 +39,25 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/arkhai_vms"]
+# The RL checkpoints are data, not modules, so package discovery does not pick
+# them up. Without this the [rl] extra installs a strategy with no weights.
+artifacts = ["src/arkhai_vms/negotiation/rl/models/*.pt"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "torch: requires the [rl] extra; exercises the torch negotiation strategy",
+]
 
 [dependency-groups]
 dev = [

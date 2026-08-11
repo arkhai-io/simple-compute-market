@@ -6,11 +6,12 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
-from domains.vms.settlement import submit_compute_fulfillment
+from market_storefront.settlement import submit_compute_fulfillment
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,10 @@ async def persist_escrow_fields_with_retry(
         "-- this fulfillment's durable identity is NOT recorded; restart/"
         "resume tracking for this escrow is degraded until reconciled "
         "manually. Last error: %s",
-        sorted(fields), escrow_uid, attempts, last_exc,
+        sorted(fields),
+        escrow_uid,
+        attempts,
+        last_exc,
     )
     return False
 
@@ -90,7 +94,9 @@ def _parse_start_utc(start_utc: str | None) -> datetime:
 
 
 def _lease_window_strings(
-    *, start_utc: str | None, duration_seconds: int,
+    *,
+    start_utc: str | None,
+    duration_seconds: int,
 ) -> tuple[str, str]:
     start = _parse_start_utc(start_utc)
     end = start + timedelta(seconds=int(duration_seconds))
@@ -137,11 +143,13 @@ async def _commit_capacity_hold(
         logger.warning(
             "[CAPACITY] Could not commit hold %s (lapsed at the ledger?): "
             "%s — reserving fresh",
-            held_reservation.get("capacity_reservation_id"), exc,
+            held_reservation.get("capacity_reservation_id"),
+            exc,
         )
         return None
     stage_event(
-        "provision", "capacity_hold_committed",
+        "provision",
+        "capacity_hold_committed",
         escrow_uid=escrow_uid,
         capacity_reservation_id=held_reservation.get("capacity_reservation_id"),
         resource_id=held_reservation.get("resource_id"),
@@ -176,7 +184,8 @@ async def _commit_fresh_reservation(
         idempotency_ref=escrow_uid,
     )
     stage_event(
-        "provision", "capacity_reservation_committed",
+        "provision",
+        "capacity_reservation_committed",
         escrow_uid=escrow_uid,
         capacity_reservation_id=capacity_reservation_id,
         resource_id=resource_id,
@@ -193,22 +202,30 @@ RegisterLeaseFn = Callable[..., Awaitable[Any]]
 ApplyFailurePolicyFn = Callable[..., Awaitable[None]]
 
 
-
 async def _build_vm_fulfillment_context(
-    *, escrow_uid: str, vm_target: str, ssh_public_key: str,
-    order: str | dict[str, Any] | None, duration_seconds: int,
-    start_utc: str | None, listing_id: str | None,
-    seller_order_id: str | None, chain_configs: dict[str, Any] | None,
+    *,
+    escrow_uid: str,
+    vm_target: str,
+    ssh_public_key: str,
+    order: str | dict[str, Any] | None,
+    duration_seconds: int,
+    start_utc: str | None,
+    listing_id: str | None,
+    seller_order_id: str | None,
+    chain_configs: dict[str, Any] | None,
 ) -> tuple[Any, dict[str, Any]]:
     """Build the immutable VM request and its restart-recovery envelope."""
     plan = build_vm_fulfillment_plan(
-        order=order, duration_seconds=duration_seconds, chain_configs=chain_configs,
+        order=order,
+        duration_seconds=duration_seconds,
+        chain_configs=chain_configs,
     )
     connectivity = None
     try:
         from market_storefront.services.fulfillment_service import (
             _connectivity_settings_from_storefront_config,
         )
+
         connectivity = _connectivity_settings_from_storefront_config()
     except Exception:
         logger.exception(
@@ -216,7 +233,8 @@ async def _build_vm_fulfillment_context(
             escrow_uid,
         )
     request_payload: dict[str, Any] = {
-        "vm_target": vm_target, "ssh_pubkey": ssh_public_key,
+        "vm_target": vm_target,
+        "ssh_pubkey": ssh_public_key,
     }
     if connectivity:
         request_payload["connectivity"] = connectivity
@@ -241,10 +259,16 @@ async def _build_vm_fulfillment_context(
 
 
 async def _reserve_capacity_for_obligation(
-    *, capacity: Any, held_reservation: dict[str, Any] | None,
-    escrow_uid: str, listing_id: str | None, order_id: str | None,
-    required_attributes: dict[str, Any], duration_seconds: int,
-    start_utc: str | None, stage_event: StageEventFn,
+    *,
+    capacity: Any,
+    held_reservation: dict[str, Any] | None,
+    escrow_uid: str,
+    listing_id: str | None,
+    order_id: str | None,
+    required_attributes: dict[str, Any],
+    duration_seconds: int,
+    start_utc: str | None,
+    stage_event: StageEventFn,
     site_id: str | None = None,
 ) -> dict[str, Any]:
     """Commit an accepted hold or create and commit an idempotent fallback.
@@ -257,9 +281,12 @@ async def _reserve_capacity_for_obligation(
     included, so no separate handling is needed at this layer.
     """
     reserved = await _commit_capacity_hold(
-        capacity=capacity, held_reservation=held_reservation,
-        escrow_uid=escrow_uid, duration_seconds=duration_seconds,
-        start_utc=start_utc, stage_event=stage_event,
+        capacity=capacity,
+        held_reservation=held_reservation,
+        escrow_uid=escrow_uid,
+        duration_seconds=duration_seconds,
+        start_utc=start_utc,
+        stage_event=stage_event,
     )
     if reserved is None:
         reserved = await capacity.reserve(
@@ -271,8 +298,11 @@ async def _reserve_capacity_for_obligation(
         )
         if reserved:
             await _commit_fresh_reservation(
-                capacity=capacity, reserved=reserved, escrow_uid=escrow_uid,
-                duration_seconds=duration_seconds, start_utc=start_utc,
+                capacity=capacity,
+                reserved=reserved,
+                escrow_uid=escrow_uid,
+                duration_seconds=duration_seconds,
+                start_utc=start_utc,
                 stage_event=stage_event,
             )
     if not reserved:
@@ -327,29 +357,41 @@ async def fulfill_vm_obligation(
 
     try:
         plan, recovery_context = await _build_vm_fulfillment_context(
-            escrow_uid=escrow_uid, vm_target=vm_target,
-            ssh_public_key=ssh_public_key, order=order,
-            duration_seconds=duration_seconds, start_utc=start_utc,
-            listing_id=listing_id, seller_order_id=seller_order_id,
+            escrow_uid=escrow_uid,
+            vm_target=vm_target,
+            ssh_public_key=ssh_public_key,
+            order=order,
+            duration_seconds=duration_seconds,
+            start_utc=start_utc,
+            listing_id=listing_id,
+            seller_order_id=seller_order_id,
             chain_configs=chain_configs,
         )
         order_id = plan.order_id
         required_attributes = plan.required_attributes
         await persist_escrow_fields_with_retry(
-            get_sqlite_client, escrow_uid=escrow_uid,
+            get_sqlite_client,
+            escrow_uid=escrow_uid,
             fulfillment_context=json.dumps(recovery_context, sort_keys=True),
             fulfillment_phase="context_persisted",
         )
 
         reserved = await _reserve_capacity_for_obligation(
-            capacity=capacity, held_reservation=held_reservation,
-            escrow_uid=escrow_uid, listing_id=listing_id, order_id=order_id,
+            capacity=capacity,
+            held_reservation=held_reservation,
+            escrow_uid=escrow_uid,
+            listing_id=listing_id,
+            order_id=order_id,
             required_attributes=required_attributes,
-            duration_seconds=duration_seconds, start_utc=start_utc,
-            stage_event=stage_event, site_id=site_id,
+            duration_seconds=duration_seconds,
+            start_utc=start_utc,
+            stage_event=stage_event,
+            site_id=site_id,
         )
         reserved_capacity_reservation_id = (
-            str(reserved.get("capacity_reservation_id")) if reserved.get("capacity_reservation_id") else None
+            str(reserved.get("capacity_reservation_id"))
+            if reserved.get("capacity_reservation_id")
+            else None
         )
         # Not coerced with str(...): resource_id is an opaque placement
         # detail the capacity boundary does not guarantee at this point
@@ -376,7 +418,8 @@ async def fulfill_vm_obligation(
             fulfillment_phase="capacity_reserved",
         )
         stage_event(
-            "provision", "resource_reserved",
+            "provision",
+            "resource_reserved",
             listing_id=order_id,
             escrow_uid=escrow_uid,
             pool_id=reserved.get("pool_id"),
@@ -395,7 +438,8 @@ async def fulfill_vm_obligation(
         delay_seconds = (start_dt - datetime.now(timezone.utc)).total_seconds()
         if delay_seconds > 0:
             stage_event(
-                "provision", "scheduled",
+                "provision",
+                "scheduled",
                 listing_id=order_id,
                 escrow_uid=escrow_uid,
                 resource_id=reserved_resource_id,
@@ -426,7 +470,8 @@ async def fulfill_vm_obligation(
                 capacity_reservation_id=reserved_capacity_reservation_id,
             )
             stage_event(
-                "provision", "job_submitted",
+                "provision",
+                "job_submitted",
                 listing_id=order_id,
                 escrow_uid=escrow_uid,
                 resource_id=reserved_resource_id,
@@ -471,7 +516,8 @@ async def fulfill_vm_obligation(
             error,
         )
         stage_event(
-            "provision", "failed",
+            "provision",
+            "failed",
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
             error=str(error),
@@ -528,7 +574,8 @@ async def fulfill_vm_obligation(
                     password=root_data.get("password"),
                     ssh_commands=(
                         json.dumps(root_data.get("ssh_commands"))
-                        if root_data.get("ssh_commands") else None
+                        if root_data.get("ssh_commands")
+                        else None
                     ),
                     ssh_key_path_host=root_data.get("ssh_key_path_host"),
                 )
@@ -540,7 +587,8 @@ async def fulfill_vm_obligation(
                     password=tenant_data.get("password"),
                     ssh_commands=(
                         json.dumps(tenant_data.get("ssh_commands"))
-                        if tenant_data.get("ssh_commands") else None
+                        if tenant_data.get("ssh_commands")
+                        else None
                     ),
                     key_type=tenant_data.get("key_type"),
                 )
@@ -574,7 +622,9 @@ async def fulfill_vm_obligation(
             logger.info(
                 "[LEASE] Registered lease with provisioning service "
                 "(reservation=%s escrow=%s expires=%s)",
-                reserved_capacity_reservation_id, escrow_uid, lease_end_utc,
+                reserved_capacity_reservation_id,
+                escrow_uid,
+                lease_end_utc,
             )
         except Exception as lease_err:
             logger.warning(
@@ -623,7 +673,8 @@ async def fulfill_vm_obligation(
             error,
         )
         stage_event(
-            "settlement", "failed_after_provisioning",
+            "settlement",
+            "failed_after_provisioning",
             listing_id=order_id,
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
@@ -666,7 +717,8 @@ async def fulfill_vm_obligation(
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
     stage_event(
-        "provision", "fulfilled",
+        "provision",
+        "fulfilled",
         listing_id=order_id,
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,

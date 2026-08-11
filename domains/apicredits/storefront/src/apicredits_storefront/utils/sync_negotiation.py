@@ -16,22 +16,51 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+from core_storefront.negotiation_composition import compose_negotiation_catalogue
 from core_storefront.negotiation_sync import (
     LIVE_LISTING_STATUSES,
     OfferUnfulfillableError,
     StorefrontPausedError,
+)
+from core_storefront.negotiation_sync import (
     coerce_pinned_proposal as _coerce_pinned_proposal,
+)
+from core_storefront.negotiation_sync import (
     create_sync_negotiation_thread as _create_sync_negotiation_thread,
+)
+from core_storefront.negotiation_sync import (
     history_from_messages as _history_from_messages,
+)
+from core_storefront.negotiation_sync import (
     record_buyer_accept_message as _record_buyer_accept_message,
+)
+from core_storefront.negotiation_sync import (
     record_buyer_counter_message as _record_buyer_counter_message,
+)
+from core_storefront.negotiation_sync import (
     record_buyer_exit_message as _record_buyer_exit_message,
+)
+from core_storefront.negotiation_sync import (
     record_seller_decision_message as _record_seller_decision_message,
 )
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_core.schemas import EscrowProposal
+from market_policy import (
+    NegotiationCatalogue,
+    PolicyRole,
+    configured_policy_names,
+)
+from market_policy.negotiation_middleware import NegotiationRound
+from market_policy.scalar_policies import _amount_from_proposal
+
+from apicredits_storefront import container as _container
 from domains.apicredits.listings.models import coerce_resource_dict
 from domains.apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
+)
+from domains.apicredits.negotiation.policy_sources import (
+    API_CREDITS_DEFAULT_SELLER_CHAIN,
 )
 from domains.apicredits.negotiation.storefront_round import (
     ApiCreditsSellerRoundHook,
@@ -41,10 +70,6 @@ from domains.apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
-from market_policy.scalar_policies import _amount_from_proposal
-from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
-from market_core.schemas import EscrowProposal
-from market_policy.negotiation_middleware import NegotiationRound
 
 logger = logging.getLogger(__name__)
 
@@ -73,16 +98,43 @@ def _default_min_price() -> Any:
     return settings.get("pricing.default_min_price")
 
 
+def compose_policy_catalogue() -> NegotiationCatalogue:
+    """Build this storefront's negotiation policy catalogue.
+
+    Called once from lifespan startup, which is after configuration resolves and
+    before the application serves traffic. The result is held on the container,
+    not in module state, so one process can still compose more than one role and
+    a test can compose a deliberately invalid catalogue.
+
+    Only this role's own mechanisms are authorized. Operator directory and
+    entry-point discovery are deliberately absent — this domain declares no
+    policies obtained that way, so nothing in configuration can introduce them.
+    """
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
+
+    negotiation_config = _negotiation_settings()
+    return compose_negotiation_catalogue(
+        [get_market_domain_contract()],
+        role=PolicyRole.STOREFRONT,
+        requested_policies=configured_policy_names(
+            negotiation_config,
+            default_chain=API_CREDITS_DEFAULT_SELLER_CHAIN,
+            default_terminal="listed_price",
+        ),
+    )
+
+
 def _default_seller_round_hook(sqlite_client: Any) -> ApiCreditsSellerRoundHook:
+    from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.services.capacity_client import build_capacity_client
     from apicredits_storefront.services.keys_lookup import lookup_key_record
-    from apicredits_storefront.domain_runtime import get_market_domain_contract
 
     policy = get_market_domain_contract().storefront
     assert policy is not None
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
         lookup_key_record,
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
         default_min_price=_default_min_price(),
@@ -92,10 +144,7 @@ def _default_seller_round_hook(sqlite_client: Any) -> ApiCreditsSellerRoundHook:
 def _chain_config_paths() -> dict[str, str | None]:
     from apicredits_storefront.utils.config import CHAINS
 
-    return {
-        name: chain.alkahest_address_config_path
-        for name, chain in CHAINS.items()
-    }
+    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
 def _seller_wallet_address() -> str | None:
@@ -107,11 +156,14 @@ def _seller_wallet_address() -> str | None:
 
 
 def _seller_reference_amount(listing: dict[str, Any], quantity: int | None) -> int:
-    unit = Decimal(str(
-        extract_unit_price_from_order(
-            listing, default_min_price=_default_min_price(),
+    unit = Decimal(
+        str(
+            extract_unit_price_from_order(
+                listing,
+                default_min_price=_default_min_price(),
+            )
         )
-    ))
+    )
     return int(unit * int(quantity if quantity is not None else 1))
 
 
@@ -193,12 +245,14 @@ async def _place_quota_hold(
     except Exception as exc:
         logger.warning(
             "[NEGOTIATION] Could not place quota hold for %s: %s",
-            negotiation_id, exc,
+            negotiation_id,
+            exc,
         )
         return
     if not held:
         stage_event(
-            "negotiation", "capacity_hold_unavailable",
+            "negotiation",
+            "capacity_hold_unavailable",
             negotiation_id=negotiation_id,
             listing_id=listing_id,
         )
@@ -211,7 +265,8 @@ async def _place_quota_hold(
         expires_at=held.get("hold_expires_at"),
     )
     stage_event(
-        "negotiation", "capacity_hold_placed",
+        "negotiation",
+        "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
         capacity_reservation_id=held.get("capacity_reservation_id"),
@@ -264,12 +319,14 @@ async def start_sync_negotiation(
         if proposal is not None and hasattr(proposal, "model_dump")
         else proposal
     )
-    history = [NegotiationRound(
-        round_number=0,
-        sender="them",
-        action="initial",
-        proposal=proposal_dict,
-    )]
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=proposal_dict,
+        )
+    ]
     try:
         round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
         round_result = await round_hook(
@@ -283,7 +340,8 @@ async def start_sync_negotiation(
     except ValueError as exc:
         if "price-less" in str(exc) or "default_min_price" in str(exc):
             raise OfferUnfulfillableError(
-                "no_floor_price", listing_id=our_listing_id,
+                "no_floor_price",
+                listing_id=our_listing_id,
             ) from exc
         raise
     our_amount = round_result.our_amount
@@ -320,9 +378,7 @@ async def start_sync_negotiation(
         requested_duration_seconds=None,
         requested_start_utc=None,
         buyer_escrow_proposal=(
-            accepted_proposal.model_dump()
-            if accepted_proposal is not None
-            else None
+            accepted_proposal.model_dump() if accepted_proposal is not None else None
         ),
         opening_sender=their_agent_url or buyer_address,
         opening_amount=their_amount,
@@ -358,7 +414,8 @@ async def start_sync_negotiation(
             quantity=quantity,
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=0,
         our_amount=our_amount,
@@ -385,9 +442,7 @@ async def start_sync_negotiation(
         if decision.action == "accept":
             response.update(artifacts)
         else:
-            response["accepted_escrow_proposal"] = artifacts[
-                "accepted_escrow_proposal"
-            ]
+            response["accepted_escrow_proposal"] = artifacts["accepted_escrow_proposal"]
     return response
 
 
@@ -416,7 +471,8 @@ async def continue_sync_negotiation(
     our_listing_id = thread.get("our_listing_id")
     our_order_dict = (
         await sqlite_client.load_listing(listing_id=our_listing_id)
-        if our_listing_id else None
+        if our_listing_id
+        else None
     )
     if not our_order_dict:
         raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
@@ -435,8 +491,7 @@ async def continue_sync_negotiation(
     )
     uses_scalar_amount = isinstance(pinned_fields, dict) and "amount" in pinned_fields
     our_amount = (
-        _seller_reference_amount(our_order_dict, quantity)
-        if uses_scalar_amount else 0
+        _seller_reference_amount(our_order_dict, quantity) if uses_scalar_amount else 0
     )
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
@@ -445,9 +500,12 @@ async def continue_sync_negotiation(
         from decimal import Decimal as _Decimal
 
         last_seller_amount = next(
-            (int(_Decimal(str(m["proposed_price"]))) for m in reversed(messages)
-             if m.get("action_taken") == "counter_offer"
-             and m.get("sender") != buyer_address),
+            (
+                int(_Decimal(str(m["proposed_price"])))
+                for m in reversed(messages)
+                if m.get("action_taken") == "counter_offer"
+                and m.get("sender") != buyer_address
+            ),
             our_amount,
         )
         await _record_buyer_accept_message(
@@ -469,7 +527,8 @@ async def continue_sync_negotiation(
             quantity=quantity,
         )
         stage_event(
-            "negotiation", "accepted",
+            "negotiation",
+            "accepted",
             negotiation_id=neg_id,
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
@@ -491,7 +550,8 @@ async def continue_sync_negotiation(
             our_amount=our_amount,
         )
         stage_event(
-            "negotiation", "exited",
+            "negotiation",
+            "exited",
             negotiation_id=neg_id,
             reason=buyer_reason or "buyer_exit",
         )
@@ -504,14 +564,18 @@ async def continue_sync_negotiation(
 
     our_sender = BASE_URL_OVERRIDE or "seller"
     history = _history_from_messages(
-        messages, our_sender, buyer_pinned_proposal=buyer_pinned_proposal,
+        messages,
+        our_sender,
+        buyer_pinned_proposal=buyer_pinned_proposal,
     )
-    history.append(NegotiationRound(
-        round_number=len(history),
-        sender="them",
-        action="counter",
-        proposal=buyer_proposal or buyer_pinned_proposal,
-    ))
+    history.append(
+        NegotiationRound(
+            round_number=len(history),
+            sender="them",
+            action="counter",
+            proposal=buyer_proposal or buyer_pinned_proposal,
+        )
+    )
     round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
     round_result = await round_hook(
         listing=our_order_dict,
@@ -542,8 +606,10 @@ async def continue_sync_negotiation(
     )
     decision = round_result.decision
     await _record_seller_decision(
-        neg_id=neg_id, our_amount=our_amount,
-        their_amount=buyer_amount, decision=decision,
+        neg_id=neg_id,
+        our_amount=our_amount,
+        their_amount=buyer_amount,
+        decision=decision,
     )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
@@ -561,7 +627,8 @@ async def continue_sync_negotiation(
             quantity=quantity,
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=len(history),
         our_amount=our_amount,
@@ -603,7 +670,5 @@ async def _record_seller_decision(
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,
-        decision_amount=(
-            int(decision_amount) if decision_amount is not None else None
-        ),
+        decision_amount=(int(decision_amount) if decision_amount is not None else None),
     )

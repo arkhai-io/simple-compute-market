@@ -29,10 +29,18 @@ init-venv:
 init: init-venv
 	uv sync --find-links $(DIST_DIR)
 
+# Every internal wheel this project declares must be listed. A dependency
+# omitted here keeps whatever version the venv already resolved, so a scenario
+# can exercise fresh domain wheels against a stale kit — and the resulting
+# failure appears in the scenario rather than at the boundary that caused it.
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
+	--upgrade-package arkhai-apicredits-buyer        --reinstall-package arkhai-apicredits-buyer \
 	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
 	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
+	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-vms-buyer               --reinstall-package arkhai-vms-buyer \
 	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
 	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
 

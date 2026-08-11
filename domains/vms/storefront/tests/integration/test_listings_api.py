@@ -9,23 +9,25 @@ ListingsController router, backed by an in-memory
 SQLiteClient. This mirrors how provisioning-service tests wire a real
 FastAPI app with dependency overrides.
 """
+
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import AsyncIterator
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-
-import market_storefront.container as _container
-from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.controllers.listings_controller import router as listings_router
-from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
+import market_storefront.container as _container
+from market_storefront.controllers.listings_controller import router as listings_router
+from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.utils.sqlite_client import SQLiteClient
+
 ADMIN_KEY = "test-admin-key"
+
 
 def _key_enforcer(expected_key: str):
     """Depends-compatible function that enforces a specific X-Admin-Key header.
@@ -33,16 +35,22 @@ def _key_enforcer(expected_key: str):
     requiring a mutable CONFIG (which is a frozen dataclass).
     """
     from fastapi import Header, HTTPException
-    def _dep(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
-        if x_admin_key != expected_key:
-            raise HTTPException(status_code=403, detail="Valid X-Admin-Key header required")
-    return _dep
 
+    def _dep(
+        x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    ) -> None:
+        if x_admin_key != expected_key:
+            raise HTTPException(
+                status_code=403, detail="Valid X-Admin-Key header required"
+            )
+
+    return _dep
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
@@ -70,12 +78,16 @@ async def _seed_listing(
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource=offer_resource,
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {
+                    "token": "0x0000000000000000000000000000000000000001"
+                },
+                "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -122,6 +134,7 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 # ---------------------------------------------------------------------------
 # GET /api/v1/listings
 # ---------------------------------------------------------------------------
+
 
 class TestListListings:
     async def test_empty_list(self, client):
@@ -185,6 +198,7 @@ class TestListListings:
 # GET /api/v1/listings/{listing_id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetListing:
     async def test_returns_listing(self, client):
         c, db = client
@@ -203,6 +217,7 @@ class TestGetListing:
 # ---------------------------------------------------------------------------
 # POST /api/v1/listings/{listing_id}/pause
 # ---------------------------------------------------------------------------
+
 
 class TestPauseListing:
     async def test_requires_admin_key(self, client_no_key):
@@ -227,6 +242,7 @@ class TestPauseListing:
 # ---------------------------------------------------------------------------
 # POST /api/v1/listings/{listing_id}/resume
 # ---------------------------------------------------------------------------
+
 
 class TestResumeListing:
     async def test_requires_admin_key(self, client_no_key):
@@ -265,7 +281,9 @@ class TestResumeListing:
     async def test_legacy_invalid_listing_fails_without_clearing_pause(self, client):
         c, db = client
         await _seed_listing(
-            db, "legacy-invalid", valid_capacity_identity=False,
+            db,
+            "legacy-invalid",
+            valid_capacity_identity=False,
         )
         await db.set_listing_paused(listing_id="legacy-invalid", paused=True)
 
@@ -286,7 +304,7 @@ class TestResumeListing:
 # is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 @pytest_asyncio.fixture
@@ -294,9 +312,7 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
 
-    listing_svc = ListingService(
-        sqlite_client=db, alkahest_clients=None
-    )
+    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
@@ -308,7 +324,9 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
-        "http://test", transport=transport, admin_key=ADMIN_KEY,
+        "http://test",
+        transport=transport,
+        admin_key=ADMIN_KEY,
         private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
     ) as c:
         yield c, db
@@ -323,9 +341,7 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
 
-    listing_svc = ListingService(
-        sqlite_client=db, alkahest_clients=None
-    )
+    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
@@ -338,7 +354,8 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     transport = httpx.ASGITransport(app=app)
     # No admin_key supplied → X-Admin-Key header absent → 403
     async with StorefrontClient(
-        "http://test", transport=transport,
+        "http://test",
+        transport=transport,
         private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
     ) as c:
         yield c
@@ -349,22 +366,28 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 
 _OFFER = {
     "resource_id": "res-test-1",
-    "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
+    "gpu_model": "H200",
+    "gpu_count": 1,
+    "sla": 99.0,
+    "region": "California, US",
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
 # storefront just stores what it's told.
-_ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": "0x" + "11" * 20,
-    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
-}]
+_ACCEPTED_ESCROWS = [
+    {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+        "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
+    }
+]
 
 
 # ---------------------------------------------------------------------------
 # POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluateNegotiate:
     """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run."""
@@ -374,10 +397,18 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-1")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "market_storefront.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-1", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            result = await c.evaluate_negotiate(
+                "neg-eval-1",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
+            )
         assert isinstance(result.would_negotiate, bool)
 
     async def test_returns_decision_fields(self, admin_client):
@@ -385,10 +416,18 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-2")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "market_storefront.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-2", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            result = await c.evaluate_negotiate(
+                "neg-eval-2",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
+            )
         assert result.decision in ("accept", "counter", "exit")
         assert result.direction == "maximize"
         assert result.our_reference_amount > 0
@@ -399,11 +438,17 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "market_storefront.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-floor", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 9000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000}
+                "neg-eval-floor",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 9000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
             )
         # At exactly the floor price, bisection should accept or counter, not exit
         assert result.would_negotiate is True, (
@@ -415,7 +460,15 @@ class TestEvaluateNegotiate:
         """Non-existent listing_id returns 404."""
         c, _ = admin_client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_negotiate("ghost-listing", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            await c.evaluate_negotiate(
+                "ghost-listing",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 1000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
+            )
         assert "404" in str(exc_info.value)
 
     async def test_no_negotiation_thread_created(self, admin_client):
@@ -423,11 +476,21 @@ class TestEvaluateNegotiate:
         c, db = admin_client
         await _seed_listing(db, "neg-eval-no-thread")
         with patch(
-            "domains.vms.negotiation.storefront_round._load_storefront_chain",
+            "market_storefront.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            await c.evaluate_negotiate("neg-eval-no-thread", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
-        threads = await db.get_active_negotiations_for_listing(listing_id="neg-eval-no-thread")
+            await c.evaluate_negotiate(
+                "neg-eval-no-thread",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
+            )
+        threads = await db.get_active_negotiations_for_listing(
+            listing_id="neg-eval-no-thread"
+        )
         assert len(threads) == 0, (
             "evaluate-negotiate created a negotiation thread — it must be a pure dry-run"
         )
@@ -435,7 +498,15 @@ class TestEvaluateNegotiate:
     async def test_requires_admin_key(self, admin_no_key_client):
         """Admin key required — missing key returns 403."""
         with pytest.raises(StorefrontClientError) as exc_info:
-            await admin_no_key_client.evaluate_negotiate("any", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            await admin_no_key_client.evaluate_negotiate(
+                "any",
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 1000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
+            )
         assert "403" in str(exc_info.value)
 
 
@@ -445,7 +516,8 @@ def _bisection_chain():
     Skips the guards so the test's seeded listings don't need to match
     an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
-    from domains.vms.negotiation.policies import bisection_middleware
+    from market_policy.scalar_policies import bisection_middleware
+
     return [bisection_middleware]
 
 
@@ -463,7 +535,7 @@ def _bisection_chain():
 
 # Hardhat/Anvil deterministic test key pair — safe for tests, never mainnet.
 _TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-_TEST_WALLET     = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # address for above key
+_TEST_WALLET = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # address for above key
 
 
 @pytest_asyncio.fixture
@@ -533,11 +605,14 @@ async def seller_auth_full_client(db):
 
 class TestLegacyInvalidListingRemoval:
     async def test_seller_can_explicitly_close_invalid_legacy_listing(
-        self, seller_auth_full_client,
+        self,
+        seller_auth_full_client,
     ):
         c, db = seller_auth_full_client
         await _seed_listing(
-            db, "legacy-invalid-close", valid_capacity_identity=False,
+            db,
+            "legacy-invalid-close",
+            valid_capacity_identity=False,
         )
         with patch(
             "market_storefront.services.publication_service.close_order",
@@ -550,9 +625,7 @@ class TestLegacyInvalidListingRemoval:
             result = await c.close_listing("legacy-invalid-close")
 
         assert result.status == "closed"
-        close_order.assert_awaited_once_with(
-            {"listing_id": "legacy-invalid-close"}
-        )
+        close_order.assert_awaited_once_with({"listing_id": "legacy-invalid-close"})
 
 
 class TestCreateListing:
@@ -565,7 +638,9 @@ class TestCreateListing:
     or evaluate-only tests.
     """
 
-    async def test_creates_listing_and_returns_listing_id(self, seller_auth_full_client):
+    async def test_creates_listing_and_returns_listing_id(
+        self, seller_auth_full_client
+    ):
         """Valid request creates a listing and returns a listing_id."""
         c, db = seller_auth_full_client
         result = await c.create_listing(
@@ -577,11 +652,14 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"No listing_id in response: {result}"
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        listing_id = (
+            result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        )
         assert listing_id, "listing_id must be non-empty"
 
     async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
-        self, seller_auth_full_client,
+        self,
+        seller_auth_full_client,
     ):
         """A compute offer with no pool_id and no resource_id can't be
         reliably matched to inventory at reservation time and must be
@@ -610,7 +688,9 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        listing_id = (
+            result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        )
         assert listing_id, "listing_id must be non-empty"
 
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
@@ -628,7 +708,11 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
+        listing_id = (
+            result.listing_id
+            if hasattr(result, "listing_id")
+            else result.get("listing_id")
+        )
         assert listing_id is not None, (
             "listing_id is None — policy pipeline returned no_action or service failed. "
             f"Full response: {result}"
@@ -650,7 +734,11 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
+        listing_id = (
+            result.listing_id
+            if hasattr(result, "listing_id")
+            else result.get("listing_id")
+        )
         assert listing_id is not None, (
             f"paused=True create should still return a listing_id. Response: {result}"
         )
@@ -676,8 +764,6 @@ class TestCreateListing:
             isinstance(result, dict) and "listing_id" in result
         ), f"Unexpected response shape: {result}"
 
-
-
     """Proves the EIP-191 auth contract for POST /api/v1/listings/create.
 
     The client signs ``create_listing:{agent_wallet_address}:{ts}`` and the
@@ -699,8 +785,12 @@ class TestCreateListing:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
                 agent_wallet_address=_TEST_WALLET,
-                offer={"gpu_model": "H200", "gpu_count": 1,
-                       "sla": 99.0, "region": "California, US"},
+                offer={
+                    "gpu_model": "H200",
+                    "gpu_count": 1,
+                    "sla": 99.0,
+                    "region": "California, US",
+                },
                 accepted_escrows=_ACCEPTED_ESCROWS,
             )
         # Auth passed — error is from missing listing_svc (500), not auth (403)
@@ -722,8 +812,12 @@ class TestCreateListing:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
                 agent_wallet_address=wrong_wallet,  # client signs this, server checks _TEST_WALLET
-                offer={"gpu_model": "H200", "gpu_count": 1,
-                       "sla": 99.0, "region": "California, US"},
+                offer={
+                    "gpu_model": "H200",
+                    "gpu_count": 1,
+                    "sla": 99.0,
+                    "region": "California, US",
+                },
                 accepted_escrows=_ACCEPTED_ESCROWS,
             )
         assert "403" in str(exc_info.value), (

@@ -349,8 +349,13 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
 
     reconciles = 0
 
-    async def fake_reconcile(db_path, *, member_availability=None):
+    # ``home_site`` is required, not defaulted: this fake stands in for both
+    # reconcilers, and both require it. Accepting it optionally is what let the
+    # periodic reconcile call them without it — the fake absorbed the omission
+    # and the poller swallowed the resulting TypeError into a warning.
+    async def fake_reconcile(db_path, *, home_site, member_availability=None, **rest):
         nonlocal reconciles
+        assert home_site, "reconcilers need a home site to interpret availability"
         reconciles += 1
         return []
 

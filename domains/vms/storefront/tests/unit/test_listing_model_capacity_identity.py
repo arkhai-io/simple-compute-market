@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from arkhai_vms.listing_models import Listing
 from pydantic import ValidationError
-
-from domains.vms.listings.models import Listing
 
 
 def _listing(pool_id=None, resource_id=None):
@@ -25,9 +24,18 @@ def _listing(pool_id=None, resource_id=None):
 
 @pytest.mark.parametrize(
     ("pool_id", "resource_id"),
-    [(None, None), ("", None), ("   ", None), (None, ""), ("bad/id", None), (None, "bad id")],
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        (None, ""),
+        ("bad/id", None),
+        (None, "bad id"),
+    ],
 )
-def test_compute_listing_rejects_missing_blank_or_malformed_identity(pool_id, resource_id):
+def test_compute_listing_rejects_missing_blank_or_malformed_identity(
+    pool_id, resource_id
+):
     with pytest.raises(ValidationError):
         Listing.model_validate(_listing(pool_id=pool_id, resource_id=resource_id))
 

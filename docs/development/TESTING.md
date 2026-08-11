@@ -167,6 +167,78 @@ clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
 
+## Agent-Driven Capacity Harness
+
+The four levels above all run inside this repository against this
+repository's code. The agent-driven capacity harness in
+`tools/issue-discovery` is not a fifth level and does not belong in the
+jurisdiction table: it describes runs performed *outside* the repository
+by an external orchestrator, and validates their recorded results after
+the fact.
+
+Its jurisdiction is contract validation and finding production — whether
+a declared capacity scenario is admissible, whether a supplied result
+correlates through the current reservation and fulfillment lifecycle,
+whether an outcome counts as expected scarcity, and what sanitized
+finding and issue plan follow. It performs no market, wallet, cloud,
+host, provisioning, VM, or GPU action, and makes no authenticated GitHub
+call. The permanent contract lives in
+`openspec/specs/test-compatibility/spec.md`'s "Agent-driven VM capacity
+contracts are finite and non-executing" requirement.
+
+**Where to put a new test.** The rule at the top of this document still
+applies — the lowest level that can meaningfully prove the behavior. A
+scenario about the product's own reservation, scheduling, or scarcity
+behavior belongs at the level that owns it, usually integration or
+system integration, not in this harness. The harness earns a test only
+when the behavior under test is the harness's own: schema admissibility,
+result evaluation, fingerprint stability, privacy refusal, or planning
+determinism.
+
+**How it is validated.** By its own locked suite, which is excluded from
+the default Tests workflow because its bootstrap tests inspect the host
+system. Run it explicitly:
+
+```bash
+cd tools/issue-discovery
+uv --no-config run pytest -q
+```
+
+The suite is verified on CPython 3.12 and 3.14, and its result codes do
+not vary across that range. See
+`docs/development/ISSUE_DISCOVERY.md`'s "Privacy and validation
+responsibility" for the input bounds this depends on.
+
+## Packaging Validation
+
+The four levels above test behaviour. They cannot test whether a distribution is
+correctly assembled: every level runs inside a repository checkout, where a module
+resolves whether or not the wheel that claims to ship it actually does, and a
+dependency resolves whether or not the package importing it declares one. That
+class of defect reaches production while every suite is green.
+
+Three checks cover it, and none is a runtime test:
+
+| Check | Asserts |
+|---|---|
+| `make check-wheel-manifests` | Every module in a project is shipped by exactly one distribution; no manifest lists a tombstoned file; no package under `domains/` is unowned |
+| `make check-wheel-closure` | Each wheel, installed alone with only its own declared dependencies, can import every module it ships |
+| `make test-scripts` | The two checks above behave as intended, against miniature repositories built per case |
+
+`check-wheel-closure` installs one wheel at a time on purpose. Installing the
+whole internal set proves the assembled set is consistent and nothing more: a
+package whose metadata omits a dependency still imports, because a sibling
+installed it. Both checks are worth running; they establish different things.
+
+Both consult a local wheelhouse and pass internal dependencies as explicit file
+paths, because several internal distributions are also published publicly at the
+same version numbers. A resolver given only an index and a version cannot tell a
+fresh local build from a stale published one.
+
+Do not classify these as unit, integration, or system tests. Their subject is the
+build artifact rather than the running system, and describing them as integration
+overstates what a green run means.
+
 ## Coverage Contract Between Levels
 
 Each level has a defined jurisdiction. Duplicating coverage across

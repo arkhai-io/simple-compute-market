@@ -1,7 +1,6 @@
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.escrow_selection import select_escrow_entry
-from domains.vms.settlement import escrow_proposal_from_accepted_entry
-
+from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 
 _ESCROW = "0x" + "11" * 20
 _TOKEN = "0x" + "22" * 20
@@ -25,14 +24,17 @@ def test_select_escrow_entry_filters_by_chain_and_token():
         ],
     }
 
-    assert select_escrow_entry(
-        listing,
-        chain_name="anvil",
-        token_contract_filter=_TOKEN,
-        assume_yes=True,
-        rpc_url="http://rpc",
-        buyer_address="0x" + "aa" * 20,
-    )["escrow_address"] == _ESCROW
+    assert (
+        select_escrow_entry(
+            listing,
+            chain_name="anvil",
+            token_contract_filter=_TOKEN,
+            assume_yes=True,
+            rpc_url="http://rpc",
+            buyer_address="0x" + "aa" * 20,
+        )["escrow_address"]
+        == _ESCROW
+    )
 
 
 def test_escrow_proposal_from_accepted_entry_selects_first_matching_demand():

@@ -44,6 +44,7 @@ class DealState:
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
     _provisioning_mock_mode: bool = False
+    _executor_host_registered: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
@@ -208,6 +209,23 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
+def site_capacity_admin_client():
+    """Canonical sync capacity-admin client for the provisioning site authority.
+
+    The site ledger is a separate store from the host registry: `probe` and
+    `reserve` match against `CapacityBucket` rows, which only
+    `register_resource` creates. A scenario that reserves capacity has to put a
+    resource there, and does it through the same typed client an operator would
+    rather than a wrapper around the async one.
+    """
+    from market_site_client import SyncSiteCapacityAdminClient
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
+    return SyncSiteCapacityAdminClient(url, admin_key)
+
+
+@pytest.fixture(scope="module")
 def provisioning_client():
     """Canonical SyncProvisioningClient.
 
@@ -236,53 +254,6 @@ def provisioning_test_client():
     admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
         yield client
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _ensure_provisioning_host_registered(provisioning_client):
-    """Idempotently register the e2e ``kvm1`` host in the provisioning service.
-
-    The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
-    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
-    in the provisioning ``hosts`` table. Compose-launched provisioning
-    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
-    configured); production deployments seed the table via Helm secret
-    or a bind-mounted IaC inventory. Inserting the row here keeps the
-    e2e scenario hermetic and idempotent across re-runs.
-
-    The credentials are stub values (path-type, fake path) - mock
-    provisioning never SSHes into the host, so they never get used.
-    Real-host integration tests use a real key path; this fixture is
-    only relevant when ``ACTIVE_PROFILES=mock``.
-    """
-    from vm_provisioning_operator import ProvisioningError
-    from vm_provisioning_operator import HostCreate
-
-    host_name = "kvm1"
-
-    try:
-        provisioning_client.get_host(host_name)
-    except ProvisioningError as exc:
-        if exc.status_code != 404:
-            pytest.skip(f"Could not probe provisioning host {host_name!r}: {exc}")
-    else:
-        log.info("[conftest] Provisioning host %r already registered", host_name)
-        return
-
-    body = HostCreate(
-        name=host_name,
-        kvm_host="127.0.0.1",
-        ssh_user="stub",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/stub-e2e-key",
-        gpu_count=1,
-        enabled=True,
-    )
-    try:
-        provisioning_client.register_host(body)
-    except ProvisioningError as exc:
-        pytest.skip(f"Could not register provisioning host {host_name!r}: {exc}")
-    log.info("[conftest] Registered provisioning host %r", host_name)
 
 
 @pytest.fixture(scope="module")

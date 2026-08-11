@@ -36,34 +36,55 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from domains.vms.negotiation import storefront_round as vm_storefront_round
-from domains.vms.negotiation.storefront_round import (
-    SellerRoundHook,
-    SellerRoundResult,
+from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
+from arkhai_vms.negotiation.policy_sources import VM_DEFAULT_SELLER_CHAIN
+from core_storefront.negotiation_composition import compose_negotiation_catalogue
+from core_storefront.negotiation_sync import (
+    LIVE_LISTING_STATUSES,
+    OfferUnfulfillableError,
+    StorefrontPausedError,
+)
+from core_storefront.negotiation_sync import (
+    coerce_pinned_proposal as _coerce_pinned_proposal,
+)
+from core_storefront.negotiation_sync import (
+    create_sync_negotiation_thread as _create_sync_negotiation_thread,
+)
+from core_storefront.negotiation_sync import (
+    history_from_messages as _history_from_messages,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_accept_message as _record_buyer_accept_message,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_counter_message as _record_buyer_counter_message,
+)
+from core_storefront.negotiation_sync import (
+    record_buyer_exit_message as _record_buyer_exit_message,
+)
+from core_storefront.negotiation_sync import (
+    record_seller_decision_message as _record_seller_decision_message,
+)
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_core.schemas import EscrowProposal
+from market_policy import (
+    NegotiationCatalogue,
+    PolicyRole,
+    configured_policy_names,
 )
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
 )
-from domains.vms.negotiation.policies import _amount_from_proposal
+from market_policy.scalar_policies import _amount_from_proposal
 
-from market_core.schemas import EscrowProposal
-from core_storefront.negotiation_sync import (
-    LIVE_LISTING_STATUSES,
-    OfferUnfulfillableError,
-    StorefrontPausedError,
-    coerce_pinned_proposal as _coerce_pinned_proposal,
-    create_sync_negotiation_thread as _create_sync_negotiation_thread,
-    history_from_messages as _history_from_messages,
-    record_buyer_accept_message as _record_buyer_accept_message,
-    record_buyer_counter_message as _record_buyer_counter_message,
-    record_buyer_exit_message as _record_buyer_exit_message,
-    record_seller_decision_message as _record_seller_decision_message,
+from market_storefront import container as _container
+from market_storefront.listings import extract_compute_from_order
+from market_storefront.negotiation import storefront_round as vm_storefront_round
+from market_storefront.negotiation.storefront_round import (  # noqa: F401
+    SellerRoundHook,
+    SellerRoundResult,  # re-exported: tests and callers import it from here
 )
-from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
-from arkhai_vms import provision_duration_seconds, provision_start_utc
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.settlement.proposals import accepted_escrow_artifacts_from_proposal
 
 logger = logging.getLogger(__name__)
 
@@ -90,18 +111,39 @@ def _default_min_price() -> Any:
     return settings.pricing.default_min_price
 
 
-def _discover_file_policies(force: bool = False) -> None:
-    vm_storefront_round._discover_file_policies(
-        force=force,
-        extra_policy_paths=_extra_policy_paths(),
+def compose_policy_catalogue() -> NegotiationCatalogue:
+    """Build this storefront's negotiation policy catalogue.
+
+    Called once from lifespan startup, which is after configuration resolves and
+    before the application serves traffic. The result is held on the container,
+    not in module state, so one process can still compose more than one role and
+    a test can compose a deliberately invalid catalogue.
+
+    This role authorizes operator directory discovery, because
+    ``[negotiation] extra_policy_paths`` is part of its configuration surface.
+    The conventional user directory is included only when that setting names
+    it; it is no longer scanned on every chain load.
+    """
+    from market_storefront.domain_runtime import get_market_domain_contract
+
+    negotiation_config = _negotiation_settings()
+    return compose_negotiation_catalogue(
+        [get_market_domain_contract()],
+        role=PolicyRole.STOREFRONT,
+        requested_policies=configured_policy_names(
+            negotiation_config,
+            default_chain=VM_DEFAULT_SELLER_CHAIN,
+            default_terminal="bisection",
+        ),
+        directory_roots=_extra_policy_paths(),
     )
 
 
 def _load_storefront_chain():
     return vm_storefront_round._load_storefront_chain(
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
-        extra_policy_paths=_extra_policy_paths(),
     )
 
 
@@ -119,7 +161,7 @@ def _seller_reference_amount(
 async def _run_default_seller_round_policy(**kwargs: Any):
     kwargs.setdefault("negotiation_config", _negotiation_settings())
     kwargs.setdefault("chains", _chain_settings())
-    kwargs.setdefault("extra_policy_paths", _extra_policy_paths())
+    kwargs.setdefault("policy_catalogue", _container.policy_catalogue())
     kwargs.setdefault("default_min_price", _default_min_price())
     return await vm_storefront_round._run_default_seller_round_policy(**kwargs)
 
@@ -128,16 +170,16 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
     # The round hook reads its availability snapshot through the
     # site-authority capacity client; embedded mode wraps the same
     # SQLite handle the rest of this flow uses.
-    from market_storefront.services.capacity_client import build_capacity_client
     from market_storefront.domain_runtime import get_market_domain_contract
+    from market_storefront.services.capacity_client import build_capacity_client
 
     policy = get_market_domain_contract().storefront
     assert policy is not None
     return policy.run_negotiation_policy(
         build_capacity_client(lambda: sqlite_client),
+        policy_catalogue=_container.policy_catalogue(),
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
-        extra_policy_paths=_extra_policy_paths(),
         default_min_price=_default_min_price(),
     )
 
@@ -145,10 +187,7 @@ def _default_seller_round_hook(sqlite_client: Any) -> SellerRoundHook:
 def _chain_config_paths() -> dict[str, str | None]:
     from market_storefront.utils.config import CHAINS
 
-    return {
-        name: chain.alkahest_address_config_path
-        for name, chain in CHAINS.items()
-    }
+    return {name: chain.alkahest_address_config_path for name, chain in CHAINS.items()}
 
 
 def _normalize_vm_message_terms(provision_terms: Any) -> Any | None:
@@ -198,8 +237,7 @@ def _reject_unsupported_resource_shape_request(
     mismatched = {
         key: {"requested": requested[key], "listing": listing_compute.get(key)}
         for key in _DIMENSION_COMPUTE_KEYS
-        if requested.get(key) is not None
-        and requested[key] != listing_compute.get(key)
+        if requested.get(key) is not None and requested[key] != listing_compute.get(key)
     }
     if mismatched:
         raise OfferUnfulfillableError(
@@ -235,7 +273,8 @@ def _accepted_escrow_artifacts(
 
 
 def lookup_pool_policy_tags(
-    sqlite_client: Any, listing_id: str | None,
+    sqlite_client: Any,
+    listing_id: str | None,
 ) -> dict[str, Any]:
     """A listing's mapped pool's currently cached ``policy_tags``, or ``{}``.
 
@@ -258,7 +297,7 @@ def lookup_pool_policy_tags(
     if not listing_id:
         return {}
     try:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             pool_id_for_listing,
             site_id_for_listing,
         )
@@ -323,15 +362,20 @@ async def _place_capacity_hold(
 
     from market_storefront.utils.config import settings as _settings
 
-    ttl = float(getattr(
-        getattr(_settings, "capacity", None), "hold_ttl_seconds", 0,
-    ) or 0)
+    ttl = float(
+        getattr(
+            getattr(_settings, "capacity", None),
+            "hold_ttl_seconds",
+            0,
+        )
+        or 0
+    )
     if ttl <= 0:
         return
     try:
         from market_resource_pools.hints import capped_hold_seconds
 
-        from domains.vms.listings.reconciler import site_id_for_listing
+        from market_storefront.listings.reconciler import site_id_for_listing
         from market_storefront.services.capacity_client import build_capacity_client
         from market_storefront.services.vm_job_spec_service import (
             compute_capacity_claim_from_order,
@@ -341,7 +385,8 @@ async def _place_capacity_hold(
         capacity = build_capacity_client(lambda: sqlite_client)
         site_id = (
             site_id_for_listing(sqlite_client.db_path, listing_id)
-            if listing_id else None
+            if listing_id
+            else None
         )
         policy_tags = lookup_pool_policy_tags(sqlite_client, listing_id)
         ttl = capped_hold_seconds(ttl, policy_tags)
@@ -359,12 +404,14 @@ async def _place_capacity_hold(
     except Exception as exc:
         logger.warning(
             "[NEGOTIATION] Could not place capacity hold for %s: %s",
-            negotiation_id, exc,
+            negotiation_id,
+            exc,
         )
         return
     if not held:
         stage_event(
-            "negotiation", "capacity_hold_unavailable",
+            "negotiation",
+            "capacity_hold_unavailable",
             negotiation_id=negotiation_id,
             listing_id=listing_id,
         )
@@ -377,7 +424,8 @@ async def _place_capacity_hold(
         expires_at=held.get("hold_expires_at"),
     )
     stage_event(
-        "negotiation", "capacity_hold_placed",
+        "negotiation",
+        "capacity_hold_placed",
         negotiation_id=negotiation_id,
         listing_id=listing_id,
         capacity_reservation_id=held.get("capacity_reservation_id"),
@@ -414,12 +462,14 @@ async def _compute_round_zero_decision(
     Raises ``ValueError`` if the listing has no usable negotiation strategy
     (e.g. the offer/demand resources don't declare one).
     """
-    history = [NegotiationRound(
-        round_number=0,
-        sender="them",
-        action="initial",
-        proposal=their_proposal,
-    )]
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=their_proposal,
+        )
+    ]
     result = await _default_seller_round_hook(sqlite_client)(
         listing=listing,
         history=history,
@@ -480,22 +530,19 @@ async def start_sync_negotiation(
     """
     vm_message_terms = _normalize_vm_message_terms(provision_terms)
     requested_duration_seconds = (
-        vm_message_terms.duration_seconds
-        if vm_message_terms is not None
-        else None
+        vm_message_terms.duration_seconds if vm_message_terms is not None else None
     )
     requested_start_utc = (
-        vm_message_terms.start_utc
-        if vm_message_terms is not None
-        else None
+        vm_message_terms.start_utc if vm_message_terms is not None else None
     )
     # Imports deferred so unit tests can patch the registry without paying for
     # the whole import graph.
-    from domains.vms.listings.models import Listing
+    from arkhai_vms.listing_models import Listing
     from core_storefront.stage_log import stage_event
 
     # Check global pause flag and per-order pause flag before doing any work.
     from market_storefront.server import is_globally_paused
+
     if is_globally_paused():
         raise StorefrontPausedError("global")
 
@@ -504,7 +551,9 @@ async def start_sync_negotiation(
 
     our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id)
     if not our_order_dict:
-        raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
+        raise ValueError(
+            f"Order {our_listing_id} not found locally; seller has no matching listing"
+        )
 
     listing_status = (our_order_dict.get("status") or "").strip()
     if listing_status not in _LIVE_LISTING_STATUSES:
@@ -514,7 +563,9 @@ async def start_sync_negotiation(
         )
 
     _reject_unsupported_resource_shape_request(
-        vm_message_terms, our_order_dict=our_order_dict, listing_id=our_listing_id,
+        vm_message_terms,
+        our_order_dict=our_order_dict,
+        listing_id=our_listing_id,
     )
 
     proposal_dict = (
@@ -525,12 +576,14 @@ async def start_sync_negotiation(
 
     our_order = Listing.model_validate(our_order_dict)
 
-    history = [NegotiationRound(
-        round_number=0,
-        sender="them",
-        action="initial",
-        proposal=proposal_dict,
-    )]
+    history = [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=proposal_dict,
+        )
+    ]
     try:
         round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
         round_result = await round_hook(
@@ -581,9 +634,7 @@ async def start_sync_negotiation(
         requested_duration_seconds=requested_duration_seconds,
         requested_start_utc=requested_start_utc,
         buyer_escrow_proposal=(
-            accepted_proposal.model_dump()
-            if accepted_proposal is not None
-            else None
+            accepted_proposal.model_dump() if accepted_proposal is not None else None
         ),
         opening_sender=their_agent_url or buyer_address,
         opening_amount=their_amount,
@@ -618,7 +669,8 @@ async def start_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=0,
         our_amount=our_amount,
@@ -650,9 +702,7 @@ async def start_sync_negotiation(
         if decision.action == "accept":
             response.update(artifacts)
         else:
-            response["accepted_escrow_proposal"] = artifacts[
-                "accepted_escrow_proposal"
-            ]
+            response["accepted_escrow_proposal"] = artifacts["accepted_escrow_proposal"]
     return response
 
 
@@ -675,9 +725,10 @@ async def continue_sync_negotiation(
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
-    from domains.vms.listings import determine_strategy_from_order
-    from domains.vms.listings.models import Listing
+    from arkhai_vms.listing_models import Listing
     from core_storefront.stage_log import stage_event
+
+    from market_storefront.listings import determine_strategy_from_order
 
     thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=neg_id)
     if not thread:
@@ -689,7 +740,11 @@ async def continue_sync_negotiation(
         )
 
     our_listing_id = thread.get("our_listing_id")
-    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id) if our_listing_id else None
+    our_order_dict = (
+        await sqlite_client.load_listing(listing_id=our_listing_id)
+        if our_listing_id
+        else None
+    )
     if not our_order_dict:
         raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
     our_order = Listing.model_validate(our_order_dict)
@@ -705,12 +760,14 @@ async def continue_sync_negotiation(
     uses_scalar_amount = isinstance(pinned_fields, dict) and "amount" in pinned_fields
     our_amount = (
         _seller_reference_amount(our_order_dict, requested_duration_seconds)
-        if uses_scalar_amount else 0
+        if uses_scalar_amount
+        else 0
     )
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
-        m for m in messages
+        m
+        for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
         and m.get("sender") != buyer_address
@@ -719,8 +776,12 @@ async def continue_sync_negotiation(
     # Buyer-declared action short-circuits (accept / exit). No policy call.
     if buyer_action == "accept":
         last_seller_amount = next(
-            (int(Decimal(str(m["proposed_price"]))) for m in reversed(messages)
-             if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
+            (
+                int(Decimal(str(m["proposed_price"])))
+                for m in reversed(messages)
+                if m.get("action_taken") == "counter_offer"
+                and m.get("sender") != buyer_address
+            ),
             our_amount,
         )
         await _record_buyer_accept_message(
@@ -749,7 +810,8 @@ async def continue_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
         stage_event(
-            "negotiation", "accepted",
+            "negotiation",
+            "accepted",
             negotiation_id=neg_id,
             agreed_amount=last_seller_amount,
             our_initial_amount=our_amount,
@@ -774,7 +836,8 @@ async def continue_sync_negotiation(
             our_amount=our_amount,
         )
         stage_event(
-            "negotiation", "exited",
+            "negotiation",
+            "exited",
             negotiation_id=neg_id,
             reason=buyer_reason or "buyer_exit",
         )
@@ -783,19 +846,24 @@ async def continue_sync_negotiation(
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
 
-    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    from market_storefront.utils.config import BASE_URL_OVERRIDE
+
     our_sender = BASE_URL_OVERRIDE or "seller"
     history = _history_from_messages(
-        messages, our_sender, buyer_pinned_proposal=buyer_pinned_proposal,
+        messages,
+        our_sender,
+        buyer_pinned_proposal=buyer_pinned_proposal,
     )
     # The buyer's just-recorded counter isn't in `messages` (loaded before
     # the txn) — append it so the chain sees it as their proposal.
-    history.append(NegotiationRound(
-        round_number=len(history),
-        sender="them",
-        action="counter",
-        proposal=buyer_proposal or buyer_pinned_proposal,
-    ))
+    history.append(
+        NegotiationRound(
+            round_number=len(history),
+            sender="them",
+            action="counter",
+            proposal=buyer_proposal or buyer_pinned_proposal,
+        )
+    )
     round_hook = seller_round_hook or _default_seller_round_hook(sqlite_client)
     round_result = await round_hook(
         listing=our_order,
@@ -834,8 +902,10 @@ async def continue_sync_negotiation(
     )
     decision = round_result.decision
     await _record_seller_decision(
-        neg_id=neg_id, our_amount=our_amount,
-        their_amount=buyer_amount, decision=decision,
+        neg_id=neg_id,
+        our_amount=our_amount,
+        their_amount=buyer_amount,
+        decision=decision,
     )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
@@ -860,7 +930,8 @@ async def continue_sync_negotiation(
             requested_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
-        "negotiation", "round_decided",
+        "negotiation",
+        "round_decided",
         negotiation_id=neg_id,
         round=len(our_previous_counters) + 1,
         our_amount=our_amount,
@@ -908,7 +979,5 @@ async def _record_seller_decision(
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,
-        decision_amount=(
-            int(decision_amount) if decision_amount is not None else None
-        ),
+        decision_amount=(int(decision_amount) if decision_amount is not None else None),
     )

@@ -18,6 +18,13 @@ import pytest
 
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import require_state
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_HOST_GPU_COUNT,
+    E2E_HOST_NAME,
+    refresh_storefront_projections,
+    register_e2e_capacity,
+    register_e2e_host,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +53,7 @@ ACCEPTED_ESCROWS = [{
 @dataclass
 class DynamicListingState:
     resources_seeded: bool = False
+    executor_host_registered: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     capacity_reservation_id: str | None = None
     reserve_closed_listing_ids: list[str] = field(default_factory=list)
@@ -55,6 +63,7 @@ class DynamicListingState:
 @dataclass
 class FungiblePoolState:
     resources_seeded: bool = False
+    executor_host_registered: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     reservation_2x_id: str | None = None
     reservation_4x_id: str | None = None
@@ -120,6 +129,53 @@ class TestComputeDynamicListings:
         assert result.imported_count >= 1
         dynamic_state.resources_seeded = True
         log.info("[dynamic] imported resource %s", DYNAMIC_RESOURCE_ID)
+
+    def test_00a_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, dynamic_state: DynamicListingState,
+    ):
+        """Register the executor host the seeded resources sit on.
+
+        The site authority projects capacity by iterating host rows, so with no
+        host registered the projection is empty and `test_02`'s reserve is
+        refused with "No available compute VM matched required attributes".
+
+        Registered through the admin API rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The projection pull that follows is asserted
+        rather than slept out.
+        """
+        require_state(dynamic_state, "resources_seeded")
+
+        host = register_e2e_host(provisioning_client)
+        # `reserve` matches CapacityBucket rows, which only `register_resource`
+        # creates — the host-derived projection the guard reads is a different
+        # store. Attributes mirror the seeded CSV so a claim built from the
+        # listing matches by equality.
+        register_e2e_capacity(
+            site_capacity_admin_client,
+            resource_id=DYNAMIC_RESOURCE_ID,
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "sla": "99.0",
+                "vm_host": "kvm1",
+            },
+        )
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
+        )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        dynamic_state.executor_host_registered = True
+        log.info(
+            "[dynamic] executor host %s registered (gpus=%s); projections confirmed for %s",
+            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+        )
+
 
     def test_01_creates_slice_listings(
         self,
@@ -256,6 +312,52 @@ class TestFungibleComputeDynamicListings:
         )
         assert result.imported_count >= 2
         fungible_state.resources_seeded = True
+
+    def test_00a_registers_executor_host_and_syncs_projection(
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, fungible_state: FungiblePoolState,
+    ):
+        """Register the executor host the two pool members sit on.
+
+        The site authority projects capacity by iterating host rows, so with no
+        host registered the projection is empty and `test_02`'s reserve is
+        refused with "No available compute VM matched required attributes".
+
+        Registered through the admin API rather than a mounted inventory file:
+        `inventory_path` is docker-compose-specific while the canonical Helm
+        deployment supplies inventory as an inline secret, and a mount is shared
+        state no scenario declares. The projection pull that follows is asserted
+        rather than slept out.
+        """
+        require_state(fungible_state, "resources_seeded")
+
+        host = register_e2e_host(provisioning_client)
+        # Both pool members, so a claim against the pool can match either.
+        for member in ("compute-e2e-fungible-a", "compute-e2e-fungible-b"):
+            register_e2e_capacity(
+                site_capacity_admin_client,
+                resource_id=member,
+                attributes={
+                    "pool_id": FUNGIBLE_POOL_ID,
+                    "gpu_model": "H200",
+                    "region": "California, US",
+                    "sla": "99.0",
+                    "vm_host": "kvm1",
+                },
+            )
+        assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
+            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"this scenario reserves up to {E2E_HOST_GPU_COUNT}"
+        )
+
+        sites = refresh_storefront_projections(storefront_admin_client)
+
+        fungible_state.executor_host_registered = True
+        log.info(
+            "[fungible] executor host %s registered (gpus=%s); "
+            "projections confirmed for %s",
+            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+        )
 
     def test_01_creates_one_pool_listing_set(
         self,

@@ -397,11 +397,25 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-site-client"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_site_client-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-vms"
 version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-policy" },
     { name = "pydantic" },
 ]
 wheels = [
@@ -460,6 +474,9 @@ dependencies = [
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-resource-pools" },
+    { name = "arkhai-kit-site" },
+    { name = "arkhai-kit-site-client" },
     { name = "arkhai-vms" },
     { name = "dynaconf" },
     { name = "eth-account" },

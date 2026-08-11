@@ -22,7 +22,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from typing import Any, Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any
 
 from compute_provisioning import (
     ComputeProvisioningClient,
@@ -43,10 +44,13 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
-from core_storefront.capacity_remote import site_events_poller  # noqa: F401 — re-exported
+from core_storefront.capacity_remote import (
+    site_events_poller,
+)
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
+
 from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
@@ -158,6 +162,7 @@ def _make_listing_reconcile_subscriber(
 
     async def _reconcile_listings(delta: CapacityDelta) -> None:
         from core_storefront.stage_log import stage_event
+
         from market_storefront.services.publication_service import (
             close_stale_compute_listings_after_capacity_change,
             reopen_available_compute_listings_after_capacity_change,
@@ -539,13 +544,25 @@ async def capacity_events_poller_loop() -> None:
             close_stale_compute_listings_after_capacity_change,
             reopen_available_compute_listings_after_capacity_change,
         )
+        # Both reconcilers need the home site and the configured site count to
+        # tell "this site has no capacity" from "no site was asked". Derived from
+        # the same client map the per-delta path uses, so the periodic reconcile
+        # and the event-driven one cannot disagree about which site is home.
+        home_site = next(iter(site_clients), None)
+        if home_site is None:
+            return
         db_path = get_sqlite_client().db_path
         availability = await member_availability_view(aggregate, db_path)
         await close_stale_compute_listings_after_capacity_change(
-            db_path, member_availability=availability,
+            db_path,
+            home_site=home_site,
+            configured_site_count=len(site_clients),
+            member_availability=availability,
         )
         await reopen_available_compute_listings_after_capacity_change(
-            db_path, member_availability=availability,
+            db_path,
+            home_site=home_site,
+            member_availability=availability,
         )
 
     await asyncio.gather(*(

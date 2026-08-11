@@ -8,7 +8,7 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels check-comment-hygiene
+.PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheels push-cli clobber-wheels check-comment-hygiene e2e-dispatch e2e-watch e2e-status e2e-logs
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -367,7 +367,9 @@ push-runtime-artifacts: push-images push-charts push-wheels push-cli
 push-images: _require-ar-project
 	$(call push_image,registry,registry)
 	$(call push_image,storefront,storefront)
-	$(call push_image,provisioning,provisioning)
+	# Remote name is `provisioning`; the locally built tag is
+	# `compute-provisioning`. push_image takes both for exactly this reason.
+	$(call push_image,provisioning,compute-provisioning)
 
 push-dev-images: _require-ar-project
 	$(call push_image,dev-env,dev-env)
@@ -411,6 +413,35 @@ clobber-wheels: _require-ar-project
 # can't safely tell the two usages apart; the tombstone convention itself
 # stays a judgment-call check, not a mechanical one.
 # ---------------------------------------------------------------------------
+e2e-dispatch: ## Run the E2E workflow against the current branch on origin
+	@bash ./scripts/e2e-ci.sh dispatch
+
+e2e-watch: ## Follow this branch's newest E2E run, or RUN=<id>, until it finishes
+	@bash ./scripts/e2e-ci.sh watch $(RUN)
+
+e2e-status: ## List recent E2E runs for this branch
+	@bash ./scripts/e2e-ci.sh status
+
+# A bare word after the target name would be parsed as another target, so the run
+# id is passed as a variable: make e2e-logs RUN=31420559605
+e2e-logs: ## Download E2E evidence for this branch's newest run, or RUN=<id>
+	@bash ./scripts/e2e-ci.sh logs $(RUN)
+
+check-wheel-closure: ## Fail if a wheel cannot import from its own declared dependencies
+	@python3 scripts/check_wheel_closure.py
+
+test-scripts: ## Run the repository check/utility test suite
+	@cd scripts && python3 -m pytest tests -q
+
+prune-tombstones: ## Delete every file whose contents are a tombstone comment
+	@python3 scripts/prune_tombstones.py
+
+prune-tombstones-dry-run: ## List tombstoned files without deleting them
+	@python3 scripts/prune_tombstones.py --dry-run
+
+check-wheel-manifests: ## Fail if a wheel file manifest has drifted from its source tree
+	@python3 scripts/check_wheel_manifests.py
+
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@echo "Scanning for change-ID and task-number references outside openspec/..."
 	@matches=$$(grep -rnE \

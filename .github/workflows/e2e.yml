@@ -41,7 +41,20 @@ jobs:
         # `make test-e2e` = compose down -v -> build-dev (wheels, buyer CLI,
         # runtime/anvil/test images) -> compose up -d --wait -> run the e2e
         # markers from a one-shot container on the compose network.
-        run: make -C e2e-tests test-e2e
+        # Captured to a file as well as the step log: diagnosing a scenario
+        # failure normally needs the scenario output and the stack's own logs side
+        # by side, and reading them from one small artifact beats fetching a
+        # 90-minute job's entire step log.
+        #
+        # Redirect-then-print rather than `| tee`. A pipeline ends only when every
+        # writer closes the pipe, and this target builds images and starts a
+        # compose stack; anything left holding stdout keeps `tee` alive long after
+        # `make` has exited, hanging the step on a run that has already finished.
+        run: |
+          rc=0
+          make -C e2e-tests test-e2e > scenario-output.txt 2>&1 || rc=$?
+          cat scenario-output.txt
+          exit $rc
       - name: Collect compose logs
         if: always()
         run: docker compose logs --no-color > compose-logs.txt 2>&1 || true
@@ -50,7 +63,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs
-          path: compose-logs.txt
+          path: |
+            compose-logs.txt
+            scenario-output.txt
           if-no-files-found: ignore
       - name: Tear down stack
         if: always()
