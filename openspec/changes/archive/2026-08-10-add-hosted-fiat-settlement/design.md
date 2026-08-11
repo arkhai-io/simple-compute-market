@@ -149,10 +149,14 @@ allocation outside this change.
 
 - Deployed Helm smoke test: unavailable because no Kubernetes cluster or
   deployment credentials were provided.
-- Stripe test credentials were supplied and verified as non-live. The platform
-  has no connected accounts and Stripe rejected account creation because
-  Connect is not enabled, so a connected-account transfer and pre-transfer
-  refund remain unavailable; no reachable webhook endpoint was provided.
+- Stripe test credentials were verified as non-live, Connect was enabled, and a
+  controller-compatible Express account completed test onboarding and reached
+  transfer readiness. Two real USD 1.00 Checkouts proved authoritative
+  retrieval: the satisfied flow produced exactly one full separate Transfer;
+  the false-condition flow used a test-only database deadline advance and
+  produced exactly one succeeded full Refund with no Transfer. Duplicate
+  collection and reclaim converged. Webhook delivery remains externally
+  unverified because no reachable endpoint was provided.
 - Supported EAS testnet UID and finalized arbiter evidence: unavailable because
   no testnet RPC/EAS endpoint or funded chain signer was provided.
 - Protected trusted-publisher workflow execution: unavailable because no

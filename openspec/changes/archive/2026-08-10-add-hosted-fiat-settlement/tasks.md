@@ -46,12 +46,13 @@
   packaging/release-signature, comment-hygiene, and targeted strict OpenSpec
   checks. Repository-wide strict OpenSpec remains nonzero only for six unrelated
   pre-existing active changes.
-- [x] 4.3 Verify supplied Stripe credentials as non-live and record the
-  authoritative external blocker without simulated evidence: the platform has
-  no connected accounts and Connect is not enabled, so connected-account
-  transfer/refund cannot run; no reachable webhook, Kubernetes cluster,
-  supported EAS testnet endpoint/funded signer, or protected publisher
-  permission was provided.
+- [x] 4.3 Verify supplied Stripe credentials as non-live, onboard a ready
+  controller-compatible Express account, and drive two real USD 1.00 Checkouts.
+  The satisfied flow produced exactly one full separate Transfer; the
+  false-condition flow used a test-only stored-deadline advance and produced
+  exactly one succeeded full Refund with no Transfer. Duplicate collect/reclaim
+  calls converged. Record unavailable webhook delivery, deployed Kubernetes,
+  supported EAS testnet, and protected publisher evidence without substitution.
 - [x] 4.4 Promote durable behavior and rationale to the owning permanent specs,
   architecture, deployment, release, roadmap, and authoring documentation;
   complete comment/import hygiene, the design-promotion record, and archive.
