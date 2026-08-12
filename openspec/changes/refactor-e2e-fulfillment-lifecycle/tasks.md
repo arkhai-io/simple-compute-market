@@ -44,7 +44,9 @@ never silently broken so much as never actually executed at all.
 
 - [x] 3.1 Resolve the three open implementation questions in `design.md`: e2e half is already covered by `test_full_deal.py`'s existing (Section-1-hardened) real reserve/commit/schedule/begin flow across two real services, so no new scenario file is needed; fast half uses `httpx.MockTransport` (both `RemoteCapacityClient` and `ComputeProvisioningClient` already declare a `transport` test seam for exactly this); retirement of the old tier happens atomically with confirming the mock-transport replacement passes (not staged -- the e2e-side coverage already existed and needed no gating).
 - [x] 3.2 e2e-side coverage: none added, confirmed already sufficient (see 3.1).
-- [x] 3.3 Added `core/storefront/tests/integration/test_capacity_and_fulfillment_client_opacity.py`: mock-transport test proving `RemoteCapacityClient`/`ComputeProvisioningClient` never send a placement field across reserve/commit/schedule/begin. Zero cross-package imports. Verified it fails when a placement field is deliberately reintroduced (sanity-checked by temporarily setting `resource_id="pinned-host"` on the commit call and confirming the test catches it), then confirmed it passes again with the fix reverted.
+- [ ] 3.3 **Reopened 2026-08-13 by an archival audit: the file is not in the repository.** `core/storefront/tests/integration/` does not exist — not the file, the directory — and the test is absent from the pristine baseline too, so it was not removed by later work. Whatever ran locally never reached the repository. The audit trail below is preserved because the design decision it records is sound and the sanity check it describes was real; only the claim that the file exists is false. Two things make this invisible: 3.4 added `tests/integration` to `testpaths`, and pytest skips a missing testpath silently rather than erroring, so `core/storefront` collects 111 tests and reports green while the entry points at nothing. Re-add the test, or retract 3.4's `testpaths` entry — but not neither, because a manifest naming a path that does not exist is the shape this repository's own deliverables rule calls out.
+
+      Original note follows. Added `core/storefront/tests/integration/test_capacity_and_fulfillment_client_opacity.py`: mock-transport test proving `RemoteCapacityClient`/`ComputeProvisioningClient` never send a placement field across reserve/commit/schedule/begin. Zero cross-package imports. Verified it fails when a placement field is deliberately reintroduced (sanity-checked by temporarily setting `resource_id="pinned-host"` on the commit call and confirming the test catches it), then confirmed it passes again with the fix reverted.
 - [x] 3.4 Added `tests/integration` to `core/storefront`'s pytest `testpaths` (previously only `tests/unit` was discovered).
 - [x] 3.5 Removed `domains/vms/storefront/tests/cross_service/` (both the test file and its now-dead PYTHONPATH-trick `conftest.py`) and the `test-vm-capacity-boundary` make target, including its `.PHONY` entry and its dependency in the aggregate `test` target.
 
@@ -55,5 +57,21 @@ never silently broken so much as never actually executed at all.
 
 ## Design-promotion record
 
-See `design.md`'s "Section 1 ... Design promotion record" table. Sections 2-4
-have no promotion record yet -- nothing implemented.
+See `design.md`'s "Section 1 ... Design promotion record" table.
+
+**Corrected 2026-08-13 by an archival audit.** The line this replaced said Sections 2-4
+"have no promotion record yet -- nothing implemented", which stopped being true when
+Section 3 shipped. Section 3 changed the repository: it added a mock-transport opacity
+test, added `tests/integration` to `core/storefront`'s `testpaths`, and removed
+`domains/vms/storefront/tests/cross_service/` along with the `test-vm-capacity-boundary`
+make target. Section 2 implemented nothing and correctly owes nothing; Section 4 was a
+read-only review and likewise owes nothing.
+
+Section 3's decisions, classified:
+
+| Material decision | Permanent location |
+|---|---|
+| The capacity and provisioning clients never send a placement field; placement is the authority's decision and the client is opaque to it | **Unclassified — owed before archive.** The invariant is proven by a test but named in no permanent document. It plausibly belongs to `openspec/specs/site-capacity/spec.md`; deciding that is the work, not this row. |
+| A cross-package boundary is proven inside the owning package with a transport seam, not by a test directory that reaches across packages with a `PYTHONPATH` trick | **Unclassified — owed before archive.** Candidate home is `docs/development/TESTING.md` or `openspec/specs/test-compatibility/spec.md`; both already carry test-level jurisdiction rules. |
+
+Archive is blocked on 3.3 and on these two classifications.

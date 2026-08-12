@@ -192,9 +192,9 @@ Per `openspec/README.md#plan-closeout-requirements`.
       validation evidence, and promotion destinations; keep the rejected-alternatives
       analysis in `design.md`.
 - [ ] 8.5 **Roadmap currency.** Update the affected goal's current-state description
-      and gap mapping in `docs/development/ROADMAP.md`. If `add-development-roadmap`
-      has not landed when this change completes, record that disposition explicitly
-      rather than skipping the step.
+      and gap mapping in `docs/development/ROADMAP.md`. The conditional this task
+      originally carried is resolved: `add-development-roadmap` landed and was archived
+      2026-08-13, so the roadmap exists and the step is owed unconditionally.
 - [ ] 8.6 **Promotion.** Complete the design-promotion record below.
 - [ ] 8.7 **Section 4b hygiene.** Read the docstrings 4b touches directly:
       `_match_payload`'s pool/member comment, `load_capacity_resource_inventory`'s

@@ -175,7 +175,7 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 | Change | Status | Acceptance boundary |
 |---|---|---|
 | [`storefront-lifecycle-pause-and-advance`](archive/2026-08-13-storefront-lifecycle-pause-and-advance/) | **archived 2026-08-13** | A paused storefront halts every timer loop, and a manual cycle advances one on demand. Scenarios drive lifecycle by pause-verify-advance instead of waiting for convergence. Requirements promoted to `storefront-publication`, `test-compatibility`, and `settlement-servicing` |
-| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; all 25 tasks complete, archival not yet audited | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
+| [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; archival audited 2026-08-13 and blocked — task 3.3 names a test file absent from the repository, and two Section 3 decisions are unclassified | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 
 ## Independent active changes
@@ -185,7 +185,7 @@ Changes with no campaign; each stands alone.
 | Change | Status | Audited scope |
 |---|---|---|
 | [`pools-6-fair-scheduling-policy`](pools-6-fair-scheduling-policy/) | design-gated; POOLS-7 blocker cleared 2026-08-06 | Fairness policy over contended capacity. Its stated blocker — transactional assignment state — has landed, but its design inputs changed: negotiable shapes and negotiation-time holds alter what contention means, so the fairness subject should be chosen against those rather than against July's inputs |
-| [`add-development-roadmap`](add-development-roadmap/) | implemented 2026-08-06; pending archive | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step |
+| [`add-development-roadmap`](archive/2026-08-13-add-development-roadmap/) | **archived 2026-08-13** | Establishes `docs/development/ROADMAP.md`, the governance permitting it, and the closeout roadmap-currency step. Requirements promoted to `planning-governance` |
 | [`fix-golden-image-config`](fix-golden-image-config/) | active | Align generated and consumed keys and deliver secrets through the provisioning Secret profile |
 | [`declare-interruptible-on-a-compute-offer`](declare-interruptible-on-a-compute-offer/) | design phase; not yet planned | An offer cannot declare itself interruptible, so the admin interrupt control is unusable and infers the answer from the escrow's splitter posture instead |
 | [`monotonic-listing-reconciliation`](monotonic-listing-reconciliation/) | design phase; not yet planned | A capacity-delta reconciliation may reopen a derived listing using an availability view older than a reservation it does not yet know about, briefly advertising capacity the site cannot serve. Reproduced end to end; the freshness constraint's home is the open question |
