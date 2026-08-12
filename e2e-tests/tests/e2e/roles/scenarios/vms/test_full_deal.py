@@ -1282,17 +1282,32 @@ class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
         # fulfilled escrow has a registered seller claim — an empty log here means
         # a settled deal nobody will ever get paid for.
         events = storefront_admin_client.get_events(
-            since_id=0, limit=1000, stage="claims",
+            since_id=0, limit=500, stage="claims",
         )
+        # 500 is the server's page cap; asking for more is rejected outright.
+        # Asserting the flag is what makes "the whole claims log" a checked claim
+        # rather than an assumed one — the filter below proves nothing about a
+        # log it only saw part of.
+        assert not events.truncated, (
+            f"the claims log did not fit in one page ({events.count} rows "
+            "returned); this assertion reads the whole log and would otherwise "
+            "be searching part of it"
+        )
+        # Matched on the indexed `escrow_uid` column rather than on the event
+        # payload. The claims engine is mechanism-neutral and names the escrow
+        # `claim_ref`; the storefront's own claims runtime translates that into
+        # this domain's settlement identity as it records the event, which is
+        # what populates the column. Reading the column here is what proves that
+        # translation happened rather than assuming it.
         submitted = [
             e for e in events.events
             if e.event == "claim_submitted"
-            and (e.data or {}).get("escrow_uid") == deal_state.real_escrow_uid
+            and e.escrow_uid == deal_state.real_escrow_uid
         ]
         assert submitted, (
             "no claim_submitted event for this fulfilled escrow "
             f"({deal_state.real_escrow_uid}); claims seen: "
-            f"{[(e.event, (e.data or {}).get('escrow_uid')) for e in events.events]}"
+            f"{[(e.event, e.escrow_uid) for e in events.events]}"
         )
         deal_state._claims_swept = True
 

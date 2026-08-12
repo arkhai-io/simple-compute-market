@@ -153,9 +153,12 @@ class HealthResponse:
     # Whether timer loops are held idle — a different question from `paused`,
     # which is about accepting new negotiations.
     loops_paused: bool | None = None
-    # Per timer loop state, present on /api/v1/system/status. Read this rather
-    # than `paused` to confirm a pause halted the background work: the flag says
-    # what was requested, this says what actually stopped.
+    # Per timer loop: "starting", "running", "pausing", "paused", "cancelled",
+    # or "exited". Present on /api/v1/system/status and /api/v1/system/ready.
+    # Read this rather than `paused` to confirm a pause halted the background
+    # work: the flag says what was requested, this says what actually stopped —
+    # and `starting` says the loop has not begun cycling, so it could not have
+    # observed the request at all.
     loops: dict[str, str] | None = None
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
@@ -325,16 +328,24 @@ class StageEvent:
 
 @dataclass
 class StageEventListResponse:
-    """Response from GET /api/v1/system/events (non-streaming)."""
+    """Response from GET /api/v1/system/events (non-streaming).
+
+    `truncated` reports that more rows matched than were returned. It is not
+    derivable from `count`: a caller receiving exactly the server's page cap
+    cannot otherwise tell a complete result from a partial one. A caller treating
+    the result as a whole history should check it.
+    """
 
     events: list[StageEvent] = field(default_factory=list)
     count: int = 0
+    truncated: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "StageEventListResponse":
         return cls(
             events=[StageEvent.from_dict(e) for e in d.get("events", [])],
             count=d.get("count", 0),
+            truncated=bool(d.get("truncated", False)),
         )
 
 

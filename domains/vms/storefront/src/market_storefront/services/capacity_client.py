@@ -44,7 +44,7 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
-from market_storefront.lifecycle import is_paused
+from market_storefront.lifecycle import CAPACITY_EVENTS_POLLER, loop_gate
 from core_storefront.capacity_remote import (
     site_events_poller,
 )
@@ -540,11 +540,40 @@ async def capacity_events_poller_loop() -> None:
     aggregate = build_capacity_client(lambda: get_sqlite_client())
     site_clients = remote_site_clients(aggregate)
 
+    # One registered loop, one gate, however many sites. Every per-site poller
+    # shares the binding, so the loop counts as at its gate once *any* site
+    # poller has reached one. With several configured sites that is optimistic in
+    # the `pausing` -> `paused` direction, which is the unsafe direction: a caller
+    # could read `paused` while another site's cycle is still writing.
+    #
+    # Accepted rather than split into a registered name per site, because the
+    # per-site pollers are started here and not by the loop registry, so a
+    # per-site name would have to be registered without a task handle -- and
+    # `loop_states` derives `exited` from that handle. Resolving it properly means
+    # registering each site poller as its own loop, which is a change to how this
+    # loop is composed rather than to how it gates. The trigger is a storefront
+    # configured with more than one site; every current stack has one, where this
+    # binding is exact.
+    site_gate = loop_gate(CAPACITY_EVENTS_POLLER)
+
+    if not site_clients:
+        # `gather()` over nothing returns immediately, which would end this loop
+        # and report it as having died — the state reserved for a loop whose
+        # failure warrants replacing the process. A storefront with no configured
+        # site has nothing to poll, which is a configuration fact and not a fault,
+        # so the loop stays alive doing nothing and reports honestly.
+        logger.info(
+            "[CAPACITY] No site authority configured; event poller idle"
+        )
+        while True:
+            site_gate()
+            await asyncio.sleep(interval)
+
     await asyncio.gather(*(
         site_events_poller(
             aggregate, name, client, interval,
             full_reconcile=full_capacity_reconcile,
-            paused=is_paused,
+            paused=site_gate,
         )
         for name, client in site_clients.items()
     ))

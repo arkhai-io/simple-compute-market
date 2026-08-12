@@ -37,6 +37,19 @@ def _default_projection_status_provider() -> dict[str, Any]:
     return projection_status_summary()
 
 
+def _default_loop_health_provider() -> str:
+    """Real production source for the timer loops' health value.
+
+    Resolved inside the function rather than imported at module scope for the
+    same reason as the providers below, and for one more: `lifecycle` and
+    `server` already reference each other, and importing `lifecycle` at this
+    module's scope would draw a service into that cycle.
+    """
+    from market_storefront.lifecycle import loops_check
+
+    return loops_check()
+
+
 def _default_listing_mode_explanation_provider() -> dict[str, dict[str, str]]:
     """Real production source for per-site, per-pool listing_mode fallback
     explanations. Same lazy-resolution and constructor-injection rationale
@@ -61,9 +74,13 @@ class SystemService:
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
         listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]] | None = None,
+        loop_health_provider: Callable[[], str] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._agent_id = agent_id or AGENT_ID or "agent"
+        self._loop_health_provider = (
+            loop_health_provider or _default_loop_health_provider
+        )
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
         )
@@ -102,6 +119,16 @@ class SystemService:
         if include_registry:
             checks["registry"] = await self.registry_check()
             checks["negotiation_strategy"] = self.negotiation_strategy_check()
+
+        # Present on every health surface, including the fast liveness probe:
+        # whether the background work is running is part of whether this
+        # storefront is healthy, and a caller diagnosing a failing probe reads it
+        # here. Which conditions fail which probe is the controller's decision,
+        # not this value's.
+        try:
+            checks["loops"] = self._loop_health_provider()
+        except Exception as exc:
+            checks["loops"] = f"error: {exc}"
 
         # alkahest configured?
         configured = _container.configured_chain_names()

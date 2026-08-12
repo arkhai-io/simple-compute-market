@@ -61,6 +61,10 @@ services:
       resources:
         limits:
           memory: 384m
+    # /health, where the VM storefronts use /ready. Deliberate, not an oversight:
+    # readiness there reports whether the timer loops have begun cycling, and
+    # this storefront's runtime has no lifecycle registry to report from, so the
+    # route does not exist here. A copied /ready would 404 and fail the stack.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8082/health')\" || exit 1"]
       interval: 10s

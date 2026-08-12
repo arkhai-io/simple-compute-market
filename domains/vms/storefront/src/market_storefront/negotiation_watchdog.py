@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from market_storefront.utils.config import settings
 from market_storefront.utils.sqlite_client import SQLiteClient
 from core_storefront.stage_log import stage_event
-from market_storefront.lifecycle import is_paused
+from market_storefront.lifecycle import NEGOTIATION_WATCHDOG, gate
 
 logger = logging.getLogger(__name__)
 
@@ -112,32 +112,45 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
     return len(stale)
 
 
-async def watchdog_loop() -> None:
-    """Continuously sweep for stale negotiations.
+#: Nothing is swept until the storefront has been up this long. Freshly created
+#: threads would otherwise be measured against a clock that has not caught up and
+#: misclassified as stale. This delays the *sweep*, not the gate: the loop cycles
+#: from the start so it can observe a pause, and a caller pausing during the
+#: settling window is told the truth about this loop rather than waiting for it.
+STARTUP_SWEEP_DELAY_SECONDS = 15.0
 
-    Initial 15 s delay lets the agent finish startup before the first scan
-    (so freshly-created threads aren't misclassified if the clock hasn't
-    caught up).
-    """
-    await asyncio.sleep(15)
+
+async def watchdog_loop() -> None:
+    """Continuously sweep for stale negotiations."""
     sqlite_client = SQLiteClient(db_path=settings.db_path)
     logger.info(
-        "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
+        "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds, "
+        "first sweep after %ss)",
         settings.negotiation_watchdog_interval,
         settings.negotiation_timeout_seconds,
+        STARTUP_SWEEP_DELAY_SECONDS,
+    )
+    sweep_not_before = (
+        asyncio.get_running_loop().time() + STARTUP_SWEEP_DELAY_SECONDS
     )
     while True:
         try:
-            await asyncio.sleep(settings.negotiation_watchdog_interval)
-            # Before the sweep, so a paused storefront never abandons a thread a
-            # scenario is about to assert on.
-            if is_paused():
+            # Gate first, sleep last. The gate is the loop's only way to report
+            # that it has stopped, so a cycle that sleeps before reaching it
+            # cannot be observed for a whole interval after the pause — and on
+            # the first cycle, not until the settling window has also elapsed.
+            if gate(NEGOTIATION_WATCHDOG):
+                await asyncio.sleep(settings.negotiation_watchdog_interval)
                 continue
-            n = await _watchdog_tick(sqlite_client)
-            if n:
-                logger.info("negotiation_watchdog_loop: abandoned %d stale thread(s)", n)
+            if asyncio.get_running_loop().time() >= sweep_not_before:
+                n = await _watchdog_tick(sqlite_client)
+                if n:
+                    logger.info(
+                        "negotiation_watchdog_loop: abandoned %d stale thread(s)", n
+                    )
         except asyncio.CancelledError:
             logger.info("negotiation_watchdog_loop: cancelled, shutting down")
             break
         except Exception as exc:
             logger.exception("negotiation_watchdog_loop error: %s", exc)
+        await asyncio.sleep(settings.negotiation_watchdog_interval)

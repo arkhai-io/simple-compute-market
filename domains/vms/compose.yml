@@ -134,8 +134,12 @@ services:
       resources:
         limits:
           memory: 512m
+    # /ready, not /health: `docker compose up -d --wait` gates the e2e run on
+    # this, and /health passes as soon as the routes are mounted — which is
+    # earlier than the timer loops begin cycling. A scenario that paused a
+    # storefront in that window was told loops had stopped that had not started.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/ready')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -179,8 +183,9 @@ services:
       resources:
         limits:
           memory: 512m
+    # /ready for the same reason as Bob's, immediately above.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/ready')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6

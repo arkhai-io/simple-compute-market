@@ -299,6 +299,10 @@ at archival — the tool's job, not a hand-copy that would drift.
 | End-to-end scenarios drive lifecycle by pause and explicit advance, never by waiting for convergence; resuming is itself a state change and belongs in teardown | `specs/test-compatibility/spec.md` (delta) · `docs/development/TESTING.md` system-integration section (applied) |
 | A still-running provider operation is re-polled on a poll interval rather than charged to a failure backoff, and keeps its claim so two cycles do not both poll one provider | `provisioning/compute/service` — enforced by unit tests. No spec row: the interval is a tuning decision, not a contract, and writing a number into a specification would freeze it |
 | A claim lease outlives the cycle that took it, so an operator control frees claimed records without changing their state | `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` (applied) |
+| A loop's reported state is established by the loop reaching its gate, not by the existence of its task; reading the pause and acknowledging it are one operation | `specs/storefront-publication/spec.md` (delta) |
+| Readiness, liveness, and diagnosis are separate surfaces: a loop that has not begun cycling fails readiness, a loop that has ended fails liveness while nothing restarts it, and a paused storefront stays ready | `specs/storefront-publication/spec.md` (delta) · `helm/charts/storefront/templates/deployment.yaml` and the VM compose healthchecks (applied) |
+| A bounded operator query reports its own truncation rather than returning a short result silently | `specs/storefront-publication/spec.md` (delta) |
+| A domain's settlement stage events carry that domain's settlement identity alongside the core engine's mechanism-neutral claim reference, translated at the domain seam | `specs/settlement-servicing/spec.md` (delta) |
 
 ### Classified, not promoted
 
@@ -313,6 +317,8 @@ and "not promoted" is a classification.
 | Pause implemented VM-locally rather than in core or kit | **Temporary.** No kit package owns storefront background work, and creating one exceeds this change. Resolves when storefront runtime moves to kit; tracked by the Goal 4 gap row above. |
 | Shortened timer intervals in the two e2e storefront configs | **Temporary, test-scoped.** Bounds how long a loop takes to notice a pause. Production keeps the shipped values; nothing depends on the shortened ones being correct. |
 | `StorefrontClient.admin_release_one_reservation` targeting an unimplemented route | **Not this change's.** Annotated in place; the route and its scenario belong to `capacity-reservation-lifecycle-hardening`. |
+| A single gate shared by every per-site capacity poller | **Temporary.** Exact at one site, optimistic in the unsafe direction beyond that. Resolving it means registering each site poller as its own loop, which changes how the loop is composed rather than how it gates. Trigger: a storefront configured with more than one site. Recorded at the loop, not only here. |
+| An ended loop failing liveness rather than readiness alone | **Temporary, and conditional on the absence of loop supervision.** Pod replacement is the only recovery available today, so liveness is how it is requested. If a supervisor that restarts a dead loop is ever added, this becomes a readiness-only condition. Stated in the requirement and at the route. |
 
 ## 8. Closeout — final
 
@@ -355,3 +361,354 @@ history; both closed a smaller change than this became.
   failed and narrowed the question; see the task for what they established.
 - `6.2` — one of two green runs under lifecycle control. The second is owed, and after this
   many race-related iterations repetition is worth more than usual.
+
+## 9. Every loop acknowledges its gate (defect, run 31623897337)
+
+Section 8 closed this change asserting "five gated loops". One loop gates. The other four
+read the pause flag without acknowledging, so the bounded wait always expires and every
+`/admin/lifecycle/pause` reports four loops as `pausing` forever. The spec delta this
+change ships already requires per-loop state "only the loop itself can establish by
+reaching its gate", so this is a defect in the change rather than a wording problem.
+See `design.md`, "Post-merge defect review — run 31623897337".
+
+- [x] 9.1 Add loop-name constants to `market_storefront/lifecycle.py` and use them at both
+      ends. Each name is currently a bare string in two places — the
+      `StorefrontBackgroundTask` in `startup.py` and the gate call in the loop body — and a
+      mismatch reproduces the symptom just diagnosed from a different cause. Make `gate`
+      log a warning when handed a name that was never registered, so a future mismatch
+      reports itself instead of presenting as a loop that never gates.
+      Files: `lifecycle.py`, `startup.py`.
+      **Done.** Five constants in `lifecycle.py`, used by `startup.py`'s registrations and by every gate call. `gate` warns once per unknown name and names the registered set, so a drifted name reports itself rather than presenting as a loop that never gates; covered by `TestGateNameDiscipline`.
+
+- [x] 9.2 Move all four unacknowledged reads onto the acknowledging gate:
+      `negotiation_watchdog.watchdog_loop` and
+      `fulfillment_resume_runtime.fulfillment_resume_loop` call `gate(<name>)` inline;
+      `claims_runtime.claims_engine_loop` and `capacity_client.capacity_events_poller_loop`
+      pass a name-bound gate as the `paused` predicate their `core_storefront` loop bodies
+      already accept. No `core_storefront` change is required for this task.
+      Files: `negotiation_watchdog.py`, `services/fulfillment_resume_runtime.py`,
+      `services/claims_runtime.py`, `services/capacity_client.py`.
+      **Done.** `negotiation_watchdog` and `fulfillment_resume` call `gate(<name>)` inline; `claims_runtime` and `capacity_client` pass `loop_gate(<name>)` as the `paused` predicate their core loop bodies already accept. No `core_storefront` change was needed for this task, as planned.
+
+- [x] 9.3 Make the unacknowledged read unavailable: `lifecycle.is_paused` becomes
+      module-private. After 9.2 it has no production consumer outside `lifecycle` itself,
+      so keeping it exported preserves only the ability to reintroduce this defect. Audit
+      test imports in the same step — `tests/unit/test_lifecycle_registry.py` and
+      `tests/integration/test_admin_api.py` both reach into the module.
+      Files: `lifecycle.py`, `tests/unit/test_lifecycle_registry.py`,
+      `tests/integration/test_admin_api.py`.
+      **Done.** `is_paused` is now `_pause_requested`, module-private, with the reason at the definition. No production consumer remains outside `lifecycle`. `test_lifecycle_registry.py` reaches the flag through `server._LOOPS_PAUSED` where it needs to; `test_admin_api.py` already used `gate`.
+
+- [x] 9.4 Record what one registered name means for the capacity poller.
+      `capacity_events_poller_loop` fans out one `site_events_poller` per configured site
+      under a single registered name, so the acknowledgement is set by whichever site
+      poller reaches its gate first. With one site — every current stack — this is exact.
+      With several it is optimistic in the `pausing`→`paused` direction, which is the unsafe
+      direction. Decide between a per-site registered name and an all-sites-acknowledged
+      aggregate, record the decision at the loop, and state which is implemented.
+      **Decided: one shared gate, recorded at the loop.** Every per-site poller shares one name-bound gate, so the loop counts as gated once any site poller reaches its gate. Exact at one site — every current stack. With several it is optimistic in the `pausing` -> `paused` direction, which is the unsafe one, and the comment says so. Not split into per-site registered names because the per-site pollers are started inside the loop body rather than by the registry, so a per-site name would have no task handle and `loop_states` derives `exited` from that handle. Resolving it properly means registering each site poller as its own loop, which changes how this loop is composed rather than how it gates; the trigger is a storefront configured with more than one site.
+
+- [x] 9.5 Add `tests/unit/test_loop_gate_wiring.py`: for every loop `startup.py` registers,
+      assert the loop acknowledges under that same registered name. Verify against the
+      defect by reverting one call site to the unacknowledged read and confirming the test
+      turns red — the existing `test_lifecycle_registry.py` drives a synthetic loop and
+      passes against all four defective call sites, which is exactly the gap. Where a loop
+      cannot be driven cheaply in a unit test, say so in the test rather than asserting a
+      weaker property that looks like the strong one.
+      **Done, and verified against the defect.** `tests/unit/test_loop_gate_wiring.py` drives each production loop's real coroutine with its dependencies stubbed and asserts the acknowledgement arrives under the registered name. Reverting `fulfillment_resume` to the unacknowledged read turns it red; restoring turns it green. All five loops are covered behaviourally, including both core-bodied ones through the composed predicate, so nothing was weakened to a structural check.
+
+- [x] 9.6 Amend `tests/unit/test_lifecycle_registry.py`'s module docstring and
+      `_counting_loop`'s comment. Both currently claim the synthetic loop gates "as every
+      production loop does". That claim was false when written and must not survive as a
+      true-again coincidence.
+      **Done.** The module docstring now states that these tests prove the mechanism and not the wiring, names `test_loop_gate_wiring.py` as the file that covers the wiring, and records that all four defective call sites passed this file throughout. `_counting_loop`'s comment no longer asserts that production loops gate this way.
+
+## 10. Readiness, liveness, and a loop that has never run
+
+`running` today means a task object exists. Registration is `create_task` inside the
+lifespan, so all five names appear before any coroutine executes a step, and the scenario's
+pre-pause check passed with the negotiation watchdog at zero gate calls. Compose and both
+Kubernetes probes point at `/health`, which says nothing about background work at all.
+
+- [x] 10.1 Add `starting` to `loop_states()`: registered, never acknowledged a gate.
+      Distinct from `pausing`, which means a cycle began before the pause request. This is
+      also the "has this loop ever gated" signal, taken from the state machine rather than a
+      parallel field. `_GATE_CALLS` stays diagnostic logging and is not exposed.
+      Files: `lifecycle.py`.
+      **Done.** `starting` = registered, never acknowledged a gate, checked ahead of the pause states so a loop that cannot observe a pause is never reported as obeying one. `_GATE_CALLS` is promoted from diagnostic to load-bearing with the reason recorded; `_ACKED` cannot carry the distinction because an unpaused gate call clears the event it would have to set.
+
+- [x] 10.2 Add a `checks["loops"]` entry to the storefront's health payload, supplied
+      through an injected provider in the same shape as `_projection_status_provider`
+      rather than by importing `lifecycle` into `SystemService` — the existing
+      `lifecycle` ↔ `server` cycle makes a direct import fragile.
+      Files: `services/system_service.py`, `container.py`, `startup.py`.
+      **Done.** `checks["loops"]` from an injected `loop_health_provider`, defaulting to `lifecycle.loops_check()` resolved inside the function — `lifecycle` and `server` already reference each other and a module-scope import would draw a service into that cycle.
+
+- [x] 10.3 Add `/ready` and its versioned alias `/api/v1/system/ready`. Returns 503 with
+      `status: "starting"` while any loop is `starting` or none is registered, 503 with
+      `status: "degraded"` when any loop has ended on its own, 200 otherwise. A paused
+      storefront is ready: pause is operator-requested, the storefront still serves and
+      trades, and failing readiness on it would mark every scenario's container unhealthy
+      the moment it paused. Unauthenticated, like the other probe routes.
+      Files: `controllers/system_controller.py`, `core/storefront/src/core_storefront/models/system_models.py`.
+      **Done.** `/ready` and `/api/v1/system/ready`, unauthenticated, no registry probe. 503 with `status: "starting"` while a loop is starting or none is registered, 503 while a loop has ended, 200 otherwise. A paused storefront is ready, pinned by `TestAPausedStorefrontIsReady`.
+
+- [x] 10.4 Make `/health` return 503 when a loop has ended on its own, and only then.
+      Liveness stays a process-level question; a still-starting loop must not restart a pod.
+      Record at the route why `exited` is fatal: no supervisor restarts a dead loop, so pod
+      replacement is the recovery mechanism and liveness is how it is requested.
+      Files: `controllers/system_controller.py`.
+      **Done.** `/health` returns 503 only for a loop that ended on its own, with the reason at the route: nothing restarts a loop, so pod replacement is the recovery and liveness is how it is requested.
+
+- [x] 10.5 Point the storefront chart's `readinessProbe` at `/ready`, leave `livenessProbe`
+      on `/health`, and correct the comment above them, which currently states `/health` is
+      a fast SQLite ping suitable for both.
+      Files: `helm/charts/storefront/templates/deployment.yaml`.
+      **Done.** `readinessProbe` on `/ready`, `livenessProbe` unchanged on `/health`, and the comment above them rewritten — it described one route serving both.
+
+- [x] 10.6 Point the `bob-storefront` and `alice-storefront` compose healthchecks at
+      `/ready`, so `docker compose up -d --wait` gates the e2e run on the loops being live.
+      Leave `credits-storefront` on `/health`: it runs equivalent loops through a runtime
+      with no lifecycle registry, the route will not exist there, and a 404 healthcheck
+      would fail the stack. State that asymmetry at the credits healthcheck, where a reader
+      changing one of the three will meet it.
+      Files: `domains/vms/compose.yml`, `domains/apicredits/compose.yml`.
+      **Done.** Bob and Alice healthcheck `/ready`, so `docker compose up -d --wait` gates the run on the loops being live. `credits-storefront` stays on `/health` with the asymmetry stated at its own healthcheck: its runtime has no lifecycle registry, so `/ready` does not exist there and a copied probe would 404 the stack.
+
+- [x] 10.7 Stop the loops dying silently, so `exited` stays exceptional enough for
+      liveness to key off it. `fulfillment_resume_loop` has no `try/except` around its
+      sweep — the per-escrow handler does, but a failure in
+      `list_incomplete_primary_escrows` or client construction escapes and ends the loop —
+      and `capacity_events_poller_loop` ends if its `gather` raises. Add cycle-level
+      handling to both in the shape the other three already use, and attach a done-callback
+      in `start_registered_loop` that logs a loop's completion with its exception. A loop
+      ending is currently invisible until someone reads a status surface.
+      Files: `services/fulfillment_resume_runtime.py`, `services/capacity_client.py`,
+      `lifecycle.py`.
+      **Done, and one case the plan did not anticipate.** Cycle-level handling added to `fulfillment_resume_loop`; `start_registered_loop` attaches a done-callback logging a loop's end with its exception at `error`. The unanticipated case: `capacity_events_poller_loop` *ended immediately* with no configured site, because `gather()` over nothing returns — which after 10.4 would fail liveness and replace the pod for a configuration fact. It now gates and idles instead, covered by `test_capacity_events_poller`.
+
+- [x] 10.8 Convert the scenarios' pre-pause check from an assumption to an assertion.
+      `pause_storefront` asserts every loop is `running`; with 10.1 that becomes a real
+      guarantee — every loop has completed a gate call, so the pause it is about to request
+      is observable within one interval. Do not add a poll or a wait: compose's healthcheck
+      now gates the stack, so the stage asserts and fails loudly rather than waiting for
+      convergence, per `TESTING.md`. Update the helper's docstring, which currently explains
+      the check as guarding against loops that "have not begun" — after this it guards
+      against a regression in the gate wiring, which is a different claim.
+      Files: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`.
+      **Done.** Assertion, not a poll: the stack's readiness gate has already established this before any scenario runs, so a wait here would restate it as a wait and absorb the regression it exists to catch. The helper's docstring now explains the check as guarding the gate wiring rather than a slow start, and says why `running` is the load-bearing word.
+
+- [x] 10.9 Tests: `starting` before a first gate and `running` after; a paused storefront
+      is ready; an exited loop fails both `/health` and `/ready`; `/ready` returns 503 with
+      `status: "starting"` rather than an error body. Storefront unit and integration
+      suites.
+      **Done.** `tests/integration/test_readiness_and_liveness.py`, nine cases against the real registry rather than an injected provider. Two of them initially passed for the wrong reason: a loop that gates on its first step is already `running` by the time a probe reads it, because any `await` in the handler yields to the event loop, so the starting window is unobservable without a deliberately slow-to-start loop. Recorded at the fixture.
+
+## 11. Loops observe a pause within one interval of starting
+
+- [x] 11.1 Restructure `watchdog_loop`'s startup delay. It sleeps 15s before entering the
+      loop and sleeps again at the top of the body, so its first gate lands ~17s after boot;
+      the suite's first pause landed 13s after registration, inside that window. Enter the
+      loop immediately, gate every interval, and hold the *sweep* behind a not-before
+      deadline — the delay's purpose is not to misclassify threads created while the clock
+      settles, which constrains the sweep and not the gate. Assert the preserved property
+      directly: no sweep before the deadline, a gate acknowledged before it.
+      Files: `negotiation_watchdog.py`.
+      **Done.** The loop is entered immediately and gates every interval; the 15s delay became a `STARTUP_SWEEP_DELAY_SECONDS` not-before deadline holding only the sweep. Both halves asserted directly — the gate is reached during a 30s delay, and no sweep runs inside it.
+
+- [x] 11.2 Move `ClaimsEngine.run`'s interval sleep after the gate check rather than before
+      it, so a pause is observed on the cycle it is requested rather than one interval
+      later. This strikes the proposal's "No `core_storefront` change" fence for one
+      ordering change; `design.md` records why the fence existed and why this does not
+      breach it. Check the first-cycle consequence explicitly — the sweep now runs at
+      startup rather than one interval in — and either accept it with a reason or preserve
+      the delay the way 11.1 does.
+      Files: `core/storefront/src/core_storefront/settlement_lifecycle.py`.
+      **Done.** Gate first, sleep last. First-cycle consequence checked and accepted rather than preserved: the sweep now runs at startup rather than one interval in, and the engine is idempotent by claim reference, so this changes when a due claim is serviced and not whether it is serviced twice. Stated at the docstring.
+
+- [x] 11.3 Correct the two comments the 4.2e split left describing a superseded revision:
+      `AdminPauseResponse`'s docstring still says pause "halts them as well as refusing new
+      negotiations", and `HealthResponse.loops` documents the vocabulary as
+      `"running", "stopped", "cancelled", "exited"` — `stopped` does not exist, `paused` and
+      `pausing` are missing, and 10.1 adds `starting`. Neither is a class
+      `make check-comment-hygiene` catches. Mirror both in the client models.
+      Files: `core/storefront/src/core_storefront/models/system_models.py`,
+      `core/storefront-client/src/storefront_client/models.py`.
+      **Done.** `AdminPauseResponse` no longer says pause halts the loops as well as refusing negotiations; both `HealthResponse.loops` comments carry the real vocabulary including `starting`, server-side and client-side.
+
+## 12. A truncated event query says so
+
+- [x] 12.1 Log at the clamp. `SQLiteClient.list_stage_events` silently reduces `limit` to
+      500; every in-process caller meets it, and over HTTP the controller's own `le=500`
+      turns it into a 422 instead. Keep both bounds — a loud rejection beats a silent short
+      read — and log when the clamp applies.
+      Files: `core/storefront/src/core_storefront/sqlite_client.py`.
+      **Done.** The clamp logs at warning with both the requested and the effective limit. Both bounds kept: the controller's 422 is a loud rejection and the persistence cap catches every in-process caller.
+
+- [x] 12.2 Add `truncated` to the stage-event response on both sides. `count` alone cannot
+      distinguish a complete page of 500 from a truncated one, which is the same diagnosis
+      problem one layer up from the one 12.1 fixes. A caller asking for the whole log can
+      then assert it got it.
+      Files: `core/storefront/src/core_storefront/models/system_models.py`,
+      `controllers/system_controller.py`,
+      `core/storefront-client/src/storefront_client/models.py`.
+      **Done.** `list_stage_events_page` returns `(rows, truncated)` and `list_stage_events` remains as a rows-only wrapper for callers that do not need the distinction. Detection reads one row past the page, so `truncated` means rows were withheld rather than that the cap was reached exactly — the boundary case is pinned. `StageEventResponse` and the client's `StageEventListResponse` both carry the flag; both storefront controllers populate it.
+
+- [x] 12.3 Fix stage 09bb's request and assert the flag. It asks for `limit=1000` against a
+      cap of 500 and is rejected before it reads anything. Request the maximum and assert
+      `truncated` is false, so "the whole claims log" is a checked claim rather than an
+      assumed one.
+      Files: `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`.
+      **Done.** Stage 09bb requests 500 and asserts `not events.truncated` before filtering, so "the whole claims log" is checked rather than assumed.
+
+- [x] 12.4 Tests: the clamp logs; a bounded query reports `truncated`; both client variants
+      parse it, with the parity check `TESTING.md` requires.
+      **Done.** `core/storefront/tests/unit/test_stage_event_pagination.py` — seven cases including the exactly-at-limit boundary, the log line, and that a filtered query counts only matching rows.
+
+## 13. The claims stage event carries the escrow identity it is filtered by
+
+Stage 09bb filters `data["escrow_uid"]`, which no claims-lifecycle event sets. The stage is
+new, not stale — this change's own claims impact assessment records that no scenario
+referenced `claim_submitted` at the time, task 4.2c added the stage afterwards, and run
+31623897337 is the first run to reach it, where the 422 stopped it two lines earlier. The
+filter has never executed.
+
+- [x] 13.1 Translate at the domain seam. `claims_runtime._on_event` is the VM hook over
+      core's mechanism-neutral emitter and already performs this exact translation one line
+      below, where it feeds `escrow_uid=fields.get("claim_ref")` into lease truncation. Add
+      `escrow_uid` alongside `claim_ref` for the alkahest mechanism there, and in
+      `submit_claim` for the direct fulfillment-path emission. `ClaimsEngine` keeps emitting
+      `claim_ref` and learns no alkahest vocabulary.
+      Files: `services/claims_runtime.py`.
+      **Done.** `_with_escrow_identity` at the domain seam, applied by `_on_event` and by `submit_claim`. Alkahest only: another mechanism's claim reference is not an escrow uid, and copying it under that name would assert an identity that does not hold. Core still emits `claim_ref` alone.
+
+- [x] 13.2 Confirm the indexed column populates. `stage_log._persist` fills
+      `stage_events.escrow_uid` only from a field of that name, which is why every
+      claims-lifecycle row has it NULL while `lease_truncated_after_abandonment` — emitted
+      by the same module — fills it. After 13.1 the column carries the escrow for the whole
+      claims stage, and `GET /api/v1/system/events` can filter on it rather than scanning
+      JSON. State whether a query filter is added or deliberately not.
+      **Confirmed, and no query filter added.** `stage_log._persist` fills the indexed column from a field of that name, so the column now populates for the whole claims stage. Stage 09bb matches on `e.escrow_uid` rather than the JSON payload, which is what proves the translation happened end-to-end. A query filter is deliberately not added: no caller needs one, and the stage-filtered page is well inside the cap.
+
+- [x] 13.3 Tests: a submitted claim's stage event carries both `claim_ref` and `escrow_uid`
+      and they agree; the persisted row's column is populated. Storefront unit or
+      integration level — this is provable below end-to-end and should not rely on 09bb.
+      **Done.** `tests/unit/test_claims_stage_event_identity.py` — submission carries both names and they agree, another mechanism is left alone, an explicit identity is not overwritten, and an event without a claim reference is unchanged.
+
+## 14. Validation
+
+- [x] 14.1 Run the VM storefront unit and integration suites, `core/storefront`,
+      `core/storefront-client`, and the e2e harness suites, by the command the repository
+      uses rather than by naming test paths. Disclose any suite not run and why, separating
+      an absence in the session environment from a defect in the code.
+      **Done, with three disclosures.** Measured against a pristine baseline copy before any
+      edit and again after, by each project's own default test command:
+
+      | Suite | Baseline | After |
+      |---|---|---|
+      | VM storefront unit | 862 passed, 1 skipped | 883 passed, 1 skipped |
+      | VM storefront integration | 166 passed, 3 failed | 175 passed, 3 failed |
+      | `core/storefront` unit | 104 passed | 111 passed |
+      | `core` unit | 70 passed | 70 passed |
+      | `core/storefront-client` | 24 passed | 24 passed |
+      | e2e harness unit | 13 passed, 2 skipped | 13 passed, 2 skipped |
+      | apicredits storefront | not run at baseline | 51 passed |
+
+      `make check-comment-hygiene` passes.
+
+      **Disclosure 1 — the `reinit` step of each `make test` target was not run.** It resolves
+      internal packages from `.dist`, which this session has no built wheels for; internal
+      packages were installed from source instead. That is a session arrangement and not a
+      change to the packaging discipline, but it means these runs do not exercise wheel
+      packaging. `make check-wheel-manifests` and `make check-wheel-closure` were not run
+      for the same reason.
+
+      **Disclosure 2 — two integration failures are the pre-existing environmental pair.**
+      `test_alkahest.py::test_rust` and `::test_python` need a local chain runtime, and fail
+      identically on the untouched baseline, as task 6.1 already recorded.
+
+      **Disclosure 3 — one integration failure is pre-existing and NOT established as
+      environmental.** `test_negotiate_controller.py::TestNegotiateNew::test_amountless_exact_escrow_can_start_and_accept`
+      fails `'counter' == 'accept'`, meaning `accept_exact_listing_middleware` found no peer
+      proposal in the history it was given. It fails identically on the unmodified baseline
+      here and is untouched by this change, but whether it also fails in CI was not
+      determined, so it is reported as an open question rather than dismissed. Worth a check
+      against a CI run before it is assumed harmless.
+
+      Also disclosed: the apicredits storefront suite needs the repository root on
+      `PYTHONPATH` to import its `domains.apicredits.*` test subjects, which its own
+      `pythonpath = ["src"]` does not supply. Unrelated to this change and not fixed here.
+- [ ] 14.2 One end-to-end run. The five failures in 31623897337 clear, and the run reaches
+      stage 09bb's assertion rather than erroring before it — 09bb's filter has never
+      executed, so its first green is new information, not a re-confirmation.
+      **Owed — cannot be run in this session.** The end-to-end suite needs the compose stack
+      and the CI workflow. Four specific predictions to check against the next run, so that a
+      failure distinguishes which part was wrong: every pause reports five `paused` rather
+      than four `pausing`; the compose log shows gate calls for all five registered names,
+      not only `site_projection_poller`; stage 09bb reaches its filter and matches on
+      `escrow_uid`; and the storefront containers reach healthy through `/ready`, which is a
+      new gate and the most likely place for this change to fail in a way no suite here can
+      see.
+- [ ] 14.3 Confirm from the compose log that all five loops acknowledge: gate calls present
+      for every registered name, and every pause reporting five `paused`. The previous run's
+      `gate calls so far: {'site_projection_poller': 48}` is the line that diagnosed this;
+      its successor is the line that proves the fix.
+- [x] 14.4 Append the run's findings to
+      `openspec/changes/compose-domain-wheels-and-policies/e2e-inventory-findings.md`,
+      which carries this campaign's run-by-run record.
+      **Done for run 31623897337** — the diagnosis, not the fix. The next run's outcome is
+      owed there too, and belongs with 14.2.
+- [ ] 14.5 Section 6.2 still owes a second green run under lifecycle control. This section's
+      run does not discharge it — it is the first run of a changed pause path, not a
+      repetition of a stable one.
+
+## 15. Closeout — after the defect sections
+
+Per `openspec/README.md#plan-closeout-requirements`. Section 8 was the final pass for the
+change as it stood; it closed a change whose central invariant the code did not hold, which
+is the reason this pass exists rather than an amendment to that one.
+
+- [x] 15.1 **Comment hygiene.** `make check-comment-hygiene`, plus a direct read of every
+      docstring these sections touch — `lifecycle`'s module docstring and its state
+      vocabulary, the three probe routes, the four gated loop bodies, `_on_event`, and the
+      scenario pause helper. Section 8 recorded that three comments described a previous
+      revision rather than current behaviour and that the target does not catch that class;
+      11.3 shows two more survived. Read for that class specifically.
+- [x] 15.2 **Import placement.** Cross-referenced against these sections' own diff. Every
+      import added here is module level except two, both with a verified reason at the
+      definition: `lifecycle._pause_requested` imports `server` inside the function because
+      the cycle is real, and `system_service._default_loop_health_provider` imports
+      `lifecycle` inside the function so a service is not drawn into that same cycle — the
+      reason 10.2 injected a provider rather than importing directly. Both were checked by
+      running the storefront suites, not by a syntax check.
+- [x] 15.3 **Documentation compliance.** Two claims, stated separately.
+
+      *Code claim.* All five loops read the pause through the acknowledging gate; the
+      unacknowledged read is private; `starting` is derived from gate calls; `/health` fails
+      only on an ended loop and `/ready` also on a starting one or an empty registry; a
+      paused storefront stays ready; bounded stage-event queries report truncation; alkahest
+      claim events carry `escrow_uid`. Each is covered by a test named in the sections above.
+
+      *Documentation claim.* The `storefront-publication` delta's three new requirements and
+      the `settlement-servicing` delta's one were each re-read against that list. The one
+      place the wording outruns the code is deliberate and stated in the requirement itself:
+      the readiness requirement says liveness fails for a loop that has ended *while no
+      supervisor restarts one*, which is a condition on the current implementation rather
+      than a permanent claim, and 10.4's route comment names the same trigger. No requirement
+      asserts an invariant the code does not hold — which is the failure this change already
+      shipped once.
+- [x] 15.4 **Narrative compression.** Each task above carries final behaviour, its evidence,
+      and anything left open. The reasoning — why the unacknowledged read became private, why
+      readiness and liveness are separate surfaces, why the translation belongs at the domain
+      seam — stays in `design.md`'s post-merge review section rather than being restated here.
+      Two findings that arrived during implementation rather than planning are recorded where
+      they were found (10.7's zero-site loop exit, 10.9's unobservable starting window)
+      because both are traps for the next reader of those files.
+- [x] 15.5 **Roadmap currency.** Disposition: no roadmap edit owed, recorded rather than
+      omitted. Goal 4's entry already names lifecycle control as a cross-cutting storefront
+      concern implemented once in the VM storefront, with its gap row owned by
+      `kit-storefront-composition-seam`. Readiness reporting is part of that same concern and
+      lands in the same place, so the current-state description and the gap mapping are both
+      still accurate. Nothing here changes what the market can do.
+- [x] 15.6 **Promotion.** The record below gains four rows and one classification. Every
+      destination resolves.

@@ -96,3 +96,77 @@ limitation rather than a deliberate difference in behaviour between the two.
 - **WHEN** a caller pauses a storefront that does not implement lifecycle controls
 - **THEN** new negotiations are refused but timer-driven work continues, and no cycle
   control is available to drive that work deliberately
+
+### Requirement: A loop's reported state is established by the loop
+
+A storefront MUST derive each loop's reported state from evidence the loop itself
+produces, not from the existence of the task running it. A loop that has been scheduled
+but has not yet reached its gate MUST be reported as starting, distinctly from a loop
+that is cycling: the first cannot yet observe a pause, and reporting the two alike lets a
+caller pause a storefront whose loops have not begun and receive an answer that cannot be
+true.
+
+Reading the pause flag and acknowledging the gate MUST NOT be separately available to a
+loop. A loop that consults the pause without acknowledging is indistinguishable, from
+outside the process, from one that never reaches a gate at all, and the pause control
+cannot then report what is true of it.
+
+#### Scenario: A scheduled loop that has not yet cycled
+
+- **WHEN** a storefront reports loop state before a loop has reached its gate for the
+  first time
+- **THEN** that loop is reported as starting rather than as running
+
+#### Scenario: Every loop acknowledges
+
+- **WHEN** an operator pauses a storefront whose loops are all cycling
+- **THEN** every loop reaches its gate within the bounded wait and is reported paused,
+  with none left reported as still stopping
+
+### Requirement: Readiness, liveness, and diagnosis are separate surfaces
+
+A storefront MUST distinguish whether its process is worth keeping from whether it can be
+relied on. Liveness MUST fail only for a condition no further running can resolve. A loop
+that has ended on its own is such a condition while no supervisor restarts one, because
+replacing the process is then the only recovery available.
+
+Readiness MUST fail while any timer loop has not yet begun cycling, since a storefront
+whose loops have not started will not perform the background work a caller relies on, and
+MUST report that condition distinctly from a fault.
+
+A storefront held at its lifecycle pause MUST remain ready. The pause is operator-requested,
+the storefront continues to serve and to trade, and treating it as unreadiness would make
+an operator control indistinguishable from a failure.
+
+Diagnostic status MUST remain available regardless of either, and MUST report per-loop
+state, since a caller consults it precisely when one of the other two is failing.
+
+#### Scenario: A storefront whose loops have not started
+
+- **WHEN** a caller probes readiness before every loop has begun cycling
+- **THEN** readiness fails and reports the condition as starting rather than as a fault,
+  while liveness continues to succeed
+
+#### Scenario: A storefront with a dead loop
+
+- **WHEN** a timer loop has ended on its own and no supervisor will restart it
+- **THEN** both liveness and readiness fail, so the process is replaced rather than left
+  serving with background work silently stopped
+
+#### Scenario: A paused storefront is ready
+
+- **WHEN** a caller probes readiness while the lifecycle pause is held
+- **THEN** readiness succeeds, and diagnostic status reports each loop as paused
+
+### Requirement: A bounded operator query reports its own truncation
+
+An operator-facing query that caps the rows it returns MUST allow a caller to tell a
+complete result from a capped one. Returning a row count alone does not satisfy this: a
+caller receiving exactly the cap cannot distinguish the two, and a caller reasoning about
+a complete history will silently reason about part of one.
+
+#### Scenario: A query that reaches its cap
+
+- **WHEN** a caller requests more rows than the surface will return and the available rows
+  reach that cap
+- **THEN** the response reports that it was truncated, in addition to the rows returned

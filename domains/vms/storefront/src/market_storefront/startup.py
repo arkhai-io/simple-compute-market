@@ -14,7 +14,14 @@ from core_storefront.app_startup import (
     run_storefront_startup_steps,
 )
 
-from market_storefront.lifecycle import start_registered_loop
+from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
+    CLAIMS_ENGINE,
+    FULFILLMENT_RESUME,
+    NEGOTIATION_WATCHDOG,
+    SITE_PROJECTION_POLLER,
+    start_registered_loop,
+)
 
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
@@ -196,7 +203,7 @@ def _start_negotiation_watchdog() -> None:
 
     start_registered_loop(
         StorefrontBackgroundTask(
-            name="negotiation_watchdog",
+            name=NEGOTIATION_WATCHDOG,
             task_factory=_neg_watchdog_loop,
             log_message=(
                 "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)"
@@ -215,7 +222,7 @@ def _start_claims_engine() -> None:
 
     start_registered_loop(
         StorefrontBackgroundTask(
-            name="claims_engine",
+            name=CLAIMS_ENGINE,
             task_factory=claims_engine_loop,
             log_message="[STARTUP] Claims engine started (interval=%ss)",
             log_args=(getattr(settings, "claims_sweep_interval", 30),),
@@ -231,7 +238,7 @@ def _start_fulfillment_resume() -> None:
 
     start_registered_loop(
         StorefrontBackgroundTask(
-            name="fulfillment_resume",
+            name=FULFILLMENT_RESUME,
             task_factory=fulfillment_resume_loop,
             log_message="[STARTUP] Fulfillment resume worker started (interval=%ss)",
             log_args=(getattr(settings, "fulfillment_resume_sweep_interval", 30),),
@@ -246,7 +253,7 @@ def _start_capacity_events_poller() -> None:
 
     start_registered_loop(
         StorefrontBackgroundTask(
-            name="capacity_events_poller",
+            name=CAPACITY_EVENTS_POLLER,
             task_factory=capacity_events_poller_loop,
         ),
         task_logger=logger,
@@ -271,7 +278,7 @@ def _start_site_projection_poller() -> None:
     try:
         start_registered_loop(
             StorefrontBackgroundTask(
-                name="site_projection_poller",
+                name=SITE_PROJECTION_POLLER,
                 task_factory=site_projection_poller_loop,
             ),
             task_logger=logger,

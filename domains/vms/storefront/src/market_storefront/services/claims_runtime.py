@@ -20,11 +20,40 @@ from typing import Any
 
 from core_storefront.settlement_lifecycle import ClaimRecord, ClaimsEngine
 from core_storefront.stage_log import stage_event
-from market_storefront.lifecycle import is_paused
+from market_storefront.lifecycle import CLAIMS_ENGINE, loop_gate
 
 logger = logging.getLogger(__name__)
 
 ALKAHEST_MECHANISM = "alkahest.v1"
+
+
+def _with_escrow_identity(fields: dict[str, Any]) -> dict[str, Any]:
+    """Add this domain's settlement identity to a core claim event.
+
+    The claims engine is mechanism-neutral and names only `claim_ref`; for
+    alkahest that reference *is* the escrow uid, which is why the abandonment
+    path below can hand `claim_ref` straight to lease truncation. A consumer
+    correlating a claim with the deal it settles holds the escrow uid and not the
+    neutral reference, and `stage_events` indexes an `escrow_uid` column that is
+    populated only from a field of that name — so without this every
+    claims-lifecycle row leaves that column null while events emitted directly
+    from this module fill it.
+
+    Translating here rather than in the engine keeps mechanism vocabulary out of
+    a core carrier. See
+    `openspec/specs/settlement-servicing/spec.md#a-settlement-stage-event-carries-the-domains-settlement-identity`.
+
+    Only for the alkahest mechanism: another mechanism's claim reference is not
+    an escrow uid, and copying it under that name would assert an identity that
+    does not hold.
+    """
+    claim_ref = fields.get("claim_ref")
+    mechanism = fields.get("mechanism")
+    if not claim_ref or "escrow_uid" in fields:
+        return fields
+    if mechanism not in (None, ALKAHEST_MECHANISM):
+        return fields
+    return {**fields, "escrow_uid": claim_ref}
 
 
 def build_claims_engine(sqlite_client: Any) -> ClaimsEngine:
@@ -42,7 +71,7 @@ def build_claims_engine(sqlite_client: Any) -> ClaimsEngine:
     )
 
     def _on_event(event: str, **fields: Any) -> None:
-        stage_event("claims", event, **fields)
+        stage_event("claims", event, **_with_escrow_identity(fields))
         if event == "claim_abandoned":
             # The settlement lifecycle's "deal is over" signal — the one
             # coupling joint between the two halves of the capacity
@@ -146,7 +175,11 @@ async def claims_engine_loop() -> None:
     sqlite_client = SQLiteClient(db_path=settings.db_path)
     engine = build_claims_engine(sqlite_client)
     interval = float(getattr(settings, "claims_sweep_interval", 30))
-    await engine.run(interval_seconds=interval, paused=is_paused)
+    # The engine's loop body lives in `core_storefront` and cannot name a loop
+    # this package registers, so composition supplies the binding. The gate
+    # acknowledges as it reads, which is what lets a pause report this loop as
+    # stopped rather than as still stopping.
+    await engine.run(interval_seconds=interval, paused=loop_gate(CLAIMS_ENGINE))
 
 
 async def submit_claim(
@@ -192,10 +225,12 @@ async def submit_claim(
     stage_event(
         "claims",
         "claim_submitted",
-        claim_ref=escrow_uid,
-        mechanism=obligation.get("mechanism"),
-        negotiation_id=negotiation_id,
-        listing_id=listing_id,
+        **_with_escrow_identity({
+            "claim_ref": escrow_uid,
+            "mechanism": obligation.get("mechanism"),
+            "negotiation_id": negotiation_id,
+            "listing_id": listing_id,
+        }),
     )
 
 

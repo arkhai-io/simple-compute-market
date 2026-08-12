@@ -265,3 +265,173 @@ record the outcomes. Kept for the reasoning they contain.
 - **Does the smoke suite's pause/resume test still hold?** It asserts pause returns 503 on
   new negotiations. That stays true, but the test's description of what pause means will
   need updating alongside the endpoint's.
+
+---
+
+## Post-merge defect review — run 31623897337 (2026-08-12)
+
+Five failures, two causes in the run and a third the second one masked. This section
+records the decisions taken with the repository owner before Section 9 onward was planned.
+
+### Context: four of five loops never acknowledged their gate
+
+`await_quiescence` waits on `_ACKED[name]`, and only `gate(name)` sets it. One loop —
+`site_projection_poller` — calls `gate`. The other four read `is_paused()` directly, which
+reads the flag without acknowledging: `negotiation_watchdog` and `fulfillment_resume`
+inline, `claims_engine` and `capacity_events_poller` by passing `is_paused` as the
+`paused` predicate into their `core_storefront` loop bodies. The compose log is
+unambiguous — `set=['site_projection_poller']`, `gate calls so far:
+{'site_projection_poller': 48}` — so the other four had never reached a gate in the
+process's lifetime, the bounded wait always expired, and `loop_states()` correctly
+reported `pausing` for all four.
+
+`gate`'s own docstring states the invariant this violates: reading the flag and
+acknowledging "must not be separately forgettable". They were separately forgettable
+because `is_paused` remained importable. The mechanism was right; only one of five call
+sites used it.
+
+Nothing below the end-to-end level could catch this. `tests/unit/test_lifecycle_registry.py`
+drives a synthetic loop whose comment reads "through `gate`, as every production loop
+does" — which is the assertion that turned out to be false. It proves the mechanism and
+never the wiring, the same shape as the defect task 4b.2 recorded for startup keywords.
+
+### Decision: the unacknowledged read becomes unavailable
+
+`is_paused` becomes module-private. After the four call sites move to `gate`, no
+production consumer of the unacknowledged read remains, so keeping it exported preserves
+only the ability to reintroduce this defect. The two `core_storefront` seams already
+accept `paused: Callable[[], bool] | None`, so an acknowledging predicate satisfies them
+and no core change is needed for this part.
+
+**Alternative rejected — leave `is_paused` public and rely on review.** This defect
+survived three closeout passes, one of which asserted "five gated loops". A convention a
+closeout can assert falsely is weaker than an import that does not exist.
+
+### Decision: loop names get one source of truth
+
+Each loop name is currently a bare string in two places — the `StorefrontBackgroundTask`
+in `startup.py` and the gate call in the loop body. A mismatch acknowledges a name nobody
+waits on and leaves the registered name unacknowledged forever: the exact symptom just
+diagnosed, with a different cause. Names become constants in `lifecycle`, and `gate`
+records a warning when handed a name that was never registered.
+
+### Decision: `running` must be earned, and `starting` is a distinct state
+
+`loop_states()` returns `running` for any registered handle where `not handle.done()`.
+Registration is `asyncio.create_task` inside the lifespan, so all five names appear before
+any coroutine has executed a step. `running` therefore means "a task object exists", not
+"this loop is cycling and will observe a pause" — and the scenario's own pre-pause check,
+which asserts every loop is `running`, passed at 17:45:04 with the negotiation watchdog at
+zero gate calls.
+
+A fifth state, `starting`, means registered and never yet acknowledged a gate. This is
+also the answer to "has this loop ever gated": it falls out of the state machine rather
+than needing a parallel field, and it makes the failure just diagnosed a single status
+read. The gate-call counter stays diagnostic logging only — an API consumer needs to know
+whether a loop is live, not how many times it has cycled.
+
+### Decision: readiness and liveness separate, and readiness gates the stack
+
+The storefront answers `/health` as soon as its routes are mounted, and `/health` says
+nothing about background work. Compose's healthcheck and both Kubernetes probes all point
+at it, so "the stack is up" is true before any loop cycles — which is why a scenario could
+pause a storefront whose loops had not started.
+
+Three surfaces, three meanings:
+
+| Surface | Meaning | Not-OK condition | Code |
+|---|---|---|---|
+| `/health` | liveness — is this process worth keeping | a loop has ended on its own | 503 |
+| `/ready` | readiness — can this process be relied on | any loop still `starting`, or ended | 503, `status: "starting"` while starting |
+| `/api/v1/system/status` | diagnosis | never fails; body carries `checks.loops` and the per-loop map | 200 |
+
+A deliberately paused storefront stays ready. Pause is an operator-requested state, the
+storefront still serves and still trades, and a readiness surface that failed on it would
+mark every scenario's container unhealthy the moment it paused.
+
+`exited` degrades liveness rather than readiness alone because no supervisor restarts a
+dead loop today: a loop's task is created once and nothing observes its completion. Under
+that arrangement pod replacement *is* the recovery mechanism, and liveness is how it is
+requested. Two consequences are accepted deliberately: a loop that dies deterministically
+at boot produces a crash loop, which is the visible failure the current silence replaces;
+and if loop supervision is added later, `exited` should move to readiness-only. That is
+recorded as the trigger rather than built now.
+
+Loops can in fact die. `fulfillment_resume_loop` has no `try/except` around its sweep — the
+per-escrow handler does, but a failure in `list_incomplete_primary_escrows` or client
+construction escapes and ends the loop — and `capacity_events_poller_loop` ends if its
+`gather` raises. Nothing logs either. Hardening both and logging task completion is part of
+this section, so that `exited` stays genuinely exceptional and liveness stays a real signal.
+
+**The suite stops waiting, and asserts instead.** With compose's healthcheck on `/ready`,
+`docker compose up -d --wait` already gates the whole run on the loops being live. The
+scenario's readiness stage then *asserts* all five are `running` rather than polling for
+it — consistent with `TESTING.md`'s no-waiting rule, and a loud failure if the gate ever
+regresses.
+
+### Decision: the negotiation watchdog's pre-loop delay is restructured
+
+`watchdog_loop` sleeps 15s before entering its loop, and its interval sleep sits at the top
+of the body, so its first gate lands ~17s after boot. The suite's first pause landed 13s
+after registration — inside that window, so even a correct acknowledgement would have been
+~1s from flaking. The delay's stated purpose is not to misclassify threads created while
+the clock settles, which is a constraint on the *sweep*, not on the gate. The loop is
+entered immediately, gates every interval, and holds the sweep behind a not-before
+deadline.
+
+`ClaimsEngine.run` has the same sleep-before-gate ordering and costs one interval on every
+pause. It is in `core_storefront`, which this change's proposal fenced off. The fence is
+struck for this one ordering change: the fence existed to avoid widening a VM-local pause
+into core, and moving a sleep to the end of a loop body carries none of that risk. Recorded
+rather than done silently, because a scope fence removed without a reason is how the next
+reader loses the reason it existed.
+
+### Decision: truncation becomes visible to the caller, not only the operator
+
+`list_stage_events` clamps `limit` to 500 silently. The controller separately rejects
+`>500` with 422, which is what stage 09bb hit — so over HTTP the silent clamp is currently
+unreachable, and every in-process caller still meets it. Raising the controller cap would
+convert a loud 422 into a silent short read, which is the worse failure.
+
+The cap stays at 500 and gains two things: a log line where the clamp happens, and a
+`truncated` flag on the response. `count` alone cannot distinguish a complete page of 500
+from a truncated one, which is the same diagnosis problem one layer up from the one being
+fixed. Stage 09bb asks for the whole claims log; with the flag it can assert that it got it.
+
+### Decision: the claims stage event carries the domain's settlement identity
+
+Stage 09bb filters `data["escrow_uid"]`, which no claims-lifecycle event sets. The stage is
+not stale — it has never executed. This change's own "Claims-engine impact assessment
+(2026-08-11)" records that a search of the scenarios for `claim_submitted` returned
+nothing; task 4.2c added the stage afterwards, and run 31623897337 is the first run to
+reach it, where the 422 stopped it two lines before the filter.
+
+The identity is present under another name. `claim_ref` *is* the escrow uid for
+alkahest — `submit_claim` sets `claim_ref=escrow_uid`, and production already depends on
+that equivalence where `_on_event` feeds `escrow_uid=fields.get("claim_ref")` into lease
+truncation. What is missing is the column: `stage_events.escrow_uid` is populated only from
+a field literally named `escrow_uid`, so every claims-lifecycle row has it NULL while
+`lease_truncated_after_abandonment`, emitted by the same module, fills it. The claims stage
+is inconsistent about its own identity column and the new stage tripped over it.
+
+The translation happens at the domain seam. `claims_runtime._on_event` is the VM hook over
+core's mechanism-neutral emitter and already performs exactly this translation one line
+below; `submit_claim` does the same for the direct fulfillment-path emission. Core keeps
+emitting `claim_ref` and learns no alkahest vocabulary.
+
+**Alternatives rejected.** Filtering the test on `claim_ref` fixes the symptom and leaves
+the column NULL for the whole claims lifecycle, so the next reader meets the same
+inconsistency. Emitting both names from `ClaimsEngine` puts mechanism vocabulary in a core
+carrier.
+
+### Scope judgement
+
+Sections 9 through 11 are this change's own contract: its spec delta already requires per-
+loop state that "only the loop itself can establish by reaching its gate", and the code
+does not hold that. Section 13 is this change's own stage 09bb. Section 12 is a storefront
+API defect this change found rather than caused; it is absorbed here on the same basis the
+convergence-backoff fix already was, and the alternative — a separate change for a log line
+and a boolean — was judged more process than the defect is worth. Section 10's readiness
+surface is the largest judgement call: it is new operator-facing behaviour with helm and
+compose impact, and it is here because the pause contract is not achievable without it, not
+because it is adjacent.

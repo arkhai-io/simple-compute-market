@@ -81,7 +81,16 @@ def reset_pause_state():
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+    # A healthy loop set is supplied rather than left to the real registry: this
+    # fixture mounts routers without the application lifespan that starts the
+    # timer loops, so the registry is genuinely empty and the storefront is
+    # genuinely not ready. That is correct behaviour, and pinning it belongs in
+    # `TestReadinessAndLiveness` below, which drives the registry directly —
+    # every other test here would otherwise assert against a permanently
+    # degraded storefront for a reason unrelated to what it is testing.
+    _container.resolved_system_service = SystemService(
+        sqlite_client=db, loop_health_provider=lambda: "ok",
+    )
 
     app = FastAPI()
     app.include_router(system_router)
@@ -101,7 +110,16 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+    # A healthy loop set is supplied rather than left to the real registry: this
+    # fixture mounts routers without the application lifespan that starts the
+    # timer loops, so the registry is genuinely empty and the storefront is
+    # genuinely not ready. That is correct behaviour, and pinning it belongs in
+    # `TestReadinessAndLiveness` below, which drives the registry directly —
+    # every other test here would otherwise assert against a permanently
+    # degraded storefront for a reason unrelated to what it is testing.
+    _container.resolved_system_service = SystemService(
+        sqlite_client=db, loop_health_provider=lambda: "ok",
+    )
 
     app = FastAPI()
     app.include_router(system_router)

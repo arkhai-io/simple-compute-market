@@ -73,11 +73,13 @@ class SystemController:
                 pass
 
         if not stream:
-            rows = await self._db.list_stage_events(
+            rows, truncated = await self._db.list_stage_events_page(
                 after_id=since_id, limit=limit,
                 stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
             )
-            return StageEventResponse(events=rows, count=len(rows))
+            return StageEventResponse(
+                events=rows, count=len(rows), truncated=truncated,
+            )
 
         async def _generate():
             cursor = since_id

@@ -27,6 +27,14 @@ Pause-verify-advance removes the race from the observation rather than toleratin
 does not detect race conditions, and is not meant to — that is not what these scenarios
 are for.
 
+> **Post-merge defect review, 2026-08-12.** Run 31623897337 showed that four of the five
+> loops read the pause flag without acknowledging their gate, so every pause reported them
+> as still stopping. The scope below is extended by Sections 9–15 of `tasks.md`: gate
+> acknowledgement at all five loops, a `starting` loop state, separate readiness and
+> liveness surfaces, a negotiation-watchdog startup restructure, a truncation flag on
+> bounded event queries, and the settlement stage event's escrow identity. Rationale is in
+> `design.md`, "Post-merge defect review — run 31623897337".
+
 ## What Changes
 
 - Make `POST /api/v1/admin/pause` halt every storefront timer loop in addition to
@@ -82,26 +90,36 @@ None.
 
 ## Impact
 
-- **Affected code:** VM storefront only — `server.py`'s pause flag and new task-handle
-  registry, `startup.py`, `admin_controller`, `system_controller`'s status surface, and
-  the four loop modules that expose an advance target. No `core_storefront` change, and
-  no kit change; the API-credits storefront is deliberately not covered (see `design.md`).
-- **Affected tests:** storefront unit and integration suites for pause semantics; the VM
-  and API-credits e2e scenarios.
+- **Affected code:** primarily the VM storefront — `server.py`'s pause flags and the loop
+  registry in `lifecycle.py`, `startup.py`, `admin_controller`, `system_controller`'s
+  status, health, and readiness surfaces, and the five loop modules. Two
+  `core_storefront` changes are in scope after the post-merge defect review: the claims
+  engine's gate ordering and the stage-event response's truncation flag (see `design.md`,
+  "Post-merge defect review"). Deployment surfaces are touched for the readiness probe:
+  the storefront Helm chart and the VM compose stack's storefront healthchecks. No kit
+  change; the API-credits storefront is deliberately not covered (see `design.md`).
+- **Affected tests:** storefront unit and integration suites for pause, gate-wiring,
+  readiness, and settlement stage-event identity; `core/storefront` and
+  `core/storefront-client`; the VM and API-credits e2e scenarios.
 - **Affected documentation:** `docs/development/TESTING.md`'s async-discipline section
   gains the pause-verify-advance rule; `ARCHITECTURE.md`'s operator lifecycle controls
   section stops being provisioning-only.
-- **Wire compatibility:** `pause`/`resume` keep their routes and response shape; their
-  effect widens. An operator who paused to stop taking negotiations now also stops
-  background work, which is a behavior change worth calling out in the endpoint
-  description.
+- **Wire compatibility:** `pause`/`resume` keep their routes and meaning; the lifecycle
+  pause is a separate pair of routes rather than a widening of them. Two additive
+  behaviour changes land with the readiness work: `/health` begins returning 503 when a
+  timer loop has ended on its own, where it previously returned 200 with a degraded body,
+  and a new `/ready` route becomes the storefront's readiness probe in the Helm chart and
+  the VM compose healthchecks. An operator running the chart gets pod replacement for a
+  dead loop that previously went unnoticed, which is the intended effect and worth calling
+  out. The stage-event response gains a `truncated` field; existing clients ignore it.
 
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — operator lifecycle controls apply to
       storefronts as well as the provisioning service
-- [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`
-      and `openspec/specs/test-compatibility/spec.md`
+- [x] Existing subsystem specification — `openspec/specs/storefront-publication/spec.md`,
+      `openspec/specs/test-compatibility/spec.md`, and
+      `openspec/specs/settlement-servicing/spec.md`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -112,6 +130,18 @@ None.
 - End-to-end scenarios drive lifecycle by pause and explicit advance rather than by
   waiting — `docs/development/TESTING.md` and
   `openspec/specs/test-compatibility/spec.md`.
+- A loop's reported state is established by the loop reaching its gate, not by the
+  existence of its task; reading the pause and acknowledging it are one operation —
+  `openspec/specs/storefront-publication/spec.md`.
+- Readiness, liveness, and diagnosis are separate surfaces: a loop that has not begun
+  fails readiness, a loop that has ended fails liveness while nothing restarts it, and a
+  paused storefront stays ready — `openspec/specs/storefront-publication/spec.md` and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- A bounded operator query reports its own truncation —
+  `openspec/specs/storefront-publication/spec.md`.
+- A domain's settlement stage events carry that domain's settlement identity alongside the
+  core engine's mechanism-neutral claim reference, translated at the domain seam —
+  `openspec/specs/settlement-servicing/spec.md`.
 
 ## Dependencies and Related Changes
 

@@ -1017,3 +1017,46 @@ The advances are harmless and keep the observation ordered, but they are not loa
 for the assertion that follows them, and a note claiming they were would mislead the next
 reader. What they do buy is that a *future* reconciliation-driven close or reopen at that
 point would be observed deterministically rather than sampled.
+
+---
+
+# Run 31623897337 — `5 failed, 94 passed, 12 skipped`
+
+Two causes in the run, and a third the second one was hiding.
+
+**Four loops never acknowledged their gate.** Every `/admin/lifecycle/pause` returned four
+loops as `pausing`, in all four scenarios that pause. The compose log settles it in one
+line: `set=['site_projection_poller'] ... gate calls so far: {'site_projection_poller':
+48}`. Only one of the five loops had ever reached a gate in the process's lifetime. The
+mechanism was right and one of five call sites used it — the other four read the pause flag
+through `is_paused`, which reads without acknowledging, so `await_quiescence` waited on
+events nothing would ever set and the bounded window expired every time.
+
+Nothing below end-to-end could catch it. `test_lifecycle_registry.py` drives a synthetic
+loop whose comment read "through `gate`, as every production loop does" — the assertion that
+was false. It proves the mechanism and says nothing about the wiring, which is the same
+shape as the startup-keyword defect recorded at task 4b.2. Both are now covered by files
+that check the wiring rather than the mechanism.
+
+**A readiness gap sat underneath it.** `running` meant a task object existed. Registration
+is `create_task` inside the lifespan, so all five names appear before any coroutine executes
+a step, and the scenario's own pre-pause check — which asserts every loop is `running` —
+passed at 17:45:04 with the negotiation watchdog at zero gate calls. The watchdog's first
+gate was ~17s after boot behind a pre-loop sleep, and the first pause landed at 13s, so even
+a correct acknowledgement would have been about a second from flaking. Compose and both
+Kubernetes probes pointed at `/health`, which never mentioned background work, so nothing in
+the stack could gate on the loops being live.
+
+**Stage 09bb's 422 was hiding a filter that has never run.** `limit=1000` against a cap of
+500 stopped the request two lines before the filter — and the filter reads
+`data["escrow_uid"]`, which no claims-lifecycle event sets. The stage is new, not stale:
+this change's own claims impact assessment records that no scenario referenced
+`claim_submitted` when it was written, task 4.2c added the stage afterwards, and this is the
+first run to reach it. The identity was present under another name the whole time —
+`claim_ref` *is* the escrow uid for alkahest, and the abandonment path already relied on
+that equivalence one line below the emitter.
+
+What the run is worth recording for, beyond the three fixes: a status surface that reports
+`pausing` for both "a cycle is in flight" and "this loop never gates" costs a full
+end-to-end round to tell apart, and the whole point of these controls is to make state
+readable. `starting` exists so the next occurrence is a status read.

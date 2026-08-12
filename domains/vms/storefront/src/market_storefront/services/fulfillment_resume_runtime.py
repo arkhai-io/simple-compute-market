@@ -32,7 +32,7 @@ from market_storefront.services.vm_fulfillment_service import (
     persist_escrow_fields_with_retry,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient, get_sqlite_client
-from market_storefront.lifecycle import is_paused
+from market_storefront.lifecycle import FULFILLMENT_RESUME, gate
 
 logger = logging.getLogger(__name__)
 
@@ -667,8 +667,19 @@ async def fulfillment_resume_loop() -> None:
     interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
     db = SQLiteClient(get_sqlite_client().db_path)
     while True:
-        # Checked before the sweep, not during: a paused storefront must not be
-        # part-way through re-driving an escrow when a scenario reads its state.
-        if not is_paused():
-            await resume_incomplete_fulfillments_once(sqlite_client=db)
+        try:
+            # Checked before the sweep, not during: a paused storefront must not be
+            # part-way through re-driving an escrow when a scenario reads its state.
+            if not gate(FULFILLMENT_RESUME):
+                await resume_incomplete_fulfillments_once(sqlite_client=db)
+        except asyncio.CancelledError:
+            logger.info("[FULFILLMENT_RESUME] cancelled, shutting down")
+            break
+        except Exception:
+            # A cycle that raises must not end the loop. The per-escrow handler
+            # inside the sweep already contains its own failures; this catches the
+            # ones outside it -- listing the incomplete escrows, or building a
+            # client -- which would otherwise stop the resume worker for the life
+            # of the process with no further sweep and no recovery.
+            logger.exception("[FULFILLMENT_RESUME] sweep failed; continuing")
         await asyncio.sleep(interval)
