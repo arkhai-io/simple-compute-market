@@ -669,3 +669,57 @@ That is the same lesson as the shared `kvm1` executor from the start of this cam
 a different field: two scenarios sharing an identity makes one scenario's failure look
 like a defect in the other, and the second failure is the one that gets debugged. Per
 scenario, per resource, per host.
+
+---
+
+# Run 31578351290 — `3 failed, 88 passed, 16 skipped`
+
+Best yet: 88 passing, 16 skipped, and the grace-window fix worked — `10a` and `11a` pass
+and the release job is submitted rather than timed out. All three remaining failures point
+at one fixture, and it is a teardown that is no longer only a teardown.
+
+`release_reserved_resources` is a module-scoped autouse fixture that calls
+`POST /api/v1/admin/portfolio/release-reservations` — a *fleet-wide* release of every held
+reservation on the storefront. Its docstring explains itself as a workaround: "mocked
+provisioning never expires the lease, so the resource stays in reserved state forever…
+this fixture is the test-only equivalent for the short-circuited mock flow."
+
+That premise is now false. Stage 10a expires the lease deliberately and 10b drives the
+watchdog through it, so the mock flow does expire leases — the scenarios stopped being
+short-circuited when teardown moved onto the production path.
+
+The run shows four fleet-wide releases, and two land badly:
+
+- `08:30:56` — a release names `ledger:default:bcc1010d…`, the `test_full_deal` lease,
+  in the same second the lease lifecycle submits its release job. `10b` then reads no
+  `release_job_id` on the lease and fails; `11b` follows.
+- `08:31:01` fulfillment for the buyer-CLI deal, then a release at line 1745, then `09c`
+  at line 1943 finds no reservation carrying a `lease_end_utc` at all — the reservation it
+  needs was released between its registration and its assertion.
+
+So the fixture now races the very lifecycle it was written to substitute for, and because
+it is fleet-wide and autouse it can clear another scenario's reservation as easily as its
+own. It should be scoped to the reservations its own module created, or removed in favour
+of the expiry path the scenarios now drive — but which, and whether any scenario still
+needs the workaround, wants deciding rather than guessing. Two prior loops in this campaign
+were lost to fixing a symptom whose cause was elsewhere, and this is the same shape: the
+failing assertions are in `10b`, `11b`, and `09c`, and none of them is where the problem
+is.
+
+## The fleet-wide release fixture is gone
+
+Removed rather than scoped. Both halves of its stated premise were false by the time it
+failed: leases expire on the production path now, and every scenario declares its own
+resource, so the starvation it was written to prevent cannot happen between scenarios.
+
+What it leaves behind is worth stating plainly, because the fixture was load-bearing for
+something real once. Scenarios that hold capacity and never release it — the one-shot buy,
+multi-registry, and the settlement variants — now finish with their capacity still held.
+That is correct within a run, since each holds only its own resource. It does mean a repeat
+run against a long-lived stack would find that capacity gone, and the right home for that
+is the stack's reset, not a test teardown that can reach across scenarios.
+
+The pattern this closes, three instances in: a shared executor host, then a shared resource
+id, then a shared release. Each made one scenario's behaviour depend on another's, and each
+time the failure surfaced in the scenario that was not at fault. Per scenario, per
+resource, per host, and no fixture that acts on anything it did not create.

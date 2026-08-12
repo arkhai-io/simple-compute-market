@@ -831,6 +831,30 @@ both look exactly like defects in the change under review.
       like a negotiation defect and is not. Same lesson as the shared `kvm1` executor, in a
       different field. **Done.**
 
+### 20. A fleet-wide release fixture now races the lifecycle it substituted for
+
+Found by run 31578351290. Recorded rather than fixed: the remedy is a scoping decision
+about a fixture three scenarios depend on, and the evidence supports more than one answer.
+
+`release_reserved_resources` (module-scoped, autouse) calls
+`POST /api/v1/admin/portfolio/release-reservations`, releasing **every** held reservation
+on the storefront. Its docstring justifies itself by the mock flow never expiring leases.
+Section 4c made that false: 10a expires the lease and 10b drives the watchdog through it.
+
+- [x] 20.1 Decide the fixture's future. Three options, and the choice needs the
+      scenarios' owner: scope it to reservations the module created (needs a handle it does
+      not currently keep); drop it for the full-deal scenarios that now drive expiry and
+      keep it for those that do not; or remove it entirely and give any scenario still
+      relying on it an explicit expiry stage. The last is most consistent with
+      pause-verify-advance, and is also the largest change. **Done — removed entirely**, per the repository owner. The fixture's premise had two halves and both were false: leases now expire on the production path (4c), and every scenario declares its own resource (11c/19.2), so leftover capacity in one cannot starve another. A scenario needing its capacity released asks in a named stage. Confirmed no other reference: `admin_release_reservations` had exactly one caller.
+- [x] 20.2 Whichever is chosen, the fixture must not be able to release a reservation
+      belonging to another module. Fleet-wide plus autouse is what turned a teardown into a
+      cross-scenario failure, and the same shape as the shared `kvm1` executor and the
+      shared `compute-e2e-deal-001` resource id before it. **Satisfied by removal.** Nothing in the suite can now release a reservation it did not create. The rationale is recorded where the fixture used to be, including that a sweep for long-lived stacks belongs in that stack's reset rather than in a teardown that reaches across scenarios.
+- [x] 20.3 Re-check `09c`'s premise afterwards. It asserts a reservation carrying a
+      `lease_end_utc` exists; if a scenario's own teardown may legitimately have released
+      it by then, the stage is asserting on a window rather than on a fact.
+ **Done, as a diagnostic rather than a relaxation.** `09c`'s premise is sound again now that nothing races it, so the assertion stands. Its message now prints the reservations it actually saw and names the two causes apart: an empty list means none was registered, while entries lacking `lease_end_utc` mean one was and its lease tail was cleared since — a different problem the previous message would have reported identically.
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

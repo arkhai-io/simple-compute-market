@@ -342,6 +342,28 @@ def advance_storefront(storefront_admin_client, loop: str) -> dict:
     return result
 
 
+# No fleet-wide reservation release runs after a module.
+#
+# One used to: a module-scoped autouse fixture called
+# `POST /api/v1/admin/portfolio/release-reservations`, releasing every held
+# reservation on the storefront. It existed because mocked provisioning never
+# expired a lease, so capacity stayed held forever and a repeat run against the
+# same stack starved at stage 05b.
+#
+# Both halves of that premise are gone. Leases now expire on the production path
+# — a scenario back-dates its lease end and drives the watchdog through it — so
+# the workaround duplicated a path that works, and being fleet-wide it raced it:
+# it cleared one scenario's reservation in the same second the lease lifecycle
+# submitted that reservation's release job, and cleared another's between its
+# registration and the stage that asserts on it. Every scenario also declares its
+# own resource now, so leftover capacity in one cannot starve another.
+#
+# A scenario that needs its capacity released asks for it, in a named stage. If a
+# repeat run against a long-lived stack ever needs a sweep again, it belongs in
+# that stack's reset rather than in a test teardown that can reach across
+# scenarios.
+
+
 @pytest.fixture(scope="module", autouse=True)
 def ensure_storefront_resumed(storefront_admin_client):
     """Yield to let the module run; then resume the storefront if it is paused.
@@ -383,31 +405,6 @@ def reap_buyer_settle_subprocess(deal_state: DealState):
         run.terminate()
     except Exception as exc:
         log.warning("[teardown] could not terminate settle subprocess: %s", exc)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def release_reserved_resources(storefront_admin_client):
-    """Release any leftover reserved compute resources after the module runs.
-
-    Stage 09 reserves a compute VM for the deal but mocked provisioning never
-    expires the lease, so the resource stays in ``reserved`` state forever.
-    Without this teardown, a second back-to-back e2e_deal run against the
-    same stack hits ``no_matching_inventory`` at stage 05b.
-
-    Production storefronts release reservations via ``resource_poller`` once
-    the lease expires; this fixture is the test-only equivalent for the
-    short-circuited mock flow.
-    """
-    yield
-    try:
-        result = storefront_admin_client.admin_release_reservations()
-        if result.released_count:
-            log.info(
-                "[teardown] Released %d reserved resource(s): %s",
-                result.released_count, result.resource_ids,
-            )
-    except Exception as exc:
-        log.warning("[teardown] Could not release reserved resources: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +482,11 @@ class DealLease:
         live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
             f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the lease registered after fulfillment?"
+            f"{escrow_uid!r} — was the lease registered after fulfillment? "
+            f"Reservations seen for this escrow: {reservations!r}. An empty list "
+            "means none was ever registered; entries without a lease_end_utc mean "
+            "one was registered and its lease tail has since been cleared, which "
+            "is a different problem with a different cause."
         )
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
