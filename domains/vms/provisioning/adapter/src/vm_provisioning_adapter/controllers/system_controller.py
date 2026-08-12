@@ -217,6 +217,23 @@ class SystemController:
         return result
 
     @_system_router.post(
+        "/fulfillment-convergence/clear-claims",
+        summary="Free claimed settlement records so the next cycle re-reads them (admin)",
+    )
+    async def clear_fulfillment_convergence_claims(self) -> dict:
+        """Clear claim leases only — state and attempt counts are untouched.
+
+        A cycle that reads a still-running operation holds its claim for a lease
+        interval, so the cycle after it cannot re-read that record. This releases
+        those leases, which is what lets a caller advance convergence immediately
+        after making an operation finish rather than waiting for the lease.
+        """
+        result = await self._system_service.clear_fulfillment_claims()
+        if "error" in result:
+            raise HTTPException(status_code=503, detail=result["error"])
+        return result
+
+    @_system_router.post(
         "/lease-watchdog/pause",
         summary="Pause timer-driven lease watchdog cycles (admin)",
     )

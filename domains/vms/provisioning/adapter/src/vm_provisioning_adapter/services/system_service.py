@@ -402,6 +402,21 @@ class SystemService:
             return {"error": "fulfillment_convergence_watchdog not initialised"}
         return await self._fulfillment_convergence_watchdog.run_cycle()
 
+    async def clear_fulfillment_claims(self) -> dict:
+        """Free every claimed settlement record so the next cycle re-reads it.
+
+        Exists because a claim lease outlives the cycle that took it. A caller who
+        has just made an operation finish cannot observe that by running another
+        cycle — the record is still leased — and waiting out the lease is the only
+        other way. That makes an end-to-end scenario wait on a timer for something
+        it caused, which is precisely what deliberate advance controls exist to
+        avoid. Also useful against a fulfillment an operator believes is stuck.
+        """
+        if self._fulfillment_convergence_watchdog is None:
+            return {"error": "fulfillment_convergence_watchdog not initialised"}
+        cleared = self._fulfillment_convergence_watchdog.clear_all_claims()
+        return {"cleared": int(cleared)}
+
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""
         if self._lease_lifecycle_service is None:

@@ -876,7 +876,42 @@ Section 4c made that false: 10a expires the lease and 10b drives the watchdog th
       finished, the lease cycle must then observe the release fulfillment succeed and return
       the units, and a second convergence records `torn_down`. Both two-call orderings were
       observed failing one step short, and in both the product was correct a step later.
-      **Done.**
+      **Reverted to a finding.** Three advances did not help either; the blocking
+      condition is upstream of every assertion in the stage.
+- [x] 21.4 **Answered: a claim lease, and it was both.** `converge_teardowns` does not poll
+      a record, it *claims* one, and `claim_pending` sets the lease from
+      `Backoff.delay_seconds(attempt_count)` — 5s doubling to 300s. Stage 11a's cycle read
+      the record while `vm_remove` was queued, which burned an attempt and leased the record
+      for the backoff interval, so no later cycle could re-read it however many advances the
+      stage made. That is why both two-call orderings and the three-call version all failed
+      identically: the blocking condition was a lease, not an order. `_claim`'s docstring
+      attributes an empty batch to lock contention, which is what made an
+      unclaimable-because-backed-off record indistinguishable from no work.
+- [x] 21.5 **Product fix.** A pending read now re-leases on
+      `fulfillment_convergence_pending_poll_seconds` (default 1s) and gives back the attempt
+      the claim charged, so a run of "still queued" reads no longer walks a healthy
+      fulfillment up a schedule meant for failures. The claim itself is deliberately kept —
+      `test_converge_creates_leaves_claim_intact_while_status_is_pending` pins that two
+      overlapping cycles must not both poll one provider, and that property is worth keeping.
+      My first attempt cleared the claim outright and broke that test, which is how the
+      distinction surfaced. **Done.**
+- [x] 21.6 **Test-side control.** `POST /api/v1/system/fulfillment-convergence/clear-claims`
+      frees claimed records so the next cycle re-reads them, with methods on both operator
+      client variants. A claim lease outlives the cycle that took it, so a caller who has
+      just made an operation finish cannot observe it by advancing again; this is the
+      deliberate equivalent of waiting the lease out. Stage 11b now clears, advances, and
+      asserts, with no timing at all. **Done.**
+- [x] 21.7 Coverage: three unit tests (pending re-leases inside 2s rather than the 5s first
+      backoff step; three pending reads do not escalate `attempt_count`; clearing frees a
+      record without changing its state) and two integration tests through the real route and
+      typed client. **Done.** `check_leases` can only
+      report `released` once the fulfillment is already `torn_down`, because the VM release
+      port maps fulfillment state onto job status. Convergence reaches `torn_down` only when
+      the teardown's provider status reads `succeeded`. `drain` proves the Ansible removal
+      finished, so the open question is whether that provider status ever becomes `succeeded`
+      under the mock profile — and if not, whether `teardown_provider_metadata` is recorded
+      at dispatch at all. Read `_log_retry("teardown status", …)` in the next run's compose
+      logs before changing anything.
 
 ### Section 12 closeout
 

@@ -408,3 +408,37 @@ class TestFulfillmentConvergenceControl:
         assert set(first) == set(second), (
             f"cycle summary shape is not stable: {first} then {second}"
         )
+
+
+class TestFulfillmentClaimRelease:
+    """A still-running operation must not be put on the failure backoff.
+
+    Claim leases come from `Backoff.delay_seconds(attempt_count)` — 5s doubling to
+    300s. That is right for an operation that failed and wrong for one that has
+    not finished: "the job is still queued" is not a failure, and treating it as
+    one leaves the record unclaimable for the whole window, so a job that
+    completes a moment later is not noticed until the lease lapses — with the
+    reservation's capacity held throughout.
+    """
+
+    async def test_clear_claims_reports_how_many_records_it_freed(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+
+        result = await client.clear_fulfillment_convergence_claims()
+
+        assert "error" not in result, result
+        assert "cleared" in result and isinstance(result["cleared"], int)
+
+    async def test_clearing_claims_is_idempotent(self, client_and_queue):
+        """Nothing claimed is a normal answer, not a failure."""
+        client, _ = client_and_queue
+
+        first = await client.clear_fulfillment_convergence_claims()
+        second = await client.clear_fulfillment_convergence_claims()
+
+        assert first.get("cleared", 0) >= 0
+        assert second.get("cleared", 0) == 0, (
+            "a second clear should find nothing left claimed"
+        )

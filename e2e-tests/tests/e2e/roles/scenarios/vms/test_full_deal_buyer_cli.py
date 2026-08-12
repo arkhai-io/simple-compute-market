@@ -1307,27 +1307,24 @@ class TestStage11b_TeardownCompletion:
         provisioning_test_client.resume_rule(REMOVE_RULE_ID)
         provisioning_test_client.drain(timeout=30)
 
-        # Three advances, because two workers hand off to each other and neither
-        # looks twice. `drain` only carries the Ansible `vm_remove` job to a
-        # terminal state. Convergence is what notices that and moves the release
-        # fulfillment on; the lease cycle polls the release fulfillment and, once
-        # it reports success, finishes the release and returns the units; a second
-        # convergence records the fulfillment as torn down.
+        # Clear the claim, then advance. `drain` has made the Ansible `vm_remove`
+        # job terminal, but stage 11a's convergence cycle already read this record
+        # while that job was queued and still holds its claim — a claim lease
+        # outlives the cycle that took it, so no later cycle can re-read the
+        # record until the lease lapses. Clearing it is the deliberate equivalent
+        # of waiting the lease out, and is why this stage needs no timing at all.
         #
-        # Both orderings of two calls have now been observed failing, each one
-        # step short: convergence-then-lease left the fulfillment `tearing_down`,
-        # and lease-then-convergence left the release job unfinished and the cycle
-        # reporting `skipped`. Neither was a defect in the product — each was a
-        # stage asserting before the advance that would have satisfied it. Nothing
-        # is asserted between the advances for that reason; the final state is
-        # what this stage is about.
+        # Then the chain in order: convergence sees the finished job and records
+        # the fulfillment `torn_down`; the lease cycle polls that fulfillment —
+        # the VM release port maps its state onto job status — and, seeing it
+        # terminal, finishes the release and returns the units.
+        provisioning_client.clear_fulfillment_convergence_claims()
         provisioning_client.run_fulfillment_convergence_cycle()
-        release_summary = provisioning_client.check_leases()
-        provisioning_client.run_fulfillment_convergence_cycle()
-
-        assert release_summary.get("released", 0) >= 1, release_summary
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert fulfillment.get("state") == "torn_down", fulfillment
+
+        release_summary = provisioning_client.check_leases()
+        assert release_summary.get("released", 0) >= 1, release_summary
         lease = deal_state.deal_lease.refresh()
         assert lease.get("status") == "released", lease
 
