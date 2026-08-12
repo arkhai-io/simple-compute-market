@@ -894,3 +894,26 @@ What the skips are protecting is real. A scenario that asserted against an unreg
 Alice would fail confusingly, and skipping is better than that. What is missing is anything
 that notices the skip is permanent. Nothing distinguishes "Alice is slow to register on this
 run" from "Alice has never registered on any run", and only the second is true.
+
+## Pause-and-advance extended to the remaining scenarios
+
+Four scenarios join the dynamic-listing one in pausing the storefront at a named stage and
+advancing deliberately. Every listing-status assertion in them now advances the capacity
+poller first, which removes the last places `monotonic-listing-reconciliation` could show up
+as an intermittent failure rather than a reproducible one.
+
+Two decisions worth recording rather than burying.
+
+`test_non_erc20_settlement` is excluded. It is written as parametrized module-level
+functions, not staged classes, so it has no readiness stage to pause in; adding one would
+restructure the scenario for a benefit it does not need, since it makes no listing-status
+assertion. Excluded deliberately rather than overlooked.
+
+And pausing costs something. The green run shows Bob's claims engine completing three full
+claim cycles — submitted, collectable, collected — purely because a timer fired during the
+scenarios. No stage asserted on any of it, so nothing fails, but the suite stops exercising
+a path it was exercising by accident. The right response is not to leave the loops running:
+it is to advance the claims engine explicitly and assert what it did, which turns an
+accident into coverage. Left as an open task rather than done here, because asserting on
+claim *collection* would depend on on-chain conditions the scenario does not control, and
+choosing what to assert deserves more than a passing decision.

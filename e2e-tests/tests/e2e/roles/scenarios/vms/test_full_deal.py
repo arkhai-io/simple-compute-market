@@ -95,6 +95,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
+    advance_storefront,
+    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_DEAL_HOST,
@@ -177,6 +179,22 @@ compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
+
+
+class TestStage00_LifecyclePause:
+    def test_00_pauses_the_storefront(self, storefront_admin_client):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        A named stage rather than a fixture because every later assertion depends
+        on it: with the loops running, a listing status read after a reserve races
+        the capacity poller's next cycle, and a defect that reorders two writes
+        becomes an intermittent failure instead of a reproducible one.
+
+        Loops are held, not stopped — nothing is torn down and no cycle is cut in
+        half. Work that a loop would have done is requested explicitly from here
+        on, through `advance_storefront`.
+        """
+        pause_storefront(storefront_admin_client)
 
 class TestStage00a_StorefrontHealth:
     def test_00a_storefront_is_healthy(
@@ -1187,6 +1205,11 @@ class TestStage09b_SettlementReadyAndCredentials:
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        # The storefront is paused, so its derived listings only reconcile when
+        # asked. Advance once here: the reserve's own effect is synchronous, and
+        # this makes the observation deterministic rather than a race with the
+        # capacity poller's next cycle.
+        advance_storefront(storefront_admin_client, "capacity-events")
         assert listing.status == "closed", (
             f"Expected listing status=closed while capacity is held, got {listing.status!r}"
         )

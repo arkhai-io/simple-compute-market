@@ -44,6 +44,8 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
+    advance_storefront,
+    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_BUY_HOST,
@@ -121,6 +123,22 @@ _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 # ===========================================================================
 # Phase B0 — readiness
 # ===========================================================================
+
+
+class TestStage00_LifecyclePause:
+    def test_00_pauses_the_storefront(self, storefront_admin_client):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        A named stage rather than a fixture because every later assertion depends
+        on it: with the loops running, a listing status read after a reserve races
+        the capacity poller's next cycle, and a defect that reorders two writes
+        becomes an intermittent failure instead of a reproducible one.
+
+        Loops are held, not stopped — nothing is torn down and no cycle is cut in
+        half. Work that a loop would have done is requested explicitly from here
+        on, through `advance_storefront`.
+        """
+        pause_storefront(storefront_admin_client)
 
 class TestStageB0_Readiness:
     def test_b0_services_ready_for_buy(
@@ -414,6 +432,11 @@ class TestStageB5_SellerAndLease:
         require_state(deal_state, "real_escrow_uid", "negotiation_id",
                       "seller_listing_id", "settlement_status")
 
+        # The storefront is paused, so its derived listings only reconcile when
+        # asked. Advance once here: the reserve's own effect is synchronous, and
+        # this makes the observation deterministic rather than a race with the
+        # capacity poller's next cycle.
+        advance_storefront(storefront_admin_client, "capacity-events")
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing to close while capacity is held, got {listing.status!r}"

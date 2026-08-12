@@ -76,14 +76,32 @@ response than the underlying call already produces.
 
 - [x] 4.1 Pause the storefront in each VM scenario's readiness stage and leave it paused
       for the run. Resume belongs in teardown only, since resume itself reconciles. **Revised and done.** An autouse fixture was replaced by an explicit `test_00_pauses_the_storefront` stage calling `pause_storefront`, which asserts every loop reports `paused`. A scenario should name the state it depends on, and this also keeps the pause with the scenario that wants it — the API-credits scenario shares the module and drives a storefront with no such control.
-- [ ] 4.2b **Open — the remaining scenarios.** Run 31495188400 showed the converted
-      scenario free of the reconciliation flap while `test_full_deal_buyer_cli`'s 09b
-      still hit it: a listing closed, reopened three seconds later while its capacity was
-      held, and closed again. Converting the full-deal scenarios needs care the dynamic
-      one did not — they drive settlement through the buyer CLI while the storefront's
-      fulfillment-resume and claims loops would be paused, and whether either is
-      load-bearing for that flow is unverified. Determine that before converting, rather
-      than pausing and discovering it from a stalled stage.
+- [x] 4.2b **Done, with one scenario deliberately excluded and one coverage loss recorded.**
+      Four more scenarios now pause in a named `test_00_pauses_the_storefront` stage —
+      `test_buy_oneshot_buyer_cli`, `test_full_deal`, `test_full_deal_buyer_cli`, and
+      `test_multi_registry` — and every listing-status assertion in them advances the
+      capacity poller first. `test_non_erc20_settlement` is excluded: it is written as
+      parametrized module-level functions rather than staged classes, so there is no
+      readiness stage to pause in and adding one would restructure the scenario for a
+      benefit it does not need — it makes no listing-status assertion.
+
+      The prerequisite this task set was to check whether pausing the claims and
+      fulfillment-resume loops breaks CLI-driven settlement. It does not: the settle path
+      drives fulfillment synchronously, the only stage-event wait in these scenarios is on a
+      `provision` event from that synchronous path, and no scenario asserts on claims output.
+
+      **The coverage loss is real and worth stating.** The green run 31591230862 shows
+      Bob's claims engine completing three full claim cycles — submitted, collectable,
+      collected — entirely incidentally, and after this change it will not run unless asked.
+      Nothing asserted on it before, so nothing fails; the suite simply stops exercising a
+      path it was exercising by accident.
+- [ ] 4.2c **Open — make the claims path deliberate rather than dropped.** Add an explicit
+      `advance_storefront(..., "claims")` after settlement in one deal scenario and assert
+      the claim was submitted. That converts incidental coverage into intentional coverage,
+      which is strictly better than either the old accident or the new silence. Assert on
+      submission rather than collection: collection depends on on-chain conditions this
+      scenario does not control, and asserting it would reintroduce exactly the timing
+      dependence this whole change removes.
 - [x] 4.3b Assert the durable fulfillment identity at 09c, not `create_job_id`. That
       field is written only when a caller registers a lease with an Ansible job id, so a
       deal on the durable path never has one — the third instance in this campaign of a

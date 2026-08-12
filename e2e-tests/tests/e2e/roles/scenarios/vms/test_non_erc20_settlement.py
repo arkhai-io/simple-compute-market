@@ -26,6 +26,7 @@ from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     delete_mock_rules_if_present,
     wait_for_stage_event,
+    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
 from tests.e2e.roles.scenarios.vms.host_registry import (
