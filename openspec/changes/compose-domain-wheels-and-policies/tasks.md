@@ -913,6 +913,26 @@ Section 4c made that false: 10a expires the lease and 10b drives the watchdog th
       at dispatch at all. Read `_log_retry("teardown status", …)` in the next run's compose
       logs before changing anything.
 
+### 22. A typed client method for a route that does not exist
+
+- [x] 22.1 Release the reuse probe's reservation through
+      `PATCH /portfolio/resources/{id}` with `state=available`, the documented
+      single-row release. `admin_release_one_reservation` posts to
+      `/portfolio/resources/{id}/release-reservation`, which no storefront implements, so
+      every call has returned FastAPI's unmatched-route 404 — and its docstring's promise
+      of "404 if the row doesn't exist" makes that read as a missing resource. **Done.**
+- [x] 22.2 Annotate the client method rather than delete it: it is public API, so removal
+      breaks outside callers, and a method that names its own absence helps them more than
+      an import error. Points at the PATCH that works. **Done.**
+- [x] 22.3 **Decided and homed elsewhere.** The storefront should support a surgical
+      release-reservation path, and no current scenario needs it, so it belongs to the change
+      that owns reservation states and transitions:
+      `capacity-reservation-lifecycle-hardening` gains a design note and three tasks,
+      including the scenario that would prove selectivity — fleet-wide release cannot
+      distinguish "released the right one" from "released them all". Not
+      `capacity-resource-administration`, which owns the operator surface for capacity
+      *resources*, declaring what exists, rather than operations on a reservation. **Done.**
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

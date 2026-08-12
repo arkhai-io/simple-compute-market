@@ -81,3 +81,16 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Expiry costs in proportion to due holds, is scheduled, and admission still evaluates due holds | `openspec/specs/site-capacity/spec.md` — "Bounded hold expiry evaluation" |
 | Terminal reservations are retained by age and reference, never by count | `openspec/specs/site-capacity/spec.md` — "Terminal reservation retention" |
 | Why the key was generalized rather than replaced, and why keying on listing identity is the dangerous near-miss | This change's `design.md` |
+
+## Surgical operator release (added 2026-08-12)
+
+- [ ] Implement `POST /api/v1/admin/portfolio/resources/{resource_id}/release-reservation`,
+      the route `StorefrontClient.admin_release_one_reservation` has always called and no
+      storefront has ever served. Decide its behaviour on an already-available row and on a
+      row whose workload is still running — the PATCH that stands in for it today cannot
+      decline either. See `design.md#surgical-operator-release-and-the-scenario-that-would-prove-it`.
+- [ ] Add the end-to-end scenario described in that note: release one reservation, assert a
+      second on another resource is untouched, and assert the repeat call is idempotent.
+      Fleet-wide release cannot show selectivity, which is the property that matters.
+- [ ] Update the client docstring once the route exists; it currently states that no
+      storefront implements it.

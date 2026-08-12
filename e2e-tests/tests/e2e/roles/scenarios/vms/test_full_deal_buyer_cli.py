@@ -1340,8 +1340,13 @@ class TestStage11b_TeardownCompletion:
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         assert reserved_again.resource_id == deal_state.reserved_resource_id
-        storefront_admin_client.admin_release_one_reservation(
-            reserved_again.resource_id
+        # `PATCH state=available` is the documented single-row release, and the
+        # only one that exists: `admin_release_one_reservation` posts to
+        # `/portfolio/resources/{id}/release-reservation`, a route no storefront
+        # implements — the client method has always 404'd. The fleet-wide
+        # endpoint's own docstring points here for "surgical single-row release".
+        storefront_admin_client.patch_resource(
+            reserved_again.resource_id, state="available"
         )
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

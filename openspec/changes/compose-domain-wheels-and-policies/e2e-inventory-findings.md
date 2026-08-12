@@ -790,3 +790,72 @@ The correction I would make to my own earlier reasoning: when a stage fails by o
 useful question is not "which order is right" but "how many parties are involved". I
 answered the first question twice and got it wrong both times, because the answer to the
 second is three.
+
+---
+
+# Run 31586372700 — `2 failed, 89 passed, 16 skipped`
+
+`11b` still reports `{checked: 0, released: 0, release_failed: 0, skipped: 1}` with three
+advances, so my inference last run was wrong too. I have now guessed twice at this stage and
+been wrong twice, so this entry records the traced chain instead of a third guess.
+
+What is now established by reading the code rather than inferring from failure shapes:
+
+- The lease cycle's release job is not a queue job. `ReleaseJobDispatcher.get_job` routes by
+  executor kind to the VM adapter's release port, which maps the *fulfillment's* state:
+  `torn_down` → `succeeded`, `teardown_failed` → `failed`, anything else → `running`.
+- So `check_leases` can only ever return `released` once the fulfillment is already
+  `torn_down`. The lease cycle is downstream of convergence, not a peer of it — my
+  "three parties handing off" description had the topology right and the reason wrong.
+- Convergence reaches `torn_down` only through `_converge_teardown_record`, which polls the
+  provider status recorded under `teardown_provider_metadata` and returns early while that
+  status is `pending`.
+
+That narrows the question to one thing, and it is a product question rather than a stage
+ordering one: **after `vm_remove` completes, does the teardown's provider status ever become
+`succeeded` under the mock profile?** `drain` returning successfully means every Ansible job
+reached a terminal state, so the removal itself finished. If convergence still sees
+`pending`, the candidates are that `teardown_provider_metadata` was never recorded at
+dispatch, or that it was recorded in a shape `_provider_status` cannot resolve — in which
+case `_log_retry("teardown status", …)` will have logged it, and that log line is the next
+thing to read.
+
+No stage change is worth making until that is answered. Two runs have been spent moving
+assertions around a stage whose blocking condition is upstream of every assertion in it.
+
+The correction to carry forward: `11b`'s failures were legible as an ordering problem for
+two runs because reordering changed *which* assertion failed. A stage that fails differently
+when reordered is not thereby an ordering problem — it can equally be one blocked precondition
+observed from two angles, and distinguishing those requires tracing the dependency rather
+than permuting the calls.
+
+---
+
+# Run 31589320954 — `2 failed, 93 passed, 12 skipped`
+
+The claim-lease fix worked. `11b` now gets past everything it has failed on for five runs:
+convergence records `torn_down`, the lease cycle returns the units, the release stage event
+arrives, the resource reads unconsumed, and re-reserving it succeeds. Both scenarios fail on
+the last line of the stage instead:
+
+```
+POST /api/v1/admin/portfolio/resources/compute-e2e-deal-001/release-reservation
+  → 404 {"detail":"Not Found"}
+```
+
+That is FastAPI's unmatched-route 404, not a handler's. **No storefront implements that
+route.** `StorefrontClient.admin_release_one_reservation` has always posted to it, and its
+docstring describes behaviour it has never had — "idempotent on already-available rows,
+404 if the row doesn't exist" — which is exactly the misreading the response invites. The
+surgical release it promises does exist, as `PATCH /portfolio/resources/{id}` with
+`state=available`; the fleet-wide endpoint's own docstring points there.
+
+Fifth instance in this campaign of a typed client and its server disagreeing, after
+`resource_id`, `fulfillment_id`, `create_job_id`, and `release_job_id`. The first four were
+field names; this one is a whole route. All five were invisible until a scenario reached
+them, and all five read as product defects at first glance.
+
+The stage now uses PATCH. The client method is annotated rather than deleted — it is public
+API and a method that names its own absence is more useful to an outside caller than an
+import error — and whether the route should exist server-side is left open, since the
+capability is already reachable.
