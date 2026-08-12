@@ -44,7 +44,8 @@ and it does not need an end-to-end run.
 ## Third occurrence — end-to-end run 31636711115 (2026-08-12)
 
 Recorded because it corrects the conclusion drawn from run 31608431467, which
-`storefront-lifecycle-pause-and-advance` task 6.3 reported as "does not reproduce with the
+`archive/2026-08-13-storefront-lifecycle-pause-and-advance` task 6.3 reported as "does not
+reproduce with the
 loops idle". It reproduces. Holding the loops moved it, it did not remove it.
 
 ```

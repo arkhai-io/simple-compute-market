@@ -781,7 +781,7 @@ provisioning to completion, and they found a control that has never worked.
       waiting. **Done.**
 - [x] 17.2 State both causes at the assertion: the reopen itself
       (`monotonic-listing-reconciliation`) and the racing that makes observing it
-      non-deterministic (`storefront-lifecycle-pause-and-advance`). A reader who finds this
+      non-deterministic (`archive/2026-08-13-storefront-lifecycle-pause-and-advance`). A reader who finds this
       red should not have to rediscover which is which. **Done.**
 
 ### 18. A project that ships its own modules must reinstall itself

@@ -952,7 +952,8 @@ who wants the second without the first has no way to ask. The scenarios can live
 conflation by pausing late, but an operator who wants to stop background writes while
 continuing to trade cannot. Splitting the two, or naming the loop control separately, is a
 product decision for the owner of
-`storefront-lifecycle-pause-and-advance` rather than something to settle in a test.
+`archive/2026-08-13-storefront-lifecycle-pause-and-advance` rather than something to settle
+in a test.
 
 ---
 
