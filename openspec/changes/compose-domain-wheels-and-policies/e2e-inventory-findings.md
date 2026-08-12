@@ -1099,3 +1099,39 @@ from replace to merge; one was a missing `anvil` binary that is a GitHub release
 "Fails identically on the baseline" establishes only that a change did not cause a failure.
 It is not a diagnosis, and treating it as one let a wrong dependency version sit unexamined
 across two sessions.
+
+---
+
+# Run 31636711115 — `99 passed, 12 skipped, 0 failed`
+
+The second green run of the acknowledged-gate pause path, and identical in shape to
+31629666780: four pauses each reporting all five loops `paused`, zero `await_quiescence`
+timeouts, eight `capacity-events` advances, one `claims` advance, stage 09bb matching on
+`escrow_uid`, containers healthy through `/ready`. That discharges the two-runs requirement
+those controls were held to, which the earlier pair could not — the first of them passed
+with four loops never acknowledging their gate, so it sampled a property that was not true.
+
+Two things worth reading the log for rather than taking the summary line.
+
+**The reconciliation flap reproduces, and holding the loops relocated it rather than
+removing it.** One listing reopened and re-closed inside 105 ms:
+
+```
+20:18:56.888  compute_listings_reopened      compute-e2e-buy-001  capacity_version 1
+20:18:56.993  stale_compute_listings_closed  compute-e2e-buy-001  capacity_version 2
+```
+
+Both immediately after a module's teardown resume, where the poller leaves its gate, reads
+the feed from zero, runs its convergence reconcile against a view that reopens a listing the
+deal path had closed, and re-closes it on the next version. Every assertion has finished by
+then. An earlier note in this file read a run with zero reopen events as evidence the defect
+did not reproduce under lifecycle control; the honest version is that the suite stopped
+sampling it *where anything looks*. Reported to `monotonic-listing-reconciliation` as a third
+occurrence, with the observation that a pause-close-resume sequence is a more reliable
+trigger than the original races.
+
+**`/ready` still has not been observed failing.** Ten probe requests, all 200. The route
+works and the stack gates on it, but two green runs now have loops that gate too quickly for
+the starting window to be sampled, so no end-to-end evidence exists that readiness rejects an
+unready storefront. That behaviour is pinned at the integration level, where it can be
+arranged deterministically, and the end-to-end runs should not be cited for it.

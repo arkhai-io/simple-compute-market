@@ -267,7 +267,21 @@ response than the underlying call already produces.
       drawn from it — that this session could not supply the runtime — was never tested. See
       task 14.1's Correction 2. The rest of this task's validation is unaffected: those two
       tests exercise chain codecs neither this task's work nor Sections 9-13 touch.
-- [ ] 6.2 **Still owed. One green run of the current pause path (31629666780): 99 passed, 12 skipped.**
+- [x] 6.2 **Satisfied by 31629666780 and 31636711115 — two green runs of the acknowledged-gate
+      pause path, identical in shape.** Both: 99 passed / 12 skipped, four pauses each
+      reporting all five loops `paused`, zero `await_quiescence` timeouts, eight
+      `capacity-events` advances and one `claims` advance, stage 09bb reaching its filter and
+      matching on `escrow_uid`, and storefront containers healthy through `/ready`. The
+      second run is a repetition rather than a first sighting, which is what this task asked
+      for after the race-related iterations.
+
+      Two things the second run adds rather than merely confirms, both recorded in
+      `compose-domain-wheels-and-policies/e2e-inventory-findings.md`: the reconciliation flap
+      reproduces (see 6.3's correction below), and `/ready` again answered 200 on all ten
+      probes without ever returning 503, so the end-to-end runs still do not demonstrate
+      readiness *failing* — that remains covered only at the integration level.
+
+      Original note follows. **One green run of the current pause path (31629666780): 99 passed, 12 skipped.**
       The earlier green run cited below (31608431467) no longer counts toward the two this task
       asks for: it passed with four of five loops never acknowledging their gate, so its pause
       reported a quiescence it had not established. The count restarts from 31629666780.
@@ -284,6 +298,25 @@ response than the underlying call already produces.
       reconcile logic is correct: an advance-driven reconcile reads a current view, so it
       would not exhibit a stale-view defect even if one exists. The defect stands for
       production; the suite has stopped sampling it at random.
+
+      **Corrected 2026-08-12 by run 31636711115: it does reproduce, and holding the loops
+      relocated it rather than removing it.** Two `compute_listings_reopened` events in that
+      run, one of them the full flap shape on a single listing inside 105 ms:
+
+      ```
+      20:18:56.888  compute_listings_reopened  compute-e2e-buy-001  capacity_version 1
+      20:18:56.993  stale_compute_listings_closed  compute-e2e-buy-001  capacity_version 2
+      ```
+
+      Both sit immediately after a module's teardown `POST /admin/lifecycle/resume`, where
+      the capacity poller left its gate, re-read the event feed from 0, ran its convergence
+      reconcile — reopening a listing the deal path had closed — and re-closed it on the next
+      capacity version. So the earlier reading was too strong: the flap did not stop
+      happening when the loops were held, it moved into the resume window, which is after
+      every assertion and therefore invisible. The stale-view interpretation this task
+      recorded is unaffected and arguably strengthened; what changes is that "the suite has
+      stopped sampling it" should have said "the suite no longer samples it where anything
+      looks". Reported to `monotonic-listing-reconciliation`.
 
 ## 7a. Closeout — first pass (historical)
 
