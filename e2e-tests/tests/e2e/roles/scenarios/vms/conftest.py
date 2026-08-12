@@ -320,6 +320,21 @@ def pause_storefront(storefront_admin_client) -> dict[str, str]:
     teardown all the same — a resumed loop runs its next cycle whenever it
     likes, and no assertion should sit behind that.
     """
+    # Verify the loops are up before pausing them. A storefront answers /health
+    # as soon as its routes are mounted, which is earlier than its background
+    # loops finish starting — so a scenario can pause a storefront whose loops
+    # have not begun, and a loop that starts after the request never sees it. The
+    # status surface names each loop, so this is checkable rather than assumed.
+    status = storefront_admin_client.get_system_status()
+    loops = dict(getattr(status, "loops", None) or {})
+    not_running = {n: st for n, st in loops.items() if st != "running"}
+    assert loops and not not_running, (
+        f"storefront loops were not all running before the pause: "
+        f"{loops or 'none registered'}. Pausing now would leave whichever loop "
+        "starts next unaware of the request, and the scenario would be asserting "
+        "against a storefront that is still changing state on its own."
+    )
+
     result = storefront_admin_client.admin_pause_lifecycle_loops()
     not_at_gate = {
         name: state for name, state in (result.loops or {}).items()

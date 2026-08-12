@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from core_storefront.app_startup import (
@@ -65,6 +66,13 @@ def start_registered_loop(
     handle = start_storefront_background_task(task, logger=task_logger or logger)
     _HANDLES[task.name] = handle
     _ACKED.setdefault(task.name, asyncio.Event())
+    # pid and registry identity, because a loop that never observes a pause set in
+    # the request handler is either not calling the gate or not sharing state with
+    # it, and those are told apart by whether these match.
+    logger.info(
+        "[LIFECYCLE] registered %s (pid=%s registry=%s)",
+        task.name, os.getpid(), hex(id(_ACKED)),
+    )
     return handle
 
 
@@ -120,10 +128,11 @@ async def await_quiescence(timeout: float | None = None) -> None:
         )
         logger.info(
             "[LIFECYCLE] %d loop(s) had not reached a gate within %ss: %s "
-            "(handles=%s acked=%s set=%s)",
+            "(handles=%s acked=%s set=%s pid=%s registry=%s paused=%s)",
             len(unacked), deadline, unacked,
             sorted(_HANDLES), sorted(_ACKED),
             sorted(n for n, e in _ACKED.items() if e.is_set()),
+            os.getpid(), hex(id(_ACKED)), is_paused(),
         )
 
 
