@@ -78,14 +78,17 @@ def _set_globally_paused(value: bool) -> None:
     _GLOBALLY_PAUSED = value
 
 
-def _set_loops_paused(value: bool) -> dict[str, str]:
+async def _set_loops_paused(value: bool) -> dict[str, str]:
     """Hold every timer loop idle, or return them to work.
 
     Each loop consults the flag once per cycle, before any work, so a cycle
     either runs completely or never starts -- nothing is torn down and no
-    loop-local position is lost. Returns the resulting per-loop state, so a
-    caller can confirm what is actually idle rather than only that the flag was
-    set.
+    loop-local position is lost.
+
+    Pausing waits, bounded, for each loop to reach its gate, and reports what is
+    true of each: `paused` for one sitting at its gate, `pausing` for one whose
+    cycle had already begun and has not come back yet. Resuming does not wait --
+    there is nothing to wait for.
     """
     global _LOOPS_PAUSED
     # Local for the same reason `lifecycle.are_loops_paused` imports this module
@@ -94,6 +97,13 @@ def _set_loops_paused(value: bool) -> dict[str, str]:
     from market_storefront import lifecycle
 
     _LOOPS_PAUSED = value
+    if value:
+        # Wait, bounded, for the loops to reach their gates before reporting. The
+        # flag alone says a pause was requested; only a loop can say it has
+        # stopped, and a caller reads this response to decide whether anything is
+        # still in flight. A loop that has not acknowledged inside the window is
+        # reported `pausing`.
+        await lifecycle.await_quiescence()
     return lifecycle.loop_states()
 
 

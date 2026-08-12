@@ -16,15 +16,30 @@ progress survive a pause and resuming continues from where the loop stopped rath
 than re-converging from an initial state.
 
 A storefront MUST report each loop's current state, and that report MUST distinguish
-a loop held idle by the pause from one that has ended on its own. Reporting only
-whether the pause flag is set does not satisfy this: the flag records what was
-requested, and the per-loop state records what is true.
+a loop held idle by the pause, a loop whose cycle began before the pause was requested
+and has not yet returned to its gate, and a loop that has ended on its own. Reporting
+only whether the pause flag is set does not satisfy this: the flag records what was
+requested, and the per-loop state records what is true, which only the loop itself can
+establish by reaching its gate.
+
+Pausing MUST wait for loops to reach their gates before reporting, and that wait MUST
+be bounded. A loop's gate is at the end of its interval, and intervals may be tens of
+seconds, so an unbounded wait would make an operator control unresponsive. A loop that
+has not reached its gate inside the window MUST be reported as still stopping rather
+than as stopped, and that MUST NOT be an error: a cycle in flight is a normal state to
+report, and failing the request would replace an accurate answer with none.
 
 #### Scenario: Pausing holds every loop idle
 
-- **WHEN** an operator pauses a storefront
-- **THEN** no timer loop performs further work until the storefront is resumed, and
-  the response reports each loop as paused
+- **WHEN** an operator pauses a storefront and every loop reaches its gate
+- **THEN** no timer loop performs further work until it is resumed, and the response
+  reports each loop as paused
+
+#### Scenario: A cycle already running when the pause is requested
+
+- **WHEN** a loop is part-way through a cycle at the moment a pause is requested
+- **THEN** that cycle runs to completion, the loop is reported as still stopping
+  rather than stopped, and the pause request itself succeeds
 
 #### Scenario: A paused loop retains its position
 

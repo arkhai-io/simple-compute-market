@@ -125,7 +125,7 @@ class AdminController:
         point of having two controls — a scenario needs deterministic
         reconciliation *and* a deal to agree.
         """
-        loops = _set_loops_paused(True)
+        loops = await _set_loops_paused(True)
         return AdminPauseResponse(
             paused=True,
             message=(
@@ -149,7 +149,7 @@ class AdminController:
         feed position across the pause and continues from it rather than
         re-converging from the feed head.
         """
-        loops = _set_loops_paused(False)
+        loops = await _set_loops_paused(False)
         return AdminPauseResponse(
             paused=False,
             message="Timer loops resumed. Each will run its next cycle.",

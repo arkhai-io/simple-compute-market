@@ -11,7 +11,7 @@
 - [x] 1.9 Update `DealState` (`conftest.py`): remove the stale `provisioning_job_id` field; repurpose `fulfillment_id` (already existed, previously teardown-only) as the identity captured at settlement; repurpose `reserved_resource_id` as admin-introspection-sourced at 09c.
 - [x] 1.10 Update stale module- and function-level docstrings referencing the old `provisioning_job_id` flow.
 - [x] 1.11 `py_compile` all four touched files; grep for orphaned references (`prov_job_id`, `.get_job(`) across all three scenario files.
-- [ ] 1.12 Run the actual e2e scenarios against live docker-compose services to confirm runtime correctness -- **not done in this session** (no live services available in this environment). Verified by static analysis and compile-checking only.
+- [x] 1.12 Run the actual e2e scenarios against live docker-compose services to confirm runtime correctness. **Confirmed by run 31608431467 (2026-08-12): the full VM end-to-end suite passes — 98 passed, 12 skipped, 0 failed — against a live docker-compose stack.** The twelve skips are `test_multi_registry`'s Alice stages, which are gated on a second storefront that never completes on-chain registration; that gap is tracked separately and touches nothing here. The static analysis this task could not go beyond is now backed by execution.
 
 ## 2. Teardown-phase rewrite
 
@@ -37,8 +37,8 @@ never silently broken so much as never actually executed at all.
 - [x] 2.2 Confirm `test_full_deal.py` stages 10a-11b match the proposed sequence.
 - [x] 2.3 Confirm `test_full_deal_buyer_cli.py`'s equivalent stages match (word-for-word identical to 2.2).
 - [x] 2.4 Trace why `pools-7` believed this was still deferred: `reserved_resource_id`'s `require_state` precondition was unsatisfiable before Section 1's fix, so these stages silently skipped rather than ran and failed -- explaining why nobody observed them passing.
-- [ ] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved, not deferred (pending an actual passing run -- see 1.12/2.6).
-- [ ] 2.6 Run stages 10a-11b against live services (blocked on the same live-service constraint as task 1.12) to confirm they now execute and pass, not just that they're syntactically present and internally consistent.
+- [x] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved rather than deferred. Done: 10.14's "still open" note now cites run 31608431467.
+- [x] 2.6 Run stages 10a-11b against live services. **Confirmed by run 31608431467 (2026-08-12): the full VM end-to-end suite passes — 98 passed, 12 skipped, 0 failed — against a live docker-compose stack.** The twelve skips are `test_multi_registry`'s Alice stages, which are gated on a second storefront that never completes on-chain registration; that gap is tracked separately and touches nothing here. Those four stages pass in both full-deal scenarios. Worth recording that they did not pass unchanged: reaching them exposed five defects between them — a lease back-date that outran the watchdog grace period, a lease view reading `release_job_id` where the contract exposes `vm_remove_job_id`, a convergence claim lease that made extra advances useless, an unimplemented `release-reservation` route, and a stage asserting before its own advance. Each was real; none was visible to static analysis, which is the argument for this task having stayed open rather than being closed on structural review.
 
 ## 3. Inter-service test split
 

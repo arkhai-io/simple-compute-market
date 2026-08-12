@@ -31,11 +31,11 @@ async def _clean_registry():
     then raises `Event loop is closed` — reported against the registry rather
     than the fixture.
     """
-    server._set_loops_paused(False)
+    server._LOOPS_PAUSED = False
     lifecycle.reset_for_tests()
     yield
     lifecycle.reset_for_tests()
-    server._set_loops_paused(False)
+    server._LOOPS_PAUSED = False
     await asyncio.sleep(0)
 
 
@@ -45,7 +45,9 @@ def _counting_loop(counter: list[int], *, interval: float = 0.001):
     async def _loop() -> None:
         while True:
             await asyncio.sleep(interval)
-            if lifecycle.is_paused():
+            # Through `gate`, as every production loop does: reading the flag and
+            # acknowledging must not be separately forgettable.
+            if lifecycle.gate("alpha"):
                 continue
             counter.append(1)
 
@@ -74,7 +76,7 @@ class TestPauseHoldsEveryLoopIdle:
         )
         await _let_loops_run()
 
-        server._set_loops_paused(True)
+        await server._set_loops_paused(True)
         counter.clear()
         await _let_loops_run(cycles=10)
 
@@ -95,7 +97,7 @@ class TestPauseHoldsEveryLoopIdle:
         )
         await _let_loops_run()
 
-        server._set_loops_paused(True)
+        await server._set_loops_paused(True)
 
         assert not lifecycle._HANDLES["alpha"].done()
         assert lifecycle.loop_states() == {"alpha": "paused"}
@@ -106,10 +108,10 @@ class TestPauseHoldsEveryLoopIdle:
             StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
         before = lifecycle._HANDLES["alpha"]
-        server._set_loops_paused(True)
+        await server._set_loops_paused(True)
         await _let_loops_run()
 
-        server._set_loops_paused(False)
+        await server._set_loops_paused(False)
         counter.clear()
         await _let_loops_run()
 
@@ -126,8 +128,8 @@ class TestIdempotence:
             StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop([]))
         )
 
-        server._set_loops_paused(True)
-        states = server._set_loops_paused(True)
+        await server._set_loops_paused(True)
+        states = await server._set_loops_paused(True)
 
         assert states == {"alpha": "paused"}
 
@@ -138,7 +140,7 @@ class TestIdempotence:
         )
         before = lifecycle._HANDLES["alpha"]
 
-        states = server._set_loops_paused(False)
+        states = await server._set_loops_paused(False)
 
         assert states == {"alpha": "running"}
         assert lifecycle._HANDLES["alpha"] is before
@@ -169,6 +171,84 @@ class TestLoopStateReporting:
         )
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        server._set_loops_paused(True)
+        await server._set_loops_paused(True)
 
         assert lifecycle.loop_states()["alpha"] == "exited"
+
+
+class TestPauseDoesNotClaimQuiescenceItCannotSee:
+    """`paused` must mean the loop reached its gate, not that a flag was set.
+
+    This is the guarantee the whole control exists to provide: a caller that reads
+    `paused` uses it to decide nothing is still writing. A status derived from the
+    flag alone reports `paused` for a loop halfway through a reconcile, and no
+    assertion built on it can fail — which is worse than no assertion, because it
+    looks like proof.
+
+    Coordinated with events rather than sleeps, so the interleaving is exact.
+    """
+
+    async def test_a_loop_mid_cycle_is_reported_pausing_not_paused(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _slow_loop() -> None:
+            while True:
+                if lifecycle.gate("alpha"):
+                    await asyncio.sleep(0.001)
+                    continue
+                entered.set()
+                await release.wait()
+
+        lifecycle.start_registered_loop(
+            StorefrontBackgroundTask(name="alpha", task_factory=_slow_loop)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+
+        # The cycle is in flight and cannot come back until released, so the
+        # bounded wait expires and the report must say so rather than claiming a
+        # stop it cannot see. A short timeout keeps the test quick; the property
+        # is the reported state, not the duration.
+        server._LOOPS_PAUSED = True
+        await lifecycle.await_quiescence(timeout=0.05)
+
+        assert lifecycle.loop_states() == {"alpha": "pausing"}, (
+            "a loop still inside a cycle was reported as paused; a caller would "
+            "read that as 'nothing is in flight' on evidence that cannot show it"
+        )
+
+        # Let the cycle finish. The loop returns to its gate, finds the pause, and
+        # acknowledges — only now is `paused` true.
+        release.set()
+        await asyncio.wait_for(
+            _until(lambda: lifecycle.loop_states() == {"alpha": "paused"}), timeout=1,
+        )
+
+    async def test_quiescence_returns_once_every_loop_reaches_its_gate(self):
+        at_gate = asyncio.Event()
+
+        async def _quick_loop() -> None:
+            while True:
+                if lifecycle.gate("alpha"):
+                    at_gate.set()
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.001)
+
+        lifecycle.start_registered_loop(
+            StorefrontBackgroundTask(name="alpha", task_factory=_quick_loop)
+        )
+
+        states = await server._set_loops_paused(True)
+
+        assert at_gate.is_set()
+        assert states == {"alpha": "paused"}, (
+            "a loop sitting at its gate should be reported paused without the "
+            f"bounded wait having to expire: {states}"
+        )
+
+
+async def _until(predicate, interval: float = 0.001) -> None:
+    """Yield until a predicate holds. Bounded by the caller's `wait_for`."""
+    while not predicate():
+        await asyncio.sleep(interval)

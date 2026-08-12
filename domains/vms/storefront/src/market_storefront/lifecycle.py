@@ -42,6 +42,21 @@ logger = logging.getLogger(__name__)
 #: loop is a live task doing nothing, which is what makes the pause safe.
 _HANDLES: dict[str, asyncio.Task[Any]] = {}
 
+#: Set by a loop when it reaches its gate and finds the pause requested; cleared
+#: when it passes the gate and starts a cycle. This is the difference between
+#: "pause was requested" and "this loop has stopped", and only the loop itself can
+#: report the second. Without it, a status derived from the flag says `paused` for
+#: a loop that is part-way through a reconcile, which is precisely the claim a
+#: caller uses the status to check.
+_ACKED: dict[str, asyncio.Event] = {}
+
+#: How long `await_quiescence` waits for loops to reach their gates. Bounded on
+#: purpose: a loop's gate is at the end of its interval, and the shipped intervals
+#: run to 30s, so an unbounded wait would let an operator endpoint hang for half a
+#: minute. A loop that has not acknowledged inside the window is reported
+#: `pausing`, which is true, rather than `paused`, which would not be.
+QUIESCENCE_TIMEOUT_SECONDS = 5.0
+
 
 def start_registered_loop(
     task: StorefrontBackgroundTask, *, task_logger: Any = None
@@ -49,11 +64,68 @@ def start_registered_loop(
     """Start one background loop and keep its handle for status reporting."""
     handle = start_storefront_background_task(task, logger=task_logger or logger)
     _HANDLES[task.name] = handle
+    _ACKED.setdefault(task.name, asyncio.Event())
     return handle
+
+
+def acknowledge_gate(name: str, *, paused: bool) -> None:
+    """A loop reports whether it is sitting at its gate.
+
+    Called by each loop once per cycle, immediately after reading the pause flag
+    and before doing any work: `paused=True` when it is about to skip the cycle,
+    `paused=False` when it is about to run one. A loop that never calls this is
+    reported as never having reached its gate, which is the safe direction to be
+    wrong in.
+    """
+    event = _ACKED.setdefault(name, asyncio.Event())
+    if paused:
+        event.set()
+    else:
+        event.clear()
+
+
+async def await_quiescence(timeout: float | None = None) -> None:
+    """Wait, bounded, for every live loop to reach its gate.
+
+    Returns when all have acknowledged or the window elapses — the caller reads
+    `loop_states()` afterwards to see which. Not an error on timeout: a loop still
+    finishing a cycle is a normal state to report, and raising would turn an
+    honest answer into a failed request.
+    """
+    deadline = timeout if timeout is not None else QUIESCENCE_TIMEOUT_SECONDS
+    pending = [
+        _ACKED[name].wait()
+        for name, handle in _HANDLES.items()
+        if not handle.done() and name in _ACKED
+    ]
+    if not pending:
+        return
+    try:
+        await asyncio.wait_for(asyncio.gather(*pending), timeout=deadline)
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.info(
+            "[LIFECYCLE] %s loop(s) had not reached a gate within %ss",
+            sum(1 for n, h in _HANDLES.items() if not h.done()
+                and not _ACKED[n].is_set()),
+            deadline,
+        )
 
 
 def registered_loop_names() -> list[str]:
     return sorted(_HANDLES)
+
+
+def gate(name: str) -> bool:
+    """The pause gate a named loop consults once per cycle, before any work.
+
+    Returns True when the loop should skip this cycle. Acknowledging is folded
+    into the read rather than left to each caller: a loop that checked the flag
+    but forgot to acknowledge would be reported as still working forever, and the
+    two must not be separately forgettable.
+    """
+    paused = is_paused()
+    acknowledge_gate(name, paused=paused)
+    return paused
 
 
 def is_paused() -> bool:
@@ -87,8 +159,17 @@ def loop_states() -> dict[str, str]:
     for name, handle in _HANDLES.items():
         if handle.done():
             states[name] = "cancelled" if handle.cancelled() else "exited"
+        elif not paused:
+            states[name] = "running"
+        elif _ACKED.get(name) is not None and _ACKED[name].is_set():
+            states[name] = "paused"
         else:
-            states[name] = "paused" if paused else "running"
+            # The flag is set and this loop has not yet reached its gate, so a
+            # cycle that began before the request may still be writing. Reporting
+            # `paused` here is the failure this state exists to prevent: a caller
+            # would read it as "nothing is in flight" on exactly the evidence that
+            # cannot establish that.
+            states[name] = "pausing"
     return states
 
 
@@ -98,3 +179,4 @@ def reset_for_tests() -> None:
         if not handle.done():
             handle.cancel()
     _HANDLES.clear()
+    _ACKED.clear()

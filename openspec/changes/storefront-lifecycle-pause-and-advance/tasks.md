@@ -53,11 +53,24 @@ response than the underlying call already produces.
 - [x] 2.7 Focused tests: each advance invokes its underlying operation exactly once and
       propagates its result; each works while paused, since that is when it is used.
  **Partly done.** Five integration tests exercise the routes while paused through the real typed client. Three assert the route's contract, not invocation count — the note previously claimed "exactly once and propagates its result", which those tests do not establish, and the claim is withdrawn rather than the tests overstated. The capacity test no longer patches `full_capacity_reconcile`: patching an owned production function is the mocked-internals shape `TESTING.md` forbids. Two attempts to replace it with an observable listing transition did not produce one against `tests/fake_site` for a reason not yet identified, so it asserts only what it can honestly observe and the transition assertion is recorded as owed in 2.8.
-- [ ] 2.8 **Owed.** Assert a lifecycle advance through an observable state transition
-      rather than through its return contract, at least for the capacity-events control.
-      This is the assertion 2.7 wanted and could not produce against the current fake;
-      identifying why the reconcile finds nothing to change there is the first step, and
-      that answer is adjacent to `monotonic-listing-reconciliation`.
+- [ ] 2.8 **Owed, after a third failed attempt — and the attempts have narrowed it.**
+      Assert a lifecycle advance through an observable state transition rather than a
+      return contract. Three constructions have now failed against `tests/fake_site`: a
+      listing seeded and reconciled with capacity free, the same with the reserve applied,
+      and the same with every unit held by a `leased` reservation so the site reports the
+      resource exhausted. In all three the reconcile runs and closes nothing.
+
+      What the attempts established, which is more than the first note had:
+      `stale_open_listing_ids` skips a listing with no `derived_compute_listings` row
+      unless `configured_site_count == 1`, and it decides staleness from
+      `current_available_resource_keys` rather than from raw units — so the precondition is
+      about which keys the availability view produces, not simply about a resource being
+      exhausted. The next attempt should assert on that function directly with a known
+      availability view before going through the route, so a failure distinguishes "the
+      reconcile did not run" from "the reconcile ran and correctly found nothing stale".
+
+      Left open rather than replaced with a passing test that asserts less than it appears
+      to; the route-return test alongside it is honest about its own scope.
 
 ## 3. Observable pause state
 
@@ -224,10 +237,12 @@ response than the underlying call already produces.
 
 ## 5. Documentation
 
-- [x] 5.1 Rewrite the `pause`/`resume` endpoint summaries and `AdminPauseResponse`
-      messages: pause halts timer-driven work as well as refusing new negotiations. This
-      is a behaviour change on an existing operator endpoint and belongs in its
-      description, not only in a spec. **Done.** Both summaries and both messages rewritten; resume's docstring states that resuming itself reconciles.
+- [x] 5.1 **Superseded by the split; final behaviour differs from this task's wording.**
+      `/admin/pause` keeps its original meaning — trading only — and `/admin/lifecycle/pause`
+      halts timer-driven work. Both pairs' summaries and `AdminPauseResponse` messages say
+      which of the two they do, and each points at the other. No existing operator endpoint
+      changed behaviour in the end, which is a better outcome than the one this task
+      planned for. **Done.** Both summaries and both messages rewritten; resume's docstring states that resuming itself reconciles.
 - [x] 5.2 Add the pause-verify-advance rule to `docs/development/TESTING.md`'s async
       discipline section, beside the existing no-sleeps rule it completes. **Done.** `docs/development/TESTING.md` gains 'Lifecycle discipline — pause, verify, advance' beside the no-sleeps rule it completes.
 - [x] 5.3 Extend `docs/development/ARCHITECTURE.md`'s "Operator lifecycle controls" so it
@@ -237,7 +252,7 @@ response than the underlying call already produces.
 
 - [x] 6.1 Run the VM storefront unit and integration suites, the e2e harness suites, and
       the smoke suite. Disclose any suite not run. **Done, with one disclosure.** On a clean baseline with this change applied: `core/storefront-client` 24 passed; VM storefront 853 unit / 1 skipped and 165 integration; provisioning 622 unit+integration; e2e harness 13 unit / 2 skipped and 108 scenarios collecting; `scripts` 42. Two integration failures are excluded as environmental and pre-existing: `test_alkahest.py::test_rust` and `::test_python` need a local Alkahest chain runtime (Rust/Cargo/Foundry/Anvil) that this session does not have, and fail identically on the unmodified baseline. The storefront's `make test` target could not be used because its `reinit` step re-resolves `[rl]`'s torch against a python-3.13/darwin/arm64 marker with no wheel; `uv sync --frozen` plus targeted `--reinstall-package` of the seven edited internal wheels was used instead, verified to have loaded this change's code before running.
-- [x] 6.2 **One green run under lifecycle control (31608431467): 98 passed, 12 skipped.**
+- [ ] 6.2 **One of two green runs under lifecycle control (31608431467): 98 passed, 12 skipped.**
       Four pause calls, four resumes, and eight capacity-events advances in the run. The plan
       asks for two, and this is one — a second run is still owed before calling the suite
       stable, since a single green run cannot distinguish "deterministic" from "lucky".
@@ -250,17 +265,16 @@ response than the underlying call already produces.
       would not exhibit a stale-view defect even if one exists. The defect stands for
       production; the suite has stopped sampling it at random.
 
-## 7. Closeout — first and second passes (historical)
+## 7a. Closeout — first pass (historical)
 
-Both passes ran before the change reached its final shape — the first before sections 4b,
-4c and the pause split existed, the second before the claims stage. Superseded by section 8,
-which closes the change as it now stands. Kept because each pass records a correction to the
-one before it, and that sequence is the useful part: two of the first pass's six items were
-overturned by the second, both because they asserted something had been checked that had not.
+Ran before sections 4b, 4c and the pause split existed, so it closes a smaller change than
+this one became. Kept rather than deleted: two of its six items were overturned by the second
+pass, both because they asserted something had been checked that had not, and that sequence is
+the useful part of the record.
 
-## 7. Closeout
+## 7b. Closeout — second pass (historical)
 
-Per `openspec/README.md#plan-closeout-requirements`.
+Per `openspec/README.md#plan-closeout-requirements`. Superseded; see the final pass below.
 
 - [x] 7.1 **Comment hygiene.** **Re-run.** `make check-comment-hygiene` clean. Read the docstrings added since the first pass: the two pause routes, the two lifecycle routes, the split flags in `server.py`, the claim-clearing control, and the scenario pause helper. The first pass's claim about docstrings was withdrawn once review found bad indentation; this pass checked the rendered text rather than trusting the edit.
 - [x] 7.2 **Import placement.** **Re-run, and corrected.** The first pass asserted the advance routes' function-level imports were deliberate. Four of them hoisted cleanly and are now module level. Two imports remain local and now state the verified reason: `lifecycle.is_paused` ↔ `server` is a real cycle, confirmed by attempting the move and reading `ImportError: cannot import name ... from partially initialized module`.
@@ -299,3 +313,45 @@ and "not promoted" is a classification.
 | Pause implemented VM-locally rather than in core or kit | **Temporary.** No kit package owns storefront background work, and creating one exceeds this change. Resolves when storefront runtime moves to kit; tracked by the Goal 4 gap row above. |
 | Shortened timer intervals in the two e2e storefront configs | **Temporary, test-scoped.** Bounds how long a loop takes to notice a pause. Production keeps the shipped values; nothing depends on the shortened ones being correct. |
 | `StorefrontClient.admin_release_one_reservation` targeting an unimplemented route | **Not this change's.** Annotated in place; the route and its scenario belong to `capacity-reservation-lifecycle-hardening`. |
+
+## 8. Closeout — final
+
+Third and last pass, against the change as it stands: two independent pause controls with
+acknowledged quiescence, five gated loops, four per-loop advance endpoints, a claim-clearing
+control, a convergence backoff fix, and five converted scenarios. Sections 7a and 7b are
+history; both closed a smaller change than this became.
+
+- [x] 8.1 **Comment hygiene.** `make check-comment-hygiene` clean on a clean baseline with
+      the change applied, and the touched docstrings read directly rather than assumed —
+      the four pause/lifecycle routes, `server.py`'s flag header, `lifecycle.py`'s module
+      docstring and `gate`/`await_quiescence`, the four advance handlers,
+      `_hold_claim_for_pending`, `clear_all_claims`, and the scenario helpers. Three
+      comments that described what a previous revision did, rather than what holds now,
+      were rewritten; `check-comment-hygiene` does not catch that class.
+- [x] 8.2 **Import placement.** Every import this change adds is module level except two,
+      both verified rather than assumed: `lifecycle` ↔ `server` is a real cycle, confirmed
+      by attempting each move and reading `ImportError: cannot import name ... from
+      partially initialized module`. Four advance-route imports that an earlier pass had
+      defended as deliberate were hoisted, with the suites re-run after each move.
+- [x] 8.3 **Documentation compliance.** Two spec deltas carry the normative behaviour,
+      including the bounded-wait rule and `pausing` as a legitimate reported state.
+      `ARCHITECTURE.md` and `TESTING.md` carry the repository-wide material. Checked that
+      the specification does not claim more than the implementation does — it did until
+      this pass, which is the defect review found.
+- [x] 8.4 **Narrative compression.** Notes hold final behaviour, evidence, deferred work,
+      and destinations; reasoning lives in `design.md`, and the run-by-run sequence in
+      `compose-domain-wheels-and-policies/e2e-inventory-findings.md`.
+- [x] 8.5 **Roadmap currency.** Goal 4 records lifecycle control as a ninth cross-cutting
+      storefront concern implemented once, with a gap row owned by
+      `kit-storefront-composition-seam`. Earlier passes recorded "no roadmap change owed",
+      which stopped being true once this change added operator controls and a product fix.
+- [x] 8.6 **Promotion.** The record below is complete, every destination resolves, and
+      decisions that were superseded, rejected, or temporary are classified rather than
+      omitted.
+
+### Deliberately left open
+
+- `2.8` — an observable state transition through a lifecycle advance. Three attempts have
+  failed and narrowed the question; see the task for what they established.
+- `6.2` — one of two green runs under lifecycle control. The second is owed, and after this
+  many race-related iterations repetition is worth more than usual.

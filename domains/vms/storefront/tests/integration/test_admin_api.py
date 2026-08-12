@@ -305,7 +305,10 @@ class TestPauseHaltsTimerLoops:
 
         async def _forever() -> None:
             while True:
-                await asyncio.sleep(3600)
+                if lifecycle.gate("claims_engine"):
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.01)
 
         lifecycle.reset_for_tests()
         try:
@@ -326,7 +329,10 @@ class TestPauseHaltsTimerLoops:
 
         async def _forever() -> None:
             while True:
-                await asyncio.sleep(3600)
+                if lifecycle.gate("claims_engine"):
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.01)
 
         lifecycle.reset_for_tests()
         try:
@@ -354,7 +360,9 @@ async def _reset_pause_flags():
     """
     yield
     _server._set_globally_paused(False)
-    _server._set_loops_paused(False)
+    # Assign rather than call: `_set_loops_paused` is a coroutine (it awaits
+    # quiescence), and an unawaited call here would silently leave the flag set.
+    _server._LOOPS_PAUSED = False
 
 
 class TestTradingPauseAndLoopPauseAreSeparate:

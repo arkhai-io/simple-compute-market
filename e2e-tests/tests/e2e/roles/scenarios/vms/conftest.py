@@ -321,14 +321,15 @@ def pause_storefront(storefront_admin_client) -> dict[str, str]:
     likes, and no assertion should sit behind that.
     """
     result = storefront_admin_client.admin_pause_lifecycle_loops()
-    still_working = {
+    not_at_gate = {
         name: state for name, state in (result.loops or {}).items()
         if state != "paused"
     }
-    assert not still_working, (
-        f"storefront reported these loops still active after a pause: "
-        f"{still_working}. An assertion made now would be racing whichever one "
-        "is still writing."
+    assert not not_at_gate, (
+        f"these loops had not reached a gate when the pause returned: "
+        f"{not_at_gate}. `pausing` means a cycle that began before the request is "
+        "still running, so an assertion made now would race it; `exited` means the "
+        "loop died. Either way the scenario cannot rely on what it reads next."
     )
     log.info("[lifecycle] storefront paused; loops=%s", result.loops)
     return result.loops or {}
