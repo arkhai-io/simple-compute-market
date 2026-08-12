@@ -1206,8 +1206,12 @@ class TestStage09b_SettlementReadyAndCredentials:
             f"tenant_credentials missing from settlement status: {status_resp}"
         )
 
-        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        # Advance, then read. The order matters and is easy to get wrong: a
+        # listing fetched before the reconcile reports the state that preceded it,
+        # so the assertion passes or fails on when the row was captured rather
+        # than on what reconciliation did.
         advance_storefront(storefront_admin_client, "capacity-events")
+        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing status=closed while capacity is held, got {listing.status!r}"
         )

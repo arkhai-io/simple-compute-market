@@ -953,3 +953,37 @@ conflation by pausing late, but an operator who wants to stop background writes 
 continuing to trade cannot. Splitting the two, or naming the loop control separately, is a
 product decision for the owner of
 `storefront-lifecycle-pause-and-advance` rather than something to settle in a test.
+
+---
+
+# Run 31606573720 — `2 failed, 86 passed, 22 skipped`
+
+The split works. All three deal scenarios now hold their loops idle from the readiness
+stage while negotiating, agreeing, and settling normally — trading pause and loop pause are
+genuinely independent in a live stack, which is what the split was for.
+
+Both failures are one mistake of mine, and it is the mistake pause-and-advance is supposed
+to make impossible:
+
+```python
+listing = storefront_admin_client.get_listing(...)   # captured here
+advance_storefront(..., "capacity-events")           # reconciled after
+assert listing.status == "closed"                    # asserts the older row
+```
+
+I inserted the advance immediately before the *assertion* rather than before the *fetch*, so
+the row was captured before the reconcile it was meant to observe. The compose log settles
+it: exactly one `stale_compute_listings_closed` fired all run, for `compute-e2e-buy-001` —
+the buy scenario, where the advance happens to precede its fetch and which passed. No close
+for `compute-e2e-deal-001` because nothing asked, and no stale read either; the deal
+scenarios simply looked too early.
+
+Worth stating what this run proves rather than only what it cost. Under the old timer-driven
+arrangement this same ordering bug would have passed most of the time, because the poller
+would have closed the listing within a second either way, and it would have failed
+occasionally and looked like `monotonic-listing-reconciliation`. Deterministic advance turned
+a latent test bug into a repeatable failure with a one-line cause. That is the trade the
+methodology makes: fewer intermittent failures, and no forgiveness for reading state at the
+wrong moment.
+
+Audited the other five advance sites — every one already reads after advancing.

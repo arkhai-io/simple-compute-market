@@ -127,6 +127,18 @@ response than the underlying call already produces.
       would let a pause set by one test silently gate an unrelated one. An autouse fixture
       now clears both. **Done.**
 
+- [x] 4.2g **Advance before reading, not before asserting.** Run 31606573720 confirmed the
+      split works in a live stack — all three deal scenarios negotiate and settle with their
+      loops idle — and failed on my own ordering error: the advance sat between the
+      `get_listing` and the assertion, so the row predated the reconcile it was meant to
+      observe. Fixed in both deal scenarios, with the reason stated at the call site, and the
+      other five advance sites audited (all already read after advancing).
+
+      Recorded because of what it shows about the methodology rather than the typo: under
+      timer-driven loops this bug would have passed most runs and failed occasionally,
+      looking exactly like the reconciliation defect. Deliberate advance converts "reads
+      state at the wrong moment" from an intermittent failure into a repeatable one.
+      **Done.**
 - [ ] 4.2c **Open — make the claims path deliberate rather than dropped.** Add an explicit
       `advance_storefront(..., "claims")` after settlement in one deal scenario and assert
       the claim was submitted. That converts incidental coverage into intentional coverage,
