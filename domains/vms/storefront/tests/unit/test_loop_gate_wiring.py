@@ -176,11 +176,17 @@ class TestEachProductionLoopAcknowledges:
             raise RuntimeError("sweep failed")
 
         monkeypatch.setattr(frr, "resume_incomplete_fulfillments_once", _always_fails)
-        from market_storefront.utils import config as _config
+
+        # A stand-in settings object rather than an attribute on the dynaconf
+        # singleton: the loop reads its interval with a `getattr` default, so the
+        # key is absent from the real settings, and monkeypatch restores an
+        # absent attribute by deleting it — which dynaconf rejects for a key it
+        # never held.
+        class _Intervals:
+            fulfillment_resume_sweep_interval = 0.01
 
         monkeypatch.setattr(
-            _config.settings, "fulfillment_resume_sweep_interval", 0.01,
-            raising=False,
+            "market_storefront.utils.config.settings", _Intervals()
         )
 
         await _run_briefly(frr.fulfillment_resume_loop, lifecycle.FULFILLMENT_RESUME)

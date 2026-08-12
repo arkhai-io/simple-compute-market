@@ -252,7 +252,20 @@ response than the underlying call already produces.
 
 - [x] 6.1 Run the VM storefront unit and integration suites, the e2e harness suites, and
       the smoke suite. Disclose any suite not run. **Done, with one disclosure.** On a clean baseline with this change applied: `core/storefront-client` 24 passed; VM storefront 853 unit / 1 skipped and 165 integration; provisioning 622 unit+integration; e2e harness 13 unit / 2 skipped and 108 scenarios collecting; `scripts` 42. Two integration failures are excluded as environmental and pre-existing: `test_alkahest.py::test_rust` and `::test_python` need a local Alkahest chain runtime (Rust/Cargo/Foundry/Anvil) that this session does not have, and fail identically on the unmodified baseline. The storefront's `make test` target could not be used because its `reinit` step re-resolves `[rl]`'s torch against a python-3.13/darwin/arm64 marker with no wheel; `uv sync --frozen` plus targeted `--reinstall-package` of the seven edited internal wheels was used instead, verified to have loaded this change's code before running.
-- [ ] 6.2 **One of two green runs under lifecycle control (31608431467): 98 passed, 12 skipped.**
+
+      **Amended 2026-08-12.** The exclusion of `test_alkahest.py::test_rust` and `::test_python`
+      as environmental was wrong. They need an `anvil` binary, which is not on PyPI but is a
+      Foundry release asset on GitHub; fetching it and putting it on `PATH` turns both green in
+      seconds. The pre-existing failure on an unmodified baseline was real, but the conclusion
+      drawn from it — that this session could not supply the runtime — was never tested. See
+      task 14.1's Correction 2. The rest of this task's validation is unaffected: those two
+      tests exercise chain codecs neither this task's work nor Sections 9-13 touch.
+- [ ] 6.2 **Still owed. One green run of the current pause path (31629666780): 99 passed, 12 skipped.**
+      The earlier green run cited below (31608431467) no longer counts toward the two this task
+      asks for: it passed with four of five loops never acknowledging their gate, so its pause
+      reported a quiescence it had not established. The count restarts from 31629666780.
+
+      Original note follows. **One of two green runs under lifecycle control (31608431467): 98 passed, 12 skipped.**
       Four pause calls, four resumes, and eight capacity-events advances in the run. The plan
       asks for two, and this is one — a second run is still owed before calling the suite
       stable, since a single green run cannot distinguish "deterministic" from "lucky".
@@ -601,44 +614,85 @@ filter has never executed.
       `core/storefront-client`, and the e2e harness suites, by the command the repository
       uses rather than by naming test paths. Disclose any suite not run and why, separating
       an absence in the session environment from a defect in the code.
-      **Done, with three disclosures.** Measured against a pristine baseline copy before any
-      edit and again after, by each project's own default test command:
+      **Done. All suites green; every previously-reported failure was this session's
+      environment, and two standing "environmental" claims were wrong.** Measured on a
+      pristine baseline copy before any edit and on a clean copy with the fileset applied,
+      by each project's own default test command:
 
-      | Suite | Baseline | After |
+      | Suite | Baseline | With fileset applied |
       |---|---|---|
       | VM storefront unit | 862 passed, 1 skipped | 883 passed, 1 skipped |
-      | VM storefront integration | 166 passed, 3 failed | 175 passed, 3 failed |
+      | VM storefront integration | 169 passed | 178 passed |
       | `core/storefront` unit | 104 passed | 111 passed |
       | `core` unit | 70 passed | 70 passed |
       | `core/storefront-client` | 24 passed | 24 passed |
       | e2e harness unit | 13 passed, 2 skipped | 13 passed, 2 skipped |
-      | apicredits storefront | not run at baseline | 51 passed |
+      | apicredits storefront | 51 passed | 51 passed |
 
       `make check-comment-hygiene` passes.
 
-      **Disclosure 1 — the `reinit` step of each `make test` target was not run.** It resolves
-      internal packages from `.dist`, which this session has no built wheels for; internal
-      packages were installed from source instead. That is a session arrangement and not a
-      change to the packaging discipline, but it means these runs do not exercise wheel
-      packaging. `make check-wheel-manifests` and `make check-wheel-closure` were not run
-      for the same reason.
+      **Correction 1 — `test_amountless_exact_escrow_can_start_and_accept` was a dependency
+      version, not a defect and not a mystery.** An earlier pass reported it as an unexplained
+      pre-existing failure. It was an unpinned `dynaconf` resolving to 3.3.5 against the
+      lockfile's 3.2.13. `settings.set` on a list *merges* in 3.3.5 and *replaces* in 3.2.13,
+      so the test helper's `negotiation.policies` override appended to the configured chain
+      instead of replacing it, leaving `bisection` ahead of `accept_exact_listing`; the chain
+      countered where the test expected an accept. Traced by logging each middleware's
+      decision rather than inferred. Installing the locked version turns it green. Worth
+      noting for its own sake: `pyproject.toml` bounds dynaconf only as `>=3.0.0`, so any
+      resolution outside the lockfile can pick up this behaviour change.
 
-      **Disclosure 2 — two integration failures are the pre-existing environmental pair.**
-      `test_alkahest.py::test_rust` and `::test_python` need a local chain runtime, and fail
-      identically on the untouched baseline, as task 6.1 already recorded.
+      **Correction 2 — `test_alkahest.py::test_rust` and `::test_python` are not
+      environment-limited here either, and task 6.1's disclosure was wrong to call them so.**
+      They need an `anvil` binary, which is not on PyPI but is a Foundry release asset on
+      GitHub — a host already reachable. Fetching the `stable` Linux tarball and putting
+      `anvil` on `PATH` turns both green in about four seconds. The failure text names the
+      repository's own host bootstrap script, which is the right instruction for a developer
+      machine, and reading it as "unavailable in this session" was the error: the assumption
+      was never checked.
 
-      **Disclosure 3 — one integration failure is pre-existing and NOT established as
-      environmental.** `test_negotiate_controller.py::TestNegotiateNew::test_amountless_exact_escrow_can_start_and_accept`
-      fails `'counter' == 'accept'`, meaning `accept_exact_listing_middleware` found no peer
-      proposal in the history it was given. It fails identically on the unmodified baseline
-      here and is untouched by this change, but whether it also fails in CI was not
-      determined, so it is reported as an open question rather than dismissed. Worth a check
-      against a CI run before it is assumed harmless.
+      **Correction 3, and the last disclosure withdrawn — the wheel path runs here.** Two
+      earlier passes reported that `make test`'s `reinit` step could not be used because the
+      session had no built wheels. `make dist` builds all 28 of them from a clean baseline
+      copy without incident, so the premise was wrong; it was never attempted. What *does*
+      fail is `reinit` itself, and for a reason worth keeping: `uv sync` resolves the `[rl]`
+      extra across every platform the project claims to support, decides no `torch` wheel
+      exists for `python 3.13 / darwin / arm64`, and aborts — the same resolution failure
+      task 6.1 recorded from a different host, so it is the project's `requires-python`
+      breadth rather than anything about a session. `uv sync --frozen --find-links ../../../.dist`
+      with `--reinstall-package` for each internal distribution does what `reinit` intends and
+      resolves against the lockfile instead.
 
-      Also disclosed: the apicredits storefront suite needs the repository root on
-      `PYTHONPATH` to import its `domains.apicredits.*` test subjects, which its own
-      `pythonpath = ["src"]` does not supply. Unrelated to this change and not fixed here.
-- [ ] 14.2 One end-to-end run. The five failures in 31623897337 clear, and the run reaches
+      With that, the repository's own targets were run against wheel-installed internal
+      packages rather than source: `make test-unit` 883 passed / 1 skipped, `make
+      test-integration` 178 passed, `core/storefront` `make test` 111 passed,
+      `core/storefront-client` `make test` 24 passed. `make check-wheel-manifests` and `make
+      check-wheel-closure` both pass. Nothing about this change's packaging is now undisclosed.
+
+      **The wheel path caught a real cross-distribution hazard that source installs cannot
+      see.** On the first attempt, four `TestStreamEvents` integration tests failed with
+      `'SQLiteClient' object has no attribute 'list_stage_events_page'`. Not a defect in the
+      change: `.dist` had been built before the fileset was applied, so a stale
+      `arkhai-core-storefront` wheel was shadowing the edited source while the VM storefront's
+      own code was local and current. Rebuilding that wheel clears it. The lasting point is
+      that **this change spans distributions** — `arkhai-core-storefront` gains
+      `list_stage_events_page` and both storefront controllers call it — so a deployment that
+      rebuilds the storefront image without rebuilding `arkhai-core-storefront` fails at
+      runtime with exactly that `AttributeError`, on the events endpoint only, and no test run
+      from source would reveal it.
+
+      Also recorded: the apicredits storefront suite needs the repository root on `PYTHONPATH`
+      to import its `domains.apicredits.*` test subjects, which its own `pythonpath = ["src"]`
+      does not supply. Unrelated to this change and not fixed here.
+
+      **One defect in this change's own tests was hidden by the wrong dependency version.**
+      `test_loop_gate_wiring.py` set an absent settings key with `monkeypatch.setattr(...,
+      raising=False)`; teardown then deletes it, which dynaconf 3.2.13 rejects for a key it
+      never held and 3.3.5 tolerated. Fixed by substituting a stand-in settings object rather
+      than mutating the singleton, with the reason recorded at the test. A newer-than-locked
+      dependency masking a defect is the same class of problem as a stale one.
+
+- [x] 14.2 One end-to-end run. The five failures in 31623897337 clear, and the run reaches
       stage 09bb's assertion rather than erroring before it — 09bb's filter has never
       executed, so its first green is new information, not a re-confirmation.
       **Owed — cannot be run in this session.** The end-to-end suite needs the compose stack
@@ -649,18 +703,41 @@ filter has never executed.
       `escrow_uid`; and the storefront containers reach healthy through `/ready`, which is a
       new gate and the most likely place for this change to fail in a way no suite here can
       see.
-- [ ] 14.3 Confirm from the compose log that all five loops acknowledge: gate calls present
+
+      **Run 31629666780: 99 passed, 12 skipped, 0 failed.** All four predictions hold. Every
+      pause reports five `paused` — `{'negotiation_watchdog': 'paused', 'claims_engine':
+      'paused', 'fulfillment_resume': 'paused', 'site_projection_poller': 'paused',
+      'capacity_events_poller': 'paused'}`, four times, against four loops stuck `pausing`
+      before. All five loops log reaching a gate for the first time within the same second as
+      registration, so the watchdog restructure removed the 17-second window as well as the
+      acknowledgement gap. Stage 09bb reaches its filter, requests `limit=500`, and matches on
+      `escrow_uid`. Storefront containers reach healthy through `/ready`.
+
+      One prediction is confirmed weakly and should be said so: `/ready` returned 200 on all
+      fourteen probe requests recorded, and never 503. The route works and the containers
+      gate on it, but the run does not demonstrate readiness *failing* while loops start —
+      the loops gated too fast for the window to be sampled. That behaviour is covered at the
+      integration level instead, where it can be arranged deterministically.
+- [x] 14.3 Confirm from the compose log that all five loops acknowledge: gate calls present
       for every registered name, and every pause reporting five `paused`. The previous run's
       `gate calls so far: {'site_projection_poller': 48}` is the line that diagnosed this;
       its successor is the line that proves the fix.
+      **Confirmed.** Both storefronts log all five loops reaching a gate for the first time,
+      then all five reaching it and going idle on pause, then leaving it on resume. No
+      timeout report appears in the run at all — `await_quiescence` never expired, so the
+      diagnostic line that carried the previous run's evidence has nothing to report.
 - [x] 14.4 Append the run's findings to
       `openspec/changes/compose-domain-wheels-and-policies/e2e-inventory-findings.md`,
       which carries this campaign's run-by-run record.
       **Done for run 31623897337** — the diagnosis, not the fix. The next run's outcome is
       owed there too, and belongs with 14.2.
-- [ ] 14.5 Section 6.2 still owes a second green run under lifecycle control. This section's
+- [x] 14.5 Section 6.2 still owes a second green run under lifecycle control. This section's
       run does not discharge it — it is the first run of a changed pause path, not a
       repetition of a stable one.
+      **Recorded, and 6.2 is updated rather than closed.** Run 31629666780 is green and is the
+      first run of the acknowledged-gate path. Counting green runs under lifecycle control it
+      is the second, but the two are not repetitions of one another: 31608431467 ran with four
+      loops silently unacknowledged. A repeat of *this* configuration is what 6.2 asks for.
 
 ## 15. Closeout — after the defect sections
 

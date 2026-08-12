@@ -435,3 +435,33 @@ and a boolean — was judged more process than the defect is worth. Section 10's
 surface is the largest judgement call: it is new operator-facing behaviour with helm and
 compose impact, and it is here because the pause contract is not achievable without it, not
 because it is adjacent.
+
+### Two "environmental" failures that were not
+
+Recorded because the error was in the reasoning, not the code, and the same reasoning will
+be available next time.
+
+Three integration tests failed on an unmodified baseline during this work and were first
+reported as environmental. All three were the session's own dependency set:
+
+`test_amountless_exact_escrow_can_start_and_accept` failed because an unpinned `dynaconf`
+resolved to 3.3.5 where the lockfile pins 3.2.13. `settings.set` on a list merges in the
+newer version and replaces in the older, so a test helper overriding `negotiation.policies`
+appended to the configured chain rather than replacing it and left `bisection` ahead of
+`accept_exact_listing`. The symptom — a counter where an accept was expected — looks exactly
+like a policy defect. `pyproject.toml` bounds dynaconf only as `>=3.0.0`, so this is
+reachable by any resolution that does not go through the lockfile.
+
+`test_alkahest.py::test_rust` and `::test_python` need an `anvil` binary. It is not on PyPI,
+which is where the search stopped; it is a Foundry release asset on GitHub, a host already
+reachable, and fetching it turns both green in seconds. The tests' own failure message names
+the repository's host bootstrap script, which is the correct instruction for a developer
+machine and was misread as a statement that the runtime could not be obtained here. That
+exclusion had been carried in this change's task 6.1 since an earlier session; it is amended
+there rather than quietly dropped.
+
+The generalisable part: "fails identically on the baseline" establishes only that a change
+did not cause a failure. It says nothing about whether the failure is a defect, and treating
+the two as the same claim is what let a wrong dependency version sit unexamined. It also cut
+both ways here — the newer dynaconf *masked* a defect in this change's own new test, which
+set an absent settings key and relied on 3.3.5 tolerating its deletion at teardown.

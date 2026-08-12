@@ -1060,3 +1060,42 @@ What the run is worth recording for, beyond the three fixes: a status surface th
 `pausing` for both "a cycle is in flight" and "this loop never gates" costs a full
 end-to-end round to tell apart, and the whole point of these controls is to make state
 readable. `starting` exists so the next occurrence is a status read.
+
+---
+
+# Run 31629666780 — `99 passed, 12 skipped, 0 failed`
+
+Green, and green for the reasons predicted rather than incidentally.
+
+**Every pause now reports five `paused`.** Four pauses in the run, each returning
+`{'negotiation_watchdog': 'paused', 'claims_engine': 'paused', 'fulfillment_resume':
+'paused', 'site_projection_poller': 'paused', 'capacity_events_poller': 'paused'}`, against
+four loops stuck `pausing` in every pause of the previous run. `await_quiescence`'s timeout
+report does not appear anywhere in the log — the wait never expired, so the line that
+carried the last run's diagnosis has nothing left to say.
+
+**All five loops reach a gate in the same second they register.** Both storefronts log
+first-gate at 18:55:05, the same second as registration, where the negotiation watchdog
+previously took about seventeen. That is the pre-loop-delay restructure, and it matters
+independently of the acknowledgement fix: the first pause of the previous run landed inside
+that window, so even a correctly acknowledging watchdog would have been about a second from
+reporting `pausing`.
+
+**Stage 09bb executed its filter for the first time and passed.** It requested `limit=500`,
+asserted the page was not truncated, and matched on the `escrow_uid` column — which exists
+on a claims-lifecycle row only because the domain seam now translates the engine's
+mechanism-neutral `claim_ref`. Its first green is new information: the filter had never run.
+
+**One thing to be honest about.** `/ready` answered 200 on all fourteen probe requests in
+the log and never 503. The route works and the containers gate on it, but this run does not
+show readiness *failing* while loops start — the loops gated too quickly for that window to
+be sampled. That behaviour is pinned at the integration level, where it can be arranged
+deterministically, and the end-to-end run should not be read as evidence for it.
+
+Worth recording alongside the run, because it is the same class of error the run's fixes
+address: three test failures reported as "environmental" during this work were not. Two were
+an unpinned `dynaconf` resolving past the lockfile, where `settings.set` on a list changed
+from replace to merge; one was a missing `anvil` binary that is a GitHub release asset away.
+"Fails identically on the baseline" establishes only that a change did not cause a failure.
+It is not a diagnosis, and treating it as one let a wrong dependency version sit unexamined
+across two sessions.
