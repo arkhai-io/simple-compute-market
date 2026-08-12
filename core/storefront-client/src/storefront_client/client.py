@@ -527,6 +527,30 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    async def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/pause", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    async def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/resume", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
     async def admin_run_lifecycle_cycle(self, loop: str) -> dict:
         """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
 
@@ -1407,6 +1431,30 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return AdminPauseResponse.from_dict(
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
+
+    def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/pause", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/resume", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
 
     def admin_run_lifecycle_cycle(self, loop: str) -> dict:
         """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)

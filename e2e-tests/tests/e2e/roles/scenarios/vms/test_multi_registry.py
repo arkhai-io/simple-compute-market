@@ -94,7 +94,6 @@ import pytest
 
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting
-from tests.e2e.roles.scenarios.vms.conftest import pause_storefront
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_HOST_GPU_COUNT,
     E2E_MULTI_REGISTRY_HOST,
@@ -324,22 +323,6 @@ def _list_listings_multi(
 # ===========================================================================
 # Phase 0 — readiness
 # ===========================================================================
-
-
-class TestStage00_LifecyclePause:
-    def test_00_pauses_the_storefront(self, storefront_admin_client):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
-
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        becomes an intermittent failure instead of a reproducible one.
-
-        Loops are held, not stopped — nothing is torn down and no cycle is cut in
-        half. Work that a loop would have done is requested explicitly from here
-        on, through `advance_storefront`.
-        """
-        pause_storefront(storefront_admin_client)
 
 class TestStage00a_BobHealth:
     def test_00a_bob_healthy(self, storefront_admin_client, mr_state):

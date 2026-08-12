@@ -150,6 +150,9 @@ class HealthResponse:
     status: str = "ok"          # "ok" | "degraded"
     checks: dict[str, str] = field(default_factory=dict)
     paused: bool | None = None  # present on /api/v1/system/status only
+    # Whether timer loops are held idle — a different question from `paused`,
+    # which is about accepting new negotiations.
+    loops_paused: bool | None = None
     # Per timer loop state, present on /api/v1/system/status. Read this rather
     # than `paused` to confirm a pause halted the background work: the flag says
     # what was requested, this says what actually stopped.
@@ -164,7 +167,8 @@ class HealthResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
-            "status", "checks", "paused", "loops", "agent_id", "chain_id",
+            "status", "checks", "paused", "loops_paused", "loops", "agent_id",
+            "chain_id",
             "resource_count", "site_projections", "listing_mode_explanations",
         }
         raw_chain_id = d.get("chain_id")
@@ -173,6 +177,7 @@ class HealthResponse:
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
             paused=d.get("paused"),
+            loops_paused=d.get("loops_paused"),
             loops=d.get("loops"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,

@@ -38,37 +38,61 @@ from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Global pause flag
+# Pause flags
+#
+# Two, deliberately. `_GLOBALLY_PAUSED` closes the storefront for business: new
+# negotiations receive 503. `_LOOPS_PAUSED` holds the timer-driven loops idle so
+# the storefront changes no state on its own. They answer different questions and
+# a caller may want either without the other -- an operator stopping background
+# writes while continuing to trade, or a scenario that needs deterministic
+# reconciliation and still has a deal to agree.
+#
+# One flag briefly served both, and the conflation made the second unusable:
+# every deal scenario that paused to steady its assertions could no longer
+# negotiate. Trading pause does not imply loop pause, and the converse must never
+# hold -- a caller who stops the loops has said nothing about accepting business.
 # ---------------------------------------------------------------------------
 
 _GLOBALLY_PAUSED: bool = False
+_LOOPS_PAUSED: bool = False
 
 
 def is_globally_paused() -> bool:
+    """Whether the storefront is closed for new business."""
     return _GLOBALLY_PAUSED
 
 
-def _set_globally_paused(value: bool) -> dict[str, str]:
-    """Set the pause flag, which gates the request path and every timer loop.
+def are_loops_paused() -> bool:
+    """Whether timer-driven loops are held idle. Read once per cycle by each."""
+    return _LOOPS_PAUSED
 
-    Pause means the storefront changes no state on its own: it refuses new
-    negotiations, and each timer loop consults this flag before its next cycle
-    and does nothing while it holds. Covering only the request path would leave
-    five loops writing while the storefront reports itself paused, which is
-    surprising to an operator and unusable for a scenario that needs to observe
-    side effects in order.
 
-    Loops are held rather than stopped, so nothing is torn down and nothing is
-    interrupted part-way; returning the resulting per-loop state lets a caller
-    confirm what is actually idle rather than only that the flag was set.
+def _set_globally_paused(value: bool) -> None:
+    """Open or close the storefront for new negotiations.
+
+    Trading only: the timer loops are unaffected, and `_set_loops_paused` is how
+    a caller asks for those. This is the meaning the endpoint has always had.
     """
     global _GLOBALLY_PAUSED
-    # Local for the same reason `lifecycle.is_paused` imports this module
+    _GLOBALLY_PAUSED = value
+
+
+def _set_loops_paused(value: bool) -> dict[str, str]:
+    """Hold every timer loop idle, or return them to work.
+
+    Each loop consults the flag once per cycle, before any work, so a cycle
+    either runs completely or never starts -- nothing is torn down and no
+    loop-local position is lost. Returns the resulting per-loop state, so a
+    caller can confirm what is actually idle rather than only that the flag was
+    set.
+    """
+    global _LOOPS_PAUSED
+    # Local for the same reason `lifecycle.are_loops_paused` imports this module
     # locally: the two reference each other, and the loop modules import
     # `lifecycle` at module scope while this module imports them.
     from market_storefront import lifecycle
 
-    _GLOBALLY_PAUSED = value
+    _LOOPS_PAUSED = value
     return lifecycle.loop_states()
 
 

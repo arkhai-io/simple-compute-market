@@ -298,6 +298,11 @@ def seller_wallet() -> str:
 def pause_storefront(storefront_admin_client) -> dict[str, str]:
     """Hold the storefront's timer loops idle, and prove they are.
 
+    Pauses the *loops* only — trading stays open, so a scenario can pause at its
+    readiness stage and still agree a deal. That separation exists because it did
+    not at first: one flag meant both, and every deal scenario that paused to
+    steady its assertions could no longer negotiate.
+
     Called from a scenario's own readiness stage rather than an autouse fixture:
     a scenario should name the state it depends on, and pausing a service is a
     dependency as much as registering a host is. It also keeps the pause with
@@ -316,7 +321,7 @@ def pause_storefront(storefront_admin_client) -> dict[str, str]:
     teardown all the same — a resumed loop runs its next cycle whenever it
     likes, and no assertion should sit behind that.
     """
-    result = storefront_admin_client.admin_pause()
+    result = storefront_admin_client.admin_pause_lifecycle_loops()
     still_working = {
         name: state for name, state in (result.loops or {}).items()
         if state != "paused"
@@ -383,7 +388,10 @@ def ensure_storefront_resumed(storefront_admin_client):
         status = storefront_admin_client.get_system_status()
         if status.paused:
             storefront_admin_client.admin_resume()
-            log.info("[teardown] Cleared residual global pause on storefront")
+            log.info("[teardown] Cleared residual trading pause on storefront")
+        if getattr(status, "loops_paused", False):
+            storefront_admin_client.admin_resume_lifecycle_loops()
+            log.info("[teardown] Returned storefront timer loops to work")
     except Exception as exc:
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
 

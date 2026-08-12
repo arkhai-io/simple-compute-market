@@ -38,7 +38,7 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.server import _set_globally_paused
+from market_storefront.server import _set_globally_paused, _set_loops_paused
 from market_storefront.negotiation_watchdog import _watchdog_tick
 from market_storefront.services.capacity_client import (
     full_capacity_reconcile,
@@ -81,36 +81,67 @@ class AdminController:
     @router.post(
         "/pause",
         response_model=AdminPauseResponse,
-        summary="Pause the storefront: refuse new negotiations and halt timer loops (admin)",
+        summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
-        """Stop the storefront changing state on its own.
+        """Close the storefront for new business.
 
-        New negotiations receive 503, and every timer-driven loop — negotiation
-        watchdog, claims engine, fulfillment resume, capacity-events poller,
-        site-projection poller — performs no further cycle. The loops are held
-        idle rather than stopped, so none is interrupted part-way and none loses
-        its position. Each loop's work stays reachable through its own lifecycle
-        route below, which is how an operator or a scenario advances one step at
-        a time while paused.
+        Trading only: timer-driven work continues, so the storefront still
+        finishes what it has already accepted. Use
+        `/admin/lifecycle/pause` to hold the loops idle — the two are separate
+        because a caller may want either without the other.
         """
-        loops = _set_globally_paused(True)
+        _set_globally_paused(True)
         return AdminPauseResponse(
-            paused=True,
-            message=(
-                "Storefront paused. New negotiations will receive 503 and no timer "
-                "loop will run a cycle until resumed; advance one with "
-                "/api/v1/admin/lifecycle/{loop}/run-cycle."
-            ),
-            loops=loops,
+            paused=True, message="Storefront paused. New negotiations will receive 503."
         )
 
     @router.post(
         "/resume",
         response_model=AdminPauseResponse,
-        summary="Resume the storefront: accept negotiations and restart timer loops (admin)",
+        summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
+        """Reopen the storefront for new negotiations. Loops are unaffected."""
+        _set_globally_paused(False)
+        return AdminPauseResponse(paused=False, message="Storefront resumed.")
+
+    @router.post(
+        "/lifecycle/pause",
+        response_model=AdminPauseResponse,
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """Stop the storefront changing state on its own.
+
+        Every timer loop — negotiation watchdog, claims engine, fulfillment
+        resume, capacity-events poller, site-projection poller — performs no
+        further cycle. The loops are held idle rather than stopped, so none is
+        interrupted part-way and none loses its position. Each loop's work stays
+        reachable through its own `/lifecycle/{loop}/run-cycle` route, which is
+        how an operator or a scenario advances one step at a time while paused.
+
+        Trading is unaffected: new negotiations are still accepted. That is the
+        point of having two controls — a scenario needs deterministic
+        reconciliation *and* a deal to agree.
+        """
+        loops = _set_loops_paused(True)
+        return AdminPauseResponse(
+            paused=True,
+            message=(
+                "Timer loops paused. No loop will run a cycle until resumed; "
+                "advance one with /api/v1/admin/lifecycle/{loop}/run-cycle. "
+                "New negotiations are still accepted."
+            ),
+            loops=loops,
+        )
+
+    @router.post(
+        "/lifecycle/resume",
+        response_model=AdminPauseResponse,
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> AdminPauseResponse:
         """Return every loop to work.
 
         Nothing is restarted: the loops were held idle rather than stopped, so
@@ -118,10 +149,10 @@ class AdminController:
         feed position across the pause and continues from it rather than
         re-converging from the feed head.
         """
-        loops = _set_globally_paused(False)
+        loops = _set_loops_paused(False)
         return AdminPauseResponse(
             paused=False,
-            message="Storefront resumed. Timer loops will run their next cycle.",
+            message="Timer loops resumed. Each will run its next cycle.",
             loops=loops,
         )
 

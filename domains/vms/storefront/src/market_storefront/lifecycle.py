@@ -59,18 +59,19 @@ def registered_loop_names() -> list[str]:
 def is_paused() -> bool:
     """The pause gate every timer loop consults once per cycle.
 
-    Reads the storefront's single pause flag rather than keeping a second one:
-    "paused" must mean one thing to the negotiation path and to the loops, or an
-    operator could pause and get half of it.
+    Reads the *loop* pause flag, not the trading one. A storefront closed for new
+    negotiations is still expected to finish the work it already accepted, and a
+    storefront whose loops are idle is still expected to trade; conflating the two
+    made the second impossible to ask for.
 
     Imported inside the function because the loop modules import this one at
     module scope and `server` imports them; hoisting it produces
     `ImportError: cannot import name 'is_paused' from partially initialized
     module`, verified by attempting the move rather than assumed.
     """
-    from market_storefront.server import is_globally_paused
+    from market_storefront.server import are_loops_paused
 
-    return is_globally_paused()
+    return are_loops_paused()
 
 
 def loop_states() -> dict[str, str]:

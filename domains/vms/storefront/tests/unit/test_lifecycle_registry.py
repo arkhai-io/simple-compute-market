@@ -30,11 +30,11 @@ async def _clean_registry():
     then raises `Event loop is closed` — reported against the registry rather
     than the fixture.
     """
-    server._set_globally_paused(False)
+    server._set_loops_paused(False)
     lifecycle.reset_for_tests()
     yield
     lifecycle.reset_for_tests()
-    server._set_globally_paused(False)
+    server._set_loops_paused(False)
     await asyncio.sleep(0)
 
 
@@ -73,7 +73,7 @@ class TestPauseHoldsEveryLoopIdle:
         )
         await _let_loops_run()
 
-        server._set_globally_paused(True)
+        server._set_loops_paused(True)
         counter.clear()
         await _let_loops_run(cycles=10)
 
@@ -94,7 +94,7 @@ class TestPauseHoldsEveryLoopIdle:
         )
         await _let_loops_run()
 
-        server._set_globally_paused(True)
+        server._set_loops_paused(True)
 
         assert not lifecycle._HANDLES["alpha"].done()
         assert lifecycle.loop_states() == {"alpha": "paused"}
@@ -105,10 +105,10 @@ class TestPauseHoldsEveryLoopIdle:
             StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop(counter))
         )
         before = lifecycle._HANDLES["alpha"]
-        server._set_globally_paused(True)
+        server._set_loops_paused(True)
         await _let_loops_run()
 
-        server._set_globally_paused(False)
+        server._set_loops_paused(False)
         counter.clear()
         await _let_loops_run()
 
@@ -125,8 +125,8 @@ class TestIdempotence:
             StorefrontBackgroundTask(name="alpha", task_factory=_counting_loop([]))
         )
 
-        server._set_globally_paused(True)
-        states = server._set_globally_paused(True)
+        server._set_loops_paused(True)
+        states = server._set_loops_paused(True)
 
         assert states == {"alpha": "paused"}
 
@@ -137,7 +137,7 @@ class TestIdempotence:
         )
         before = lifecycle._HANDLES["alpha"]
 
-        states = server._set_globally_paused(False)
+        states = server._set_loops_paused(False)
 
         assert states == {"alpha": "running"}
         assert lifecycle._HANDLES["alpha"] is before
@@ -168,6 +168,6 @@ class TestLoopStateReporting:
         )
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        server._set_globally_paused(True)
+        server._set_loops_paused(True)
 
         assert lifecycle.loop_states()["alpha"] == "exited"

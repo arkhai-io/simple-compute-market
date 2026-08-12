@@ -95,6 +95,38 @@ response than the underlying call already produces.
       collected — entirely incidentally, and after this change it will not run unless asked.
       Nothing asserted on it before, so nothing fails; the suite simply stops exercising a
       path it was exercising by accident.
+- [x] 4.2d **Corrected.** Pausing at each deal scenario's readiness stage broke the deals:
+      pause refuses new negotiations, which was its meaning before this change extended it to
+      the loops, so a scenario cannot hold the pause across agreement. Each deal scenario now
+      pauses immediately before the assertion that needs determinism, after settlement.
+      `test_multi_registry` loses its pause entirely — no listing-status assertion to protect,
+      and a negotiation to lose. The dynamic-listing scenario keeps its early pause because it
+      reserves through the admin API and never negotiates; that difference is now stated in
+      its docstring, since it is why the pattern looked general when it was not. **Done.**
+- [x] 4.2e **Split, as decided.** `/admin/pause` keeps its original meaning — trading only,
+      new negotiations receive 503 — and `/admin/lifecycle/pause` and `/lifecycle/resume`
+      hold the timer loops idle. Two module-level flags, `_GLOBALLY_PAUSED` and
+      `_LOOPS_PAUSED`, and neither implies the other; two integration tests pin that
+      independence in both directions. The status surface reports `paused` and
+      `loops_paused` separately, both models carry the field, and both client variants gain
+      `admin_pause_lifecycle_loops` / `admin_resume_lifecycle_loops`.
+
+      The split was cheap because the two meanings were never entangled in code — the
+      trading flag had exactly one functional consumer, `sync_negotiation`. They were
+      entangled only in the name, which is what I did wrong: I added a second meaning to an
+      existing flag instead of giving it its own.
+
+      Consequences carried through: the scenario helper pauses loops rather than trading, so
+      4.2d's late-pause workaround is reverted and the three deal scenarios pause at their
+      readiness stage again; teardown resumes both; `ARCHITECTURE.md`, `TESTING.md`, and the
+      `storefront-publication` delta describe two controls; and the registry unit tests
+      exercise the loop flag rather than the trading one.
+- [x] 4.2f **Test isolation, found while pinning independence.** Both flags are module-level
+      and leaked between integration tests — one test paused the loops and the next read
+      `loops_paused=True` before touching anything. Harmless in that pair, but the same leak
+      would let a pause set by one test silently gate an unrelated one. An autouse fixture
+      now clears both. **Done.**
+
 - [ ] 4.2c **Open — make the claims path deliberate rather than dropped.** Add an explicit
       `advance_storefront(..., "claims")` after settlement in one deal scenario and assert
       the claim was submitted. That converts incidental coverage into intentional coverage,

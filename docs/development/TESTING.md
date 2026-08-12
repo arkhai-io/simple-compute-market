@@ -179,8 +179,10 @@ intermittent failure rather than a reproducible one. Polling until an expected
 state appears is the same thing wearing a different name.
 
 The two services expose different control surfaces, and a scenario should not
-assume one from the other. The storefront has a single pause that holds all of
-its timer loops idle, plus a per-loop control that runs one cycle. The compute
+assume one from the other. The storefront separates the two questions a pause can answer: `/admin/pause`
+closes it for new negotiations, `/admin/lifecycle/pause` holds all of its timer
+loops idle, and a per-loop control runs one cycle. A scenario wants the second
+without the first — it needs deterministic reconciliation *and* a deal to agree. The compute
 provisioner has no global pause: its lease watchdog has its own pause gate, and
 its other recovery workers expose one-cycle controls without one. In both, a
 manual cycle invokes the same operation the loop invokes.

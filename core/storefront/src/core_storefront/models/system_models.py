@@ -32,6 +32,10 @@ class HealthResponse(BaseModel):
     status: str
     checks: dict[str, str] = Field(default_factory=dict)
     paused: bool | None = None
+    # Whether timer-driven loops are held idle. Distinct from `paused`, which is
+    # about accepting new negotiations: a storefront may trade with its loops idle
+    # or run its loops while closed for business.
+    loops_paused: bool | None = None
     # Per timer loop: "running", "stopped", "cancelled", or "exited". Reported
     # beside `paused` because the flag and the loops can disagree — a loop that
     # exited on its own is neither running nor deliberately halted, and a single

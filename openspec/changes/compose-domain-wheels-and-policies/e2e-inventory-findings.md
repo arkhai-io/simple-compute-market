@@ -917,3 +917,39 @@ it is to advance the claims engine explicitly and assert what it did, which turn
 accident into coverage. Left as an open task rather than done here, because asserting on
 claim *collection* would depend on on-chain conditions the scenario does not control, and
 choosing what to assert deserves more than a passing decision.
+
+---
+
+# Run 31593556775 — `3 failed, 71 passed, 37 skipped`
+
+A regression, and mine. Pausing each deal scenario at its readiness stage broke the deals:
+
+```
+POST /api/v1/negotiate/new → 503
+  {"error":"paused","reason":"global",
+   "hint":"Storefront or listing is paused; use admin API to advance or resume"}
+```
+
+Pause has always meant "refuse new negotiations" — that was its entire meaning before this
+work extended it to the timer loops. So a scenario cannot hold the pause across the step
+that agrees the deal, and three scenarios that must negotiate were paused before doing so.
+71 passing against 95 is the cost, and the 37 skips are the downstream stages of the three
+that failed.
+
+The dynamic-listing scenario worked from the start because it never negotiates: it reserves
+capacity through the admin API. That is why the pattern looked general when it was not, and
+it is the kind of difference worth checking before generalising from one scenario to five.
+
+The fix is placement. Each deal scenario now pauses immediately before the assertion that
+needs determinism — after agreement and settlement — rather than at its readiness stage. The
+determinism those stages need is only about what reconciliation does once capacity is held,
+so nothing is lost by pausing later. `test_multi_registry` loses its pause entirely: it
+makes no listing-status assertion, so it had nothing to gain and a negotiation to lose.
+
+The design question this exposes is worth raising rather than working around. "Paused" now
+carries two meanings — refuse new negotiations, and halt timer-driven work — and a caller
+who wants the second without the first has no way to ask. The scenarios can live with the
+conflation by pausing late, but an operator who wants to stop background writes while
+continuing to trade cannot. Splitting the two, or naming the loop control separately, is a
+product decision for the owner of
+`storefront-lifecycle-pause-and-advance` rather than something to settle in a test.

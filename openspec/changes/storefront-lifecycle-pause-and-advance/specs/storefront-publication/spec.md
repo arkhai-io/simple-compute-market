@@ -2,9 +2,14 @@
 
 ### Requirement: A paused storefront performs no timer-driven work
 
-A storefront's pause control MUST hold every timer-driven loop it runs idle in
-addition to refusing new negotiations, so that a paused storefront changes no state
-on its own. A loop MUST observe the pause at a cycle boundary: a cycle either runs
+A storefront MUST expose its trading pause and its lifecycle pause as independent
+controls. Refusing new negotiations and halting timer-driven work are different
+requests: a storefront that stops accepting deals is still expected to finish those
+it has accepted, and a storefront whose loops are idle is still expected to trade.
+Neither control MAY imply the other.
+
+The lifecycle pause MUST hold every timer-driven loop the storefront runs idle, so
+that a storefront with its loops paused changes no state on its own. A loop MUST observe the pause at a cycle boundary: a cycle either runs
 to completion or does not begin, and a paused loop MUST NOT be interrupted part-way
 through one. Loops MUST NOT be torn down to achieve this, so loop-local position and
 progress survive a pause and resuming continues from where the loop stopped rather

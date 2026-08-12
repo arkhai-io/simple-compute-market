@@ -314,7 +314,7 @@ class TestPauseHaltsTimerLoops:
             )
             await asyncio.sleep(0)
 
-            result = await c.admin_pause()
+            result = await c.admin_pause_lifecycle_loops()
 
             assert result.paused is True
             assert result.loops == {"claims_engine": "paused"}
@@ -333,15 +333,63 @@ class TestPauseHaltsTimerLoops:
             lifecycle.start_registered_loop(
                 StorefrontBackgroundTask(name="claims_engine", task_factory=_forever)
             )
-            await c.admin_pause()
+            await c.admin_pause_lifecycle_loops()
 
-            result = await c.admin_resume()
+            result = await c.admin_resume_lifecycle_loops()
             await asyncio.sleep(0)
 
             assert result.paused is False
             assert result.loops == {"claims_engine": "running"}
         finally:
             lifecycle.reset_for_tests()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_pause_flags():
+    """Both pause flags are module-level, so they leak between tests.
+
+    Found by the independence tests above: one paused the loops, and the next read
+    `loops_paused=True` before touching anything. Harmless in that pair, but the
+    same leak would let a pause set by one test silently gate an unrelated one.
+    """
+    yield
+    _server._set_globally_paused(False)
+    _server._set_loops_paused(False)
+
+
+class TestTradingPauseAndLoopPauseAreSeparate:
+    """Two controls, because a caller may want either without the other.
+
+    One flag briefly meant both, and that made the loop pause unusable: a scenario
+    pausing to steady its assertions could no longer negotiate, because pause had
+    always refused new negotiations. Trading pause must not imply loop pause, and
+    loop pause must never imply trading pause — a caller who stops the background
+    work has said nothing about accepting business.
+    """
+
+    async def test_pausing_the_loops_leaves_trading_open(self, client):
+        c, _ = client
+
+        await c.admin_pause_lifecycle_loops()
+        status = await c.get_system_status()
+
+        assert status.loops_paused is True
+        assert not status.paused, (
+            "pausing the loops closed the storefront for business; a scenario "
+            "that pauses to steady its assertions must still be able to negotiate"
+        )
+
+    async def test_pausing_trading_leaves_the_loops_running(self, client):
+        c, _ = client
+
+        await c.admin_pause()
+        status = await c.get_system_status()
+
+        assert status.paused is True
+        assert not status.loops_paused, (
+            "closing for business also halted background work; a storefront that "
+            "stops accepting deals is still expected to finish the ones it has"
+        )
 
 
 class TestLifecycleAdvance:
@@ -359,7 +407,7 @@ class TestLifecycleAdvance:
 
     async def test_claims_cycle_runs_while_paused(self, client):
         c, _ = client
-        await c.admin_pause()
+        await c.admin_pause_lifecycle_loops()
 
         result = await c.admin_run_lifecycle_cycle("claims")
 
@@ -368,7 +416,7 @@ class TestLifecycleAdvance:
 
     async def test_fulfillment_resume_cycle_runs_while_paused(self, client):
         c, _ = client
-        await c.admin_pause()
+        await c.admin_pause_lifecycle_loops()
 
         result = await c.admin_run_lifecycle_cycle("fulfillment-resume")
 
@@ -376,7 +424,7 @@ class TestLifecycleAdvance:
 
     async def test_negotiation_watchdog_cycle_runs_while_paused(self, client):
         c, _ = client
-        await c.admin_pause()
+        await c.admin_pause_lifecycle_loops()
 
         result = await c.admin_run_lifecycle_cycle("negotiation-watchdog")
 
@@ -403,7 +451,7 @@ class TestLifecycleAdvance:
 
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
-        await c.admin_pause()
+        await c.admin_pause_lifecycle_loops()
 
         with site_capacity(_fake_pool_site()):
             result = await c.admin_run_lifecycle_cycle("capacity-events")

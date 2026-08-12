@@ -134,6 +134,12 @@ class TestComputeDynamicListings:
         assertion depends on it: with the loops running, a listing status read
         after a reserve races the capacity poller's next cycle. Advances are
         explicit from here on.
+
+        Pausing this early is safe *here* and not in general: a paused storefront
+        also refuses new negotiations, so a scenario that has to agree a deal
+        cannot hold the pause across that step. This one reserves capacity through
+        the admin API and never negotiates, so it can pause at the start; the deal
+        scenarios pause after agreement instead.
         """
         dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
 
