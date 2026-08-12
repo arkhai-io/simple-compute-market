@@ -79,8 +79,16 @@ def acknowledge_gate(name: str, *, paused: bool) -> None:
     """
     event = _ACKED.setdefault(name, asyncio.Event())
     if paused:
+        if not event.is_set():
+            # Logged on the transition only, not every cycle. A pause that reports
+            # `pausing` for a loop that has clearly stopped working is unresolvable
+            # from the outside: it cannot be told apart from a loop that never
+            # reached its gate. This line is the difference.
+            logger.info("[LIFECYCLE] %s reached its gate and is idle", name)
         event.set()
     else:
+        if event.is_set():
+            logger.info("[LIFECYCLE] %s left its gate and is working", name)
         event.clear()
 
 
@@ -103,11 +111,19 @@ async def await_quiescence(timeout: float | None = None) -> None:
     try:
         await asyncio.wait_for(asyncio.gather(*pending), timeout=deadline)
     except (asyncio.TimeoutError, TimeoutError):
+        # Name the loops and both key sets. A count alone cannot distinguish "the
+        # loop never acknowledged" from "the waiter watched a different object
+        # than the loop set", and those have opposite fixes.
+        unacked = sorted(
+            n for n, h in _HANDLES.items()
+            if not h.done() and not _ACKED[n].is_set()
+        )
         logger.info(
-            "[LIFECYCLE] %s loop(s) had not reached a gate within %ss",
-            sum(1 for n, h in _HANDLES.items() if not h.done()
-                and not _ACKED[n].is_set()),
-            deadline,
+            "[LIFECYCLE] %d loop(s) had not reached a gate within %ss: %s "
+            "(handles=%s acked=%s set=%s)",
+            len(unacked), deadline, unacked,
+            sorted(_HANDLES), sorted(_ACKED),
+            sorted(n for n, e in _ACKED.items() if e.is_set()),
         )
 
 

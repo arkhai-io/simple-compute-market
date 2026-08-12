@@ -260,17 +260,26 @@ async def _load_site_projections() -> None:
 
 
 def _start_site_projection_poller() -> None:
+    # Logged either way. This loop is registered last, and in one end-to-end run
+    # it was absent from the lifecycle registry while the four before it were
+    # present — with no log line, an absent loop and a silently failed start look
+    # identical from outside the process.
     from market_storefront.services.site_projection_cache import (
         site_projection_poller_loop,
     )
 
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name="site_projection_poller",
-            task_factory=site_projection_poller_loop,
-        ),
-        task_logger=logger,
-    )
+    try:
+        start_registered_loop(
+            StorefrontBackgroundTask(
+                name="site_projection_poller",
+                task_factory=site_projection_poller_loop,
+            ),
+            task_logger=logger,
+        )
+        logger.info("[STARTUP] Site projection poller registered")
+    except Exception:
+        logger.exception("[STARTUP] Site projection poller failed to start")
+        raise
 
 
 async def _startup_tasks() -> None:
