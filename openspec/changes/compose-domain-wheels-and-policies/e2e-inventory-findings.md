@@ -723,3 +723,38 @@ The pattern this closes, three instances in: a shared executor host, then a shar
 id, then a shared release. Each made one scenario's behaviour depend on another's, and each
 time the failure surfaced in the scenario that was not at fault. Per scenario, per
 resource, per host, and no fixture that acts on anything it did not create.
+
+---
+
+# Run 31579815786 — `4 failed, 91 passed, 12 skipped`
+
+91 passing, 12 skipped. Removing the fleet-wide release worked: `09c` passes in both
+scenarios, and no reservation is cleared out from under another module. The four remaining
+failures are two causes, symmetric across the two full-deal scenarios, and both are in the
+scenarios rather than the product.
+
+**`10b` — reading a field the lease contract does not have.** `DealLease.refresh` mapped
+`fulfillment_id` from `lease["release_job_id"]`. `LeaseResponse` exposes
+`vm_remove_job_id`; it has never had `release_job_id`. The ledger writes the release job id
+to *both* columns — `_sync_release_job_fields` sets `release_job_id` and, for VM executors,
+`vm_remove_job_id` — but only the vm-flavoured name is on the lease contract, so the view
+read `None` however healthy the release was. The logs show the release job submitted
+normally (`019ff529-…`), and `11b`'s own failure output prints that same id as the
+fulfillment id, which is what settles it: the release existed and the reader was wrong.
+
+Fourth instance of this shape in the campaign, after `resource_id`, `fulfillment_id`, and
+`create_job_id`: a scenario reading an identity under a name the contract does not use.
+Each was invisible until the flow reached it. Now falls back to the reservation row's
+`release_job_id`, so a non-VM executor populating only that column still resolves.
+
+**`11b` — asserting one step early.** After the `vm_remove` gate is released, nothing has
+yet looked at the resulting job. A lease cycle polls it and finishes the release, and only
+a finished release lets convergence record the fulfillment as torn down. The stage called
+`run_fulfillment_convergence_cycle` first and asserted `torn_down`, observing
+`tearing_down` — the correct state, read before the step that advances it. The two calls are
+now in that order.
+
+Worth noting this one is a consequence of the teardown trigger moving to lease expiry. Under
+the old interrupt path the storefront had already begun teardown before the stage ran, so
+the ordering happened to be satisfied. The stage was always relying on something it did not
+state.

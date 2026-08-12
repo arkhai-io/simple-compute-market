@@ -508,7 +508,16 @@ class DealLease:
             "vm_host": row.get("vm_host"),
             "vm_target": row.get("vm_target"),
             "status": data.get("status"),
-            "fulfillment_id": data.get("release_job_id"),
+            # `LeaseResponse` names this `vm_remove_job_id`, never
+            # `release_job_id`. The ledger writes the release job id to both
+            # columns (`_sync_release_job_fields`), but only the vm-flavoured one
+            # is on the lease contract, so reading `release_job_id` here returned
+            # None however healthy the release was. Falls back to the reservation
+            # row, which does carry `release_job_id`, so this keeps working if a
+            # non-VM executor ever populates one without the vm alias.
+            "fulfillment_id": (
+                data.get("vm_remove_job_id") or row.get("release_job_id")
+            ),
             "create_job_id": data.get("create_job_id"),
         }
 

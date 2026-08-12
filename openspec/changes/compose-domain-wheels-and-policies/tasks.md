@@ -855,6 +855,21 @@ Section 4c made that false: 10a expires the lease and 10b drives the watchdog th
       `lease_end_utc` exists; if a scenario's own teardown may legitimately have released
       it by then, the stage is asserting on a window rather than on a fact.
  **Done, as a diagnostic rather than a relaxation.** `09c`'s premise is sound again now that nothing races it, so the assertion stands. Its message now prints the reservations it actually saw and names the two causes apart: an empty list means none was registered, while entries lacking `lease_end_utc` mean one was and its lease tail was cleared since — a different problem the previous message would have reported identically.
+### 21. Lease-view field name, and a stage that asserted before its own advance
+
+- [x] 21.1 Read the release job id from `vm_remove_job_id`, the name `LeaseResponse`
+      actually exposes, falling back to the reservation row's `release_job_id`. The ledger
+      writes both columns but only the vm-flavoured one is on the lease contract, so
+      `DealLease.refresh` returned `None` for `fulfillment_id` on every healthy release —
+      the fourth field in this campaign read under a name the contract does not use.
+      **Done.**
+- [x] 21.2 Run the lease cycle before asserting the fulfillment is torn down. Releasing
+      the `vm_remove` gate only makes its job succeed; a lease cycle is what polls it and
+      finishes the release, and convergence cannot record `torn_down` until it has. The
+      stage observed `tearing_down` — the right state, one step early. It passed under the
+      old interrupt trigger because teardown had already begun before the stage ran, so the
+      stage was relying on an ordering it never stated. **Done.**
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method
