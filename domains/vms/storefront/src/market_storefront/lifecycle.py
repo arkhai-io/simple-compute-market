@@ -51,6 +51,9 @@ _HANDLES: dict[str, asyncio.Task[Any]] = {}
 #: caller uses the status to check.
 _ACKED: dict[str, asyncio.Event] = {}
 
+#: Diagnostic only: how many times each loop has consulted its gate.
+_GATE_CALLS: dict[str, int] = {}
+
 #: How long `await_quiescence` waits for loops to reach their gates. Bounded on
 #: purpose: a loop's gate is at the end of its interval, and the shipped intervals
 #: run to 30s, so an unbounded wait would let an operator endpoint hang for half a
@@ -85,6 +88,17 @@ def acknowledge_gate(name: str, *, paused: bool) -> None:
     reported as never having reached its gate, which is the safe direction to be
     wrong in.
     """
+    # First few calls per loop are logged unconditionally. Transition-only logging
+    # cannot distinguish "this loop reached its gate and saw no pause" from "this
+    # loop never reached its gate at all", and that is exactly the open question:
+    # four loops share a registry and a process with the request handler, the flag
+    # reads True there, and they log no transition. Bounded so it does not flood.
+    seen = _GATE_CALLS[name] = _GATE_CALLS.get(name, 0) + 1
+    if seen <= 3:
+        logger.info(
+            "[LIFECYCLE] %s gate call #%d (paused=%s)", name, seen, paused,
+        )
+
     event = _ACKED.setdefault(name, asyncio.Event())
     if paused:
         if not event.is_set():
@@ -133,6 +147,9 @@ async def await_quiescence(timeout: float | None = None) -> None:
             sorted(_HANDLES), sorted(_ACKED),
             sorted(n for n, e in _ACKED.items() if e.is_set()),
             os.getpid(), hex(id(_ACKED)), is_paused(),
+        )
+        logger.info(
+            "[LIFECYCLE] gate calls so far: %s", dict(sorted(_GATE_CALLS.items())),
         )
 
 
@@ -205,3 +222,4 @@ def reset_for_tests() -> None:
             handle.cancel()
     _HANDLES.clear()
     _ACKED.clear()
+    _GATE_CALLS.clear()
