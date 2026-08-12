@@ -255,6 +255,13 @@ cannot then report what is true of it.
 - **THEN** every loop reaches its gate within the bounded wait and is reported paused,
   with none left reported as still stopping
 
+#### Scenario: One worker cannot acknowledge for another
+
+- **WHEN** a storefront runs several workers of the same kind, one per configured
+  authority, and one of them is still mid-cycle while another sits at its gate
+- **THEN** the pause reports the one still working as not yet stopped, because each
+  worker acknowledges only for itself
+
 ### Requirement: Readiness, liveness, and diagnosis are separate surfaces
 
 A storefront MUST distinguish whether its process is worth keeping from whether it can be
@@ -310,7 +317,7 @@ a complete history will silently reason about part of one.
 - Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.
 - Domain-runtime bundle and VM wiring: `core/storefront/tests/unit/test_domain_runtime.py` and `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`.
 - Global pause state: `domains/vms/storefront/tests/unit/test_order_pause_state.py` and `tests/integration/test_admin_api.py`.
-- Loop pause, per-loop gate acknowledgement, and the `starting`/`running`/`pausing`/`paused` state machine: `domains/vms/storefront/tests/unit/test_lifecycle_registry.py` and `test_loop_gate_wiring.py`. The second is the one that proves each production loop acknowledges under its registered name; the first drives a synthetic loop and proves only the mechanism.
+- Loop pause, per-loop gate acknowledgement including one registered loop per configured capacity site, and the `starting`/`running`/`pausing`/`paused` state machine: `domains/vms/storefront/tests/unit/test_lifecycle_registry.py` and `test_loop_gate_wiring.py`. The second is the one that proves each production loop acknowledges under its registered name; the first drives a synthetic loop and proves only the mechanism.
 - Readiness, liveness, and diagnosis as separate surfaces, including that a paused storefront stays ready and an ended loop fails both probes: `domains/vms/storefront/tests/integration/test_readiness_and_liveness.py`. Probe wiring: `helm/charts/storefront/templates/deployment.yaml` and the VM compose healthchecks.
 - Operator lifecycle advance producing the transitions its loop produces, in both directions: `domains/vms/storefront/tests/integration/test_admin_api.py::TestCapacityAdvanceMovesListings`.
 - Bounded stage-event queries reporting their own truncation: `core/storefront/tests/unit/test_stage_event_pagination.py`.

@@ -371,7 +371,7 @@ and "not promoted" is a classification.
 | Shortened timer intervals in the two e2e storefront configs | **Temporary, test-scoped.** Bounds how long a loop takes to notice a pause. Production keeps the shipped values; nothing depends on the shortened ones being correct. |
 | `StorefrontClient.admin_release_one_reservation` targeting an unimplemented route | **Not this change's.** Annotated in place; the route and its scenario belong to `capacity-reservation-lifecycle-hardening`. |
 | The listing-reconcile path takes its unit of work as a parameter rather than resolving the process-wide client | **Not promoted — a testability seam, not a contract.** It changes no observable behaviour: the default resolution is what every production caller already got. Its value is that a caller reconciling one database can no longer write to another, which is a code property rather than a requirement a counterparty could depend on. The hazard it does not remove — other `get_sqlite_client()` writers reached from a test mutate the configured database — is recorded at that function. |
-| A single gate shared by every per-site capacity poller | **Temporary.** Exact at one site, optimistic in the unsafe direction beyond that. Resolving it means registering each site poller as its own loop, which changes how the loop is composed rather than how it gates. Trigger: a storefront configured with more than one site. Recorded at the loop, not only here. |
+| Each per-site capacity poller is registered and gated under its own name | **Permanent — see the loop-state requirement in `storefront-publication`.** Previously classified temporary, with one gate shared across sites and the optimism recorded as accepted. Review rejected that classification and was right to: the promoted requirement says a loop's state is established by the loop itself, `[capacity.sites]` is supported configuration today, and a shared gate lets whichever site reaches its gate first answer for the others — so a pause could report `paused` while another site was still writing. A permanent document asserting an invariant the code does not hold is a defect in the change, not a wording problem, and this one was both. Corrected before the change reached the repository. |
 | An ended loop failing liveness rather than readiness alone | **Temporary, and conditional on the absence of loop supervision.** Pod replacement is the only recovery available today, so liveness is how it is requested. If a supervisor that restarts a dead loop is ever added, this becomes a readiness-only condition. Stated in the requirement and at the route. |
 
 ## 8. Closeout — final
@@ -460,7 +460,27 @@ See `design.md`, "Post-merge defect review — run 31623897337".
       With several it is optimistic in the `pausing`→`paused` direction, which is the unsafe
       direction. Decide between a per-site registered name and an all-sites-acknowledged
       aggregate, record the decision at the loop, and state which is implemented.
-      **Decided: one shared gate, recorded at the loop.** Every per-site poller shares one name-bound gate, so the loop counts as gated once any site poller reaches its gate. Exact at one site — every current stack. With several it is optimistic in the `pausing` -> `paused` direction, which is the unsafe one, and the comment says so. Not split into per-site registered names because the per-site pollers are started inside the loop body rather than by the registry, so a per-site name would have no task handle and `loop_states` derives `exited` from that handle. Resolving it properly means registering each site poller as its own loop, which changes how this loop is composed rather than how it gates; the trigger is a storefront configured with more than one site.
+      **Corrected 2026-08-13 in review, before this change reached the repository: each
+      site poller is now registered and gated under `capacity_events_poller:<site>`.** The
+      decision recorded below was wrong, and the reasoning that produced it was the wrong
+      shape — it treated a promoted, unconditional requirement as something a code comment
+      could carve an exception out of. It cannot: the requirement says a loop's reported
+      state is established by the loop itself, `[capacity.sites]` is supported configuration
+      rather than a future idea, and the shared gate let one site's acknowledgement answer
+      for another in the single direction the pause exists to rule out.
+
+      The objection to per-site registration was that the site pollers are started inside
+      the loop body and so would have no task handle. They can simply be registered:
+      `start_registered_loop` gives each its own handle, gate, state, and death detection,
+      and `await_quiescence` then waits for every one of them without changing. The
+      aggregate name stays registered — the advance route addresses it, and a storefront
+      with no site configured must still report a capacity loop — but it does no work and
+      only gates. Per-site states also make the status surface say *which* site is still
+      stopping. Covered by `test_capacity_events_poller_registers_a_loop_per_site` and
+      `test_a_second_site_still_working_is_not_reported_paused`, both verified to fail when
+      the shared gate is reinstated.
+
+      Original note follows. **Decided: one shared gate, recorded at the loop.** Every per-site poller shares one name-bound gate, so the loop counts as gated once any site poller reaches its gate. Exact at one site — every current stack. With several it is optimistic in the `pausing` -> `paused` direction, which is the unsafe one, and the comment says so. Not split into per-site registered names because the per-site pollers are started inside the loop body rather than by the registry, so a per-site name would have no task handle and `loop_states` derives `exited` from that handle. Resolving it properly means registering each site poller as its own loop, which changes how this loop is composed rather than how it gates; the trigger is a storefront configured with more than one site.
 
 - [x] 9.5 Add `tests/unit/test_loop_gate_wiring.py`: for every loop `startup.py` registers,
       assert the loop acknowledges under that same registered name. Verify against the

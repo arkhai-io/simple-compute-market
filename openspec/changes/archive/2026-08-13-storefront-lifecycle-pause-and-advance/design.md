@@ -557,3 +557,38 @@ index to `sys_platform == 'linux'` then fails on linux/x86_64/3.13 with only `to
 visible. Why the CPU index is pinned at all, and whether the `rl` extra should participate in
 the default resolution, are questions for whoever owns that dependency. Recorded with the
 evidence so a third attempt starts further along.
+
+### Review correction: the multi-site gate was a defect, not a limitation (2026-08-13)
+
+Recorded because the error was in how the decision was classified, not only in the code.
+
+The capacity poller fans out one poller per configured site. This change shipped them
+sharing a single acknowledgement gate, and recorded that as an accepted temporary
+limitation: exact at one site, optimistic beyond it, trigger noted, comment written at the
+loop. Review rejected the classification, and correctly.
+
+Three facts together make it a defect rather than a limitation. The requirement promoted to
+`storefront-publication` says a loop's reported state is established by the loop itself, and
+says it unconditionally — nothing scopes the lifecycle contract to single-site storefronts.
+`[capacity.sites]` is supported configuration that `_capacity_settings`,
+`AggregateCapacityClient`, and the poller all consume today, so the violating composition is
+available now. And the direction of the error was the unsafe one: a pause could return
+`paused` while a second site's cycle was still writing, which is the precise condition the
+feature exists to eliminate. A comment acknowledging that in prose does not make a promoted
+requirement true.
+
+The reason given for not fixing it was that per-site pollers are started inside the loop
+body and would have no task handle, while `loop_states` derives `exited` from that handle.
+That reason dissolves on contact: they can be registered. `start_registered_loop` gives each
+one a handle, and every property the aggregate had follows — own gate, own acknowledgement,
+own state, own death detection — with `await_quiescence` unchanged, because it already waits
+for every live registered task. The aggregate name remains registered, gating and idling, so
+the advance route still has a name to address and a storefront with no site still reports a
+capacity loop.
+
+The generalisable part: "temporary, with the trigger recorded" is a legitimate
+classification for a decision the permanent documents do not contradict. It is not available
+for one they do. The check that would have caught this is the one the workflow already
+states — a permanent document asserting an invariant the code does not hold is a defect in
+the change — and it was applied to the wording of the requirement rather than to the
+requirement against every supported configuration.

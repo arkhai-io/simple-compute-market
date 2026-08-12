@@ -65,6 +65,20 @@ FULFILLMENT_RESUME = "fulfillment_resume"
 CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 SITE_PROJECTION_POLLER = "site_projection_poller"
 
+
+def capacity_site_loop_name(site: str) -> str:
+    """The registered name of one site's capacity-event poller.
+
+    Capacity polling fans out one poller per configured site, and each is
+    registered under its own name rather than sharing the aggregate's. A shared
+    acknowledgement would let whichever site reached its gate first answer for
+    the others, so a pause could report `paused` while another site's cycle was
+    still writing — optimistic in the one direction the pause exists to prevent.
+    Per-site names also make the status surface say which site is still
+    stopping, rather than only that something is.
+    """
+    return f"{CAPACITY_EVENTS_POLLER}:{site}"
+
 #: Handles are kept for status reporting only. Nothing cancels them: a paused
 #: loop is a live task doing nothing, which is what makes the pause safe.
 _HANDLES: dict[str, asyncio.Task[Any]] = {}

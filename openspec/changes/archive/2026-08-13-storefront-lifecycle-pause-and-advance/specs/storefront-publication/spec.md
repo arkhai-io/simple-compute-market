@@ -123,6 +123,13 @@ cannot then report what is true of it.
 - **THEN** every loop reaches its gate within the bounded wait and is reported paused,
   with none left reported as still stopping
 
+#### Scenario: One worker cannot acknowledge for another
+
+- **WHEN** a storefront runs several workers of the same kind, one per configured
+  authority, and one of them is still mid-cycle while another sits at its gate
+- **THEN** the pause reports the one still working as not yet stopped, because each
+  worker acknowledges only for itself
+
 ### Requirement: Readiness, liveness, and diagnosis are separate surfaces
 
 A storefront MUST distinguish whether its process is worth keeping from whether it can be

@@ -44,7 +44,13 @@ from core_storefront.capacity import (
     CapacityDelta,
     CapacitySubscriber,
 )
-from market_storefront.lifecycle import CAPACITY_EVENTS_POLLER, loop_gate
+from core_storefront.app_startup import StorefrontBackgroundTask
+from market_storefront.lifecycle import (
+    CAPACITY_EVENTS_POLLER,
+    capacity_site_loop_name,
+    loop_gate,
+    start_registered_loop,
+)
 from core_storefront.capacity_remote import (
     site_events_poller,
 )
@@ -552,43 +558,42 @@ async def capacity_events_poller_loop() -> None:
     # takes a no-argument callable, so the binding happens here.
     reconcile = functools.partial(full_capacity_reconcile, db)
 
-    # One registered loop, one gate, however many sites. Every per-site poller
-    # shares the binding, so the loop counts as at its gate once *any* site
-    # poller has reached one. With several configured sites that is optimistic in
-    # the `pausing` -> `paused` direction, which is the unsafe direction: a caller
-    # could read `paused` while another site's cycle is still writing.
+    # One registered loop per site, each with its own gate, plus this one as the
+    # aggregate. A single shared acknowledgement would let whichever site reached
+    # its gate first answer for every other, so `await_quiescence` could return
+    # while another site's cycle was still writing and the pause would report
+    # `paused` when it was not true — optimistic in the one direction the pause
+    # exists to prevent. Registering each poller gives it its own handle, so it
+    # acknowledges for itself, reports its own state, and is seen if it dies.
     #
-    # Accepted rather than split into a registered name per site, because the
-    # per-site pollers are started here and not by the loop registry, so a
-    # per-site name would have to be registered without a task handle -- and
-    # `loop_states` derives `exited` from that handle. Resolving it properly means
-    # registering each site poller as its own loop, which is a change to how this
-    # loop is composed rather than to how it gates. The trigger is a storefront
-    # configured with more than one site; every current stack has one, where this
-    # binding is exact.
+    # This loop stays registered under the aggregate name because the admin
+    # advance route addresses that name, and because a storefront with no site
+    # configured must still have a capacity loop to report. It performs no work of
+    # its own: the per-site pollers do the polling, and this one gates and idles.
     site_gate = loop_gate(CAPACITY_EVENTS_POLLER)
 
-    if not site_clients:
-        # `gather()` over nothing returns immediately, which would end this loop
-        # and report it as having died — the state reserved for a loop whose
-        # failure warrants replacing the process. A storefront with no configured
-        # site has nothing to poll, which is a configuration fact and not a fault,
-        # so the loop stays alive doing nothing and reports honestly.
-        logger.info(
-            "[CAPACITY] No site authority configured; event poller idle"
-        )
-        while True:
-            site_gate()
-            await asyncio.sleep(interval)
+    for site_name, client in site_clients.items():
+        loop_name = capacity_site_loop_name(site_name)
+        start_registered_loop(StorefrontBackgroundTask(
+            name=loop_name,
+            task_factory=functools.partial(
+                site_events_poller,
+                aggregate, site_name, client, interval,
+                full_reconcile=reconcile,
+                paused=loop_gate(loop_name),
+            ),
+        ))
 
-    await asyncio.gather(*(
-        site_events_poller(
-            aggregate, name, client, interval,
-            full_reconcile=reconcile,
-            paused=site_gate,
-        )
-        for name, client in site_clients.items()
-    ))
+    if not site_clients:
+        logger.info("[CAPACITY] No site authority configured; event poller idle")
+
+    # Never returns. `gather()` over the site pollers would end this loop the
+    # moment no site is configured, and an ended loop is the state reserved for
+    # one whose failure warrants replacing the process — which a storefront with
+    # no site authority does not deserve.
+    while True:
+        site_gate()
+        await asyncio.sleep(interval)
 
 
 async def full_capacity_reconcile(sqlite_client: Any | None = None) -> None:

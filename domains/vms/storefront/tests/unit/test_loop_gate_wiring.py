@@ -239,6 +239,97 @@ class TestEachProductionLoopAcknowledges:
 
         assert _acknowledged(lifecycle.CAPACITY_EVENTS_POLLER)
 
+    async def test_capacity_events_poller_registers_a_loop_per_site(
+        self, monkeypatch
+    ):
+        """Each site acknowledges for itself, or one can answer for another.
+
+        The pollers fan out across configured sites. Sharing one gate between
+        them means whichever site reaches its gate first satisfies the
+        acknowledgement for every other, so a pause can return `paused` while a
+        second site's cycle is still writing — optimistic in the single direction
+        the pause exists to rule out.
+        """
+        from market_storefront.services import capacity_client as cc
+
+        polled: list[str] = []
+
+        async def _fake_site_poller(
+            _aggregate, name, _client, _interval, *, full_reconcile=None,
+            paused=None,
+        ):
+            while True:
+                polled.append(name)
+                if paused is not None:
+                    paused()
+                await asyncio.sleep(0.01)
+
+        monkeypatch.setattr(cc, "build_capacity_client", lambda _f: object())
+        monkeypatch.setattr(
+            cc, "remote_site_clients",
+            lambda _a: {"site-a": object(), "site-b": object()},
+        )
+        monkeypatch.setattr(cc, "site_events_poller", _fake_site_poller)
+
+        await _run_briefly(
+            cc.capacity_events_poller_loop, lifecycle.CAPACITY_EVENTS_POLLER
+        )
+
+        for site in ("site-a", "site-b"):
+            name = lifecycle.capacity_site_loop_name(site)
+            assert name in lifecycle._HANDLES, (
+                f"{site} has no registered loop, so it cannot be waited on"
+            )
+            assert _acknowledged(name), (
+                f"{site} never acknowledged its own gate"
+            )
+
+    async def test_a_second_site_still_working_is_not_reported_paused(
+        self, monkeypatch
+    ):
+        """The reviewer's case, and the reason per-site registration exists.
+
+        One site parks at its gate; the other never reaches one. A pause must
+        report the capacity pollers as still stopping, because one of them is.
+        """
+        from market_storefront.services import capacity_client as cc
+
+        async def _fake_site_poller(
+            _aggregate, name, _client, _interval, *, full_reconcile=None,
+            paused=None,
+        ):
+            while True:
+                if name == "site-a" and paused is not None:
+                    paused()
+                await asyncio.sleep(0.01)
+
+        monkeypatch.setattr(cc, "build_capacity_client", lambda _f: object())
+        monkeypatch.setattr(
+            cc, "remote_site_clients",
+            lambda _a: {"site-a": object(), "site-b": object()},
+        )
+        monkeypatch.setattr(cc, "site_events_poller", _fake_site_poller)
+
+        task = asyncio.create_task(cc.capacity_events_poller_loop())
+        lifecycle._HANDLES[lifecycle.CAPACITY_EVENTS_POLLER] = task
+        try:
+            await asyncio.sleep(0.1)
+            server._LOOPS_PAUSED = True
+            await lifecycle.await_quiescence(0.05)
+            states = lifecycle.loop_states()
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        assert states[lifecycle.capacity_site_loop_name("site-a")] == "paused"
+        assert states[lifecycle.capacity_site_loop_name("site-b")] == "starting", (
+            "a site that never reached its gate must not be reported as stopped "
+            "on the strength of another site's acknowledgement"
+        )
+
     async def test_site_projection_poller(self, monkeypatch):
         from market_storefront.services import site_projection_cache as spc
 
