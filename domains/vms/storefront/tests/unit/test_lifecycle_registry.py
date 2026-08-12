@@ -7,9 +7,10 @@ resuming needs no restart, so there is no window where two copies of a loop
 overlap.
 
 The pause gate is checked at the top of a cycle rather than delivered as a
-cancellation. That is the difference between "every cycle either ran completely
-or never began" and "some cycle was stopped at whatever await it happened to be
-sitting on", and the tests below pin the first.
+cancellation, which is what makes "every cycle either ran completely or never
+began" true rather than "some cycle was stopped at whatever await it happened to
+be sitting on". The tests below pin that, and that a paused loop stays alive so
+its loop-local position survives.
 """
 
 from __future__ import annotations

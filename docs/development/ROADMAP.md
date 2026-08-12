@@ -119,6 +119,8 @@ Eight cross-cutting storefront concerns are implemented twice and absent once. M
 
 Neither new domain is deployable or testable end to end. Bare metal has no stack definition, and no end-to-end scenario references either domain: every deal path the repository proves is a VM deal path.
 
+Operator lifecycle control over storefront background work is a ninth concern with the same shape, and it currently exists once. The VM storefront can hold its five timer loops idle independently of whether it is accepting business, and advance each loop one cycle on demand; the API-credits storefront runs equivalent loops — capacity-event polling, projection refresh, claims sweeping, fulfillment resumption — with no control over any of them. Its background work therefore cannot be paused, stepped, or observed the way the VM storefront's can, which is why the deterministic end-to-end methodology applies to VM scenarios only.
+
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
 **Completion test.** Bare metal and API credits each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
@@ -130,6 +132,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Settlement orchestration, claim servicing, and failure handling are implemented twice and absent once | [`kit-owned-settlement-runtime`](../../openspec/changes/kit-owned-settlement-runtime/) |
 | The capacity client and publication runtime are implemented twice and absent once | [`kit-owned-capacity-and-publication`](../../openspec/changes/kit-owned-capacity-and-publication/) |
 | Bare metal has no deployable stack, no domain has an end-to-end deal path but VM, and API credits still reimplements rather than composes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
+| Operator lifecycle control over background loops exists on the VM storefront only, so the API-credits storefront's timer work cannot be paused, stepped, or deterministically observed | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |
 
 | Executor identity falls back implicitly to VM where durable identity is absent, which a growing set of executor kinds cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 | Two named-item registries remain mutable module-level state populated by import order — the buyer's aggregation policies, a public extension point whose lookup also writes to the registry it reads, and the identity verifiers. The negotiation and buyer-policy registries are now composed catalogues; the reusable primitive they were built on is `market_policy.catalogue` | [`kit-storefront-composition-seam`](../../openspec/changes/kit-storefront-composition-seam/) |

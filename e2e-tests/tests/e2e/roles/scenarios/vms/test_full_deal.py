@@ -1249,6 +1249,53 @@ class TestStage09b_SettlementReadyAndCredentials:
                  listing.status, primary["fulfillment_uid"])
 
 
+class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
+    def test_09bb_claims_cycle_registers_the_seller_claim(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Drive one claims sweep and assert the seller's claim exists.
+
+        This path used to be covered by accident: the claims engine's timer fired
+        somewhere during the scenario and swept whatever was due, and no stage
+        asserted on any of it. Holding the loops idle made that coverage
+        conditional on when a scenario happened to resume, which is a worse
+        position than either having the coverage or not — so the sweep is now
+        requested and its effect asserted.
+
+        Asserts submission, not collection. A claim becomes collectable when its
+        on-chain obligation window opens, which this scenario does not control;
+        asserting collection would put a chain condition behind a test assertion
+        and reintroduce exactly the timing dependence the lifecycle controls
+        removed. Submission is entirely the storefront's own act.
+        """
+        require_state(deal_state, "real_escrow_uid", "settlement_status")
+
+        result = advance_storefront(storefront_admin_client, "claims")
+        assert result.get("loop") == "claims_engine", result
+        assert "processed" in result, (
+            f"claims advance returned no sweep count: {result}"
+        )
+
+        # Read the whole claims log, not only what this sweep added. Submission is
+        # the fulfillment path's act and may already have happened; the sweep
+        # services what is due. The assertion that matters either way is that a
+        # fulfilled escrow has a registered seller claim — an empty log here means
+        # a settled deal nobody will ever get paid for.
+        events = storefront_admin_client.get_events(
+            since_id=0, limit=1000, stage="claims",
+        )
+        submitted = [
+            e for e in events.events
+            if e.event == "claim_submitted"
+            and (e.data or {}).get("escrow_uid") == deal_state.real_escrow_uid
+        ]
+        assert submitted, (
+            "no claim_submitted event for this fulfilled escrow "
+            f"({deal_state.real_escrow_uid}); claims seen: "
+            f"{[(e.event, (e.data or {}).get('escrow_uid')) for e in events.events]}"
+        )
+        deal_state._claims_swept = True
+
 class TestStage09c_LeaseRegistered:
     def test_09c_provisioning_lease_registered(
         self, provisioning_client, deal_state: DealState

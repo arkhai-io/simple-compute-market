@@ -987,3 +987,33 @@ methodology makes: fewer intermittent failures, and no forgiveness for reading s
 wrong moment.
 
 Audited the other five advance sites — every one already reads after advancing.
+
+---
+
+# Run 31608431467 — `98 passed, 12 skipped, 0 failed`
+
+Green, with the deal scenarios running under deliberate lifecycle control: four
+`/admin/lifecycle/pause`, four resumes, and eight `capacity-events/run-cycle` advances in
+the run. Three more passing than the previous green run, and the same twelve Alice skips.
+
+Two things the logs say that are worth recording precisely, because both correct something
+stated earlier in this file.
+
+**The reconciliation flap did not reproduce.** Zero `compute_listings_reopened` events in
+the whole run, against a flap that appeared in three separate runs while the poller was
+running. That is the diagnostic `monotonic-listing-reconciliation` was waiting for, and it
+supports the stale-view reading: the reopen needs the timer path to act on an availability
+view older than a reservation it has not yet seen. It does **not** show the reconcile logic
+is correct — an advance-driven reconcile reads a current view, so it would not exhibit a
+stale-view defect even if one exists. The defect remains real for production, where the
+loops do run. What has changed is that the suite no longer samples it at random.
+
+**The advances before the closed-listing assertions are not what makes those assertions
+pass.** There were zero `stale_compute_listings_closed` events this run, and every listing
+assertion still passed — so those listings are closed by the deal-acceptance path, not by
+capacity reconciliation. The previous run's single close event for `compute-e2e-buy-001`
+made it look otherwise and I read it that way; with a full green run the picture is clearer.
+The advances are harmless and keep the observation ordered, but they are not load-bearing
+for the assertion that follows them, and a note claiming they were would mislead the next
+reader. What they do buy is that a *future* reconciliation-driven close or reopen at that
+point would be observed deterministically rather than sampled.

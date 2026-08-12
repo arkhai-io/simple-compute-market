@@ -47,10 +47,11 @@ logger = logging.getLogger(__name__)
 # writes while continuing to trade, or a scenario that needs deterministic
 # reconciliation and still has a deal to agree.
 #
-# One flag briefly served both, and the conflation made the second unusable:
-# every deal scenario that paused to steady its assertions could no longer
-# negotiate. Trading pause does not imply loop pause, and the converse must never
-# hold -- a caller who stops the loops has said nothing about accepting business.
+# Trading pause does not imply loop pause, and the converse must never hold: a
+# caller who stops the background work has said nothing about whether to accept
+# business, and one that stops accepting business still expects the deals it has
+# already taken to finish. Collapsing the two makes the second unaskable -- a
+# caller wanting deterministic reconciliation while still trading has no control.
 # ---------------------------------------------------------------------------
 
 _GLOBALLY_PAUSED: bool = False

@@ -56,6 +56,7 @@ class DealState:
     resume_confirmed: bool = False
     # Phase 5 — negotiation
     _evaluate_negotiate_passed: bool = False
+    _claims_swept: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
     agreed_amount: Optional[int] = None
@@ -299,9 +300,7 @@ def pause_storefront(storefront_admin_client) -> dict[str, str]:
     """Hold the storefront's timer loops idle, and prove they are.
 
     Pauses the *loops* only — trading stays open, so a scenario can pause at its
-    readiness stage and still agree a deal. That separation exists because it did
-    not at first: one flag meant both, and every deal scenario that paused to
-    steady its assertions could no longer negotiate.
+    readiness stage and still agree a deal.
 
     Called from a scenario's own readiness stage rather than an autouse fixture:
     a scenario should name the state it depends on, and pausing a service is a

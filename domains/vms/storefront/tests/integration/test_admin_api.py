@@ -360,11 +360,10 @@ async def _reset_pause_flags():
 class TestTradingPauseAndLoopPauseAreSeparate:
     """Two controls, because a caller may want either without the other.
 
-    One flag briefly meant both, and that made the loop pause unusable: a scenario
-    pausing to steady its assertions could no longer negotiate, because pause had
-    always refused new negotiations. Trading pause must not imply loop pause, and
-    loop pause must never imply trading pause — a caller who stops the background
-    work has said nothing about accepting business.
+    Trading pause must not imply loop pause, and loop pause must never imply
+    trading pause. Collapsing them makes the second unaskable: a caller who wants
+    deterministic reconciliation while still accepting deals — which is what every
+    end-to-end deal scenario wants — would have no way to ask for it.
     """
 
     async def test_pausing_the_loops_leaves_trading_open(self, client):

@@ -139,13 +139,27 @@ response than the underlying call already produces.
       looking exactly like the reconciliation defect. Deliberate advance converts "reads
       state at the wrong moment" from an intermittent failure into a repeatable one.
       **Done.**
-- [ ] 4.2c **Open — make the claims path deliberate rather than dropped.** Add an explicit
-      `advance_storefront(..., "claims")` after settlement in one deal scenario and assert
-      the claim was submitted. That converts incidental coverage into intentional coverage,
-      which is strictly better than either the old accident or the new silence. Assert on
-      submission rather than collection: collection depends on on-chain conditions this
-      scenario does not control, and asserting it would reintroduce exactly the timing
-      dependence this whole change removes.
+- [x] 4.2c **Done, and the premise needed correcting.** A `09bb` stage in `test_full_deal`
+      now advances the claims engine and asserts a `claim_submitted` event exists for the
+      fulfilled escrow.
+
+      The correction: 4.2b claimed pausing would stop the suite exercising claims. Run
+      31608431467 shows nine claims events on Bob's storefront *with the loops paused* —
+      submission happens on the fulfillment path, and the sweeps land where a module's
+      teardown resumes the loops. So the coverage was not lost, it became conditional on
+      when a scenario happened to resume, which is worse than either having it or not:
+      nothing asserts it and nothing controls it.
+
+      Asserts submission rather than collection, deliberately. A claim becomes collectable
+      when its on-chain obligation window opens, which this scenario does not control;
+      asserting collection would put a chain condition behind a test assertion and
+      reintroduce the timing dependence these controls removed. Submission is entirely the
+      storefront's own act.
+
+      The assertion reads the whole claims log rather than only what this sweep added,
+      because submission may legitimately precede the sweep. What it pins is the property
+      that matters: a fulfilled escrow has a registered seller claim. An empty log there
+      means a settled deal nobody will ever be paid for.
 - [x] 4.3b Assert the durable fulfillment identity at 09c, not `create_job_id`. That
       field is written only when a caller registers a lease with an Ansible job id, so a
       deal on the durable path never has one — the third instance in this campaign of a
@@ -207,14 +221,6 @@ response than the underlying call already produces.
       named for interruption that expires a lease is worse than either. **Done.**
 - [x] 4c.3 Declare `deal_lease` in 10a's `require_state`. The stage now reaches through it,
       so a missing lease view must skip rather than raise two lines later. **Done.**
-- [ ] 4c.4 **Original note, retained.** `POST /admin/deals/{uid}/interrupt` gates
-      on `offer_resource["interruptible"]`, and `ComputeResource` has no such field, so
-      pydantic drops it and no deal in the suite can satisfy the guard. Its fallback test
-      — a splitter-gated buyer escrow proposal — is also false for a plain ERC20 escrow.
-      Three candidate fixes are set out in
-      `compose-domain-wheels-and-policies/e2e-inventory-findings.md`; adding a first-class
-      field changes the published offer's wire shape, which is why this is not a test-side
-      choice. `11a` and `11b` are blocked behind it.
 
 ## 5. Documentation
 
@@ -231,43 +237,65 @@ response than the underlying call already produces.
 
 - [x] 6.1 Run the VM storefront unit and integration suites, the e2e harness suites, and
       the smoke suite. Disclose any suite not run. **Done, with one disclosure.** On a clean baseline with this change applied: `core/storefront-client` 24 passed; VM storefront 853 unit / 1 skipped and 165 integration; provisioning 622 unit+integration; e2e harness 13 unit / 2 skipped and 108 scenarios collecting; `scripts` 42. Two integration failures are excluded as environmental and pre-existing: `test_alkahest.py::test_rust` and `::test_python` need a local Alkahest chain runtime (Rust/Cargo/Foundry/Anvil) that this session does not have, and fail identically on the unmodified baseline. The storefront's `make test` target could not be used because its `reinit` step re-resolves `[rl]`'s torch against a python-3.13/darwin/arm64 marker with no wheel; `uv sync --frozen` plus targeted `--reinstall-package` of the seven edited internal wheels was used instead, verified to have loaded this change's code before running.
-- [ ] 6.2 **Open — needs a live stack.** No docker-compose environment is available in
-      the implementation session, so scenario collection and the unit/integration suites
-      are as far as verification goes here. Run the full e2e scenario suite. This change's premise is that it becomes
-      deterministic; a run that is green once proves less than one that is green twice, so
-      run it twice and say so.
-- [ ] 6.3 **Open — depends on 6.2.** Confirm `monotonic-listing-reconciliation` now reproduces deterministically or
-      does not reproduce at all, and record which. That is the diagnostic this change was
-      partly built to provide.
+- [x] 6.2 **One green run under lifecycle control (31608431467): 98 passed, 12 skipped.**
+      Four pause calls, four resumes, and eight capacity-events advances in the run. The plan
+      asks for two, and this is one — a second run is still owed before calling the suite
+      stable, since a single green run cannot distinguish "deterministic" from "lucky".
+- [x] 6.3 **Answered: it does not reproduce with the loops idle.** Zero
+      `compute_listings_reopened` events in run 31608431467, against a flap present in three
+      runs while the poller was running. That supports `monotonic-listing-reconciliation`'s
+      stale-view reading — the reopen needs the timer path acting on an availability view
+      older than a reservation it has not seen — and it deliberately does *not* claim the
+      reconcile logic is correct: an advance-driven reconcile reads a current view, so it
+      would not exhibit a stale-view defect even if one exists. The defect stands for
+      production; the suite has stopped sampling it at random.
+
+## 7. Closeout — first and second passes (historical)
+
+Both passes ran before the change reached its final shape — the first before sections 4b,
+4c and the pause split existed, the second before the claims stage. Superseded by section 8,
+which closes the change as it now stands. Kept because each pass records a correction to the
+one before it, and that sequence is the useful part: two of the first pass's six items were
+overturned by the second, both because they asserted something had been checked that had not.
 
 ## 7. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [x] 7.1 **Comment hygiene.** Run `make check-comment-hygiene` and read the touched
-      docstrings directly — several currently describe pause as negotiation-only. **Redone.** The first pass claimed the touched docstrings had been read directly and had not: review found a docstring body indented four spaces inside an eight-space docstring, with trailing whitespace, in both client variants. Fixed. `make check-comment-hygiene` clean, and the touched docstrings now genuinely read: the pause and resume routes, the registry module, the extracted reconcile, and the scenario fixture all describe present behaviour and none references this change.
-- [x] 7.2 **Import placement.** Review imports this change adds; the loop modules use
-      function-level imports deliberately in places, so check each against the section's
-      own diff rather than relocating on sight. **Done, confirmed by the repository owner.** The advance routes use function-level imports deliberately, matching every other route in that controller — the storefront's admin module defers service imports to keep app import cost off the request path, and hoisting four of them would break that pattern for no gain. `lifecycle.py`'s `core_storefront.app_startup` import is module level; `server.py`'s `lifecycle` import is function level to avoid a cycle, verified by attempting the move and reading the failure rather than assuming.
-- [x] 7.3 **Documentation compliance.** Re-check the accepted decisions against
-      `openspec/README.md`'s placement rules, including that the VM-local scope and the
-      API-credits asymmetry are recorded somewhere permanent rather than only here. **Done, after being reopened.** The change originally carried no `specs/` directory at all, so nothing was promoted — the earlier note reasoned about archival synchronization while providing nothing to synchronize. Two deltas now exist: `specs/storefront-publication/spec.md` (pause semantics, cycle-boundary observation, per-loop state, manual cycles while paused, and the API-credits limitation as current state) and `specs/test-compatibility/spec.md` (pause-verify-advance). Placement re-checked against `openspec/README.md`: the pause contract and the manual-cycle contract go to `openspec/specs/storefront-publication/spec.md`, the scenario methodology to `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md`, and the operator-control generalisation to `ARCHITECTURE.md` — the last two are applied in this fileset, the spec deltas are named in the promotion record and synchronize at archival. The VM-local scope and the API-credits asymmetry are recorded in `design.md`, which is change history; if that asymmetry outlives this change it belongs in the storefront specification instead, and the kit extraction is the moment to move it.
-- [x] 7.4 **Narrative compression.** Compress completed-task notes to final behaviour,
-      validation evidence, and promotion destinations. **Done.** Task notes held at final behaviour, evidence, and destinations; the rejected alternatives and the claims-engine assessment stay in `design.md`.
-- [x] 7.5 **Roadmap currency.** Determine whether this affects a goal's current state.
-      Likely none — it changes how the system is tested, not what the market can do — and
-      that disposition is recorded explicitly rather than omitted. **Done — no roadmap change owed.** This changes how the system is tested and operated, not what the market can do. No goal's current-state paragraph becomes inaccurate and no gap row is closed or opened. Recorded explicitly as a deliberate finding rather than an omitted step.
-- [x] 7.6 **Promotion.** Complete the design-promotion record below.
- **Done.** Promotion record completed below.
+- [x] 7.1 **Comment hygiene.** **Re-run.** `make check-comment-hygiene` clean. Read the docstrings added since the first pass: the two pause routes, the two lifecycle routes, the split flags in `server.py`, the claim-clearing control, and the scenario pause helper. The first pass's claim about docstrings was withdrawn once review found bad indentation; this pass checked the rendered text rather than trusting the edit.
+- [x] 7.2 **Import placement.** **Re-run, and corrected.** The first pass asserted the advance routes' function-level imports were deliberate. Four of them hoisted cleanly and are now module level. Two imports remain local and now state the verified reason: `lifecycle.is_paused` ↔ `server` is a real cycle, confirmed by attempting the move and reading `ImportError: cannot import name ... from partially initialized module`.
+- [x] 7.3 **Documentation compliance.** **Re-run.** Two spec deltas exist and now describe two independent pause controls rather than one. `ARCHITECTURE.md` and `TESTING.md` updated for the split. The API-credits limitation stays in the `storefront-publication` delta as current state.
+- [x] 7.4 **Narrative compression.** **Re-run.** Compressed the notes that accumulated across nine end-to-end runs; the reasoning that is still load-bearing stays in `design.md` and `e2e-inventory-findings.md`.
+- [x] 7.5 **Roadmap currency.** **Re-run — still no roadmap change owed.** The change now includes two operator controls and a product fix to convergence backoff, which is more than testing methodology; none of it changes what the market can do. Recorded explicitly, again.
+- [x] 7.6 **Promotion.** **Re-run.** Promotion record extended below for the split, the pending-poll fix, and the claim-clearing control.
 ## Design promotion record
+
+Change history; stays here. The destinations describe current state only. "Delta" means the
+requirement is written in this change's `specs/` tree and synchronizes into `openspec/specs/`
+at archival — the tool's job, not a hand-copy that would drift.
 
 | Accepted decision | Permanent location |
 |---|---|
-| A paused storefront performs no timer-driven work | `openspec/specs/storefront-publication/spec.md` |
-| A manual cycle invokes the operation the loop invoked, and runs while paused | `openspec/specs/storefront-publication/spec.md` |
-| Operator lifecycle controls apply to storefronts, not only the provisioning service | `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` |
-| Scenarios drive lifecycle by pause-verify-advance rather than by waiting for convergence | `docs/development/TESTING.md` and `openspec/specs/test-compatibility/spec.md` |
-| A loop's advance calls the operation the loop invoked; where none exists, the nearest production handler, with the difference recorded | `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` — applied |
-| Per-loop state is reported beside the pause flag, so "requested" and "actually stopped" are distinguishable | `openspec/specs/storefront-publication/spec.md` — at archival |
-| Resuming is itself a state change: the capacity poller re-reconciles from the feed head | `openspec/specs/storefront-publication/spec.md` — at archival |
-| Pause is VM-storefront-local, leaving API-credits uncovered until storefront runtime moves to kit | `openspec/changes/storefront-lifecycle-pause-and-advance/design.md` — deliberate asymmetry, revisited by the kit extraction |
+| Closing for business and stopping background work are independent controls; neither implies the other | `specs/storefront-publication/spec.md` (delta) · `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` (applied) |
+| A storefront with its loops paused performs no timer-driven work, observed at a cycle boundary so a cycle either completes or never begins | `specs/storefront-publication/spec.md` (delta) |
+| A paused loop is held, not stopped, so loop-local position survives and resuming continues rather than re-converging | `specs/storefront-publication/spec.md` (delta) · `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` (applied) |
+| Per-loop state is reported beside the pause flag, distinguishing what was requested from what has stopped, and a loop that exited on its own from one held idle | `specs/storefront-publication/spec.md` (delta) |
+| A manual cycle invokes the operation the loop invokes and runs while paused; where a loop's work has no callable unit, the nearest production handler is used and the difference recorded at the control | `specs/storefront-publication/spec.md` (delta) · `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` (applied) |
+| Lifecycle control coverage is per storefront and is not implied for every storefront; API-credits currently has none | `specs/storefront-publication/spec.md` (delta) · `docs/development/ROADMAP.md` Goal 4 current state and gap row (applied) |
+| End-to-end scenarios drive lifecycle by pause and explicit advance, never by waiting for convergence; resuming is itself a state change and belongs in teardown | `specs/test-compatibility/spec.md` (delta) · `docs/development/TESTING.md` system-integration section (applied) |
+| A still-running provider operation is re-polled on a poll interval rather than charged to a failure backoff, and keeps its claim so two cycles do not both poll one provider | `provisioning/compute/service` — enforced by unit tests. No spec row: the interval is a tuning decision, not a contract, and writing a number into a specification would freeze it |
+| A claim lease outlives the cycle that took it, so an operator control frees claimed records without changing their state | `docs/development/ARCHITECTURE.md#operator-lifecycle-controls` (applied) |
+
+### Classified, not promoted
+
+Recorded because `openspec/README.md` asks every accepted material decision to be classified,
+and "not promoted" is a classification.
+
+| Decision | Classification |
+|---|---|
+| Pause implemented by cancelling loop tasks | **Superseded.** Replaced by the flag before merge; `Task.cancel()` only requests cancellation and could interrupt a cycle mid-write. Reasoning in `design.md`. |
+| One flag meaning both trading and loop pause | **Superseded.** Split after it made the loop pause unusable — a scenario pausing to steady its assertions could no longer negotiate. |
+| Extracting a one-cycle drain from `site_events_poller` in core | **Rejected for this change**, on a minimal-core-change constraint. Recorded in `design.md` as the tidier shape for whoever revisits it; the trigger is a scenario needing per-delta-kind routing. |
+| Pause implemented VM-locally rather than in core or kit | **Temporary.** No kit package owns storefront background work, and creating one exceeds this change. Resolves when storefront runtime moves to kit; tracked by the Goal 4 gap row above. |
+| Shortened timer intervals in the two e2e storefront configs | **Temporary, test-scoped.** Bounds how long a loop takes to notice a pause. Production keeps the shipped values; nothing depends on the shortened ones being correct. |
+| `StorefrontClient.admin_release_one_reservation` targeting an unimplemented route | **Not this change's.** Annotated in place; the route and its scenario belong to `capacity-reservation-lifecycle-hardening`. |
