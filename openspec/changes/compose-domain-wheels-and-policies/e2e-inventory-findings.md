@@ -758,3 +758,35 @@ Worth noting this one is a consequence of the teardown trigger moving to lease e
 the old interrupt path the storefront had already begun teardown before the stage ran, so
 the ordering happened to be satisfied. The stage was always relying on something it did not
 state.
+
+---
+
+# Run 31581689519 — `2 failed, 93 passed, 12 skipped`
+
+93 passing. `10b` passes in both scenarios: reading `vm_remove_job_id` was the right fix.
+Only `11b` remains, and my previous change to it was wrong in an instructive way.
+
+The reorder moved the lease cycle ahead of convergence, and the cycle reported
+`{checked: 0, released: 0, release_failed: 0, skipped: 1}` — the releasing reservation was
+processed and its release job was not yet succeeded. So both two-call orderings have now
+been observed failing, each one step short of the state it asserted:
+
+- convergence, then lease cycle → fulfillment still `tearing_down`
+- lease cycle, then convergence → release job unfinished, cycle reports `skipped`
+
+The reason is that three parties hand off and none of them looks twice.
+`provisioning_test_client.drain` waits on the **Ansible** job queue, which is where
+`vm_remove` runs; the release job the lease cycle polls is a fulfillment aggregate, not an
+Ansible job — the ids in the logs are UUIDv7 fulfillment ids, not queue job ids. So
+convergence must first notice the Ansible job finished and advance the release fulfillment;
+the lease cycle then sees that fulfillment succeed, finishes the release and returns the
+units; a second convergence records `torn_down`.
+
+The stage now performs all three advances and asserts only afterwards. Asserting between
+them is what produced two runs of near-misses, and in both cases the product was doing
+exactly the right thing one step later.
+
+The correction I would make to my own earlier reasoning: when a stage fails by one step, the
+useful question is not "which order is right" but "how many parties are involved". I
+answered the first question twice and got it wrong both times, because the answer to the
+second is three.

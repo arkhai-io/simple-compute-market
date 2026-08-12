@@ -1307,16 +1307,25 @@ class TestStage11b_TeardownCompletion:
         provisioning_test_client.resume_rule(REMOVE_RULE_ID)
         provisioning_test_client.drain(timeout=30)
 
-        # Lease cycle first, then convergence. Releasing the gate only makes the
-        # `vm_remove` job succeed; nothing has looked at it yet. A lease cycle is
-        # what polls that job and finishes the release, and only a finished
-        # release lets convergence record the fulfillment as torn down. Asserting
-        # `torn_down` before this ran observed `tearing_down` — correct state,
-        # read one step too early.
-        release_summary = provisioning_client.check_leases()
-        assert release_summary.get("released", 0) >= 1, release_summary
-
+        # Three advances, because two workers hand off to each other and neither
+        # looks twice. `drain` only carries the Ansible `vm_remove` job to a
+        # terminal state. Convergence is what notices that and moves the release
+        # fulfillment on; the lease cycle polls the release fulfillment and, once
+        # it reports success, finishes the release and returns the units; a second
+        # convergence records the fulfillment as torn down.
+        #
+        # Both orderings of two calls have now been observed failing, each one
+        # step short: convergence-then-lease left the fulfillment `tearing_down`,
+        # and lease-then-convergence left the release job unfinished and the cycle
+        # reporting `skipped`. Neither was a defect in the product — each was a
+        # stage asserting before the advance that would have satisfied it. Nothing
+        # is asserted between the advances for that reason; the final state is
+        # what this stage is about.
         provisioning_client.run_fulfillment_convergence_cycle()
+        release_summary = provisioning_client.check_leases()
+        provisioning_client.run_fulfillment_convergence_cycle()
+
+        assert release_summary.get("released", 0) >= 1, release_summary
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert fulfillment.get("state") == "torn_down", fulfillment
         lease = deal_state.deal_lease.refresh()

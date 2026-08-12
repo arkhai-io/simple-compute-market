@@ -868,7 +868,15 @@ Section 4c made that false: 10a expires the lease and 10b drives the watchdog th
       finishes the release, and convergence cannot record `torn_down` until it has. The
       stage observed `tearing_down` — the right state, one step early. It passed under the
       old interrupt trigger because teardown had already begun before the stage ran, so the
-      stage was relying on an ordering it never stated. **Done.**
+      stage was relying on an ordering it never stated. **Superseded by 21.3** — the
+      reorder was itself one step short in the other direction.
+- [x] 21.3 Drive all three advances in 11b and assert only afterwards. `drain` waits on the
+      Ansible queue where `vm_remove` runs; the release job the lease cycle polls is a
+      fulfillment aggregate, not a queue job. So convergence must notice the Ansible job
+      finished, the lease cycle must then observe the release fulfillment succeed and return
+      the units, and a second convergence records `torn_down`. Both two-call orderings were
+      observed failing one step short, and in both the product was correct a step later.
+      **Done.**
 
 ### Section 12 closeout
 
