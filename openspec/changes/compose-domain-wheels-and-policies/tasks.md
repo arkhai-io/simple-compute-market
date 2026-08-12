@@ -933,6 +933,34 @@ Section 4c made that false: 10a expires the lease and 10b drives the watchdog th
       `capacity-resource-administration`, which owns the operator surface for capacity
       *resources*, declaring what exists, rather than operations on a reservation. **Done.**
 
+### 23. The multi-registry scenario's second seller has never run
+
+Found in run 31591230862, the first green run — which is when a permanent skip becomes the
+most interesting thing in the summary.
+
+All twelve remaining skips are `test_multi_registry` stages gated on `alice_agent_id`, which
+skips when the alice-storefront container has no live on-chain agent id. It never gets one:
+Alice starts, opens her database, polls capacity, and stops logging minutes before the run
+ends. The whole point of the scenario — two sellers on heterogeneous registry topologies,
+fan-in returning two unique listings, discovery surviving a dead registry, independent
+negotiations on distinct storefronts — is in the skipped half.
+
+- [ ] 23.1 Determine why Alice never completes on-chain registration. Her config records a
+      deliberate choice of Anvil account #4 to avoid colliding with the account #3 sentinel,
+      and notes that a collision makes `perform_registration()` return
+      `numeric_agent_id=0` — so a wrong-account collision is one candidate and worth ruling
+      in or out first. Read her startup logs before changing anything.
+- [ ] 23.2 Decide what a permanently-unsatisfied skip gate should do. The gate itself is
+      right — asserting against an unregistered Alice would fail confusingly — but nothing
+      distinguishes "slow this run" from "never, on any run". A scenario whose subject is
+      unreachable should fail rather than skip, or the suite should assert that its own skip
+      count is what it expects.
+- [ ] 23.3 Re-check the harness guard added for `_evaluate_negotiate_passed`. It asserts
+      every `require_state` key is produced somewhere, and correctly does not fire here,
+      since `alice_agent_id` is produced — by a fixture, conditionally. Whether the guard
+      should extend to conditional fixture gates is a judgement about how much a static check
+      can usefully prove.
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

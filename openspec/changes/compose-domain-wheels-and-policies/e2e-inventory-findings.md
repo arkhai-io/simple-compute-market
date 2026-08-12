@@ -859,3 +859,38 @@ The stage now uses PATCH. The client method is annotated rather than deleted —
 API and a method that names its own absence is more useful to an outside caller than an
 import error — and whether the route should exist server-side is left open, since the
 capability is already reachable.
+
+---
+
+# Run 31591230862 — `95 passed, 12 skipped, 0 failed`
+
+Green. The full VM end-to-end suite passes for the first time in this campaign, including
+the complete deal lifecycle: discovery, negotiation to agreement, escrow, settlement,
+provisioning to `ready`, lease expiry, gated teardown, release, and capacity reuse.
+
+The twelve skips are not incidental and should not be read as "green enough". Every one is
+in `test_multi_registry`, and every one is downstream of a single fixture:
+
+```
+alice_agent_id → pytest.skip("Alice has no live agent_id — the alice-storefront
+                              container hasn't completed on-chain registration yet")
+```
+
+Alice's container starts, resolves its database, and polls capacity — its log lines stop
+early at 11:22:08 while the run continues for minutes afterwards — and never registers on
+chain. So the entire Alice half of the multi-registry scenario has never executed: her
+health, her registry reachability, her strategy, her inventory seeding, her publication,
+her presence in registry A and absence from registry B, the fan-in that proves two unique
+listings, the dead-registry resilience case, and all three independent-negotiation stages.
+
+That is the same shape as the `_evaluate_negotiate_passed` gate found earlier in this
+campaign: a scenario that skips its own subject reports as neither pass nor failure, so a
+green summary conceals it. The difference is that this gate is *satisfiable* — it depends on
+a container completing registration rather than on a field nothing sets — so the harness
+guard added for that defect does not catch it, correctly: the state is produced, just not by
+Alice.
+
+What the skips are protecting is real. A scenario that asserted against an unregistered
+Alice would fail confusingly, and skipping is better than that. What is missing is anything
+that notices the skip is permanent. Nothing distinguishes "Alice is slow to register on this
+run" from "Alice has never registered on any run", and only the second is true.
