@@ -465,3 +465,95 @@ did not cause a failure. It says nothing about whether the failure is a defect, 
 the two as the same claim is what let a wrong dependency version sit unexamined. It also cut
 both ways here — the newer dynaconf *masked* a defect in this change's own new test, which
 set an absent settings key and relied on 3.3.5 tolerating its deletion at teardown.
+
+---
+
+## Task 2.8 diagnosed, and three findings alongside it (2026-08-12)
+
+### 2.8 was never about the reconcile
+
+Three attempts read the failure as a data-shape problem — which availability keys the
+view produces, whether a resource counts as exhausted — and the task's own note passed
+that reading forward. It is wrong. Asked directly, with the fake site's ledger holding two
+of four GPUs, the reconciler answers correctly:
+
+```
+availability: {(None,'pool-h200-1'): 2, ('default','pool-h200-1'): 2}
+stale:        ['listing-3x', 'listing-4x']
+```
+
+The precondition is seed-and-reserve, and `test_admin_reserve_capacity_closes_oversized_listings`
+in the same file already establishes it with the same two helpers.
+
+The cause is that the route reconciles a different database. `full_capacity_reconcile`
+resolves its path from the module singleton — `get_sqlite_client().db_path`, which is
+`settings.db_path` — while the integration fixture seeds a `tmp_path` database and wires it
+into the container. So the reconcile ran, correctly, against an empty database and found
+nothing. `close_order` compounds it: it takes `db_path` for the query and mutates through
+`get_sqlite_client()` for the write.
+
+This was already known and written down, in a neighbouring test that works around it:
+
+> That global singleton defaults to settings.db_path, not this test's own db fixture, so it
+> must be patched here or the fallback check silently finds nothing.
+
+That test patches `publication_service.get_sqlite_client`. Nobody connected the note to
+2.8's three failures, and the patch is the mocked-internals shape `TESTING.md` forbids —
+so the one test that could see the problem was also the one hiding it.
+
+### Decision: inject the unit of work, minimally
+
+The reconcile path takes its sqlite client as a parameter, defaulted to today's resolution
+so no caller changes behaviour; the admin route passes the container's client and the poller
+passes the one it already builds. This is the injected-dependency seam `AGENTS.md` prefers
+over patching a global, and it is what makes the transition observable at all.
+
+Deliberately narrow. Several changes are already slated against the storefront persistence
+layer, so this adds a parameter to the functions 2.8 needs and does not attempt to retire
+the singleton, rework how the container resolves a unit of work, or touch the other call
+sites of `get_sqlite_client`. The trap is recorded where the next reader of that layer will
+meet it.
+
+**Alternative rejected — point the singleton at the temp database from the fixture.** Two
+lines, and it unblocks 2.8 today. It also pins a production global from a test and leaves
+the next caller of `full_capacity_reconcile` to rediscover the same thing, which is what
+happened here three times.
+
+### Decision: cover both reconcile passes, not one
+
+`full_capacity_reconcile` runs a close pass and a reopen pass, and the advance route's own
+docstring already records that it runs both unconditionally where the delta subscriber runs
+one or both by delta kind. The requirement 2.8 serves is that a control does not diverge
+from its loop. A single close assertion leaves half of what this control does unasserted,
+and the reopen half is where the divergence would be least obvious — a scenario advancing
+after a release is exactly the case the storefront's own timer path handles by delta kind.
+Reserve-advance-observe-close and release-advance-observe-reopen are one setup and two
+assertions.
+
+### The ambient-database write, recorded rather than fixed
+
+Until the injection lands, exercising this route from a test mutates the checked-out
+storefront database at `settings.db_path` — the developer's own `agent.db` — rather than a
+temporary one. It is gitignored, so nothing reaches version control, but a suite that writes
+to shared ambient state can contaminate a later run on the same checkout. The injection
+removes it for this path; other `get_sqlite_client()` writers are out of scope here and the
+hazard is stated for whoever takes the persistence layer next.
+
+### Dependency bounds: one fixed, one larger than it looked
+
+`dynaconf` is declared `>=3.0.0` in four distributions and `>=3.2` in a fifth. Between 3.2
+and 3.3, `settings.set` on a list key changed from replacing to merging, which silently turns
+a test's policy-chain override into an append and makes a negotiation test fail as though the
+policy were wrong. The demonstrated breakage is in test helpers rather than production
+config layering, so the bound is about keeping the suite meaningful; that is still worth
+holding, and stating the reason is what lets someone lift it deliberately.
+
+The `[rl]` extra's torch resolution — which breaks `make reinit` for every developer, not
+just one host — is **not** the small fix it was characterised as, and the characterisation is
+withdrawn rather than acted on. Two candidate fixes were tried and each moved the failure
+rather than removing it: narrowing the darwin environment to `python_full_version < '3.13'`
+still fails because the `pytorch-cpu` index carries no darwin wheels at all, and scoping the
+index to `sys_platform == 'linux'` then fails on linux/x86_64/3.13 with only `torch<2.7.0`
+visible. Why the CPU index is pinned at all, and whether the `rl` extra should participate in
+the default resolution, are questions for whoever owns that dependency. Recorded with the
+evidence so a third attempt starts further along.

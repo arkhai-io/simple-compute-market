@@ -110,13 +110,17 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
 
 
 async def member_availability_view(
-    client: Any, db_path: str | None = None,
+    client: Any,
 ) -> dict[tuple[str | None, str], int]:
     """Available units per pool member, from the aggregated snapshots.
 
     Keyed ``(site, resource_id)`` — the aggregator's member key. The
     home site (the first configured one) is also keyed ``(None, rid)``,
     matching members that carry no site tag.
+
+    Availability comes entirely from the client's snapshot; no storefront
+    table contributes. Stated because this took a `db_path` argument it never
+    read, which invited the reading that availability is database-derived.
     """
     view: dict[tuple[str | None, str], int] = {}
     sites = remote_site_clients(client)
@@ -173,8 +177,9 @@ def _make_listing_reconcile_subscriber(
         home_site = next(iter(sites), None)
         if home_site is None:
             return
-        db_path = sqlite_client_factory().db_path
-        availability = await member_availability_view(client, db_path)
+        db = sqlite_client_factory()
+        db_path = db.db_path
+        availability = await member_availability_view(client)
         # Structural capacity source is local tables unless this site is
         # explicitly opted into the projection-sourced path -- see
         # reconciler.available_compute_slices' own docstring for what
@@ -189,7 +194,7 @@ def _make_listing_reconcile_subscriber(
             closed = await close_stale_compute_listings_after_capacity_change(
                 db_path, home_site=home_site, configured_site_count=len(sites),
                 member_availability=availability, site_pool_projection=projection,
-                site_capacity_buckets=buckets,
+                site_capacity_buckets=buckets, sqlite_client=db,
             )
             if closed:
                 stage_event(
@@ -203,7 +208,7 @@ def _make_listing_reconcile_subscriber(
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db_path, home_site=home_site, member_availability=availability,
                 site_pool_projection=projection,
-                site_capacity_buckets=buckets,
+                site_capacity_buckets=buckets, sqlite_client=db,
             )
             if reopened:
                 stage_event(
@@ -537,8 +542,15 @@ async def capacity_events_poller_loop() -> None:
     interval = float(getattr(
         getattr(config.settings, "capacity", None), "poll_interval", 5,
     ) or 5)
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    db = get_sqlite_client()
+    aggregate = build_capacity_client(lambda: db)
     site_clients = remote_site_clients(aggregate)
+
+    # The reconcile callback is bound to this loop's own unit of work rather
+    # than resolving one per call, so the poller and the operator control
+    # reconcile the database their caller is working in. `site_events_poller`
+    # takes a no-argument callable, so the binding happens here.
+    reconcile = functools.partial(full_capacity_reconcile, db)
 
     # One registered loop, one gate, however many sites. Every per-site poller
     # shares the binding, so the loop counts as at its gate once *any* site
@@ -572,14 +584,14 @@ async def capacity_events_poller_loop() -> None:
     await asyncio.gather(*(
         site_events_poller(
             aggregate, name, client, interval,
-            full_reconcile=full_capacity_reconcile,
+            full_reconcile=reconcile,
             paused=site_gate,
         )
         for name, client in site_clients.items()
     ))
 
 
-async def full_capacity_reconcile() -> None:
+async def full_capacity_reconcile(sqlite_client: Any | None = None) -> None:
     """Reconcile every derived listing against current site capacity.
 
     The poller runs this at startup and after a ledger reset, and the admin
@@ -592,6 +604,13 @@ async def full_capacity_reconcile() -> None:
     "this site has no capacity" from "no site was asked". Both are derived from
     the same client map the per-delta path uses, so the periodic reconcile and
     the event-driven one cannot disagree about which site is home.
+
+    ``sqlite_client`` is the unit of work to reconcile. Supplied by the caller
+    rather than resolved here, because resolving it from the process-wide client
+    means this function reconciles whatever database that client addresses and
+    not the one its caller is working in -- the two coincide in a composed
+    storefront and do not otherwise. The default preserves the previous
+    resolution for a caller with no client of its own.
     """
     from market_storefront.services.publication_service import (
         close_stale_compute_listings_after_capacity_change,
@@ -599,21 +618,24 @@ async def full_capacity_reconcile() -> None:
     )
     from market_storefront.utils.sqlite_client import get_sqlite_client
 
-    aggregate = build_capacity_client(lambda: get_sqlite_client())
+    db = sqlite_client or get_sqlite_client()
+    aggregate = build_capacity_client(lambda: db)
     site_clients = remote_site_clients(aggregate)
     home_site = next(iter(site_clients), None)
     if home_site is None:
         return
-    db_path = get_sqlite_client().db_path
-    availability = await member_availability_view(aggregate, db_path)
+    db_path = db.db_path
+    availability = await member_availability_view(aggregate)
     await close_stale_compute_listings_after_capacity_change(
         db_path,
         home_site=home_site,
         configured_site_count=len(site_clients),
         member_availability=availability,
+        sqlite_client=db,
     )
     await reopen_available_compute_listings_after_capacity_change(
         db_path,
         home_site=home_site,
         member_availability=availability,
+        sqlite_client=db,
     )

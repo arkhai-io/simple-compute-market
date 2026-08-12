@@ -209,7 +209,11 @@ class AdminController:
         needs per-kind routing needs a one-cycle drain extracted from
         `site_events_poller`, which does not exist yet.
         """
-        await full_capacity_reconcile()
+        # The controller's own unit of work, not the process-wide client: an
+        # operator control must reconcile the database this storefront is
+        # serving from, which is the same object in production and is what makes
+        # the transition observable in a test at all.
+        await full_capacity_reconcile(self._db)
         return {"loop": "capacity_events_poller", "reconciled": True}
 
     @router.post(
@@ -801,10 +805,7 @@ class AdminController:
         )
 
         try:
-            return await member_availability_view(
-                self._capacity(),
-                self._db.db_path,
-            )
+            return await member_availability_view(self._capacity())
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s",

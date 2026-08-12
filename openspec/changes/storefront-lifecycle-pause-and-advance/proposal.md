@@ -58,6 +58,12 @@ are for.
 - Convert the VM end-to-end scenarios to pause at setup and advance deliberately, and
   delete the polling helper introduced as a stopgap.
 
+> **Section 16, 2026-08-12.** Closing task 2.8 requires the storefront's listing-reconcile
+> path to take its unit of work as a parameter rather than resolving it from a module
+> singleton — a testability seam, not a behavioural change. Section 16 also carries two small
+> dependency and API-hygiene fixes found during the defect pass. Rationale in `design.md`,
+> "Task 2.8 diagnosed".
+
 ## Capabilities
 
 ### New Capabilities

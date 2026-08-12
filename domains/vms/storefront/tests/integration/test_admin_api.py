@@ -459,18 +459,10 @@ class TestLifecycleAdvance:
     async def test_capacity_events_cycle_runs_the_real_reconcile(self, client):
         """The advance drives production reconciliation, unpatched.
 
-        Weaker than it should be, and deliberately so rather than misleadingly
-        strong. The assertion this wants is a listing transition — advance once,
-        observe a slice close or reopen — and two attempts at it did not produce
-        one against `tests/fake_site`, for a reason not yet identified: the
-        reconcile runs and finds nothing to change. Rather than reach for a patch
-        of `full_capacity_reconcile` to make the test say something (which is the
-        mocked-internals shape `TESTING.md` forbids), this asserts only what it
-        can honestly observe, and the transition assertion is recorded as owed.
-
-        What it does establish: the route resolves, calls the real reconcile with
-        a real site client behind it, and completes while the storefront is
-        paused.
+        Establishes the route resolves, calls the real reconcile with a real site
+        client behind it, and completes while the storefront is paused. The
+        transitions that reconcile produces are asserted below, in
+        `TestCapacityAdvanceMovesListings`.
         """
         from tests.fake_site import site_capacity
 
@@ -482,6 +474,87 @@ class TestLifecycleAdvance:
             result = await c.admin_run_lifecycle_cycle("capacity-events")
 
         assert result == {"loop": "capacity_events_poller", "reconciled": True}
+
+
+class TestCapacityAdvanceMovesListings:
+    """An advance is asserted by what it changes, not by what it returns.
+
+    A return contract cannot distinguish a control that runs the production
+    handler from one that returns the right shape, and `spec.md`'s requirement is
+    that a manual cycle produces the transitions the timer-driven loop produces.
+
+    Both passes are covered. `full_capacity_reconcile` closes and reopens on every
+    call, where the delta subscriber runs one or both depending on the delta kind,
+    so asserting only the close pass would leave the half where a divergence is
+    least visible unexamined.
+
+    Each case asserts the statuses *before* advancing as well. Reading only
+    afterwards cannot tell a reconcile that moved a listing from a fixture that
+    seeded it that way, and attributing the transition to the advance is the whole
+    point of advancing deliberately.
+    """
+
+    async def _statuses(self, db) -> dict[int, str]:
+        return {
+            n: (await db.load_listing(listing_id=f"listing-{n}x"))["status"]
+            for n in range(1, 5)
+        }
+
+    async def test_advancing_closes_listings_that_no_longer_fit(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        await c.admin_pause_lifecycle_loops()
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            await _ledger_hold(capacity, gpu_count=2)
+
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "open", 4: "open"
+            }, (
+                "capacity was taken and nothing has reconciled yet, so every "
+                "listing should still be open — if one is already closed this "
+                "test cannot attribute the close to the advance"
+            )
+
+            await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert await self._statuses(db) == {
+            1: "open", 2: "open", 3: "closed", 4: "closed"
+        }, (
+            "one advance did not close the slices that no longer fit two "
+            "remaining GPUs"
+        )
+
+    async def test_advancing_reopens_listings_that_fit_again(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        await c.admin_pause_lifecycle_loops()
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            reservation_id = await _ledger_hold(capacity, gpu_count=2)
+            await c.admin_run_lifecycle_cycle("capacity-events")
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "closed", 4: "closed"
+            }
+
+            await capacity.release(capacity_reservation_id=reservation_id)
+
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "closed", 4: "closed"
+            }, (
+                "the capacity came back but nothing has reconciled yet; a reopen "
+                "observed here would not be the advance's doing"
+            )
+
+            await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert await self._statuses(db) == {
+            1: "open", 2: "open", 3: "open", 4: "open"
+        }, "one advance did not reopen the slices that fit again"
 
 
 # ---------------------------------------------------------------------------
@@ -1244,18 +1317,13 @@ class TestRealOrchestrationCacheToReconciliation:
             site_capacity(_fake_pool_site()) as capacity,
             patch.dict(spc._caches, {"default": caches}, clear=True),
             settings_overrides(**{"capacity.use_site_projection_for_listings": True}),
-            patch(
-                "market_storefront.services.publication_service.get_sqlite_client",
-                return_value=db,
-            ),
         ):
-            # close_order (called for each stale listing) is registry-
-            # backed and has no real registry server here -- it falls
-            # back to get_sqlite_client() to confirm the DB-side close
-            # landed even when the registry push failed. That global
-            # singleton defaults to settings.db_path, not this test's
-            # own db fixture, so it must be patched here or the
-            # fallback check silently finds nothing.
+            # No patch of the storefront's sqlite client. The subscriber passes
+            # the unit of work it was built with all the way through to the
+            # close, so the database it reconciles and the database it writes are
+            # the one this test supplies. That was not always true: `close_order`
+            # took a path for its query and mutated through the process-wide
+            # client, and this test used to substitute that client to compensate.
             subscriber = _make_listing_reconcile_subscriber(lambda: db, capacity)
             await subscriber(CapacityDelta(kind="reserved", version=1))
 

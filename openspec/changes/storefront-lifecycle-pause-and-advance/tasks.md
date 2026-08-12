@@ -53,7 +53,14 @@ response than the underlying call already produces.
 - [x] 2.7 Focused tests: each advance invokes its underlying operation exactly once and
       propagates its result; each works while paused, since that is when it is used.
  **Partly done.** Five integration tests exercise the routes while paused through the real typed client. Three assert the route's contract, not invocation count — the note previously claimed "exactly once and propagates its result", which those tests do not establish, and the claim is withdrawn rather than the tests overstated. The capacity test no longer patches `full_capacity_reconcile`: patching an owned production function is the mocked-internals shape `TESTING.md` forbids. Two attempts to replace it with an observable listing transition did not produce one against `tests/fake_site` for a reason not yet identified, so it asserts only what it can honestly observe and the transition assertion is recorded as owed in 2.8.
-- [ ] 2.8 **Owed, after a third failed attempt — and the attempts have narrowed it.**
+- [x] 2.8 **Closed by Section 16.3–16.4. Diagnosed 2026-08-12; The narrowing below was a
+      wrong lead and is kept only to show where it went.** The reconcile was never at fault:
+      the advance route reconciles the database at `settings.db_path`, not the one the test
+      seeds, so it ran correctly against an empty database. Asked directly with the fake
+      site's ledger holding two of four GPUs, `stale_open_listing_ids` returns
+      `['listing-3x', 'listing-4x']`. See `design.md`, "Task 2.8 diagnosed".
+
+      Original note follows. **Owed, after a third failed attempt — and the attempts have narrowed it.**
       Assert a lifecycle advance through an observable state transition rather than a
       return contract. Three constructions have now failed against `tests/fake_site`: a
       listing seeded and reconciled with capacity free, the same with the reserve applied,
@@ -330,6 +337,7 @@ and "not promoted" is a classification.
 | Pause implemented VM-locally rather than in core or kit | **Temporary.** No kit package owns storefront background work, and creating one exceeds this change. Resolves when storefront runtime moves to kit; tracked by the Goal 4 gap row above. |
 | Shortened timer intervals in the two e2e storefront configs | **Temporary, test-scoped.** Bounds how long a loop takes to notice a pause. Production keeps the shipped values; nothing depends on the shortened ones being correct. |
 | `StorefrontClient.admin_release_one_reservation` targeting an unimplemented route | **Not this change's.** Annotated in place; the route and its scenario belong to `capacity-reservation-lifecycle-hardening`. |
+| The listing-reconcile path takes its unit of work as a parameter rather than resolving the process-wide client | **Not promoted — a testability seam, not a contract.** It changes no observable behaviour: the default resolution is what every production caller already got. Its value is that a caller reconciling one database can no longer write to another, which is a code property rather than a requirement a counterparty could depend on. The hazard it does not remove — other `get_sqlite_client()` writers reached from a test mutate the configured database — is recorded at that function. |
 | A single gate shared by every per-site capacity poller | **Temporary.** Exact at one site, optimistic in the unsafe direction beyond that. Resolving it means registering each site poller as its own loop, which changes how the loop is composed rather than how it gates. Trigger: a storefront configured with more than one site. Recorded at the loop, not only here. |
 | An ended loop failing liveness rather than readiness alone | **Temporary, and conditional on the absence of loop supervision.** Pod replacement is the only recovery available today, so liveness is how it is requested. If a supervisor that restarts a dead loop is ever added, this becomes a readiness-only condition. Stated in the requirement and at the route. |
 
@@ -789,3 +797,170 @@ is the reason this pass exists rather than an amendment to that one.
       still accurate. Nothing here changes what the market can do.
 - [x] 15.6 **Promotion.** The record below gains four rows and one classification. Every
       destination resolves.
+
+## 16. Task 2.8, and three findings from the defect pass
+
+2.8 has been owed since the original closeout and failed three times against a diagnosis
+that was wrong. The cause is in `design.md`, "Task 2.8 diagnosed": the advance route
+reconciles the database at `settings.db_path`, not the one the test seeds and the container
+holds, so the reconcile ran correctly against an empty database and closed nothing. The
+reconcile logic itself was never at fault — with the ledger holding two of four GPUs it
+returns `['listing-3x', 'listing-4x']` when asked directly.
+
+- [x] 16.1 Take the sqlite client as a parameter through the reconcile path rather than
+      resolving it from the module singleton. `full_capacity_reconcile`,
+      `close_stale_compute_listings_after_capacity_change`,
+      `reopen_available_compute_listings_after_capacity_change`, and `close_order` each
+      accept one, defaulting to today's resolution so no production caller changes
+      behaviour. Note at `close_order` that it previously took `db_path` for its query and
+      mutated through the singleton — the two disagreeing is the whole defect, so the
+      parameter must reach the write and not only the read.
+      Files: `services/capacity_client.py`, `services/publication_service.py`.
+      **Done.** `close_order`, `close_stale_...`, `reopen_available_...` and `full_capacity_reconcile` each take `sqlite_client`, defaulting to the previous resolution. `close_order`'s parameter reaches the `update_listing` write and the `load_listing` fallback, which is where the two databases used to diverge.
+
+- [x] 16.2 Have both callers supply it: the advance route passes the controller's client,
+      the poller passes the one it already builds for its aggregate. `site_events_poller`
+      takes a no-argument `full_reconcile`, so the poller binds its client at composition —
+      same shape as Section 9's `loop_gate`. Confirm no other caller of
+      `full_capacity_reconcile` exists, rather than assuming the two.
+      Files: `controllers/admin_controller.py`, `services/capacity_client.py`.
+      **Done, and one caller more than the two planned.** The advance route passes the controller's client and the poller binds its own with `functools.partial`, as planned. The delta subscriber (`_make_listing_reconcile_subscriber`) was the third: it already held a client factory and passed only `db_path`, so it had the same split and now threads the client through both passes. Found by 16.5 rather than by the audit, which is the right order but not the one this task assumed.
+
+- [x] 16.3 **This is 2.8.** Assert the close pass through an observable transition: seed the
+      four pool listings, reserve two of four GPUs against the fake site, advance
+      `capacity-events` once, and assert `listing-3x` and `listing-4x` are closed in the
+      database while `listing-1x` and `listing-2x` stay open. Assert the statuses before the
+      advance as well — a test that only reads after cannot tell a reconcile that closed them
+      from a fixture that seeded them closed, and the whole point of a deliberate advance is
+      that the transition is attributable to it.
+      Files: `tests/integration/test_admin_api.py`.
+      **Done — this closes 2.8.** `TestCapacityAdvanceMovesListings::test_advancing_closes_listings_that_no_longer_fit`: seed, hold two of four GPUs, assert all four listings still open, advance once, assert `listing-3x`/`listing-4x` closed and `1x`/`2x` open. Verified against the defect: with 16.2's route injection reverted the assertion fails, so it can go red for the reason it claims.
+
+- [x] 16.4 Assert the reopen pass in the same way: release the hold, advance once more, and
+      assert both listings reopen. The route runs both passes unconditionally where the
+      delta subscriber runs one or both by delta kind, so covering only the close pass leaves
+      the half where a divergence would be least visible unasserted. One setup, two
+      assertions.
+      Files: `tests/integration/test_admin_api.py`.
+      **Done.** `test_advancing_reopens_listings_that_fit_again` drives close, releases the hold, asserts nothing moved before the second advance, then asserts both listings reopen.
+
+- [x] 16.5 Remove the `patch("...publication_service.get_sqlite_client", return_value=db)`
+      from the reconcile-subscriber test now that the client is supplied rather than
+      resolved. That patch is the mocked-internals shape `TESTING.md` forbids, and its own
+      comment is the clearest statement of the defect anywhere in the repository — replace
+      the comment with what is true afterwards rather than deleting the knowledge.
+      Files: `tests/integration/test_admin_api.py`.
+      **Done.** The `patch("...publication_service.get_sqlite_client", return_value=db)` is gone, replaced by a comment stating what is now true and what used to be — the knowledge in the old comment was the best description of the defect in the repository and is preserved rather than deleted.
+
+- [x] 16.6 Rewrite the advance route's integration-test docstring, which currently records
+      2.8 as owed and says the reconcile "finds nothing to change ... for a reason not yet
+      identified". Both halves stop being true. State what the test now establishes instead
+      of leaving a stale confession.
+      Files: `tests/integration/test_admin_api.py`.
+      **Done.** The advance test's docstring no longer records 2.8 as owed or claims the reconcile finds nothing for an unidentified reason; it states what that test establishes and points at the class that asserts the transitions.
+
+- [x] 16.7 Record the ambient-database hazard where the next reader of this layer meets it.
+      Any `get_sqlite_client()` writer reached from a test mutates the checked-out storefront
+      database rather than a temporary one. 16.1 removes it for the reconcile path; the other
+      writers are out of scope and the hazard is real for them. A comment at
+      `get_sqlite_client` is the right place — it is what a caller reads before depending on
+      it — and this is a note about current behaviour, not about this change.
+      Files: `utils/sqlite_client.py`.
+      **Done.** The note is at `get_sqlite_client` itself, where a caller reads it before depending on it, and says both halves: prefer a client you were given, and a test-reached writer still mutates the configured database rather than a temporary one.
+
+- [x] 16.8 Drop `member_availability_view`'s `db_path` parameter. It has never been read;
+      availability is derived entirely from the client's snapshot. Four call sites pass it,
+      and its presence implies availability is database-derived — the reading that made 2.8
+      look like a data-shape problem for three attempts.
+      Files: `services/capacity_client.py`, `controllers/admin_controller.py`,
+      `utils/failure_policy.py`, `tests/unit/test_remote_capacity_client.py`.
+      **Done.** Parameter removed and all four call sites updated, with the reason recorded at the function: availability comes entirely from the client's snapshot, and an unread `db_path` invited the reading that made 2.8 look like a data-shape problem.
+
+- [x] 16.9 Bound `dynaconf` below 3.3 in the four distributions declaring `>=3.0.0`, with the
+      reason at the declaration: `settings.set` on a list key merges from 3.3 and replaces
+      before it, which turns a test's policy-chain override into an append and fails a
+      negotiation test as though the policy were wrong. State the scope honestly — the
+      demonstrated breakage is in test helpers, not production config layering — so the bound
+      can be lifted deliberately after an audit of list-valued `set` calls rather than
+      lifted blind. Check whether `e2e-tests`' `>=3.2` wants the same ceiling.
+      Files: `domains/vms/storefront/pyproject.toml`,
+      `domains/apicredits/storefront/pyproject.toml`,
+      `domains/apicredits/service/pyproject.toml`,
+      `provisioning/compute/service/pyproject.toml`, `e2e-tests/pyproject.toml`.
+      **Attempted, reverted, and rehomed — it cannot land in this change.** All five
+      distributions were bounded and the suites stayed green, but verifying on a clean
+      baseline showed why that was not the whole test: changing a declared bound invalidates
+      each `uv.lock`, and `make test-unit`/`make test-integration` run through `uv run`,
+      which re-resolves and then fails on the same `rl`/torch split as 16.10. The bound and
+      that fix are one piece of work. Reverted here and recorded as task 4.2 of
+      `remove-relative-uv-sources`, beside 16.10's finding and sequenced after it.
+
+      Worth stating plainly: the in-tree suites passed with the bound applied, and only the
+      wheel-path verification on a clean copy caught it. A fileset carrying this would have
+      broken the recipient's `make test`.
+
+- [x] 16.10 **The `[rl]` torch resolution is not in this section, and the judgement that put
+      it here is withdrawn.** It was characterised as small code-quality work; it is not.
+      `make reinit` fails for every developer, on every host, because `uv` resolves the `rl`
+      extra across all declared environments. Two fixes were attempted and each moved the
+      failure rather than removing it: narrowing the darwin environment to
+      `python_full_version < '3.13'` still fails because the `pytorch-cpu` index carries no
+      darwin wheels at all, and scoping that index to `sys_platform == 'linux'` then fails on
+      linux/x86_64/3.13 with only `torch<2.7.0` visible. Either fix also regenerates
+      `uv.lock`. The open questions — why the CPU index is pinned, and whether `rl` should
+      participate in the default resolution at all — belong to whoever owns that dependency.
+      Recorded here with the evidence; no file is changed by this task.
+      **Rehomed, not dropped.** Written up in `remove-relative-uv-sources` — `design.md` gains "Found from adjacent work: the `rl` extra makes `make reinit` unresolvable" with both failed attempts and their evidence, and `tasks.md` gains task 4.1. That change already owns repairing init/reinit targets and already carries a non-goal about the PyTorch index selector, which is the constraint a fix has to argue with.
+
+- [x] 16.13 **Found while validating: an order-dependent unit test.**
+      `test_remote_capacity_client.py` passed in a full run and failed when the file was run
+      alone, on the unmodified baseline as well as here. A loop's pause gate imports
+      `market_storefront.server` lazily, and that module reads `settings.gateway.root_path`
+      at import scope; the file's stand-in settings had no `gateway`, so the first gate call
+      raised inside the poller's own exception handler and the reconcile count stayed zero.
+      In a full run an earlier test had already imported the module and the failure was
+      invisible. Fixed by giving the stand-in a `gateway`, with the reason at the fixture.
+      Not caused by this section, and pre-existing — but found here, and a test that only
+      fails when run alone is the worst way for a test to be wrong.
+
+- [x] 16.11 **Closeout.** `make check-comment-hygiene` clean. Read the docstrings this
+      section rewrites rather than trusting the edits — the advance test, the reconcile
+      subscriber test, `close_order`, `full_capacity_reconcile`, `member_availability_view`,
+      and `get_sqlite_client` — three of them described a defect that no longer exists,
+      which is the class the target does not catch. Import placement: this section adds no
+      import; `functools` was already imported where the poller binds its reconcile.
+      Documentation compliance: no requirement is added or changed — the injection is a
+      testability seam, not observable behaviour — and the existing deltas were re-read
+      against the code and still assert only what it holds. Narrative compression: each task
+      carries final behaviour and evidence; reasoning stays in `design.md`. Roadmap currency:
+      nothing owed, recorded explicitly. Promotion: classified below rather than promoted.
+
+
+- [x] 16.12 Validation. VM storefront unit and integration, `core/storefront`,
+      `core/storefront-client`, and the wheel path — `make dist`, then a frozen sync with
+      `--reinstall-package` for each internal distribution, then `make test-unit` and `make
+      test-integration` against wheel-installed packages. Section 14.1 records why `make
+      reinit` itself cannot be used and 16.10 records why that is not fixed here. Verify
+      16.3's assertion against the defect: with 16.1 reverted, the transition assertion must
+      fail rather than pass for the wrong reason — three previous attempts produced a test
+      that passed while observing nothing, and the only guard against a fourth is checking
+      that it can fail.
+
+      **Done, on a clean baseline copy with the fileset applied.** Source path: VM storefront
+      883 unit / 1 skipped and 180 integration, `core` 70, `core/storefront` 111,
+      `core/storefront-client` 24, e2e harness 13 / 2 skipped, apicredits storefront 51.
+      Wheel path: `make dist`, frozen sync with `--reinstall-package` per internal
+      distribution, then `make test-unit` 883 / 1 skipped and `make test-integration` 180.
+      `make check-wheel-manifests`, `make check-wheel-closure`, and
+      `make check-comment-hygiene` all pass. The two `test_alkahest` cases pass with `anvil`
+      on `PATH`, per 14.1's Correction 2.
+
+      The verify-against-the-defect check was run and is why 16.3 can be trusted: with
+      16.2's route injection reverted both transition assertions fail; restored, both pass.
+
+      **The clean-copy verification earned its cost this round.** 16.9's dynaconf bound
+      passed every in-tree suite and still had to be reverted — a changed bound invalidates
+      each `uv.lock`, and `make test-unit`/`make test-integration` run through `uv run`,
+      which re-resolves and then fails on the unrelated `rl`/torch split. Only the wheel-path
+      run on a clean copy exercised that; a fileset carrying the bound would have broken the
+      recipient's `make test` while looking green here.
