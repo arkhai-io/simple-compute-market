@@ -816,6 +816,21 @@ both look exactly like defects in the change under review.
 - [x] 18.5 Tombstone `openspec/changes/reinstall-self-owned-wheels/`, which briefly
       existed as a separate change. **Done.**
 
+### 19. Lease-expiry back-date must land inside the watchdog grace (run 31539745808)
+
+- [x] 19.1 Bound the back-date on both sides. `E2E_LEASE_EXPIRY_BACKDATE` is one minute:
+      enough for the watchdog to treat the lease as expired, not enough to elapse the 300s
+      grace, because `_process_releasing_reservation` marks `release_failed` the moment
+      grace passes with `vm_remove` unfinished — and 11a/11b hold `vm_remove` at a mock
+      gate on purpose. Two hours put the lease past grace before the release began, so one
+      cycle both dispatched and timed out the removal. The constant states both bounds.
+      **Done.**
+- [x] 19.2 Give the buyer-CLI scenario its own resource id. Both full-deal scenarios
+      declared `compute-e2e-deal-001`, so the failed release above starved the second
+      scenario's inventory guard and its round-0 evaluation vetoed — a failure that looks
+      like a negotiation defect and is not. Same lesson as the shared `kvm1` executor, in a
+      different field. **Done.**
+
 ### Section 12 closeout
 
 - [x] 12.5 **Comment hygiene.** `make check-comment-hygiene` clean; the borrowed-method

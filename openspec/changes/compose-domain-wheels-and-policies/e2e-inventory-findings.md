@@ -635,3 +635,37 @@ The interrupt control keeps its own defect, now owned by
 `declare-interruptible-on-a-compute-offer`, along with an end-to-end scenario dedicated to
 it. That is the right place for it: one scenario proving the escape hatch, rather than two
 scenarios using the escape hatch to prove something else.
+
+---
+
+# Run 31539745808 — `3 failed, 80 passed, 24 skipped`
+
+`10a` passes: the lease back-dates and the watchdog picks it up. All three failures are
+one cause, and the cause is mine.
+
+`_process_releasing_reservation` computes `past_grace = now >= lease_end + grace_seconds`
+with a 300s grace, and marks `release_failed` the moment grace elapses with `vm_remove`
+unfinished. Back-dating two hours put the lease past grace before the release even began,
+so the first watchdog cycle dispatched the removal and timed it out in the same pass:
+
+```
+[LEASE_LIFECYCLE] Release failed for reservation 4502647a...:
+  vm_remove_timeout vm_remove did not complete before watchdog grace period elapsed
+[LEASE_LIFECYCLE] Cycle: checked=1 released=0 release_failed=1 skipped=0
+```
+
+The back-date is bounded on both sides and I only reasoned about one: the lease must be
+past its end for the watchdog to act, and must *not* be past grace, because 11a and 11b
+deliberately hold `vm_remove` at a mock gate. One minute expires the lease and leaves
+about four for the gated stages. The constant now says both bounds.
+
+`11b` follows from `10b`. `05a` in the buyer-CLI scenario is the more interesting cascade:
+the failed release never returned the capacity, and both full-deal scenarios declared the
+same `compute-e2e-deal-001`, so the second scenario's inventory guard found nothing
+available and vetoed at round 0. The buyer-CLI scenario now declares
+`compute-e2e-deal-cli-001` on its own host.
+
+That is the same lesson as the shared `kvm1` executor from the start of this campaign, in
+a different field: two scenarios sharing an identity makes one scenario's failure look
+like a defect in the other, and the second failure is the one that gets debugged. Per
+scenario, per resource, per host.

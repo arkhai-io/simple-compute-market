@@ -81,6 +81,7 @@ Phase 11 — Fulfillment convergence and resource release
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import logging
 from importlib import resources
 
@@ -118,7 +119,7 @@ OFFER_RESOURCE = {
     "interruptible": True,
     # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
     # storefront admin API so it does not depend on a mounted resource file.
-    "resource_id": "compute-e2e-deal-001",
+    "resource_id": "compute-e2e-deal-cli-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,
@@ -174,9 +175,9 @@ BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter 
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses provider teardown
-E2E_RESOURCE_ID = "compute-e2e-deal-001"
+E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
+compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
 """
 
 # ===========================================================================
@@ -375,7 +376,7 @@ class TestStage00f1_ExecutorHostRegistry:
             site_capacity_admin_client,
             host=E2E_DEAL_CLI_HOST,
             pool_id=E2E_DEAL_CLI_POOL_ID,
-            resource_id="compute-e2e-deal-001",
+            resource_id="compute-e2e-deal-cli-001",
             sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
@@ -1186,17 +1187,25 @@ class TestStage09c_LeaseRegistered:
             "ledger" if lease_view.is_ledger else "legacy",
         )
 
+#: How far back to move a lease end so the watchdog treats it as expired.
+#:
+#: Bounded on both sides, which is why it is not simply "a long time ago". The
+#: lease must be past its end for the watchdog to begin releasing, but it must
+#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
+#: path marks `release_failed` the moment grace elapses with `vm_remove`
+#: unfinished — and stages 11a/11b deliberately hold `vm_remove` at a mock gate.
+#: Back-dating two hours put the lease past grace immediately, so the first cycle
+#: both dispatched the removal and timed it out.
+#:
+#: One minute expires the lease and leaves roughly four minutes for the gated
+#: stages, which is ample for three stages that make no network waits.
+E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
+
+
 def _expired_lease_end() -> str:
-    """A lease end far enough in the past that the next watchdog cycle acts.
-
-    Fixed offset rather than "now": the provisioning service applies a grace
-    period after expiry before releasing, so an end time of exactly now would
-    leave the lease unexpired and the stage would fail on a correct system.
-    """
-    from datetime import datetime, timedelta, timezone
-
+    """A lease end the watchdog reads as expired but still inside its grace."""
     return (
-        datetime.now(timezone.utc) - timedelta(hours=2)
+        datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
     ).isoformat().replace("+00:00", "Z")
 
 # ===========================================================================
