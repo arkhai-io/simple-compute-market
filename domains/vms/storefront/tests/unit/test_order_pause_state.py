@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 
 from market_core.schemas import EscrowProposal
+from market_identity import TrustedIdentitySet, create_signer
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.sync_negotiation import (
@@ -21,6 +22,17 @@ from market_storefront.utils.sync_negotiation import (
     StorefrontPausedError,
 )
 
+
+_BUYER_SIGNER = create_signer("ed25519", b"\x41" * 32)
+_SELLER_SIGNER = create_signer("ed25519", b"\x42" * 32)
+_BUYER_PRINCIPAL = _BUYER_SIGNER.identity
+_SELLER_PRINCIPAL = _SELLER_SIGNER.identity
+_PROVISIONING_AUTHORITIES = TrustedIdentitySet(
+    identities=(
+        create_signer("ed25519", b"\x43" * 32).identity,
+        create_signer("ed25519", b"\x44" * 32).identity,
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -45,9 +57,28 @@ async def db(tmp_path) -> SQLiteClient:
         }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER_PRINCIPAL,
     )
     return client
+
+
+@pytest.fixture
+def marketplace_signer(monkeypatch):
+    from market_storefront import container
+    from market_storefront.services import capacity_client
+
+    monkeypatch.setattr(
+        container,
+        "resolved_marketplace_signer",
+        _SELLER_SIGNER,
+    )
+    monkeypatch.setattr(
+        capacity_client,
+        "get_provisioning_authorities",
+        lambda: _PROVISIONING_AUTHORITIES,
+    )
+    return _SELLER_SIGNER
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +142,8 @@ class TestOrderPauseHelpers:
             
             fulfillment_resource=None,
             max_duration_seconds=3600,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_PRINCIPAL,
             paused=True,
         )
 
@@ -136,7 +168,8 @@ class TestOrderPauseHelpers:
             
             fulfillment_resource=None,
             max_duration_seconds=3600,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_PRINCIPAL,
         )
         await db.set_listing_paused(listing_id="order-001", paused=True)
 
@@ -188,14 +221,10 @@ class TestStartSyncNegotiationPauseGuard:
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(
-                sqlite_client=db,
-                our_listing_id="order-001",
-                buyer_address="0xBuyer",
-                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
-                our_base_url="http://seller:8001",
-                their_agent_url="0xBuyer",
-            )
+            await start_sync_negotiation(sqlite_client=db,
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            our_base_url="http://seller:8001",
+            their_agent_url="0xBuyer",)
         assert exc_info.value.reason == "global"
 
     async def test_order_pause_raises(self, db, monkeypatch):
@@ -206,14 +235,10 @@ class TestStartSyncNegotiationPauseGuard:
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
-            await start_sync_negotiation(
-                sqlite_client=db,
-                our_listing_id="order-001",
-                buyer_address="0xBuyer",
-                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
-                our_base_url="http://seller:8001",
-                their_agent_url="0xBuyer",
-            )
+            await start_sync_negotiation(sqlite_client=db,
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            our_base_url="http://seller:8001",
+            their_agent_url="0xBuyer",)
         assert "order-001" in exc_info.value.reason
 
     async def test_no_pause_proceeds_normally(self, db, monkeypatch):
@@ -225,18 +250,14 @@ class TestStartSyncNegotiationPauseGuard:
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         # order-001 has no strategy set, so we expect ValueError not paused
         with pytest.raises((ValueError, Exception)) as exc_info:
-            await start_sync_negotiation(
-                sqlite_client=db,
-                our_listing_id="order-001",
-                buyer_address="0xBuyer",
-                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
-                our_base_url="http://seller:8001",
-                their_agent_url="0xBuyer",
-            )
+            await start_sync_negotiation(sqlite_client=db,
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            our_base_url="http://seller:8001",
+            their_agent_url="0xBuyer",)
         assert not isinstance(exc_info.value, StorefrontPausedError)
 
     async def test_pre_negotiation_guard_rejection_raises_offer_unfulfillable(
-        self, db, monkeypatch
+        self, db, monkeypatch, marketplace_signer
     ):
         """Round-0 guard veto (no matching inventory) raises OfferUnfulfillableError.
 
@@ -251,22 +272,18 @@ class TestStartSyncNegotiationPauseGuard:
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         from market_core.schemas import EscrowProposal, ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
-            await start_sync_negotiation(
-                sqlite_client=db,
-                our_listing_id="order-001",
-                buyer_address="0xBuyer",
-                proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
-                provision_terms=ProvisionTerms(
-                    kind="compute.v1",
-                    version=1,
-                    payload={
-                        "duration_seconds": 1800,
-                        "ssh_public_key": "ssh-rsa AAAA",
-                    },
-                ),
-                our_base_url="http://seller:8001",
-                their_agent_url="0xBuyer",
-            )
+            await start_sync_negotiation(sqlite_client=db,
+            our_listing_id="order-001", buyer_principal=_BUYER_PRINCIPAL, seller_principal=_SELLER_PRINCIPAL, proposal=EscrowProposal(chain_name="anvil", escrow_address="0x"+"0"*40, fields={"amount": 5000, "token": "0x"+"a"*40}, expiration_unix=2000000000),
+            provision_terms=ProvisionTerms(
+                kind="compute.v1",
+                version=1,
+                payload={
+                    "duration_seconds": 1800,
+                    "ssh_public_key": "ssh-rsa AAAA",
+                },
+            ),
+            our_base_url="http://seller:8001",
+            their_agent_url="0xBuyer",)
 
         assert exc_info.value.reason == "no_matching_inventory"
         assert exc_info.value.listing_id == "order-001"

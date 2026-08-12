@@ -14,9 +14,16 @@ from hosted_settlement_client import (
     FinancialState,
     FulfillmentRef,
     HostedSettlementAsyncClient,
+    ExpectedAuthorities,
+    IdentityScheme as HostedIdentityScheme,
     OperationRequest,
+    Principal,
+    REQUEST_PROTOCOL,
+    RESPONSE_PROTOCOL,
     canonical_json,
 )
+from market_identity import Signer as MarketplaceSigner
+from market_identity import TrustedIdentitySet
 from market_settlement_runtime import (
     ConditionOutcome,
     EffectOutcome,
@@ -26,6 +33,18 @@ from market_settlement_runtime import (
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 MECHANISM = "fiat.stripe.v1"
+EXPECTED_HOSTED_REQUEST_PROTOCOL = "arkhai.hosted-request-signature.v2"
+EXPECTED_HOSTED_RESPONSE_PROTOCOL = "arkhai.hosted-response-signature.v2"
+REQUIRED_HOSTED_CAPABILITIES = frozenset(
+    {
+        "account-owner-admission.v1",
+        "account-owner-rotation.v1",
+        "account-owner-retirement.v1",
+        "provider-neutral-seller-onboarding.v1",
+        "scheme-tagged-identities.v1",
+        "signer-injected-client.v1",
+    }
+)
 _CURRENCY = re.compile(r"^[a-z]{3}$")
 _FULFILLMENT: TypeAdapter[FulfillmentRef] = TypeAdapter(FulfillmentRef)
 
@@ -34,8 +53,8 @@ class HostedObligationParams(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     account_ref: str = Field(min_length=1, max_length=256)
-    payer_address: str = Field(min_length=1, max_length=256)
-    claimant_address: str = Field(min_length=1, max_length=256)
+    payer_principal: Principal
+    claimant_principal: Principal
     funds_flow: Literal["separate_charges_transfers"]
     payment_method_types: tuple[Literal["card"], ...] = ("card",)
     condition: ConditionDescriptor
@@ -52,10 +71,54 @@ class HostedObligationParams(BaseModel):
         return value
 
 
+class MarketplaceSignerAdapter:
+    """Expose a marketplace signer through the hosted client signer protocol."""
+
+    __slots__ = ("_principal", "_signer")
+
+    def __init__(self, signer: MarketplaceSigner) -> None:
+        identity = signer.identity
+        self._principal = Principal(
+            scheme=HostedIdentityScheme(identity.scheme.value),
+            identifier=identity.identifier,
+        )
+        self._signer = signer
+
+    @property
+    def principal(self) -> Principal:
+        return self._principal
+
+    def sign(self, message: bytes) -> bytes:
+        return self._signer.sign(message)
+
+
+def adapt_expected_authorities(
+    trusted: TrustedIdentitySet,
+) -> ExpectedAuthorities:
+    """Convert shared marketplace trust pins at the hosted wire boundary."""
+
+    if not isinstance(trusted, TrustedIdentitySet):
+        raise TypeError("trusted must be a market_identity.TrustedIdentitySet")
+    return ExpectedAuthorities(
+        principals=tuple(
+            Principal(
+                scheme=HostedIdentityScheme(identity.scheme.value),
+                identifier=identity.identifier,
+            )
+            for identity in trusted.identities
+        )
+    )
+
+
 class HostedConditionalEscrowClient:
     """Maps the generic settlement runtime to the released hosted contract."""
 
     def __init__(self, client: HostedSettlementAsyncClient) -> None:
+        if (
+            REQUEST_PROTOCOL != EXPECTED_HOSTED_REQUEST_PROTOCOL
+            or RESPONSE_PROTOCOL != EXPECTED_HOSTED_RESPONSE_PROTOCOL
+        ):
+            raise ValueError("hosted settlement client lacks identity v2")
         self._client = client
 
     async def verify_contract_ready(
@@ -77,9 +140,16 @@ class HostedConditionalEscrowClient:
             raise ValueError("hosted settlement contract version does not match")
         if health.schema_version != expected_schema_version:
             raise ValueError("hosted settlement schema version does not match")
-        missing = sorted(set(required_capabilities).difference(health.capabilities))
+        missing = sorted(
+            REQUIRED_HOSTED_CAPABILITIES.union(required_capabilities).difference(
+                health.capabilities
+            )
+        )
         if missing:
-            raise ValueError("hosted settlement authority lacks required capabilities")
+            raise ValueError(
+                "hosted settlement authority lacks required capabilities: "
+                + ", ".join(missing)
+            )
 
     async def verify_ready(
         self,
@@ -118,8 +188,8 @@ class HostedConditionalEscrowClient:
                 obligation_ref=_obligation_ref_from_operation(operation_ref),
                 obligation_hash="0x"
                 + hashlib.sha256(canonical_json(obligation)).hexdigest(),
-                payer=params.payer_address,
-                claimant=params.claimant_address,
+                payer=params.payer_principal,
+                claimant=params.claimant_principal,
                 account_ref=params.account_ref,
                 amount=amount,
                 currency=currency,
@@ -288,6 +358,14 @@ def _validate_obligation(
     params = HostedObligationParams.model_validate(
         {**raw_params, "condition": condition}
     )
+    payer_principal = Principal.model_validate(obligation.get("payer_principal"))
+    claimant_principal = Principal.model_validate(
+        obligation.get("claimant_principal")
+    )
+    if params.payer_principal != payer_principal:
+        raise ValueError("hosted payer principal does not match the obligation")
+    if params.claimant_principal != claimant_principal:
+        raise ValueError("hosted claimant principal does not match the obligation")
     return params, amount, currency, expiration
 
 

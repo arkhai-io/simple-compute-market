@@ -4,8 +4,7 @@ Integration test fixtures.
 Starts the full FastAPI application with:
   - A real in-memory SQLite database (fresh per test)
   - A real AsyncJobQueue (fresh per test, with on_job_started seam)
-  - AnsibleService overridden with a MagicMock — the only external boundary
-  - Auth gate open (storefront_admin_key unset in test settings)
+  - Signed Ed25519 storefront/admin transports with authority-pinned responses
 
 Pattern for exercising the background job loop without sleeps
 -------------------------------------------------------------
@@ -26,6 +25,10 @@ rationale.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
+import uuid
 from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
@@ -36,6 +39,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from market_identity import (
+    EMPTY_BODY,
+    Ed25519Signer,
+    RequestEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_request,
+)
 
 from compute_provisioning_service import container as _container_module
 from vm_provisioning_operator import ProvisioningClient
@@ -43,6 +54,98 @@ from compute_provisioning_service.db.database import create_session_factory
 
 from compute_provisioning_service.db.models import Base
 
+from compute_provisioning.client import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+    canonical_provisioning_request_body,
+    resolve_provisioning_route_contract,
+)
+from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.middleware.auth import (
+    SqlAlchemyProvisioningReplayStore,
+)
+from compute_provisioning_service.services.principal_authority import (
+    SqlAlchemyProvisioningPrincipalAuthority,
+)
+
+
+SERVICE_SIGNER = Ed25519Signer(b"\x11" * 32)
+STOREFRONT_SIGNER = Ed25519Signer(b"\x12" * 32)
+ADMIN_SIGNER = Ed25519Signer(b"\x13" * 32)
+SERVICE_AUTHORITIES = TrustedIdentitySet(
+    identities=(SERVICE_SIGNER.identity,)
+)
+
+
+def _install_signed_asgi_transport(monkeypatch) -> None:
+    original = ASGITransport.handle_async_request
+
+    async def signed(self, request):
+        if (
+            request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}
+            or SIGNATURE_HEADER in request.headers
+            or "X-Admin-Key" in request.headers
+        ):
+            return await original(self, request)
+        raw = await request.aread()
+        content_type = request.headers.get("content-type", "").split(";", 1)[0]
+        if raw and (content_type == "application/json" or content_type.endswith("+json")):
+            body = json.loads(raw)
+        elif raw:
+            body = {
+                "content_type": content_type or "application/octet-stream",
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        else:
+            body = EMPTY_BODY
+        query: dict[str, object] = {}
+        for key in sorted(set(request.url.params.keys())):
+            values = request.url.params.get_list(key)
+            query[key] = values[0] if len(values) == 1 else values
+        body = canonical_provisioning_request_body(
+            request.method,
+            request.url.path,
+            body,
+            query=query,
+        )
+        route, resource = resolve_provisioning_route_contract(
+            request.method,
+            request.url.path,
+            body,
+        )
+        signer = ADMIN_SIGNER if route.required_role == "admin" else STOREFRONT_SIGNER
+        authenticated = sign_request(
+            signer=signer,
+            envelope=RequestEnvelope(
+                role=route.required_role,
+                principal=signer.identity,
+                method=request.method,
+                operation=route.operation,
+                resource=resource,
+                request_id=uuid.uuid4().hex,
+                timestamp=int(time.time()),
+                body_hash=canonical_body_hash(body),
+            ),
+        )
+        request.headers.update(
+            {
+                SIGNATURE_VERSION_HEADER: authenticated.protocol,
+                IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
+                IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
+                ROLE_HEADER: authenticated.role,
+                REQUEST_ID_HEADER: authenticated.request_id,
+                TIMESTAMP_HEADER: str(authenticated.timestamp),
+                SIGNATURE_HEADER: authenticated.proof.value,
+            }
+        )
+        return await original(self, request)
+
+    monkeypatch.setattr(ASGITransport, "handle_async_request", signed)
 
 # ---------------------------------------------------------------------------
 # Async test client for /test/* endpoints (shared across integration tests)
@@ -320,22 +423,15 @@ def fake_ansible(fake_inventory_path) -> MagicMock:
 # ---------------------------------------------------------------------------
 # App fixture — wires all overrides and starts the job processing loop
 # ---------------------------------------------------------------------------
-
-
 @pytest_asyncio.fixture
 async def client_and_queue(
-    session_factory, fake_ansible
-) -> AsyncIterator[tuple[AsyncClient, AsyncJobQueue]]:
-    """Yield (httpx.AsyncClient, AsyncJobQueue) with overrides applied.
+    session_factory,
+    fake_ansible,
+    monkeypatch,
+) -> AsyncIterator[tuple[ProvisioningClient, AsyncJobQueue]]:
+    """Yield an authenticated provisioning client and fresh async job queue."""
 
-    The job queue is fresh per-test.  Use the ``on_job_started`` seam to
-    synchronise tests against the background loop without any sleeps.
-
-    Container providers are overridden for the duration of the test and
-    reset afterwards so tests are fully isolated.
-    """
-    # Build services directly — bypass the container's DB singleton so we use
-    # the fresh per-test in-memory DB.
+    _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
         default_vm_host="kvm1",
         default_max_retries=3,
@@ -352,12 +448,25 @@ async def client_and_queue(
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
         lease_watchdog_grace_period_seconds=300,
-        lease_watchdog_enabled=False,  # Don't start background timer in tests
+        lease_watchdog_enabled=False,
         storefront_url="http://test-storefront:8001",
-        storefront_admin_key="test-admin-key",
-        resolved_bare_metal_playbook_path=Path("/fake/bare-metal-node-access.yml"),
+        storefront_site_id="default",
+        resolved_bare_metal_playbook_path=Path(
+            "/fake/bare-metal-node-access.yml"
+        ),
         bare_metal_reclaim_policy="remove_lease_key",
     )
+    identity_context = ProvisioningIdentityContext(
+        signer=SERVICE_SIGNER,
+        storefront_principal=STOREFRONT_SIGNER.identity,
+        admin_principal=ADMIN_SIGNER.identity,
+        storefront_site_id="default",
+    )
+    principal_authority = SqlAlchemyProvisioningPrincipalAuthority(
+        session_factory,
+        identity_context,
+    )
+    replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
 
     host_service = HostService(
         session_factory=session_factory,
@@ -472,20 +581,20 @@ async def client_and_queue(
         default_executor_kind=VM_EXECUTOR_KIND,
     )
 
-    from compute_provisioning_service.services.deal_event_sink import notify_storefront_capacity_released
     from compute_provisioning.lease_lifecycle import LeaseLifecycleService
+    from compute_provisioning_service.services.deal_event_sink import (
+        SqlAlchemyCapacityReleaseOutbox,
+    )
+
+    capacity_release_outbox = SqlAlchemyCapacityReleaseOutbox(session_factory)
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_authority=site_authority,
         release_jobs=release_job_dispatcher,
         executor_release=release_dispatcher,
-        capacity_released_notifier=(
-            lambda reservation: notify_storefront_capacity_released(
-                mock_settings, reservation
-            )
-        ),
+        capacity_released_notifier=AsyncMock(return_value=True),
+        capacity_release_outbox=capacity_release_outbox,
     )
-
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.host_operations_service import (
         HostOperationsService,
@@ -541,6 +650,10 @@ async def client_and_queue(
     app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
     app.container.fulfillment_service.override(fulfillment_service)
 
+    app.container.identity_context.override(identity_context)
+    app.container.principal_authority.override(principal_authority)
+    app.container.provisioning_replay_store.override(replay_store)
+    app.container.capacity_release_outbox.override(capacity_release_outbox)
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
     _container_module.resolved_session_factory = session_factory
@@ -595,21 +708,27 @@ async def client_and_queue(
 
     transport = ASGITransport(app=app)
 
-    # Mount the test controller if not already present
-    from vm_provisioning_adapter.controllers.test_controller import make_router as _make_test_router
-    _test_prefix = "/test"
+    # Mount the test controller if not already present.
+    from vm_provisioning_adapter.controllers.test_controller import (
+        make_router as _make_test_router,
+    )
     _already_mounted = any(
-        getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
+        getattr(route, "path", "").startswith("/test")
+        for route in app.routes
     )
     if not _already_mounted:
         app.include_router(_make_test_router())
 
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        client = ProvisioningClient(
-            "http://test",
-            transport=transport,
-        )
+    client = ProvisioningClient(
+        "http://test",
+        signer=ADMIN_SIGNER,
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=transport,
+    )
+    try:
         yield client, job_queue
+    finally:
+        await client.close()
 
     processing_task.cancel()
     try:
@@ -617,6 +736,10 @@ async def client_and_queue(
     except asyncio.CancelledError:
         pass
 
+    app.container.identity_context.reset_override()
+    app.container.principal_authority.reset_override()
+    app.container.provisioning_replay_store.reset_override()
+    app.container.capacity_release_outbox.reset_override()
     # Reset container overrides
     app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()

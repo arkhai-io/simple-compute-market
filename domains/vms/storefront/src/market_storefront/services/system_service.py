@@ -12,13 +12,15 @@ import logging
 import os
 import time
 from typing import Any, Callable
+from market_identity import Signer
 
 import market_storefront.container as _container
 from market_storefront.utils.config import (
+    AGENT_ID,
     CHAINS,
     ESCROW_TEMPLATES,
+    get_evm_wallet_address,
     settings,
-    AGENT_ID,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,12 +65,14 @@ class SystemService:
         self,
         *,
         sqlite_client,
+        marketplace_signer: Signer,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
         listing_mode_explanation_provider: Callable[[], dict[str, dict[str, str]]]
         | None = None,
     ) -> None:
         self._db = sqlite_client
+        self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
         self._projection_status_provider = (
             projection_status_provider or _default_projection_status_provider
@@ -141,22 +145,17 @@ class SystemService:
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
 
         if include_registry:
-            # Top-level diagnostic facts. Identity is the wallet (eip191),
-            # a single chain-agnostic operator-assigned value.
-            # ``agent_id`` is the identity the storefront presents to the
-            # provisioning service (X-Agent-ID); consumers read it here to
-            # address jobs the storefront owns. ``identities`` keeps the
-            # per-chain breakdown for multi-chain operators.
-            wallet = (settings.wallet.address or "").lower() or None
-            result["agent_id"] = wallet
-            identities: dict[str, dict[str, Any]] = {}
-            for name, chain in CHAINS.items():
-                identities[name] = {
+            principal = self._marketplace_signer.identity
+            result["agent_id"] = self._agent_id
+            result["marketplace_principal"] = principal.model_dump(mode="json")
+            wallet = get_evm_wallet_address().lower() if CHAINS else ""
+            result["evm_mechanisms"] = {
+                name: {
                     "chain_id": chain.chain_id,
-                    "identity": wallet,
-                    "scheme": "eip191" if wallet else None,
+                    "address": wallet or None,
                 }
-            result["identities"] = identities
+                for name, chain in CHAINS.items()
+            }
             try:
                 resources = await self._db.list_resources()
                 result["resource_count"] = len(resources)

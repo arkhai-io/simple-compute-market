@@ -10,16 +10,46 @@ import re
 from pathlib import Path
 from typing import Any
 
-_RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v1"
+_RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
 _RELEASE_VERSION = "0.1.0"
 _API_VERSION = "0.1.0"
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _CAPABILITIES = (
     "conditional-escrow.v1",
     "stripe-connect-separate-charges-transfers.v1",
     "portable-attestation.v1",
     "eas-arbiter.v1",
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1",
 )
+_IDENTITY_CONTRACT = {
+    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
+    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
+    "supported_identity_schemes": ["eip191", "ed25519"],
+    "capabilities": [
+        "scheme-tagged-identities.v1",
+        "account-owner-admission.v1",
+        "account-owner-rotation.v1",
+        "account-owner-retirement.v1",
+        "signer-injected-client.v1",
+        "provider-neutral-seller-onboarding.v1",
+    ],
+    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
+    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
+    "client_signer_api": "hosted_settlement_client.Signer",
+    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
+}
+_ARTIFACT_FILENAMES = {
+    "openapi": "openapi-v0.1.0.json",
+    "conformance": "conformance-v0.1.0.json",
+    "migrations": "migrations-v4.json",
+    "sbom": "sbom.spdx.json",
+    "provenance": "provenance.intoto.json",
+}
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -92,6 +122,11 @@ def verify_release(
     _equal(trust.get("api_version"), _API_VERSION, "trust api_version")
     _equal(trust.get("schema_version"), _SCHEMA_VERSION, "trust schema_version")
     _equal(tuple(trust.get("required_capabilities") or ()), _CAPABILITIES, "trust capabilities")
+    _equal(
+        trust.get("identity_contract"),
+        _IDENTITY_CONTRACT,
+        "trust identity_contract",
+    )
     manifest_filename = _text(trust.get("manifest_filename"), "manifest_filename")
     if manifest_path.name != manifest_filename:
         raise ReleaseVerificationError("staged manifest filename does not match the trusted pin")
@@ -117,8 +152,15 @@ def verify_release(
         raise ReleaseVerificationError(f"cannot read staged release manifest: {exc}") from exc
     if hashlib.sha256(manifest_bytes).hexdigest() != trusted_manifest_sha:
         raise ReleaseVerificationError("staged release manifest hash does not match")
-    if set(envelope) != {"payload", "authority_id", "authority_address", "signature"}:
+    if set(envelope) != {
+        "payload",
+        "signature_scheme",
+        "authority_id",
+        "authority_address",
+        "signature",
+    }:
         raise ReleaseVerificationError("release manifest envelope has unexpected fields")
+    _equal(envelope.get("signature_scheme"), "eip191", "signature_scheme")
     payload = _object(envelope.get("payload"), "manifest.payload")
     _equal(envelope.get("authority_id"), authority_id, "authority_id")
     _equal(envelope.get("authority_address"), authority_address, "authority_address")
@@ -143,6 +185,29 @@ def verify_release(
     _equal(payload.get("release_version"), _RELEASE_VERSION, "release_version")
     migrations = _object(payload.get("migrations"), "payload.migrations")
     _equal(migrations.get("schema_version"), _SCHEMA_VERSION, "migration schema_version")
+    _equal(
+        payload.get("identity_contract"),
+        _IDENTITY_CONTRACT,
+        "identity_contract",
+    )
+    for artifact_name, filename in _ARTIFACT_FILENAMES.items():
+        artifact = _object(payload.get(artifact_name), f"payload.{artifact_name}")
+        _equal(artifact.get("filename"), filename, f"{artifact_name}.filename")
+        artifact_sha = _sha(
+            str(artifact.get("sha256", "")).removeprefix("sha256:"),
+            f"{artifact_name}.sha256",
+        )
+        artifact_path = manifest_path.parent / filename
+        try:
+            staged_artifact_sha = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ReleaseVerificationError(
+                f"cannot read staged {artifact_name} artifact: {exc}"
+            ) from exc
+        if staged_artifact_sha != artifact_sha:
+            raise ReleaseVerificationError(
+                f"staged {artifact_name} artifact hash does not match"
+            )
     build = _object(payload.get("build"), "payload.build")
     _equal(build.get("repository"), repository, "build.repository")
     _equal(build.get("workflow_ref"), workflow_ref, "build.workflow_ref")
@@ -171,10 +236,13 @@ def verify_release(
     return {
         "manifest_sha256": trusted_manifest_sha,
         "client_wheel_sha256": trusted_client_sha,
+        "service_image_reference": image_reference,
         "service_image_digest": image_digest,
         "api_version": _API_VERSION,
         "schema_version": _SCHEMA_VERSION,
         "capabilities": list(_CAPABILITIES),
+        "identity_contract": _IDENTITY_CONTRACT,
+        "artifacts": dict(_ARTIFACT_FILENAMES),
     }
 
 

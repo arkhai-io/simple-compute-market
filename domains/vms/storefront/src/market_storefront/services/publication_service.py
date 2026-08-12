@@ -21,7 +21,7 @@ from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 if TYPE_CHECKING:
-    from market_storefront.utils.multi_registry_client import MultiRegistryClient
+    from core_storefront.multi_registry_client import MultiRegistryClient
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,6 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         update_listing_request_factory=UpdateListingRequest,
-        private_key=settings.wallet.private_key,
         select_target_registries=_registries_to_target,
         record_publications=_record_publications,
     )
@@ -135,18 +134,23 @@ async def reopen_available_compute_listings_after_capacity_change(
 
 
 def _make_registry_client() -> MultiRegistryClient:
-    """Construct a multi-registry client wrapping every configured URL."""
-    from market_storefront.utils.multi_registry_client import MultiRegistryClient
+    """Construct a signer-authenticated client for every pinned registry."""
+    import market_storefront.container as container
 
-    urls = (
-        list(settings.registry.urls)
-        if settings.registry.urls
-        else ["http://localhost:8080"]
-    )
+    from core_storefront.multi_registry_client import MultiRegistryClient
+    from market_storefront.utils.config import get_registry_authorities
+
+    urls = list(settings.registry.urls)
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("marketplace signer is not initialized")
     return MultiRegistryClient(
         urls,
         timeout=settings.registry.discovery_timeout,
         auth=settings.registry.auth,
+        signer=signer,
+        caller_role="seller",
+        expected_registries=get_registry_authorities(),
     )
 
 
@@ -165,7 +169,6 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         listing_request_factory=ListingRequest,
-        private_key=settings.wallet.private_key,
         storefront_url=BASE_URL_OVERRIDE,
         record_publications=_record_publications,
         on_published=_record_listing_published_stage_event,
@@ -175,6 +178,8 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
 def _record_listing_published_stage_event(
     *,
     listing_id: str,
+    storefront_url: str,
+    seller_principal: dict[str, Any],
     offer_resource: dict[str, Any],
     accepted_escrows: list[dict[str, Any]],
     settlement_options: list[dict[str, Any]],
@@ -185,7 +190,8 @@ def _record_listing_published_stage_event(
         "discovery",
         "order_published",
         order_id=listing_id,
-        agent_url=BASE_URL_OVERRIDE,
+        agent_url=storefront_url,
+        seller_principal=seller_principal,
         offer=offer_resource,
         accepted_escrows=accepted_escrows,
         settlement_options=settlement_options,

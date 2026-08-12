@@ -223,3 +223,7 @@ deploy-base-sepolia/
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+
+# Local assistant session exports
+omp-session-*.html
+pi-session-*.html

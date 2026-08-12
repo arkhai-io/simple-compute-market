@@ -7,9 +7,10 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
+from market_identity import Identity
+
 from .models import (
     MaterializationOutcome,
-    Party,
     SettlementObligationRecord,
     SettlementOperationOutcome,
     SettlementPlanStatus,
@@ -25,7 +26,7 @@ class SettlementManualRequired(RuntimeError):
 
 
 class SettlementRuntime:
-    """Registers plans and executes role-authorized obligation operations."""
+    """Registers plans and executes principal-authorized obligation operations."""
 
     def __init__(
         self,
@@ -76,7 +77,7 @@ class SettlementRuntime:
         self,
         obligation_ref: str,
         *,
-        local_role: Party,
+        local_principal: Identity,
         mechanism_ref: str,
         receipt: dict[str, Any] | None = None,
         condition_anchor: str | None = None,
@@ -87,15 +88,12 @@ class SettlementRuntime:
         if not mechanism_ref:
             raise ValueError("mechanism_ref must be non-empty")
         record = await self._load(obligation_ref)
-        if local_role not in {
-            record.obligation.get("payer"),
-            record.obligation.get("claimant"),
-        }:
-            raise PermissionError("only an obligation participant may adopt it")
+        self._require_participant(record, local_principal, operation="adopt")
         reserved = await self._reserve(
             record,
             "materialize",
             worker_id,
+            local_principal,
             request_values={"adopted_mechanism_ref": mechanism_ref},
         )
         if reserved is None:
@@ -121,13 +119,13 @@ class SettlementRuntime:
         obligation_ref: str,
         fulfillment_ref: str,
         *,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str = "fulfillment",
     ) -> SettlementObligationRecord:
         """Bind the claimant's immutable public fulfillment reference once."""
         del worker_id
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "claimant")
+        self._require_principal(record, local_principal, "claimant")
         if not fulfillment_ref:
             raise ValueError("fulfillment_ref must be non-empty")
         row = await self._repository.bind_settlement_fulfillment(
@@ -140,7 +138,7 @@ class SettlementRuntime:
         self,
         obligation_ref: str,
         *,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         """Reserve one durable domain-fulfillment attempt.
@@ -151,8 +149,10 @@ class SettlementRuntime:
         authoritative and repairs an unfinished operation row.
         """
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "claimant")
-        reserved = await self._reserve(record, "fulfill", worker_id)
+        self._require_principal(record, local_principal, "claimant")
+        reserved = await self._reserve(
+            record, "fulfill", worker_id, local_principal
+        )
         if reserved is None:
             return self._outcome(record, "fulfill", "busy")
         terminal = self._terminal_outcome(record, "fulfill", reserved)
@@ -175,14 +175,14 @@ class SettlementRuntime:
         obligation_ref: str,
         fulfillment_ref: str,
         *,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementObligationRecord:
         """Commit fulfillment identity before completing its leased operation."""
         record = await self.bind_fulfillment(
             obligation_ref,
             fulfillment_ref,
-            local_role=local_role,
+            local_principal=local_principal,
             worker_id=worker_id,
         )
         await self._finish(
@@ -199,12 +199,12 @@ class SettlementRuntime:
         obligation_ref: str,
         error: Exception,
         *,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> None:
         """Release a failed fulfillment lease for deterministic retry."""
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "claimant")
+        self._require_principal(record, local_principal, "claimant")
         await self._finish_retry(
             record,
             "fulfill",
@@ -217,13 +217,15 @@ class SettlementRuntime:
         self,
         *,
         obligation_ref: str,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "payer")
+        self._require_principal(record, local_principal, "payer")
         client = self._client(record)
-        reserved = await self._reserve(record, "materialize", worker_id)
+        reserved = await self._reserve(
+            record, "materialize", worker_id, local_principal
+        )
         if reserved is None:
             return self._outcome(record, "materialize", "busy")
         terminal = self._terminal_outcome(record, "materialize", reserved)
@@ -266,15 +268,11 @@ class SettlementRuntime:
         self,
         *,
         obligation_ref: str,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
-        if local_role not in {
-            record.obligation.get("payer"),
-            record.obligation.get("claimant"),
-        }:
-            raise PermissionError("only an obligation participant may reconcile it")
+        self._require_participant(record, local_principal, operation="reconcile")
         if record.collection_state == "succeeded":
             return self._outcome(
                 record,
@@ -291,7 +289,9 @@ class SettlementRuntime:
             )
         mechanism_ref = self._require_mechanism_ref(record)
         client = self._client(record)
-        reserved = await self._reserve(record, "status", worker_id)
+        reserved = await self._reserve(
+            record, "status", worker_id, local_principal
+        )
         if reserved is None:
             return self._outcome(record, "status", "busy")
         terminal = self._terminal_outcome(record, "status", reserved)
@@ -332,11 +332,11 @@ class SettlementRuntime:
         self,
         *,
         obligation_ref: str,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "claimant")
+        self._require_principal(record, local_principal, "claimant")
         mechanism_ref = self._require_materialized(record)
         fulfillment_ref = self._require_fulfillment(record)
         client = self._client(record)
@@ -344,6 +344,7 @@ class SettlementRuntime:
             record,
             "check",
             worker_id,
+            local_principal,
             request_values={"fulfillment_ref": fulfillment_ref},
         )
         if reserved is None:
@@ -398,17 +399,19 @@ class SettlementRuntime:
         self,
         *,
         obligation_ref: str,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "claimant")
+        self._require_principal(record, local_principal, "claimant")
         mechanism_ref = self._require_materialized(record)
         if record.condition_state != "ready":
             raise ValueError("obligation conditions are not ready")
         fulfillment_ref = self._require_fulfillment(record)
         client = self._client(record)
-        reserved = await self._reserve(record, "collect", worker_id)
+        reserved = await self._reserve(
+            record, "collect", worker_id, local_principal
+        )
         if reserved is None:
             return self._outcome(record, "collect", "busy")
         terminal = self._terminal_outcome(record, "collect", reserved)
@@ -443,16 +446,18 @@ class SettlementRuntime:
         self,
         *,
         obligation_ref: str,
-        local_role: Party,
+        local_principal: Identity,
         worker_id: str,
     ) -> SettlementOperationOutcome:
         record = await self._load(obligation_ref)
-        self._require_role(record, local_role, "payer")
+        self._require_principal(record, local_principal, "payer")
         mechanism_ref = self._require_materialized(record)
         if self._clock() < float(record.obligation["expiration_unix"]):
             raise ValueError("obligation has not expired")
         client = self._client(record)
-        reserved = await self._reserve(record, "reclaim", worker_id)
+        reserved = await self._reserve(
+            record, "reclaim", worker_id, local_principal
+        )
         if reserved is None:
             return self._outcome(record, "reclaim", "busy")
         terminal = self._terminal_outcome(record, "reclaim", reserved)
@@ -496,12 +501,40 @@ class SettlementRuntime:
             raise ValueError(f"no conditional escrow client for {mechanism!r}") from exc
 
     @staticmethod
-    def _require_role(
+    def _require_participant(
         record: SettlementObligationRecord,
-        local_role: Party,
+        local_principal: Identity,
+        *,
+        operation: str,
+    ) -> None:
+        if not isinstance(local_principal, Identity):
+            raise TypeError(
+                "local_principal must be a canonical marketplace identity"
+            )
+        if (
+            local_principal != record.payer_principal
+            and local_principal != record.claimant_principal
+        ):
+            raise PermissionError(
+                f"only an obligation participant may {operation} it"
+            )
+
+    @staticmethod
+    def _require_principal(
+        record: SettlementObligationRecord,
+        local_principal: Identity,
         field: Literal["payer", "claimant"],
     ) -> None:
-        if record.obligation.get(field) != local_role:
+        if not isinstance(local_principal, Identity):
+            raise TypeError(
+                "local_principal must be a canonical marketplace identity"
+            )
+        expected = (
+            record.payer_principal
+            if field == "payer"
+            else record.claimant_principal
+        )
+        if local_principal != expected:
             raise PermissionError(
                 f"only the obligation {field} may perform this operation"
             )
@@ -529,6 +562,7 @@ class SettlementRuntime:
         record: SettlementObligationRecord,
         operation: str,
         worker_id: str,
+        local_principal: Identity,
         *,
         request_values: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
@@ -537,7 +571,10 @@ class SettlementRuntime:
             obligation_ref=record.obligation_ref,
             operation=operation,
             request_hash=_request_hash(
-                record, operation, request_values=request_values
+                record,
+                operation,
+                local_principal=local_principal,
+                request_values=request_values,
             ),
             lease_owner=worker_id,
             now_unix=now,
@@ -667,13 +704,15 @@ def _request_hash(
     record: SettlementObligationRecord,
     operation: str,
     *,
+    local_principal: Identity,
     request_values: Mapping[str, Any] | None = None,
 ) -> str:
     payload = {
-        "protocol": "arkhai.settlement-operation.v1",
+        "protocol": "arkhai.settlement-operation.v2",
         "obligation_ref": record.obligation_ref,
         "obligation_hash": record.obligation_hash,
         "operation": operation,
+        "principal": local_principal.model_dump(mode="json"),
         "request": dict(request_values or {}),
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

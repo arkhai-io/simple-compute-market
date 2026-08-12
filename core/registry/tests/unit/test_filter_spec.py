@@ -8,6 +8,7 @@ modes (duplicate filter names, malformed YAML).
 from __future__ import annotations
 
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -276,9 +277,95 @@ def test_etag_changes_when_schema_identity_added(tmp_path: Path) -> None:
         compute_etag(load_filter_spec(_write(tmp_path, with_schema)))
 
 
-def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
-    """ETag header on GET /filter-spec mirrors the body etag."""
+def _authenticated_filter_client(app, db_session):
     from fastapi.testclient import TestClient
+    from market_identity import (
+        Ed25519Signer,
+        RequestEnvelope,
+        TrustedIdentitySet,
+        canonical_body_hash,
+        sign_request,
+    )
+    from src.db.database import get_db
+
+    caller = Ed25519Signer(bytes(range(32)))
+    registry = Ed25519Signer(bytes(range(1, 33)))
+    app.state.registry_authority_signer = registry
+
+    def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    request = sign_request(
+        signer=caller,
+        envelope=RequestEnvelope(
+            role="buyer",
+            principal=caller.identity,
+            method="GET",
+            operation="filter.get",
+            resource="filter-spec",
+            request_id="filter-spec-unit",
+            timestamp=int(time.time()),
+            body_hash=canonical_body_hash({"query": []}),
+        ),
+    )
+    headers = {
+        "X-Market-Signature-Version": request.protocol,
+        "X-Market-Identity-Scheme": request.principal.scheme.value,
+        "X-Market-Identity-Identifier": request.principal.identifier,
+        "X-Market-Role": request.role,
+        "X-Market-Request-ID": request.request_id,
+        "X-Market-Timestamp": str(request.timestamp),
+        "X-Market-Signature": request.proof.value,
+    }
+    return TestClient(app), request, headers, TrustedIdentitySet(
+        identities=(registry.identity,)
+    )
+
+
+def _assert_signed_filter_response(response, request, registry_principals) -> None:
+    from market_identity import VerificationCode, canonical_body_hash, verify_response
+
+    scheme = response.headers["X-Market-Identity-Scheme"]
+    result = verify_response(
+        {
+            "protocol": response.headers["X-Market-Signature-Version"],
+            "role": response.headers["X-Market-Role"],
+            "principal": {
+                "scheme": scheme,
+                "identifier": response.headers["X-Market-Identity-Identifier"],
+            },
+            "method": request.method,
+            "operation": request.operation,
+            "resource": request.resource,
+            "request_id": response.headers["X-Market-Request-ID"],
+            "timestamp": int(response.headers["X-Market-Timestamp"]),
+            "status": response.status_code,
+            "body_hash": canonical_body_hash(response.json()),
+            "proof": {
+                "scheme": scheme,
+                "value": response.headers["X-Market-Signature"],
+            },
+        },
+        body=response.json(),
+        now=int(time.time()),
+        max_skew=300,
+        expected_role="registry",
+        expected_method=request.method,
+        expected_operation=request.operation,
+        expected_resource=request.resource,
+        expected_request_id=request.request_id,
+        expected_principals=registry_principals,
+    )
+    assert result.code == VerificationCode.VERIFIED
+
+
+def test_etag_present_on_endpoint(
+    monkeypatch,
+    tmp_path: Path,
+    db_session,
+) -> None:
+    """ETag header on GET /filter-spec mirrors the body etag."""
 
     path = _write(
         tmp_path,
@@ -297,10 +384,13 @@ def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(fs_mod.router)
-    client = TestClient(app)
-
-    resp = client.get("/filter-spec")
+    client, request, headers, registry_principals = _authenticated_filter_client(
+        app,
+        db_session,
+    )
+    resp = client.get("/filter-spec", headers=headers)
     assert resp.status_code == 200
+    _assert_signed_filter_response(resp, request, registry_principals)
     body = resp.json()
     assert resp.headers["etag"].strip('"') == body["etag"]
     assert body["version"] == 1
@@ -308,8 +398,11 @@ def test_etag_present_on_endpoint(monkeypatch, tmp_path: Path) -> None:
     assert "schema" not in body  # spec declares none → key absent
 
 
-def test_endpoint_serves_schema_identity(monkeypatch, tmp_path: Path) -> None:
-    from fastapi.testclient import TestClient
+def test_endpoint_serves_schema_identity(
+    monkeypatch,
+    tmp_path: Path,
+    db_session,
+) -> None:
 
     path = _write(
         tmp_path,
@@ -331,7 +424,11 @@ def test_endpoint_serves_schema_identity(monkeypatch, tmp_path: Path) -> None:
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(fs_mod.router)
-    client = TestClient(app)
-
-    body = client.get("/filter-spec").json()
+    client, request, headers, registry_principals = _authenticated_filter_client(
+        app,
+        db_session,
+    )
+    response = client.get("/filter-spec", headers=headers)
+    _assert_signed_filter_response(response, request, registry_principals)
+    body = response.json()
     assert body["schema"] == {"id": "tokens.api", "version": 2}

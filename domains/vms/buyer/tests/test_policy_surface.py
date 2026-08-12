@@ -18,7 +18,7 @@ from domains.vms.buyer.policy_surface import (
     configured_buyer_policy,
     entry_uses_scalar_amount,
 )
-from core_buyer.escrow_selection import select_escrow_entry
+from domains.vms.buyer.escrow_selection import select_escrow_entry
 
 
 _TOKEN = "0x" + "22" * 20
@@ -107,18 +107,18 @@ def test_selection_refuses_incompatible_only_listings():
 
 
 def test_chain_terminal_follows_the_configured_policy():
-    from domains.vms.buyer.buyer_client import _load_buyer_chain
+    from domains.vms.buyer.buyer_client import load_buyer_chain
     from domains.vms.negotiation.policies import (
         bisection_middleware,
         listed_price_middleware,
     )
 
-    assert _load_buyer_chain()[-1] is listed_price_middleware
+    assert load_buyer_chain()[-1] is listed_price_middleware
     with patch(
         "core_buyer.buyer_config.resolve_config_value",
         return_value="bisection",
     ):
-        assert _load_buyer_chain()[-1] is bisection_middleware
+        assert load_buyer_chain()[-1] is bisection_middleware
 
 
 def test_policy_without_derivation_passes_explicit_values_through():

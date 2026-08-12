@@ -13,11 +13,37 @@ from __future__ import annotations
 import contextlib
 import itertools
 import json
+import time
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import patch
 
 import httpx
+from market_identity import (
+    EMPTY_BODY,
+    ResponseEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    create_signer,
+    sign_response,
+)
+from market_site_client.client import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+    resolve_capacity_route,
+)
+
+
+TEST_MARKETPLACE_SIGNER = create_signer("ed25519", b"\x41" * 32)
+TEST_SITE_AUTHORITY_SIGNER = create_signer("ed25519", b"\x42" * 32)
+TEST_SITE_AUTHORITIES = TrustedIdentitySet(
+    identities=(TEST_SITE_AUTHORITY_SIGNER.identity,)
+)
 
 
 class FakeSite:
@@ -29,7 +55,6 @@ class FakeSite:
         self.events: list[dict] = []
         self._versions = itertools.count(1)
         self._ids = itertools.count(1)
-        self.seen_admin_keys: list[str | None] = []
 
     def add_resource(
         self,
@@ -68,7 +93,50 @@ class FakeSite:
         return self.resources[rid]["total_units"] - held
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
-        self.seen_admin_keys.append(request.headers.get("X-Admin-Key"))
+        response = self._dispatch(request)
+        request_body = json.loads(request.content) if request.content else {}
+        response_body = response.json() if response.content else EMPTY_BODY
+        operation, resource = resolve_capacity_route(
+            request.method,
+            request.url.path,
+            request_body,
+        )
+        signed = sign_response(
+            signer=TEST_SITE_AUTHORITY_SIGNER,
+            envelope=ResponseEnvelope(
+                role="service",
+                principal=TEST_SITE_AUTHORITY_SIGNER.identity,
+                method=request.method,
+                operation=operation,
+                resource=resource,
+                request_id=request.headers[REQUEST_ID_HEADER],
+                timestamp=int(time.time()),
+                status=response.status_code,
+                body_hash=canonical_body_hash(response_body),
+            ),
+        )
+        headers = {
+            SIGNATURE_VERSION_HEADER: signed.protocol,
+            IDENTITY_SCHEME_HEADER: signed.principal.scheme.value,
+            IDENTITY_IDENTIFIER_HEADER: signed.principal.identifier,
+            ROLE_HEADER: signed.role,
+            REQUEST_ID_HEADER: signed.request_id,
+            TIMESTAMP_HEADER: str(signed.timestamp),
+            SIGNATURE_HEADER: signed.proof.value,
+        }
+        if response_body is EMPTY_BODY:
+            return httpx.Response(
+                response.status_code,
+                content=b"",
+                headers=headers,
+            )
+        return httpx.Response(
+            response.status_code,
+            json=response_body,
+            headers=headers,
+        )
+
+    def _dispatch(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         body = json.loads(request.content) if request.content else {}
 
@@ -295,7 +363,8 @@ def aggregate_over(
 
     remote = SiteCapacityClient(
         "http://fake-site:8081",
-        "test-key",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
         transport=fake.transport(),
     )
     aggregate = AggregateCapacityClient({site_name: remote})

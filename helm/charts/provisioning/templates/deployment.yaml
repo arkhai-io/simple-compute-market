@@ -41,6 +41,11 @@ spec:
               value: {{ if .Values.mockMode }}"production,provisioning-secrets,mock"{{ else }}"production,provisioning-secrets"{{ end }}
             - name: CONFIG_DIRECTORY
               value: "/app/config"
+            - name: ARKHAI_IDENTITY_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "provisioning identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
+                  key: {{ required "provisioning identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
           volumeMounts:
             - name: data
               mountPath: /app/data
@@ -65,6 +70,11 @@ spec:
               value: {{ if .Values.mockMode }}"production,provisioning-secrets,mock"{{ else }}"production,provisioning-secrets"{{ end }}
             - name: CONFIG_DIRECTORY
               value: "/app/config"
+            - name: ARKHAI_IDENTITY_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "provisioning identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
+                  key: {{ required "provisioning identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
           volumeMounts:
             - name: data
               mountPath: /app/data

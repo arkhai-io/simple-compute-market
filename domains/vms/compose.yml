@@ -1,14 +1,10 @@
 # VM compute (vms.compute) market — domain stack.
 #
-# The seller side of the VM compute market: two registry/indexer instances
-# (public + private), Bob's and Alice's storefronts, the Redis job queue, and
-# the provisioning service. Chain-touching services gate on a service named
-# `anvil` (the local dev chain) which this file does NOT define — the root
-# `compose.dev.yml` supplies it. Bring this domain up with that overlay via
-# the repo-root wrapper:
-#   docker compose -f compose.vms.yml up
-# (compose.vms.yml just `include:`s compose.dev.yml + this file.) The full
-# multi-domain stack is the root `docker-compose.yml`.
+# The seller side of the VM compute market: two registry/indexer instances,
+# Bob's and Alice's storefronts, the Redis job queue, and provisioning. The
+# domain stack has no unconditional chain dependency. An explicit Alkahest
+# storefront profile may add Anvil through the root development overlay;
+# a hosted-only profile composes without it.
 #
 # Paths below are relative to THIS file's directory (domains/vms/) — Compose
 # `include:` resolves an included file's relative paths against its own
@@ -18,9 +14,6 @@ services:
   # 1. Registry/Indexer service (vms.compute filter-spec — the image default).
   registry:
     image: arkhai:registry
-    depends_on:
-      anvil:
-        condition: service_healthy
     ports:
       - "8080:8080"
     env_file:
@@ -41,17 +34,10 @@ services:
       retries: 3
       start_period: 10s
 
-  # 1b. Second Registry/Indexer — a "private" registry alongside the
-  # public one, exercising the multi-registry code paths permanently
-  # in CI. Same image, same chain, independent SQLite. Both EventSync
-  # the same chain so the seller's on-chain agent registration is
-  # picked up by both; publish/discover fan-out and fan-in against
-  # the union (domains/vms/storefront/.../utils/multi_registry_client.py).
+  # 1b. Second Registry/Indexer — a private registry alongside the public
+  # one, exercising authenticated multi-registry publication and discovery.
   registry-b:
     image: arkhai:registry
-    depends_on:
-      anvil:
-        condition: service_healthy
     ports:
       - "8082:8080"
     env_file:
@@ -64,12 +50,12 @@ services:
       # startup (write implies read) so the storefront can publish to
       # registry-b on a fresh ``compose up`` without an out-of-band mint
       # step, and the buyer can discover from it with the same token.
-      # Bob's storefront.bob.toml carries the matching token in
-      # [registry.auth].
+      # Operator-provided secret values; never commit them to this Compose file
+      # or the public storefront profile.
       - REGISTRY_REQUIRE_READ_API_KEY=true
       - REGISTRY_REQUIRE_WRITE_API_KEY=true
-      - REGISTRY_ADMIN_API_KEY=test-admin-token
-      - REGISTRY_BOOTSTRAP_API_KEY=test-buyer-token
+      - REGISTRY_ADMIN_API_KEY=${VMS_REGISTRY_ADMIN_API_KEY:?set VMS_REGISTRY_ADMIN_API_KEY}
+      - REGISTRY_BOOTSTRAP_API_KEY=${VMS_REGISTRY_BOOTSTRAP_API_KEY:?set VMS_REGISTRY_BOOTSTRAP_API_KEY}
     volumes:
       - ../../shared-env:/app/shared-env
     restart: unless-stopped
@@ -126,6 +112,7 @@ services:
       # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
       # TOML (the default is the dev/anvil seller config).
       - ${VMS_BOB_STOREFRONT_CONFIG:-./storefront/storefront.bob.toml}:/etc/arkhai/storefront.toml:ro
+      - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
       # Compute inventory seed CSV — storefront.bob.toml's
       # seller.resources_csv_path expects this at /app/resources.csv.
       - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
@@ -222,7 +209,6 @@ services:
       # storefront resource available. Must match the bob-storefront service
       # name and port defined in this compose file.
       - PROVISIONING_STOREFRONT_URL=http://bob-storefront:8001
-      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:-test-api-key}
     volumes:
       - ./provisioning/iac:/opt/domains/vms/provisioning/iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro

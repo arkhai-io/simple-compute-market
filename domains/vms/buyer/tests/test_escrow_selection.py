@@ -6,7 +6,7 @@ from io import StringIO
 import pytest
 from rich.console import Console
 
-from core_buyer.escrow_selection import select_escrow_entry
+from domains.vms.buyer.escrow_selection import select_escrow_entry
 
 
 _TOKEN_A = "0x" + "11" * 20
@@ -102,7 +102,7 @@ def test_valid_preference_precedes_positive_balance(monkeypatch) -> None:
         balance_calls += 1
         return 1
 
-    monkeypatch.setattr("core_buyer.escrow_selection._balance", balance)
+    monkeypatch.setattr("domains.vms.buyer.escrow_selection._balance", balance)
 
     def preference(candidates, _context):
         return candidates[0].identity
@@ -116,7 +116,7 @@ def test_valid_preference_precedes_positive_balance(monkeypatch) -> None:
 def test_none_preference_then_positive_balance_then_list_order(monkeypatch) -> None:
     first, second = _entry(1, token=_TOKEN_A), _entry(2, token=_TOKEN_B)
     monkeypatch.setattr(
-        "core_buyer.escrow_selection._balance",
+        "domains.vms.buyer.escrow_selection._balance",
         lambda **kwargs: 1 if kwargs["token_address"] == _TOKEN_B else 0,
     )
 
@@ -126,7 +126,10 @@ def test_none_preference_then_positive_balance_then_list_order(monkeypatch) -> N
     listing = {"accepted_escrows": [first, second]}
     assert _select(listing, preference=no_preference) is second
 
-    monkeypatch.setattr("core_buyer.escrow_selection._balance", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        "domains.vms.buyer.escrow_selection._balance",
+        lambda **_kwargs: 0,
+    )
     assert _select(listing, preference=no_preference) is first
 
 
@@ -139,7 +142,10 @@ def test_invalid_preference_output_uses_constrained_fallback(
     mode: str,
 ) -> None:
     first, second = _entry(1), _entry(2)
-    monkeypatch.setattr("core_buyer.escrow_selection._balance", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        "domains.vms.buyer.escrow_selection._balance",
+        lambda **_kwargs: 0,
+    )
     calls = 0
 
     def preference(candidates, _context):
@@ -165,7 +171,10 @@ def test_interactive_choice_is_authoritative(monkeypatch) -> None:
     def preference(_candidates, _context):
         raise AssertionError("interactive selection must not invoke preference")
 
-    monkeypatch.setattr("core_buyer.escrow_selection.typer.prompt", lambda *_a, **_k: 2)
+    monkeypatch.setattr(
+        "domains.vms.buyer.escrow_selection.typer.prompt",
+        lambda *_a, **_k: 2,
+    )
     picked = _select(
         {"accepted_escrows": [first, second]},
         assume_yes=False,

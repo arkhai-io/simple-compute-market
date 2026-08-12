@@ -42,6 +42,8 @@ from .buy_orchestrator import (
     make_legacy_settle_hook,
     query_registry_for_matches_multi,
     run_buy,
+)
+from .hosted_settlement import (
     start_hosted_settlement,
     wait_for_hosted_settlement,
 )
@@ -50,6 +52,7 @@ from .common import resolve_config_value
 from .deal_helpers import (
     is_negotiation_complete,
     load_negotiation_resume_point,
+    make_publisher_trust_resolver,
     open_run_log,
 )
 from .settle_cli import run_settle_from_log
@@ -122,12 +125,19 @@ def _make_hosted_settle_hook(
         obligations = outcome.settlement_plan.obligations
         if len(obligations) != 1 or obligations[0].mechanism != "fiat.stripe.v1":
             raise ValueError("hosted settlement requires one fiat.stripe.v1 obligation")
+        from core_buyer.orchestration import make_publisher_trust_resolver
+
+        resolve_seller_principals = make_publisher_trust_resolver(
+            config=config,
+            listing=match,
+            on_update=lambda stage, payload: on_event(stage, payload),
+        )
         obligation = obligations[0].model_dump(mode="json")
         if confirm is not None and not confirm(int(obligation["amount"]), match):
             return BuyResult(
                 status="exited",
                 negotiation_id=outcome.negotiation_id,
-                seller_url=match.get("storefront_url") or match.get("seller"),
+                seller_url=str(match.get("storefront_url") or ""),
                 agreed_amount=outcome.agreed_amount,
                 reason="user_declined",
                 rounds=outcome.rounds,
@@ -135,18 +145,16 @@ def _make_hosted_settle_hook(
             )
         negotiation_id = outcome.negotiation_id or ""
         obligation_ref = derive_obligation_ref(negotiation_id, 0, obligation)
-        seller_url = (
-            match.get("storefront_url")
-            or match.get("seller")
-            or match.get("seller_url")
-            or ""
-        )
+        seller_url = str(match.get("storefront_url") or "")
+        if not seller_url:
+            raise ValueError("listing is missing required storefront_url")
         started = start_hosted_settlement(
             seller_url=seller_url,
             negotiation_id=negotiation_id,
             obligation_ref=obligation_ref,
-            buyer_address=config.buyer_address,
-            buyer_private_key=config.buyer_private_key,
+            principal=config.principal,
+            signer=config.signer,
+            resolve_seller_principals=resolve_seller_principals,
         )
         settlement_ref = started.get("settlement_ref")
         if not isinstance(settlement_ref, str) or not settlement_ref:
@@ -177,7 +185,7 @@ def _make_hosted_settle_hook(
         if isinstance(initial_action, dict):
             handle_action(initial_action)
         on_event(
-            "hosted_settlement_started",
+            "settlement_started",
             {
                 "settlement_ref": settlement_ref,
                 "status": started.get("status"),
@@ -189,8 +197,9 @@ def _make_hosted_settle_hook(
             final = wait_for_hosted_settlement(
                 seller_url=seller_url,
                 settlement_ref=settlement_ref,
-                buyer_address=config.buyer_address,
-                buyer_private_key=config.buyer_private_key,
+                principal=config.principal,
+                signer=config.signer,
+                resolve_seller_principals=resolve_seller_principals,
                 poll_interval=poll_interval,
                 total_timeout=total_timeout,
                 on_action=handle_action,
@@ -288,27 +297,22 @@ def _run_resume_from(
     events when finishing the negotiation, then `settle_*` events from
     ``run_settle_from_log``.
     """
-    if not is_negotiation_complete(from_run):
+    from .common import (
+        resolve_buyer_signer,
+        resolve_identity_config,
+        resolve_identity_credential,
+    )
+
+    identity_config = resolve_identity_config()
+    signer = resolve_buyer_signer(
+        identity_config,
+        resolve_identity_credential(),
+    )
+    if not is_negotiation_complete(from_run, signer=signer):
         if max_price is None:
             typer.secho(
                 "--max-price is required when resuming a mid-stream "
                 "negotiation (the strategy needs the buyer's ceiling).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-
-        from .common import resolve_buyer_wallet
-
-        addr, pk = resolve_buyer_wallet(
-            override_addr=buyer_address,
-            override_pk=buyer_private_key,
-        )
-        if not addr or not pk:
-            typer.secho(
-                "Missing buyer wallet config. Pass --buyer-priv-key or set "
-                "wallet.private_key in config.toml; the address is derived "
-                "from the key.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -327,7 +331,7 @@ def _run_resume_from(
             from .common import chain_by_name
             from .settle_cli import _chain_name_from_run_log
 
-            cname = chain_name or _chain_name_from_run_log(from_run)
+            cname = chain_name or _chain_name_from_run_log(from_run, signer=signer)
             if cname:
                 try:
                     chain_cfg = chain_by_name(cname)
@@ -342,8 +346,8 @@ def _run_resume_from(
         if token_decimals is not None:
             max_price = max_price * (10 ** int(token_decimals))
 
-        resume_point = load_negotiation_resume_point(from_run)
-        run_log = open_run_log(from_run)
+        resume_point = load_negotiation_resume_point(from_run, signer=signer)
+        run_log = open_run_log(from_run, signer=signer)
         run_log.event(
             "negotiation_resumed",
             from_run=from_run,
@@ -378,16 +382,26 @@ def _run_resume_from(
 
         resume_chain = None
         if getattr(resume_point, "policy", None):
-            from .buyer_client import _load_buyer_chain
+            from .buyer_client import load_buyer_chain
 
-            resume_chain = _load_buyer_chain(
+            resume_chain = load_buyer_chain(
                 policy_mode=str(resume_point.policy),
             )
+        resolve_seller_principals = make_publisher_trust_resolver(
+            run_id=from_run,
+            listing_id=resume_point.listing_id,
+            publisher_id=resume_point.publisher_id,
+            source_registry_url=resume_point.source_registry_url,
+            source_registry_authority=resume_point.source_registry_authority,
+            current=resume_point.publisher_principals,
+            signer=signer,
+        )
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=resume_point.seller_url,
-                buyer_address=addr,
-                buyer_private_key=pk,
+                principal=resume_point.buyer_principal,
+                signer=signer,
                 listing_id=resume_point.listing_id,
                 initial_price=0,
                 max_price=max_price,
@@ -400,6 +414,7 @@ def _run_resume_from(
                     last_seller_proposal=resume_point.last_seller_proposal,
                     rounds_completed=resume_point.rounds_completed,
                 ),
+                resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
             run_log.event("negotiation_failed", error=str(exc))
@@ -765,27 +780,43 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        # Resolution: CLI flag > config.toml > derivation > default.
         from .common import (
             VMS_SCHEMA_ID,
+            resolve_buyer_signer,
             resolve_buyer_wallet,
-            resolve_ssh_public_key,
-            resolve_indexer_urls_for_schema,
             resolve_discovery_timeout,
-            resolve_indexer_auth,
+            resolve_identity_config,
+            resolve_identity_credential,
+            resolve_indexer_urls,
+            resolve_indexer_urls_for_schema,
+            resolve_registry_api_keys,
+            resolve_registry_authorities,
+            resolve_ssh_public_key,
             select_chain_for_listing,
         )
 
-        addr, pk = resolve_buyer_wallet(
-            override_addr=buyer_address,
-            override_pk=buyer_private_key,
+        identity_config = resolve_identity_config()
+        signer = resolve_buyer_signer(
+            identity_config,
+            resolve_identity_credential(),
         )
         ssh = resolve_ssh_public_key(override=ssh_public_key)
-        reg_urls = resolve_indexer_urls_for_schema(
-            VMS_SCHEMA_ID, override=registry_urls
-        )
+        configured_reg_urls = resolve_indexer_urls(override=registry_urls)
+        registry_authorities = resolve_registry_authorities(configured_reg_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
-        reg_auth = resolve_indexer_auth()
+        reg_urls = resolve_indexer_urls_for_schema(
+            VMS_SCHEMA_ID,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            override=registry_urls,
+            timeout=deadline,
+        )
+        registry_authorities = {url: registry_authorities[url] for url in reg_urls}
+        registry_api_keys = {
+            url: key
+            for url, key in resolve_registry_api_keys().items()
+            if url in registry_authorities
+        }
         configured_priority = resolve_config_value(
             toml_path="settlement.mechanism_priority",
         )
@@ -816,11 +847,14 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+
         hosted_mode = selected_mechanism == "fiat.stripe.v1"
         chain_cfg = None
         selected_chain_name = ""
         rpc = ""
         addr_cfg = ""
+        addr = ""
+        pk = ""
         if not hosted_mode:
             chain_cfg = select_chain_for_listing(
                 listing=None,
@@ -830,21 +864,29 @@ def register(app: typer.Typer) -> None:
             selected_chain_name = chain_cfg.name
             rpc = chain_cfg.rpc_url
             addr_cfg = chain_cfg.alkahest_address_config_path
+            addr, pk = resolve_buyer_wallet(
+                override_addr=buyer_address,
+                override_pk=buyer_private_key,
+            )
 
         _key_for = {
+            "buyer_address": "wallet.address",
             "buyer_priv_key": "wallet.private_key",
-            "ssh_public_key": "wallet.ssh_public_key",
+            "ssh_public_key": "provisioning.ssh_public_key",
             "registry_urls": "registry.urls",
         }
-        missing = [
-            n
-            for n, v in (
-                ("buyer_priv_key", pk),
-                ("ssh_public_key", ssh),
-                ("registry_urls", reg_urls),
-            )
-            if not v
+        required_values = [
+            ("ssh_public_key", ssh),
+            ("registry_urls", reg_urls),
         ]
+        if not hosted_mode:
+            required_values.extend(
+                [
+                    ("buyer_address", addr),
+                    ("buyer_priv_key", pk),
+                ]
+            )
+        missing = [name for name, value in required_values if not value]
         if missing:
             typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
             for name in missing:
@@ -902,7 +944,7 @@ def register(app: typer.Typer) -> None:
         build_escrow_terms = None
         create_escrow = None
         if not hosted_mode:
-            from core_buyer.escrow_client import (
+            from .escrow_client import (
                 make_buyer_payment_escrow_terms_fn,
                 make_create_escrow_fn,
             )
@@ -941,8 +983,10 @@ def register(app: typer.Typer) -> None:
             matches = query_registry_for_matches_multi(
                 reg_urls,
                 timeout=deadline,
+                signer=signer,
+                registry_authorities=registry_authorities,
                 filters=active_filters or None,
-                auth=reg_auth,
+                api_keys=registry_api_keys,
             )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
@@ -1008,7 +1052,6 @@ def register(app: typer.Typer) -> None:
                 # No advertised price, or the user declined the picks.
                 raise typer.Exit(2)
 
-        # Resolve aggregation policy: --aggregate-by > [aggregation].policy > VM default.
         aggregation_policy = (
             aggregate_by
             or resolve_config_value(
@@ -1019,10 +1062,11 @@ def register(app: typer.Typer) -> None:
 
         config = BuyConfig(
             registry_urls=reg_urls,
-            buyer_address=addr,
-            buyer_private_key=pk,
+            registry_authorities=registry_authorities,
+            principal=identity_config.principal,
+            signer=signer,
             discovery_timeout=deadline,
-            indexer_auth=reg_auth,
+            registry_api_keys=registry_api_keys,
             aggregation_policy=aggregation_policy,
         )
         constraints = BuyConstraints(
@@ -1035,7 +1079,7 @@ def register(app: typer.Typer) -> None:
             start_utc=requested_start_utc,
             ssh_public_key=ssh,
         )
-        from core_buyer.escrow_selection import select_escrow_entry
+        from .escrow_selection import select_escrow_entry
 
         def build_escrow_proposal_for_match(
             match: dict,
@@ -1064,7 +1108,7 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
-            buyer_address=addr,
+            principal=identity_config.principal,
             registry_urls=reg_urls,
             policy=_policy.name,
             policy_params=policy_params_all,
@@ -1082,7 +1126,13 @@ def register(app: typer.Typer) -> None:
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
         header.add_row("Registries", ", ".join(reg_urls))
-        header.add_row("Buyer wallet", addr)
+        header.add_row(
+            "Buyer principal",
+            f"{identity_config.principal.scheme.value}:"
+            f"{identity_config.principal.identifier}",
+        )
+        if not hosted_mode:
+            header.add_row("EVM wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
         if active_filters:
@@ -1172,9 +1222,9 @@ def register(app: typer.Typer) -> None:
 
         policies, policy_mode = resolve_negotiation_config()
         if policies or policy_mode:
-            from .buyer_client import _load_buyer_chain
+            from .buyer_client import load_buyer_chain
 
-            negotiation_chain = _load_buyer_chain(
+            negotiation_chain = load_buyer_chain(
                 policies=policies, policy_mode=policy_mode
             )
 
@@ -1224,6 +1274,7 @@ def register(app: typer.Typer) -> None:
             settle_hook = make_legacy_settle_hook(
                 config=config,
                 provision=provision,
+                buyer_evm_address=addr,
                 build_escrow_terms=build_escrow_terms,
                 create_escrow=create_escrow,
                 confirm_settlement=confirm_settlement_cb,

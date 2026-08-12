@@ -10,9 +10,6 @@
 #   4. This file
 # ---------------------------------------------------------------------------
 
-# Identity
-agent_id        = ""        # must be a Python identifier; empty → "root_agent"
-agent_name      = ""        # display name; falls back to agent_id
 
 # HTTP server
 port            = 8000
@@ -36,8 +33,6 @@ log_level       = "INFO"
 resources_csv_inline = ""
 resources_csv_path   = ""
 
-# Admin API key — protects /admin/* routes. Empty means unprotected (local dev).
-admin_api_key   = ""
 
 # Registry discovery (seller-side)
 enable_registry_discovery = true
@@ -76,14 +71,26 @@ trusted_oracle_address = ""
 interruptible_listings = false
 interruptible_oracle_address = ""
 default_vm_host               = "kvm1"
+# Marketplace identity (public). Signing material is supplied only through
+# the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
+[identity.principal]
+scheme     = ""
+identifier = ""
 
-[wallet]
-# Sensitive — populated by Secret overlay in k8s, by local file otherwise.
-address        = ""
-private_key    = ""
-ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
+# Every provisioning callback peer is an explicit public trust binding.
+# Configure one table per stable peer; site_id must be a configured
+# [capacity.sites] key (or "default" for the single-site form).
+# [identity.service_peers.provisioning_default]
+# role = "service"
+# site_id = "default"
+# principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
 
-[hosted_settlement]
+# Stable administrator subjects use the same scheme-tagged public principals.
+# [identity.administrators.operator]
+# principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
+
+
+[settlement.hosted]
 # Disabled by default. When enabled, startup verifies the exact manifest/API
 # capability pin before accepting traffic. The service owns Stripe/EAS/RPC
 # secrets; this consumer table contains only public trust and request settings.
@@ -91,35 +98,40 @@ enabled = false
 base_url = ""
 authority_id = ""
 environment = ""
-expected_authority = ""
 expected_manifest_digest = ""
 contract_version = "0.1.0"
-expected_schema_version = 3
+expected_schema_version = 4
 required_capabilities = [
   "conditional-escrow.v1",
   "stripe-connect-separate-charges-transfers.v1",
   "portable-attestation.v1",
   "eas-arbiter.v1",
+  "scheme-tagged-identities.v1",
+  "account-owner-admission.v1",
+  "account-owner-rotation.v1",
+  "account-owner-retirement.v1",
+  "signer-injected-client.v1",
+  "provider-neutral-seller-onboarding.v1",
 ]
 timeout_seconds = 10.0
 preflight_timeout_seconds = 5.0
 allow_insecure_loopback = false
 
-# Operator overlays define [hosted_settlement.condition_profiles.<name>] using
+[settlement.hosted.authority]
+principals = []
+
+# Operator overlays define [settlement.hosted.condition_profiles.<name>] using
 # the released ConditionDescriptor wire shape and
-# [hosted_settlement.resolvers.<resolver_id>] with only a configured chain_name
+# [settlement.hosted.resolvers.<resolver_id>] with only a configured chain_name
 # and evidence_mode. Negotiated listing data never supplies RPC URLs or keys.
 
-# [chains.<name>] tables — one per chain the operator wants to transact
-# on. The operator provides these via storefront.toml; no defaults ship
-# here (the storefront refuses to start with zero configured chains, so
-# the absent-key state has a clear error path). Each entry supports:
+# [wallet] and [chains.<name>] are optional EVM-mechanism settings supplied
+# by operator overlays. A storefront that only advertises fiat.stripe.v1
+# leaves them absent. Alkahest listings require wallet.address,
+# wallet.private_key, and a selected chain with:
 #   rpc_url                       (required)
-#   chain_id                      (optional, defaults to KNOWN_CHAIN_IDS lookup by name)
-#   alkahest_address_config_path  (optional, anvil-style file deployments only)
-# Listings advertise their accepted chains via
-# accepted_escrows[].chain_name tuples; the runtime dispatches to the
-# matching [chains.<name>] entry when settling.
+#   chain_id                      (optional for canonical chain names)
+#   alkahest_address_config_path  (optional, file deployments only)
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay
@@ -133,6 +145,10 @@ discovery_timeout = 5.0
 [registry.auth]
 # Free-form table of {url = "bearer-token"} pairs for private registries.
 # Empty by default; populate via storefront.secrets.toml.
+
+[registry.authorities]
+# Public URL → stable registry authority name plus canonical response-signing
+# principals. Keys must exactly match [registry].urls after URL normalization.
 
 [gateway]
 # Path prefix when behind a reverse proxy (e.g. "/storefront"). Empty for direct.
@@ -148,9 +164,9 @@ root_path = ""
 # With no table, authority_url becomes the single site "default"
 # (and itself defaults to provisioning.service_url — that process
 # hosts the site authority). The first site is the storefront's home
-# site: local CSV inventory mirrors there. Authentication rides
-# admin_api_key, and capacity deltas arrive by polling each
-# authority's versioned event feed.
+# site: local CSV inventory mirrors there. Every site client uses the
+# storefront signer and pins the site's configured public authority identity;
+# capacity deltas arrive by polling each authority's versioned event feed.
 # placement orders sites for reserves: "fill_first" (configuration
 # order — pack a site before touching the next) or "most_available"
 # (spread to the site with the most free units).
@@ -198,6 +214,11 @@ fail_on_unreachable    = true
 frp_server_addr        = ""
 frp_domain             = ""
 frp_dashboard_password = ""
+
+[provisioning.identity]
+# Ordered old/new public response trust pins for provisioning HTTP calls.
+# Private material belongs only to the provisioning service's own Secret.
+principals = []
 
 [fulfillment.failure_policy]
 # Actions applied when provisioning/fulfillment fails. `release_capacity`

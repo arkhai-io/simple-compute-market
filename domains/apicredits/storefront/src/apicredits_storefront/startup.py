@@ -9,7 +9,7 @@ from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
 logging.basicConfig(
-    level=getattr(logging, str(settings.log_level).upper(), logging.INFO)
+    level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
 )
 
 logger = logging.getLogger(__name__)
@@ -104,12 +104,20 @@ async def _startup_tasks() -> None:
     logger.info("[STARTUP] Quota capacity event poller started")
 
 
-def _capacity_authority_url() -> str:
-    """Where the quota ledger lives — capacity.authority_url, else the
-    credits service (which hosts the ledger in the single-seller setup)."""
-    return str(
-        settings.get("capacity.authority_url", "") or config.credits_service_url()
-    ).rstrip("/")
+def _capacity_authority_site():
+    """Resolve the explicitly pinned site used for demo quota registration."""
+    from apicredits_storefront.services.capacity_client import _capacity_settings
+
+    sites, _ = _capacity_settings()
+    selected = str(settings.get("capacity.seed_site", "") or "")
+    if selected:
+        try:
+            return sites[selected]
+        except KeyError as exc:
+            raise RuntimeError(f"unknown capacity.seed_site {selected!r}") from exc
+    if len(sites) != 1:
+        raise RuntimeError("capacity.seed_site is required with multiple sites")
+    return next(iter(sites.values()))
 
 
 async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
@@ -122,8 +130,20 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
     """
     from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
 
-    authority = _capacity_authority_url()
-    admin_client = SiteCapacityAdminClient(authority, config.credits_admin_key())
+    import apicredits_storefront.container as container
+
+    site = _capacity_authority_site()
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("marketplace signer is unavailable for quota registration")
+    admin_client = SiteCapacityAdminClient(
+        site.url,
+        signer=signer,
+        expected_authorities=site.expected_authorities,
+        timeout=30.0,
+        transport=None,
+        max_timestamp_skew=300,
+    )
     try:
         await admin_client.register_resource(
             resource_id,
@@ -132,7 +152,7 @@ async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
         )
     except SiteCapacityAdminClientError as exc:
         raise RuntimeError(
-            f"quota registration for {resource_id!r} at {authority!r} failed: {exc}"
+            f"quota registration for {resource_id!r} at {site.url!r} failed: {exc}"
         ) from exc
     logger.info(
         "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
@@ -210,7 +230,12 @@ async def _seed_demo_listing() -> None:
             }
         ]
 
-        result = await ListingService(sqlite_client=db).publish_from_quota(
+        from apicredits_storefront.utils.config import resolve_identity_config
+
+        result = await ListingService(
+            sqlite_client=db,
+            seller_principal=resolve_identity_config().principal,
+        ).publish_from_quota(
             resource_id=resource_id,
             service_name=str(seed.get("service_name", "service")),
             accepted_escrows=accepted_escrows,

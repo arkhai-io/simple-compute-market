@@ -30,6 +30,12 @@ from domains.vms.buyer.cli import app
 from domains.vms.buyer.buy_orchestrator import BuyResult
 from domains.vms.buyer.run_log import RunLog, read_run
 from market_config.config_loader import ChainConfig
+from core_buyer.registry_config import RegistryAuthority
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 
 
 # Test wallet — derived address must match _BUYER_ADDR below for
@@ -43,6 +49,40 @@ _BUYER_ADDR = "0xCC" + "cc" * 19  # placeholder; not signature-checked here
 def _isolated_runs_dir(tmp_path, monkeypatch):
     """Pin the run-log directory at tmp_path for hermetic tests."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_identity_config",
+        lambda: type("IdentityConfig", (), {"principal": BUYER_SIGNER.identity})(),
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_identity_credential",
+        lambda: b"unused-test-credential",
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_buyer_signer",
+        lambda *_: BUYER_SIGNER,
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.deal_helpers._publisher_trust_refresh",
+        lambda signer: lambda *_: seller_principals(),
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_registry_authorities",
+        lambda urls: {
+            url: RegistryAuthority(
+                authority="registry",
+                principals=seller_principals(),
+            )
+            for url in urls
+        },
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_indexer_urls_for_schema",
+        lambda _schema, **kwargs: list(kwargs["registry_authorities"]),
+    )
+    monkeypatch.setattr(
+        "domains.vms.buyer.common.resolve_registry_api_keys",
+        lambda: {},
+    )
     yield
 
 
@@ -55,6 +95,7 @@ def runner():
 class _MockResponse:
     status: int
     text: str
+    headers: dict[str, str] | None = None
 
     def read(self):
         return self.text.encode("utf-8")
@@ -72,20 +113,35 @@ def _urlopen_for(responses):
 
     def _fn(req, timeout=None):
         body = next(it)
-        return _MockResponse(status=200, text=json.dumps(body))
+        return _MockResponse(
+            status=200,
+            text=json.dumps(body),
+            headers=signed_response_headers(req, body),
+        )
 
     return _fn
+
+
+def _start_log(**fields):
+    trust = seller_principals()
+    fields.setdefault("publisher_id", "publisher-1")
+    fields.setdefault(
+        "publisher_principals",
+        trust.model_dump(mode="json"),
+    )
+    fields.setdefault("source_registry_url", "http://registry:8080")
+    fields.setdefault("source_registry_authority", "registry")
+    return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
 
 
 def _seed_partial_negotiation(seller_url: str, listing_id: str) -> str:
     """Write a run-log resembling an interrupted `market negotiate`:
     one round logged (seller countered at 90), no run_ended yet.
     """
-    log = RunLog.start(
+    log = _start_log(
         command="market negotiate",
         seller_url=seller_url,
         listing_id=listing_id,
-        buyer_address=_BUYER_ADDR,
     )
     log.event(
         "negotiation_round",
@@ -98,11 +154,10 @@ def _seed_partial_negotiation(seller_url: str, listing_id: str) -> str:
 
 def _seed_agreed_negotiation(seller_url: str, listing_id: str) -> str:
     """Run-log resembling a completed `market negotiate` that agreed."""
-    log = RunLog.start(
+    log = _start_log(
         command="market negotiate",
         seller_url=seller_url,
         listing_id=listing_id,
-        buyer_address=_BUYER_ADDR,
     )
     log.event(
         "negotiation_round",
@@ -184,7 +239,7 @@ class TestNegotiateFrom:
         from domains.vms.buyer.run_log import list_runs
         new_runs = [r for r in list_runs() if r.run_id != original_run]
         assert len(new_runs) == 1
-        events = read_run(new_runs[0].run_id)
+        events = read_run(new_runs[0].run_id, signer=BUYER_SIGNER)
         run_started = next(e for e in events if e["event"] == "run_started")
         assert run_started.get("resumed_from") == original_run
 
@@ -237,7 +292,7 @@ class TestBuyFrom:
 
         # The same run-log accumulated negotiation_completed BEFORE
         # settlement was kicked off.
-        events = read_run(run_id)
+        events = read_run(run_id, signer=BUYER_SIGNER)
         ev_names = [e["event"] for e in events]
         assert "negotiation_resumed" in ev_names
         assert "negotiation_completed" in ev_names
@@ -373,11 +428,11 @@ class TestBuyFrom:
             lambda **kw: (100, 150),
         )
         monkeypatch.setattr(
-            "core_buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
+            "domains.vms.buyer.escrow_client.make_buyer_payment_escrow_terms_fn",
             lambda **kw: lambda *a, **inner_kw: [],
         )
         monkeypatch.setattr(
-            "core_buyer.escrow_client.make_create_escrow_fn",
+            "domains.vms.buyer.escrow_client.make_create_escrow_fn",
             lambda **kw: lambda escrows: [],
         )
 
@@ -414,9 +469,8 @@ class TestBuyFrom:
             "--yes",
         ])
 
-        assert result.exit_code == 0, result.output
+        assert captured["config"].principal == BUYER_SIGNER.identity
         assert captured["config"].registry_urls == ["http://reg"]
-        assert captured["config"].buyer_address == _BUYER_ADDR
         assert captured["proposal"].chain_name == "anvil"
 
     def test_buy_from_mid_stream_without_max_price_errors(

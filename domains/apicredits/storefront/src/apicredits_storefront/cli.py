@@ -144,7 +144,19 @@ def publish_cmd(
         }
     ]
 
-    svc = ListingService(sqlite_client=get_sqlite_client())
+    from apicredits_storefront.utils.config import (
+        BASE_URL_OVERRIDE,
+        resolve_identity_config,
+    )
+
+    principal = resolve_identity_config().principal
+    svc = ListingService(
+        sqlite_client=get_sqlite_client(
+            local_listing_principal=principal,
+            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+        ),
+        seller_principal=principal,
+    )
     result = asyncio.run(
         svc.publish_from_quota(
             resource_id=resource_id,
@@ -165,10 +177,17 @@ def listings_cmd(
     limit: int = typer.Option(50, "--limit"),
 ) -> None:
     """List the storefront's local listings."""
+    from apicredits_storefront.utils.config import (
+        BASE_URL_OVERRIDE,
+        resolve_identity_config,
+    )
     from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
     rows = asyncio.run(
-        get_sqlite_client().list_listings(status=status, limit=limit),
+        get_sqlite_client(
+            local_listing_principal=resolve_identity_config().principal,
+            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+        ).list_listings(status=status, limit=limit),
     )
     typer.echo(json.dumps(rows, indent=2, default=str))
 

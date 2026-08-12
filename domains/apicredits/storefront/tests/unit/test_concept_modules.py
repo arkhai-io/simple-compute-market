@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from market_identity import Ed25519Signer, Identity, IdentityScheme
 
 from domains.apicredits.listings.pricing import (
     determine_strategy_from_order,
@@ -15,7 +16,7 @@ from domains.apicredits.listings.reconciler import (
 )
 from domains.apicredits.negotiation.policies import (
     api_credits_round_zero_guard,
-    key_owned_by_buyer_wallet,
+    key_owned_by_buyer_principal,
     credit_quota_guard,
 )
 from domains.apicredits.negotiation.terms import (
@@ -24,6 +25,7 @@ from domains.apicredits.negotiation.terms import (
     provision_key_mode,
     provision_quantity,
 )
+
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationRound,
@@ -31,7 +33,12 @@ from market_policy.negotiation_middleware import (
 
 _TOKEN = "0x" + "01" * 20
 _ESCROW = "0x" + "11" * 20
-_BUYER = "0xBuyerAAAA0000000000000000000000000000ab"
+_BUYER = "0x" + "ab" * 20
+_BUYER_PRINCIPAL = Identity(
+    scheme=IdentityScheme.EIP191,
+    identifier=_BUYER,
+)
+_ED25519_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 
 
 def _offer(resource_id="svc-quota"):
@@ -270,37 +277,48 @@ def test_quota_guard_ignores_non_token_listings():
 # Ownership guard
 # ---------------------------------------------------------------------------
 
-def _owned_record(owner=_BUYER, scheme="wallet", status="active"):
-    return {"key_id": "ak_x", "owner_scheme": scheme, "owner_id": owner,
-            "status": status}
+def _owned_record(
+    owner=_BUYER_PRINCIPAL.identifier,
+    scheme=IdentityScheme.EIP191.value,
+    status="active",
+):
+    return {
+        "key_id": "ak_x",
+        "owner_scheme": scheme,
+        "owner_id": owner,
+        "status": status,
+    }
 
 
 def test_ownership_guard_passes_new_key_deals():
-    decision, _ = key_owned_by_buyer_wallet(
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()), _context(key_mode="new"),
     )
     assert decision is None
 
 
-def test_ownership_guard_admits_owner_wallet_case_insensitively():
-    decision, _ = key_owned_by_buyer_wallet(
+def test_ownership_guard_admits_same_canonical_principal():
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
         _context(
             key_mode="existing", key_id="ak_x",
             key_record=_owned_record(owner=_BUYER.upper().replace("0X", "0x")),
-            buyer_wallet=_BUYER.lower(),
+            buyer_principal=_BUYER_PRINCIPAL,
         ),
     )
     assert decision is None
 
 
 def test_ownership_guard_rejects_stranger():
-    decision, _ = key_owned_by_buyer_wallet(
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
         _context(
             key_mode="existing", key_id="ak_x",
             key_record=_owned_record(),
-            buyer_wallet="0x" + "99" * 20,
+            buyer_principal=Identity(
+                scheme=IdentityScheme.EIP191,
+                identifier="0x" + "99" * 20,
+            ),
         ),
     )
     assert decision.action == "reject"
@@ -308,43 +326,59 @@ def test_ownership_guard_rejects_stranger():
 
 
 def test_ownership_guard_rejects_unknown_and_revoked_keys():
-    decision, _ = key_owned_by_buyer_wallet(
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
-        _context(key_mode="existing", key_id="ak_x", key_record=None,
-                 buyer_wallet=_BUYER),
+        _context(
+            key_mode="existing",
+            key_id="ak_x",
+            key_record=None,
+            buyer_principal=_BUYER_PRINCIPAL,
+        ),
     )
     assert decision.reason.startswith("key_not_found")
 
-    decision, _ = key_owned_by_buyer_wallet(
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
         _context(
             key_mode="existing", key_id="ak_x",
             key_record=_owned_record(status="revoked"),
-            buyer_wallet=_BUYER,
+            buyer_principal=_BUYER_PRINCIPAL,
         ),
     )
     assert decision.reason.startswith("key_revoked")
 
 
 def test_ownership_guard_open_key_admits_anyone():
-    record = {"key_id": "ak_x", "owner_scheme": None, "owner_id": None,
-              "status": "active"}
-    decision, _ = key_owned_by_buyer_wallet(
+    record = {
+        "key_id": "ak_x",
+        "owner_scheme": None,
+        "owner_id": None,
+        "status": "active",
+    }
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
-        _context(key_mode="existing", key_id="ak_x", key_record=record,
-                 buyer_wallet="0x" + "99" * 20),
+        _context(
+            key_mode="existing",
+            key_id="ak_x",
+            key_record=record,
+            buyer_principal=_ED25519_PRINCIPAL,
+        ),
     )
     assert decision is None
 
 
-def test_ownership_guard_rejects_unverifiable_schemes():
-    decision, _ = key_owned_by_buyer_wallet(
+def test_ownership_guard_rejects_cross_scheme_collision():
+    decision, _ = key_owned_by_buyer_principal(
         _round0(_proposal()),
         _context(
-            key_mode="existing", key_id="ak_x",
-            key_record=_owned_record(scheme="ed25519", owner="pubkey"),
-            buyer_wallet=_BUYER,
+            key_mode="existing",
+            key_id="ak_x",
+            key_record=_owned_record(
+                scheme=IdentityScheme.ED25519.value,
+                owner=_ED25519_PRINCIPAL.identifier,
+            ),
+            buyer_principal=_BUYER_PRINCIPAL,
         ),
     )
     assert decision.action == "reject"
-    assert "not verifiable" in decision.reason
+    assert decision.reason.startswith("key_not_owned")

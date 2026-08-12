@@ -116,14 +116,24 @@ def config_get(
 
 _INIT_USER_TEMPLATE = """\
 # arkhai storefront config — see `market-storefront config path` for this
-# file's location. Every key is optional; the resolver falls back to
-# built-in defaults when a key is missing. Schema matches
-# domains/vms/storefront/src/market_storefront/settings.toml (top-level keys + named
-# sections; no [seller] prefix).
+# file's location. Schema matches
+# domains/vms/storefront/src/market_storefront/settings.toml (top-level keys +
+# named sections; no [seller] prefix).
+#
+# The public marketplace principal is required. Inject its matching private
+# signer only through ARKHAI_IDENTITY_CREDENTIAL; never write it here.
 
-# ---------------------------------------------------------------------------
-# Identity / on-chain
-# ---------------------------------------------------------------------------
+[identity.principal]
+# scheme = "ed25519"
+# identifier = "<unpadded-base64url-public-key>"
+
+# Stable public role bindings use ordered 1-2 principal rotation sets:
+# [identity.administrators.operator]
+# principals = [{ scheme = "ed25519", identifier = "<operator-public-key>" }]
+# [identity.service_peers.provisioning_default]
+# role = "service"
+# site_id = "default"
+# principals = [{ scheme = "ed25519", identifier = "<service-public-key>" }]
 
 # agent_id = "alice"                           # must be a valid Python identifier
 # agent_name = "Alice"                         # display name (any string)
@@ -147,9 +157,6 @@ _INIT_USER_TEMPLATE = """\
 # resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
                                                 # Mutually exclusive with resources_csv_inline.
 
-# admin_api_key = ""                           # protects /admin/* routes; the seller-stack
-                                                # provisioning container reads this from the same
-                                                # storefront.toml so the secret lives in one place.
 
 # ---------------------------------------------------------------------------
 # Discovery / lifecycle
@@ -169,21 +176,17 @@ _INIT_USER_TEMPLATE = """\
 # Shared sections (also used by the buyer-side `market` CLI)
 # ---------------------------------------------------------------------------
 
+# EVM-mechanism settings only. Omit [wallet] and every [chains.<name>] table
+# when this storefront advertises only fiat.stripe.v1.
 [wallet]
-# address = "0x0000000000000000000000000000000000000000"  # auto-derived from private_key when omitted
+# address = "0x0000000000000000000000000000000000000000"
 # private_key = "0x..."
-# ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-# One [chains.<name>] table per chain the storefront serves listings on.
-# Identity is the wallet (above); listings emit one accepted_escrows entry
-# per configured chain at publish time.
-
+# One [chains.<name>] table per Alkahest chain the storefront serves.
 [chains.ethereum_sepolia]
 # rpc_url = "https://sepolia.infura.io/v3/<project_id>"
-# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
-                                                # (anvil | base_sepolia | ethereum_sepolia |
-                                                # ethereum_mainnet | filecoin_calibration).
-# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+# chain_id = 11155111
+# alkahest_address_config_path = "/path/to/alkahest.json"
 
 # Add additional chains by uncommenting and customizing:
 # [chains.base_sepolia]
@@ -191,6 +194,12 @@ _INIT_USER_TEMPLATE = """\
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs; publishes fan out to each.
+# [registry.authorities."http://localhost:8080"]
+# authority = "registry"
+# principals = [
+#   { scheme = "ed25519", identifier = "<registry-public-key>" },
+# ]
+
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match urls above
@@ -210,6 +219,11 @@ _INIT_USER_TEMPLATE = """\
 # frp_server_addr = ""
 # frp_domain = ""
 # frp_dashboard_password = ""
+# Public response authority overlap for the provisioning service:
+# [provisioning.identity]
+# principals = [
+#   { scheme = "ed25519", identifier = "<service-public-key>" },
+# ]
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,

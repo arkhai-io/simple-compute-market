@@ -15,12 +15,20 @@ The urlopen stub routes by request host so parallel negotiations
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from unittest.mock import patch
+from urllib.request import Request
 from urllib.parse import urlparse
 
 from market_core.schemas import EscrowProposal, EscrowTerms
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
+from core_buyer.registry_config import RegistryAuthority
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 
 _ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
@@ -40,7 +48,6 @@ from domains.vms.buyer.buy_orchestrator import (
 from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 
-_BUYER_PK = "0x" + "11" * 32
 _BUYER_ADDR = "0x" + "cc" * 20
 _REGISTRY = "http://registry:4000"
 _SELLER_WALLET_A = "0x" + "aa" * 20
@@ -50,8 +57,14 @@ _SELLER_WALLET_B = "0x" + "bb" * 20
 def _config(aggregation_policy: str | None = None) -> BuyConfig:
     return BuyConfig(
         registry_urls=[_REGISTRY],
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
+        registry_authorities={
+            _REGISTRY: RegistryAuthority(
+                authority="registry",
+                principals=seller_principals(),
+            )
+        },
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
         aggregation_policy=aggregation_policy,
     )
 
@@ -111,6 +124,8 @@ def _run_buy_with_legacy_hooks(
     confirm_settlement=None,
     chain=None,
 ):
+    if matches is not None:
+        matches = [_listing_with_identity(match) for match in matches]
     negotiate = make_legacy_negotiate_hook(
         config=config,
         constraints=constraints,
@@ -120,16 +135,12 @@ def _run_buy_with_legacy_hooks(
         derive_prices=derive_prices,
         chain=chain,
     )
-    settle = make_legacy_settle_hook(
-        config=config,
-        provision=provision,
-        build_escrow_terms=build_escrow_terms,
-        create_escrow=create_escrow,
-        confirm_settlement=confirm_settlement,
-        settlement_poll_interval=settlement_poll_interval,
-        settlement_total_timeout=settlement_total_timeout,
-        sleep=sleep,
-    )
+    settle = make_legacy_settle_hook(config=config, provision=provision, buyer_evm_address="0x" + "cc" * 20, build_escrow_terms=build_escrow_terms,
+    create_escrow=create_escrow,
+    confirm_settlement=confirm_settlement,
+    settlement_poll_interval=settlement_poll_interval,
+    settlement_total_timeout=settlement_total_timeout,
+    sleep=sleep,)
     return run_buy(
         config=config,
         constraints=constraints,
@@ -140,6 +151,50 @@ def _run_buy_with_legacy_hooks(
         max_matches_to_try=max_matches_to_try,
         on_event=on_event,
     )
+
+def _listing_with_identity(listing):
+    enriched = dict(listing)
+    seller_url = (
+        enriched.get("storefront_url")
+        or enriched.get("seller")
+        or enriched.get("seller_url")
+        or "http://seller:8001"
+    )
+    enriched.update(
+        publisher_id=enriched.get("publisher_id", f"publisher-{enriched.get('listing_id', 'seller')}"),
+        storefront_url=seller_url,
+        publisher_principals=seller_principals().model_dump(mode="json"),
+    )
+    return enriched
+
+
+@contextmanager
+def _patched_transport(urlopen):
+    def _query(registry_urls, **_kwargs):
+        response = urlopen(Request(f"{registry_urls[0]}/api/v1/listings"))
+        payload = json.loads(response.read().decode("utf-8"))
+        return [_listing_with_identity(item) for item in payload.get("items", [])]
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "core_buyer.orchestrator.query_registry_for_matches_multi",
+                side_effect=_query,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "core_buyer.negotiation_client.urllib.request.urlopen",
+                side_effect=urlopen,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "core_buyer.orchestration.make_publisher_trust_resolver",
+                return_value=seller_principals,
+            )
+        )
+        yield
 
 
 # Echo for /negotiate/new mock replies so _settle_one can read the
@@ -158,6 +213,8 @@ _ACCEPTED_ECHO_AGG = {
 @dataclass
 class _FakeResp:
     text: str
+    headers: dict[str, str] | None = None
+    status: int = 200
 
     def read(self):
         return self.text.encode("utf-8")
@@ -178,8 +235,6 @@ def _route_by_url(routes: dict[str, list]):
     `_urlopen_sequence` but indexed by URL substring.
     """
     def _fn(req, timeout=None):
-        # urlopen accepts either a Request object (signed POSTs) or a
-        # bare URL string (well-known GETs).
         url = req.full_url if hasattr(req, "full_url") else str(req)
         for key, queue in routes.items():
             if key in url:
@@ -187,7 +242,16 @@ def _route_by_url(routes: dict[str, list]):
                     raise AssertionError(f"No more responses for {key!r} ({url})")
                 nxt = queue.pop(0)
                 body = nxt if isinstance(nxt, str) else json.dumps(nxt)
-                return _FakeResp(body)
+                headers = (
+                    signed_response_headers(req, nxt)
+                    if not isinstance(nxt, str)
+                    and any(
+                        name.lower() == "x-market-request-id"
+                        for name, _value in req.header_items()
+                    )
+                    else {}
+                )
+                return _FakeResp(body, headers=headers)
         raise AssertionError(f"Unrouted URL: {url}")
 
     return _fn
@@ -224,19 +288,15 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         ],
     }
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_route_by_url(routes),
-    ):
-        result = _run_buy_with_legacy_hooks(
-            config=_config(aggregation_policy="best_price"),
-            constraints=_constraints(),
-            provision=_provision(),
-            build_escrow_proposal=_build_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_stub,
-            create_escrow=lambda escrows: ["0xescrow"],
-            sleep=lambda _: None,
-        )
+    with _patched_transport(_route_by_url(routes)): result = _run_buy_with_legacy_hooks(
+        config=_config(aggregation_policy="best_price"),
+        constraints=_constraints(),
+        provision=_provision(),
+        build_escrow_proposal=_build_escrow_proposal(),
+        build_escrow_terms=_build_escrow_terms_stub,
+        create_escrow=lambda escrows: ["0xescrow"],
+        sleep=lambda _: None,
+    )
 
     assert result.status == "ready", (
         f"got status={result.status} reason={result.reason} attempts={result.attempts}"
@@ -280,19 +340,15 @@ def test_cheapest_first_preserves_first_agreed_semantics():
         "seller-b": [],
     }
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_route_by_url(routes),
-    ):
-        result = _run_buy_with_legacy_hooks(
-            config=_config(aggregation_policy="cheapest_first"),
-            constraints=_constraints(),
-            provision=_provision(),
-            build_escrow_proposal=_build_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_stub,
-            create_escrow=lambda escrows: ["0xescrow"],
-            sleep=lambda _: None,
-        )
+    with _patched_transport(_route_by_url(routes)): result = _run_buy_with_legacy_hooks(
+        config=_config(aggregation_policy="cheapest_first"),
+        constraints=_constraints(),
+        provision=_provision(),
+        build_escrow_proposal=_build_escrow_proposal(),
+        build_escrow_terms=_build_escrow_terms_stub,
+        create_escrow=lambda escrows: ["0xescrow"],
+        sleep=lambda _: None,
+    )
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-a:8001"
@@ -340,19 +396,15 @@ def test_custom_policy_can_short_circuit():
         ],
     }
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_route_by_url(routes),
-    ):
-        result = _run_buy_with_legacy_hooks(
-            config=_config(aggregation_policy="pick_second_no_negotiate"),
-            constraints=_constraints(),
-            provision=_provision(),
-            build_escrow_proposal=_build_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_stub,
-            create_escrow=lambda escrows: ["0xescrow"],
-            sleep=lambda _: None,
-        )
+    with _patched_transport(_route_by_url(routes)): result = _run_buy_with_legacy_hooks(
+        config=_config(aggregation_policy="pick_second_no_negotiate"),
+        constraints=_constraints(),
+        provision=_provision(),
+        build_escrow_proposal=_build_escrow_proposal(),
+        build_escrow_terms=_build_escrow_terms_stub,
+        create_escrow=lambda escrows: ["0xescrow"],
+        sleep=lambda _: None,
+    )
 
     assert result.status == "ready"
     assert result.seller_url == "http://seller-b:8001"
@@ -364,23 +416,19 @@ def test_policy_returning_none_yields_exited():
     async def _always_none(matches, negotiate):
         return None
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_route_by_url({
-            "registry": [
-                {"items": [{"listing_id": "x", "seller": "http://seller-a:8001"}]},
-            ],
-        }),
-    ):
-        result = _run_buy_with_legacy_hooks(
-            config=_config(aggregation_policy="always_none"),
-            constraints=_constraints(),
-            provision=_provision(),
-            build_escrow_proposal=_build_escrow_proposal(),
-            build_escrow_terms=_build_escrow_terms_stub,
-            create_escrow=lambda escrows: ["0xnever"],
-            sleep=lambda _: None,
-        )
+    with _patched_transport(_route_by_url({
+        "registry": [
+            {"items": [{"listing_id": "x", "seller": "http://seller-a:8001"}]},
+        ],
+    })): result = _run_buy_with_legacy_hooks(
+        config=_config(aggregation_policy="always_none"),
+        constraints=_constraints(),
+        provision=_provision(),
+        build_escrow_proposal=_build_escrow_proposal(),
+        build_escrow_terms=_build_escrow_terms_stub,
+        create_escrow=lambda escrows: ["0xnever"],
+        sleep=lambda _: None,
+    )
 
     assert result.status == "exited"
     assert result.reason == "no_match_agreed_to_terms"

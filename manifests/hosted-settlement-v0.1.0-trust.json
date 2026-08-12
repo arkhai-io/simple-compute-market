@@ -1,29 +1,55 @@
 {
-  "contract_version": "arkhai.hosted-settlement-release.v1",
+  "contract_version": "arkhai.hosted-settlement-release.v2",
   "release_version": "0.1.0",
   "api_version": "0.1.0",
-  "schema_version": 3,
+  "schema_version": 4,
   "required_capabilities": [
     "conditional-escrow.v1",
     "stripe-connect-separate-charges-transfers.v1",
     "portable-attestation.v1",
-    "eas-arbiter.v1"
+    "eas-arbiter.v1",
+    "scheme-tagged-identities.v1",
+    "account-owner-admission.v1",
+    "account-owner-rotation.v1",
+    "account-owner-retirement.v1",
+    "signer-injected-client.v1",
+    "provider-neutral-seller-onboarding.v1"
   ],
+  "identity_contract": {
+    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
+    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
+    "supported_identity_schemes": [
+      "eip191",
+      "ed25519"
+    ],
+    "capabilities": [
+      "scheme-tagged-identities.v1",
+      "account-owner-admission.v1",
+      "account-owner-rotation.v1",
+      "account-owner-retirement.v1",
+      "signer-injected-client.v1",
+      "provider-neutral-seller-onboarding.v1"
+    ],
+    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
+    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
+    "client_signer_api": "hosted_settlement_client.Signer",
+    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding"
+  },
   "manifest_filename": "release-manifest.json",
-  "manifest_sha256": "3f9bb7ab579fdc5388b97d7bbf28d4cb647e0b5f2bc40eb8f4ec93d8083d1da7",
+  "manifest_sha256": "4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e",
   "authority_id": "local-release-authority",
   "authority_address": "0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63",
   "repository": "arkhai/hosted-settlement-service",
-  "workflow_ref": ".github/workflows/release.yml@local/17590279817dcb48ef1337810d6b6d3169680b64",
-  "source_commit": "17590279817dcb48ef1337810d6b6d3169680b64",
+  "workflow_ref": ".github/workflows/release.yml@local/d167a7adbdc2aee90c976b643bc18bd4045c4bf6",
+  "source_commit": "d167a7adbdc2aee90c976b643bc18bd4045c4bf6",
   "client_wheel": {
     "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",
     "distribution": "arkhai-hosted-settlement-client",
     "version": "0.1.0",
-    "sha256": "82a1493adb10536ce8c234251ece9128e3cb95817a2230d10a04e6a2444438ca"
+    "sha256": "a1524d11bfbd76a3ce63b02b9ea698bb09557c7789948be7011ec80af896bfe9"
   },
   "service_image": {
     "reference": "localhost/arkhai-hosted-settlement-service",
-    "digest": "sha256:3c88f345f0c9aed22348ec8ec9ae89eefd73a2f5ccbcbece60841298ed9be44b"
+    "digest": "sha256:28a59051cc7c8fb681bb01b71421eb5b4f817e582a44c09acf7bc637617b9ef2"
   }
 }

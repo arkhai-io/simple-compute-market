@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 import httpx
+from market_identity import Identity
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class CreditsServiceClient:
         quantity: int,
         key_mode: str = "new",
         key_id: str | None = None,
-        buyer_wallet: str | None = None,
+        buyer_principal: Identity,
         capacity_reservation_id: str | None = None,
         resource_id: str | None = None,
         timeout: float = 30.0,
@@ -94,8 +95,8 @@ class CreditsServiceClient:
             "quantity": int(quantity),
             "key": key,
         }
-        if buyer_wallet:
-            body["buyer"] = {"scheme": "wallet", "id": buyer_wallet}
+        if buyer_principal is not None:
+            body["buyer"] = buyer_principal.model_dump(mode="json")
         if capacity_reservation_id:
             body["capacity_reservation_id"] = capacity_reservation_id
         if resource_id:

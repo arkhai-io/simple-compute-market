@@ -13,12 +13,13 @@ from market_core import MarketDomainContract
 from .api import router as http_router
 from .domain_runtime import get_market_domain_contract
 from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
+from .response_auth import authenticate_response
 
 
 DESCRIPTION = (
     "Seller-side storefront for the Arkhai bare-metal marketplace.\n\n"
-    "Admin endpoints require an `X-Admin-Key` header. Buyer-facing endpoints "
-    "use the shared signed storefront protocol."
+    "Admin and buyer-facing endpoints use the shared scheme-tagged marketplace "
+    "request and response signature version 2 contracts."
 )
 
 
@@ -51,7 +52,7 @@ def build_bare_metal_storefront_app(
             else lambda: build_runtime_from_environment(domain=selected_domain)
         )
         lifespan = _runtime_lifespan(factory)
-    return build_storefront_app(
+    app = build_storefront_app(
         config=StorefrontAppConfig(
             title="Arkhai Bare-Metal Storefront",
             description=DESCRIPTION,
@@ -62,6 +63,8 @@ def build_bare_metal_storefront_app(
         lifespan=lifespan,
         routers=(http_router, *tuple(routers)),
     )
+    app.middleware("http")(authenticate_response)
+    return app
 
 
 app = build_bare_metal_storefront_app()

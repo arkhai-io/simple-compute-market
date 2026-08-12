@@ -5,11 +5,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_hosted_settlement import adapt_expected_authorities
+from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 
 from market_storefront.settlement_composition import (
     VmFulfillmentInput,
     VmProjectionContext,
+    build_vm_settlement_composition,
     fulfill_vm_settlement,
     persist_vm_settlement_outcome,
     prepare_vm_settlement,
@@ -18,12 +21,23 @@ from market_storefront.settlement_composition import (
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
 
+_BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
+_SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
+_HOSTED_AUTHORITY_SIGNER = Ed25519Signer(b"\x33" * 32)
+_BUYER = _BUYER_SIGNER.identity
+_SELLER = _SELLER_SIGNER.identity
+_HOSTED_AUTHORITIES = TrustedIdentitySet(
+    identities=(_HOSTED_AUTHORITY_SIGNER.identity,)
+)
+
 
 def _obligation(index: int = 0) -> dict:
     return {
         "mechanism": "alkahest.v1",
         "payer": "buyer",
         "claimant": "seller",
+        "payer_principal": _BUYER.model_dump(mode="json"),
+        "claimant_principal": _SELLER.model_dump(mode="json"),
         "expiration_unix": 1_900_000_000 + index,
         "params": {
             "chain_name": "anvil",
@@ -40,7 +54,7 @@ def _prepared(db: SQLiteClient, *, escrow_uid: str = "0xescrow") -> PreparedSett
         agreement_ref="neg-1",
         obligations=(obligation,),
         selected_obligation_index=0,
-        local_role="seller",
+        local_principal=_SELLER,
         mechanism_ref=escrow_uid,
         mechanism_receipt={"verified": True},
         fulfillment_input=VmFulfillmentInput(
@@ -71,6 +85,57 @@ def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"))
 
 
+def test_hosted_composition_injects_signer_and_trusted_authorities(
+    db, monkeypatch
+):
+    captured = {}
+    hosted_config = SimpleNamespace(
+        enabled=True,
+        base_url="https://hosted-settlement.test",
+        authority_id="hosted-test",
+        environment="test",
+        expected_manifest_digest="sha256:test-manifest",
+        contract_version="0.1.0",
+        expected_schema_version=4,
+        required_capabilities=(),
+        timeout_seconds=10.0,
+        allow_insecure_loopback=False,
+        authority={
+            "principals": [
+                principal.model_dump(mode="json")
+                for principal in _HOSTED_AUTHORITIES.identities
+            ]
+        },
+    )
+
+    def hosted_client(config):
+        captured["config"] = config
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        "market_storefront.settlement_composition._hosted_config",
+        lambda: hosted_config,
+    )
+    monkeypatch.setattr(
+        "market_storefront.settlement_composition.HostedSettlementAsyncClient",
+        hosted_client,
+    )
+    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
+
+    composition = build_vm_settlement_composition(
+        sqlite_client=db,
+        alkahest_clients={},
+        marketplace_signer=_SELLER_SIGNER,
+    )
+
+    assert composition.local_principal == _SELLER
+    assert captured["config"].signer.principal.identifier == _SELLER.identifier
+    assert captured["config"].expected_authorities == adapt_expected_authorities(
+        _HOSTED_AUTHORITIES
+    )
+    assert "fiat.stripe.v1" in composition.mechanism_clients
+
+
 @pytest.mark.asyncio
 async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
     proposal = {
@@ -86,6 +151,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
             "agreed_price": 42,
             "agreed_duration_seconds": 3600,
             "our_listing_id": "listing-1",
+            "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": proposal,
         }
     )
@@ -124,6 +190,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
     prepared = await prepare_vm_settlement(
         escrow_uid="0xverified",
         negotiation_id="neg-1",
+        local_principal=_SELLER,
         mechanism_client=object(),
         chain_name="anvil",
         request={"ssh_public_key": "ssh-ed25519 AAAA"},
@@ -132,7 +199,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
 
     assert prepared.selected_obligation_index == 1
     assert prepared.obligations == tuple(obligations)
-    assert prepared.local_role == "seller"
+    assert prepared.local_principal == _SELLER
     assert prepared.mechanism_ref == "0xverified"
     context = prepared.projection_context
     assert context.obligation_ref == derive_obligation_ref("neg-1", 1, obligations[1])
@@ -151,6 +218,7 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
     rates = [RateValue(field="amount", value=42)]
     params = {
         "account_ref": "acct-seller",
+        "claimant_principal": _SELLER.model_dump(mode="json"),
         "condition": {
             "kind": "builtin",
             "arbiter": "trusted_oracle",
@@ -181,7 +249,7 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
             "agreed_price": 42,
             "agreed_duration_seconds": 3600,
             "our_listing_id": "listing-hosted",
-            "buyer": "0x" + "22" * 20,
+            "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": {"settlement_selection": selection},
         }
     )
@@ -205,18 +273,12 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
         "domains.vms.listings.reconciler.site_id_for_listing",
         lambda *_args: "site-1",
     )
-    from market_storefront.utils.config import settings
-
-    monkeypatch.setattr(
-        settings.wallet,
-        "address",
-        "0x" + "33" * 20,
-        raising=False,
-    )
+    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
 
     prepared = await prepare_vm_settlement(
         escrow_uid="settlement-1",
         negotiation_id="neg-hosted",
+        local_principal=_SELLER,
         mechanism_client=mechanism,
         chain_name="",
         request={"ssh_public_key": "ssh-ed25519 AAAA"},
@@ -224,6 +286,12 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
     )
 
     assert prepared.mechanism_ref == "settlement-1"
+    assert prepared.obligations[0]["payer_principal"] == _BUYER.model_dump(
+        mode="json"
+    )
+    assert prepared.obligations[0]["claimant_principal"] == _SELLER.model_dump(
+        mode="json"
+    )
     assert prepared.obligations[0]["mechanism"] == "fiat.stripe.v1"
     assert prepared.obligations[0]["amount"] == "42"
     assert prepared.mechanism_receipt["financial_state"] == "funded"
@@ -241,6 +309,7 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
             "agreed_price": 42,
             "agreed_duration_seconds": 3600,
             "our_listing_id": "listing-1",
+            "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": None,
         }
     )
@@ -260,6 +329,7 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
         await prepare_vm_settlement(
             escrow_uid="0xverified",
             negotiation_id="neg-1",
+            local_principal=_SELLER,
             mechanism_client=object(),
             chain_name="anvil",
             request={"ssh_public_key": "ssh-ed25519 AAAA"},

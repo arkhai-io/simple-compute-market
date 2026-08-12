@@ -305,26 +305,22 @@ class SystemService:
                 "status": "ok" | "degraded",
                 "checks": {
                     "storefront":      "ok" | "unreachable" | "timeout" | "unconfigured" | "http_N",
-                    "storefront_auth": "ok" | "unauthorized" | "unconfigured" | "http_N" | <error>,
+                    "storefront_auth": "ok" | "unauthorized" | "configuration_error" | "unconfigured" | "http_N",
                     "lease_watchdog":  "running" | "paused" | "disabled",
                 }
             }
 
-        Status rollup rules (what counts as healthy per check):
-          - storefront:      "ok" or "unconfigured"
-          - storefront_auth: "ok" or "unconfigured"
-          - lease_watchdog:  "running", "paused", or "disabled"
+        ``storefront_auth`` uses the provisioning service signer with explicit
+        role ``service`` and verifies the pinned storefront response principal.
         """
         from storefront_client import StorefrontClient, StorefrontClientError
+        from compute_provisioning_service.identity import resolve_identity_context
 
         checks: dict[str, str] = {}
 
         storefront_url = str(
             getattr(self._settings, "storefront_url", "") or ""
         ).rstrip("/")
-        storefront_admin_key = str(
-            getattr(self._settings, "storefront_admin_key", "") or ""
-        )
 
         if not storefront_url:
             checks["storefront"] = "unconfigured"
@@ -333,7 +329,7 @@ class SystemService:
             # Reachability — GET /health via StorefrontClient (no admin key needed)
             try:
                 async with StorefrontClient(base_url=storefront_url) as sf:
-                    health = await sf.get_health()
+                    await sf.get_health()
                 # Any structured response (ok or degraded) means the storefront is reachable
                 checks["storefront"] = "ok"
             except StorefrontClientError as exc:
@@ -347,27 +343,37 @@ class SystemService:
                 else:
                     checks["storefront"] = f"error: {name}"
 
-            # Auth — GET /api/v1/system/status with admin key
-            if not storefront_admin_key:
-                checks["storefront_auth"] = "unconfigured"
-            elif checks["storefront"] != "ok":
-                # Storefront not reachable — auth check is meaningless
+            if checks["storefront"] != "ok":
                 checks["storefront_auth"] = checks["storefront"]
             else:
                 try:
-                    async with StorefrontClient(
-                        base_url=storefront_url,
-                        admin_key=storefront_admin_key,
-                    ) as sf:
-                        await sf.get_system_status()
-                    checks["storefront_auth"] = "ok"
-                except StorefrontClientError as exc:
-                    if exc.status_code in (401, 403):
-                        checks["storefront_auth"] = "unauthorized"
-                    else:
-                        checks["storefront_auth"] = f"http_{exc.status_code}" if exc.status_code else "error"
-                except Exception as exc:
-                    checks["storefront_auth"] = f"error: {type(exc).__name__}"
+                    identity = resolve_identity_context(self._settings)
+                except RuntimeError:
+                    checks["storefront_auth"] = "configuration_error"
+                else:
+                    try:
+                        async with StorefrontClient(
+                            base_url=storefront_url,
+                            signer=identity.signer,
+                            caller_role="service",
+                            expected_publisher=identity.storefront_principal,
+                        ) as sf:
+                            await sf.get_system_status()
+                        checks["storefront_auth"] = "ok"
+                    except StorefrontClientError as exc:
+                        if exc.status_code in (401, 403):
+                            checks["storefront_auth"] = "unauthorized"
+                        else:
+                            checks["storefront_auth"] = (
+                                f"http_{exc.status_code}"
+                                if exc.status_code
+                                else "error"
+                            )
+                    except Exception as exc:
+                        checks["storefront_auth"] = (
+                            f"error: {type(exc).__name__}"
+                        )
+
 
         # Lease watchdog state
         if self._lease_lifecycle_service is None:
@@ -382,13 +388,17 @@ class SystemService:
         def _is_healthy(key: str, value: str) -> bool:
             """True when a check value is not a service degradation.
 
-            - storefront / storefront_auth: "ok" and "unconfigured" are healthy.
+            - storefront: "ok" and "unconfigured" are healthy.
               "unconfigured" means not yet pointed at a storefront — not a failure.
+            - storefront_auth: only a verified ``ok`` or an unconfigured
+              storefront is healthy.
             - lease_watchdog: "running", "paused", and "disabled" are all healthy.
               "paused" is an intentional operator/test action; "disabled" means
               the watchdog was not started (e.g. in test environments).
             """
-            if key in ("storefront", "storefront_auth"):
+            if key == "storefront":
+                return value in ("ok", "unconfigured")
+            if key == "storefront_auth":
                 return value in ("ok", "unconfigured")
             if key == "lease_watchdog":
                 return value in ("running", "paused", "disabled")

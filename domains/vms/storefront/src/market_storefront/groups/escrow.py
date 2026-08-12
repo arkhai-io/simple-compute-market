@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from storefront_client import StorefrontClientError, SyncStorefrontClient
+from market_identity import Identity
 
 from ..cli_common import resolve_storefront_url
 
@@ -68,17 +69,31 @@ def _render_obligation_data(body: Table, obligation: object) -> None:
         body.add_row("Data", str(obligation))
 
 
+def _seller_client(agent_url: str) -> SyncStorefrontClient:
+    from ..utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
+    return SyncStorefrontClient(
+        agent_url,
+        signer=signer,
+        caller_role="seller",
+        expected_publisher=signer.identity,
+    )
+
+
 def _submit_claim(
     agent_url: str,
     listing_id: str,
-    fulfillment_uid: str | None,
-    private_key: str | None,
+    escrow_uid: str,
+    fulfillment_uid: str,
 ) -> dict:
     """POST /listings/claim; returns the storefront's response as a dict."""
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    with _seller_client(agent_url) as client:
         try:
             resp = client.claim_listing(
-                listing_id=listing_id, fulfillment_uid=fulfillment_uid
+                listing_id=listing_id,
+                escrow_uid=escrow_uid,
+                fulfillment_uid=fulfillment_uid,
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
@@ -95,17 +110,18 @@ def _submit_claim(
 def _submit_refund(
     agent_url: str,
     listing_id: str,
+    buyer_principal: Identity,
     buyer_address: str,
     amount: str | None,
     token: str | None,
-    private_key: str | None,
 ) -> dict:
     """POST /listings/refund; returns the storefront's response as a dict."""
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    with _seller_client(agent_url) as client:
         try:
             resp = client.refund_listing(
                 listing_id=listing_id,
-                buyer_address=buyer_address,
+                buyer_principal=buyer_principal,
+                buyer_evm_address=buyer_address,
                 amount=amount,
                 token=token,
             )
@@ -125,11 +141,11 @@ def claim_cmd(
     listing_id: str = typer.Argument(
         ..., help="Local listing ID on the provider storefront."
     ),
-    fulfillment_uid: str | None = typer.Option(
-        None,
-        "--fulfillment-uid",
-        help="Override the fulfillment_uid from local state. Use this if the seller's "
-        "StringObligation attestation landed on-chain but the storefront DB is out of sync.",
+    escrow_uid: str = typer.Option(
+        ..., "--escrow-uid", help="Exact accepted escrow obligation UID."
+    ),
+    fulfillment_uid: str = typer.Option(
+        ..., "--fulfillment-uid", help="Exact seller fulfillment attestation UID."
     ),
     storefront_url: str | None = typer.Option(
         None,
@@ -146,10 +162,7 @@ def claim_cmd(
     storefront restart or RPC outage.
     """
     console = Console()
-    from ..utils.config import settings
-
     base_url = resolve_storefront_url(storefront_url, default_port=8001)
-    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -163,7 +176,7 @@ def claim_cmd(
     )
 
     try:
-        resp = _submit_claim(base_url, listing_id, fulfillment_uid, private_key)
+        resp = _submit_claim(base_url, listing_id, escrow_uid, fulfillment_uid)
     except typer.Exit:
         raise
 
@@ -192,13 +205,17 @@ def refund_cmd(
     listing_id: str = typer.Argument(
         ..., help="Local listing ID on the provider storefront."
     ),
-    buyer_address: str | None = typer.Option(
-        None,
+    buyer_address: str = typer.Option(
+        ...,
         "--buyer",
         "-b",
-        help="0x-prefixed wallet address to receive the refund. "
-        "Optional — the storefront resolves this from the listing's "
-        "recorded buyer when omitted. Pass explicitly to override.",
+        help="EVM mechanism address that receives the refund.",
+    ),
+    buyer_scheme: str = typer.Option(
+        ..., "--buyer-scheme", help="Durable marketplace buyer identity scheme."
+    ),
+    buyer_identifier: str = typer.Option(
+        ..., "--buyer-identifier", help="Durable marketplace buyer identifier."
     ),
     amount: str | None = typer.Option(
         None,
@@ -228,10 +245,11 @@ def refund_cmd(
     deal otherwise can't settle through the normal escrow release path.
     """
     console = Console()
-    from ..utils.config import settings
-
     base_url = resolve_storefront_url(storefront_url, default_port=8001)
-    private_key = settings.wallet.private_key
+    buyer_principal = Identity(
+        scheme=buyer_scheme,
+        identifier=buyer_identifier,
+    )
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -251,10 +269,10 @@ def refund_cmd(
         resp = _submit_refund(
             base_url,
             listing_id,
+            buyer_principal,
             buyer_address,
             amount,
             token,
-            private_key,
         )
     except typer.Exit:
         raise
@@ -321,7 +339,7 @@ def show_cmd(
         resolve_alkahest_address_config,
     )
 
-    from ..utils.config import CHAINS, settings
+    from ..utils.config import CHAINS, get_evm_wallet_private_key
 
     if not CHAINS:
         typer.secho(
@@ -351,10 +369,11 @@ def show_cmd(
         )
         raise typer.Exit(2)
 
-    if not settings.wallet.private_key:
+    private_key = get_evm_wallet_private_key()
+    if not private_key:
         typer.secho(
-            "Missing wallet.private_key in storefront.toml — alkahest_py "
-            "requires a wallet key even for read-only inspection.",
+            "Missing wallet.private_key — Alkahest inspection requires an "
+            "explicit EVM mechanism credential.",
             err=True,
             fg=typer.colors.RED,
         )
@@ -371,7 +390,7 @@ def show_cmd(
         raise typer.Exit(2)
 
     client = AlkahestClient(
-        private_key=settings.wallet.private_key,
+        private_key=private_key,
         rpc_url=chain.rpc_url,
         address_config=address_config,
     )

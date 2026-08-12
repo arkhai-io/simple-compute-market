@@ -29,7 +29,8 @@ def escrow_proposal_from_accepted_entry(
         literal_fields["token"] = token
     selected_chain = entry.get("chain_name")
     matching_demands = [
-        demand for demand in accepted_demands(listing)
+        demand
+        for demand in accepted_demands(listing)
         if not demand.get("chain_name") or demand.get("chain_name") == selected_chain
     ]
     selected_demand = matching_demands[0] if matching_demands else None
@@ -74,9 +75,10 @@ def proposal_is_oracle_gated(
             children = (demand.get("demand_data") or {}).get("arbiters") or []
             for child in children:
                 try:
-                    if address_to_slot(
-                        chain, child, config_path=config_path
-                    ) == "trusted_oracle_arbiter":
+                    if (
+                        address_to_slot(chain, child, config_path=config_path)
+                        == "trusted_oracle_arbiter"
+                    ):
                         return True
                 except Exception:
                     continue
@@ -113,9 +115,10 @@ def proposal_is_splitter_gated(
             children = (demand.get("demand_data") or {}).get("arbiters") or []
             for child in children:
                 try:
-                    if address_to_slot(
-                        chain, child, config_path=config_path
-                    ) in splitter_slots:
+                    if (
+                        address_to_slot(chain, child, config_path=config_path)
+                        in splitter_slots
+                    ):
                         return True
                 except Exception:
                     continue
@@ -140,14 +143,18 @@ def accepted_escrow_artifacts_from_proposal(
     """
     if proposal is None:
         return {}
-    proposal_model = proposal if isinstance(proposal, EscrowProposal) else (
-        EscrowProposal.model_validate(proposal.model_dump())
-        if hasattr(proposal, "model_dump")
-        else EscrowProposal.model_validate(proposal)
+    proposal_model = (
+        proposal
+        if isinstance(proposal, EscrowProposal)
+        else (
+            EscrowProposal.model_validate(proposal.model_dump())
+            if hasattr(proposal, "model_dump")
+            else EscrowProposal.model_validate(proposal)
+        )
     )
     fields = dict(proposal_model.fields or {})
     if uses_scalar_amount:
-        fields["amount"] = int(agreed_amount)
+        fields["amount"] = str(agreed_amount)
     accepted = EscrowProposal(
         chain_name=proposal_model.chain_name,
         escrow_address=proposal_model.escrow_address,
@@ -158,7 +165,7 @@ def accepted_escrow_artifacts_from_proposal(
         expiration_unix=proposal_model.expiration_unix,
     )
 
-    accepted_payload = accepted.model_dump()
+    accepted_payload = accepted.model_dump(mode="json")
     if accepted_payload.get("demands") is None:
         accepted_payload.pop("demands", None)
     out: dict[str, Any] = {
@@ -181,9 +188,7 @@ def accepted_escrow_artifacts_from_proposal(
                 "schema": "vms.heartbeat.v1",
                 "interval_seconds": int(heartbeat_interval_seconds),
             }
-        if proposal_is_splitter_gated(
-            accepted, chain_config_paths=chain_config_paths
-        ):
+        if proposal_is_splitter_gated(accepted, chain_config_paths=chain_config_paths):
             service_terms["interruptible"] = {
                 "schema": "vms.interruptible.v1",
                 "refund_authority": "seller_declared",
@@ -196,12 +201,12 @@ def accepted_escrow_artifacts_from_proposal(
             addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
             service_terms=service_terms,
         )
-        out["settlement_plan"] = plan.model_dump()
+        out["settlement_plan"] = plan.model_dump(mode="json")
         # LEGACY mirror of the plan's alkahest obligations, kept for
         # buyers that predate the settlement-plan carrier. Leaves with
         # the client-wheel wire bump.
         out["accepted_escrow_terms"] = [
-            terms.model_dump()
+            terms.model_dump(mode="json")
             for terms in escrow_terms_from_settlement_plan(plan)
         ]
     except Exception as exc:

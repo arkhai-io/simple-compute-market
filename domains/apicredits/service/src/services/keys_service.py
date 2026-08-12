@@ -36,6 +36,7 @@ import secrets as _secrets
 import threading
 from typing import Any, Mapping, Optional
 
+from market_identity import Identity, IdentityScheme
 from sqlalchemy.orm import Session, sessionmaker
 
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
@@ -76,25 +77,30 @@ def derive_key_id(escrow_uid: str) -> str:
     return f"ak_{digest[:16]}"
 
 
+def _principal(
+    scheme: str | None,
+    identifier: str | None,
+    *,
+    field: str,
+) -> Identity | None:
+    if scheme is None and identifier is None:
+        return None
+    if scheme is None or identifier is None:
+        raise ValueError(f"{field} requires both scheme and identifier")
+    return Identity(scheme=IdentityScheme(scheme), identifier=identifier)
+
+
 def _owner_admits(
-    key: ApiKey, buyer_scheme: str | None, buyer_id: str | None,
+    key: ApiKey,
+    buyer: Identity | None,
 ) -> tuple[bool, str]:
-    """Authoritative ownership check. Returns (admitted, reason)."""
-    if key.owner_scheme is None:
-        return True, ""  # open top-up: no ownership guard on the key
-    if key.owner_scheme == "wallet":
-        if (
-            buyer_scheme == "wallet"
-            and buyer_id
-            and key.owner_id
-            and buyer_id.lower() == key.owner_id.lower()
-        ):
-            return True, ""
-        return False, "key is wallet-bound to a different owner"
-    # ed25519 (and any future scheme) needs a possession proof the v1
-    # issuance request doesn't carry; the negotiation challenge
-    # middleware is the planned path.
-    return False, f"ownership scheme {key.owner_scheme!r} is not verifiable at issuance in v1"
+    """Authorize an exact canonical principal against the key owner."""
+    owner = _principal(key.owner_scheme, key.owner_id, field="stored owner")
+    if owner is None:
+        return True, ""
+    if buyer == owner:
+        return True, ""
+    return False, "key is bound to a different marketplace principal"
 
 
 class KeysService:
@@ -129,11 +135,9 @@ class KeysService:
     ) -> dict[str, Any]:
         """Fulfill one deal: quota commit + key + grant, idempotently.
 
-        ``owner_scheme``/``owner_id`` override the ownership claim bound
-        to a *new* key; the default binds the purchasing wallet
-        (``buyer_*``). Existing-mode issuance re-checks the target key's
-        claim against ``buyer_*`` and refuses with the shared reject
-        vocabulary on mismatch.
+        ``owner_scheme``/``owner_id`` override the principal bound to a
+        new key. Existing-mode issuance re-checks the exact buyer principal
+        and refuses identifier-only or cross-scheme matches.
         """
         if quantity < 1:
             raise ValueError(f"quantity must be >= 1, got {quantity}")
@@ -141,6 +145,8 @@ class KeysService:
             raise ValueError(f"key.mode must be 'new' or 'existing', got {key_mode!r}")
         if key_mode == "existing" and not key_id:
             raise ValueError("key.mode 'existing' requires key.key_id")
+        buyer = _principal(buyer_scheme, buyer_id, field="buyer")
+        explicit_owner = _principal(owner_scheme, owner_id, field="owner")
 
         with self._lock, self._session_factory() as db:
             prior = (
@@ -157,7 +163,7 @@ class KeysService:
                     raise IssuanceError(KEY_NOT_FOUND, f"key {key_id!r} not found")
                 if key.status != "active":
                     raise IssuanceError(KEY_REVOKED, f"key {key_id!r} is {key.status}")
-                admitted, why = _owner_admits(key, buyer_scheme, buyer_id)
+                admitted, why = _owner_admits(key, buyer)
                 if not admitted:
                     raise IssuanceError(KEY_NOT_OWNED, why)
             else:
@@ -165,8 +171,9 @@ class KeysService:
                 key = db.get(ApiKey, new_id)
                 if key is None:
                     secret = _new_secret(new_id)
-                    bind_scheme = owner_scheme if owner_scheme else buyer_scheme
-                    bind_id = owner_id if owner_scheme else buyer_id
+                    bound = explicit_owner or buyer
+                    bind_scheme = bound.scheme.value if bound else None
+                    bind_id = bound.identifier if bound else None
                     key = ApiKey(
                         key_id=new_id,
                         secret_hash=_hash_secret(secret),

@@ -242,6 +242,56 @@ under its own `tests/` root, matching the four-level hierarchy above.
 System-level tests live in the separate `e2e-tests` package, itself
 split into `unit/` (its own helper logic), `smoke/`, and `e2e/`.
 
+## Marketplace Identity Verification
+
+Identity tests follow the same lowest-meaningful-level rule while exercising
+the security boundary from canonical bytes through composed roles:
+
+Scheme-neutral behavior is exercised from one shared fixture matrix under both
+Ed25519 and EIP-191 rather than by maintaining parallel feature suites. Tests
+specific to normalization and cryptographic dispatch stay with the identity
+plugins; tests that require a wallet or chain stay with the explicitly selected
+EVM adapter. The representative hosted-fiat system path deliberately uses
+Ed25519 with every wallet and chain setting absent, while focused EIP-191
+integration coverage proves that selecting that scheme or an EVM effect does
+not change the common marketplace contract.
+
+Identity migrations are tested as atomic state transformations, not as
+compatibility-mode behavior: populated legacy fixtures must become canonical
+principals while stable subject and operation identifiers survive, malformed
+populations must roll back completely, and no test environment may continue
+with mixed signature versions or an address-only fallback.
+
+- Identity-kit unit and conformance fixtures cover strict Ed25519 and EIP-191
+  principal normalization, byte-identical version 2 request/response and
+  rotation vectors, field-by-field tamper rejection, timestamp skew, exact
+  replay, changed reuse, and dual-proof bounded rotation.
+- Authority integration tests use canonical typed clients against real
+  applications and databases. They prove replay reservation precedes handler
+  dispatch, exact principals and roles authorize, configured service-peer and
+  site pins are enforced, signed responses are verified, and no body address,
+  administrator key, private-key field, or missing-header fallback reaches a
+  state mutation.
+- Migration tests cover populated legacy state as well as fresh bootstrap and
+  idempotent rerun. They assert stable publisher, listing, negotiation,
+  obligation, fulfillment, and operation identifiers, explicit buyer run-log
+  migration, complete rollback on malformed or conflicting owners, and
+  startup/readiness rejection of drift or mixed signature versions.
+- Composition tests exercise an Ed25519 hosted-fiat path with wallet, chain,
+  RPC, balance, and gas configuration absent, and separately prove that a
+  selected EVM effect resolves and validates only its adapter-owned inputs.
+- Configuration and artifact tests use secret canaries to reject private
+  material in public models, persistence, logs, rendered ConfigMaps,
+  arguments, images, wheels, manifests, and fixtures. Hosted integration uses
+  the exact manifest-pinned released client and shared conformance fixtures;
+  editable sibling imports or copied hosted signing behavior are test
+  failures.
+- The system-level identity scenario runs publication, discovery, negotiation,
+  hosted funding, settlement, status, reclaim, and recovery with Ed25519
+  principals and no wallet configuration. It also checks coordinated
+  readiness failure when any authority or client lacks the pinned identity
+  version.
+
 ## Boundary-Change Validation
 
 Moving or renaming a contract at a package boundary needs more than

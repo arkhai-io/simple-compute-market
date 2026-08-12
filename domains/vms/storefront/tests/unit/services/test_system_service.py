@@ -11,9 +11,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_identity import Ed25519Signer
 
 from market_storefront.services.system_service import SystemService
 from market_storefront.utils.sqlite_client import SQLiteClient
+
+MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
 
 # ---------------------------------------------------------------------------
@@ -27,14 +30,13 @@ def db(tmp_path) -> SQLiteClient:
 
 def _make_service(
     db: SQLiteClient,
-    registry: dict | None = None,
     *,
     projection_status_provider=None,
     listing_mode_explanation_provider=None,
 ) -> SystemService:
-    """``registry`` arg kept for compat with older test invocations; ignored."""
     return SystemService(
         sqlite_client=db,
+        marketplace_signer=MARKETPLACE_SIGNER,
         agent_id="test-agent",
         projection_status_provider=projection_status_provider,
         listing_mode_explanation_provider=listing_mode_explanation_provider,

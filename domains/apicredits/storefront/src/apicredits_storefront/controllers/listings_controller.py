@@ -16,7 +16,7 @@ from fastapi_utils.cbv import cbv
 from pydantic import BaseModel, Field
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_key
+from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.middleware.seller_auth import make_seller_auth_dep
 from core_storefront.models.listing_models import (
     CloseListingResponse,
@@ -105,7 +105,7 @@ class ListingsController:
         "/listings/{listing_id}/pause",
         response_model=PauseListingResponse,
         summary="Pause a listing (admin)",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def pause_listing(self, listing_id: str) -> PauseListingResponse:
         row = await self._db.load_listing(listing_id=listing_id)
@@ -125,7 +125,7 @@ class ListingsController:
         "/listings/{listing_id}/resume",
         response_model=PauseListingResponse,
         summary="Resume a listing and publish to registry (admin)",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def resume_listing(self, listing_id: str) -> PauseListingResponse:
         row = await self._db.load_listing(listing_id=listing_id)

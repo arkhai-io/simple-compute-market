@@ -15,10 +15,15 @@ differs so colocated local runs can still be steered independently.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from dynaconf import Dynaconf
+from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
+from core_storefront.multi_registry_client import RegistryAuthorityTrust
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from market_config.config_loader import (
     ChainConfig,
     chains_from_config,
@@ -43,22 +48,21 @@ def _build_settings() -> Dynaconf:
         environments=False,
         merge_enabled=True,
     )
-    pk = str(s.get("wallet.private_key", "") or "")
-    addr_cfg = str(s.get("wallet.address", "") or "")
-    if pk:
-        derived_addr = derive_wallet_address(pk)
-        if derived_addr:
-            if not addr_cfg:
-                s.set("wallet.address", derived_addr)
-            elif addr_cfg.lower() != derived_addr.lower():
-                logger.warning(
-                    "[CONFIG] wallet.address (%s) does not match the address "
-                    "derived from wallet.private_key (%s); using the "
-                    "configured address.",
-                    addr_cfg,
-                    derived_addr,
-                )
     return s
+
+def resolve_evm_wallet() -> tuple[str, str]:
+    """Resolve explicit, matching Alkahest mechanism credentials."""
+    address = str(settings.get("wallet.address", "") or "")
+    private_key = str(settings.get("wallet.private_key", "") or "")
+    if not address or not private_key:
+        raise RuntimeError(
+            "API-credits Alkahest settlement requires wallet.address and "
+            "wallet.private_key",
+        )
+    derived = derive_wallet_address(private_key)
+    if not derived or derived.lower() != address.lower():
+        raise RuntimeError("configured Alkahest wallet address/private key mismatch")
+    return address, private_key
 
 
 def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
@@ -86,6 +90,97 @@ if not CHAINS:
         "will fail when it needs to dispatch any on-chain call."
     )
 
+def resolve_identity_config() -> IdentityConfig:
+    """Load the public marketplace principal without reading its credential."""
+    scheme_raw = str(settings.get("identity.scheme", "") or "")
+    identifier = str(settings.get("identity.identifier", "") or "")
+    if not scheme_raw or not identifier:
+        raise RuntimeError(
+            "[identity].scheme and [identity].identifier are required",
+        )
+    try:
+        config = IdentityConfig(
+            scheme=IdentityScheme(scheme_raw),
+            identifier=identifier,
+        )
+        config.principal
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("invalid storefront marketplace identity") from exc
+    return config
+
+def resolve_admin_identities() -> TrustedIdentitySet:
+    """Load the ordered public principals trusted for admin requests."""
+    raw = settings.get("identity.admin_principals.identities")
+    if not isinstance(raw, (list, tuple)):
+        raise RuntimeError(
+            "[identity.admin_principals].identities must contain 1-2 principals",
+        )
+    try:
+        return TrustedIdentitySet(
+            identities=tuple(Identity.model_validate(value) for value in raw),
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("invalid storefront admin trust set") from exc
+
+
+def resolve_registry_authorities() -> dict[str, RegistryAuthorityTrust]:
+    """Resolve stable registry authorities and signer sets for every URL."""
+    from market_config.registry_url import normalize_registry_url
+
+    raw_urls = settings.get("registry.urls")
+    urls = list(raw_urls) if raw_urls else []
+    if not urls:
+        raise RuntimeError("[registry].urls must configure at least one registry")
+    raw_trust = settings.get("registry.authorities")
+    if not raw_trust or not hasattr(raw_trust, "items"):
+        raise RuntimeError("[registry.authorities] authority pins are required")
+    resolved: dict[str, RegistryAuthorityTrust] = {}
+    for raw_url, raw_principal in dict(raw_trust).items():
+        url = normalize_registry_url(str(raw_url))
+        if url in resolved:
+            raise RuntimeError(f"duplicate registry trust pin for {url!r}")
+        try:
+            values = dict(raw_principal)
+            if set(values) != {"authority", "identities"}:
+                raise ValueError("authority entry requires authority and identities")
+            authority = values["authority"]
+            identities = values["identities"]
+            if not isinstance(authority, str) or not authority.strip():
+                raise ValueError("authority must be nonempty text")
+            if not isinstance(identities, (list, tuple)):
+                raise TypeError("identities must be a list")
+            resolved[url] = RegistryAuthorityTrust(
+                authority=authority.strip(),
+                principals=TrustedIdentitySet(
+                    identities=tuple(
+                        Identity.model_validate(value) for value in identities
+                    ),
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"invalid registry authority trust pin for {url!r}"
+            ) from exc
+    expected = {normalize_registry_url(str(url)) for url in urls}
+    if set(resolved) != expected:
+        missing = sorted(expected - set(resolved))
+        unexpected = sorted(set(resolved) - expected)
+        raise RuntimeError(
+            "registry trust pins must exactly match configured URLs "
+            f"(missing={missing}, unexpected={unexpected})"
+        )
+    return resolved
+
+
+def resolve_identity_signer(
+    environ: Mapping[str, str] | None = None,
+) -> Signer:
+    """Resolve the env-only credential and require its public identity to match."""
+    credential = (environ or os.environ).get("ARKHAI_IDENTITY_CREDENTIAL")
+    if not credential:
+        raise RuntimeError("ARKHAI_IDENTITY_CREDENTIAL is required")
+    return resolve_storefront_signer(resolve_identity_config(), credential)
+
 
 def _validate_agent_id(raw: Any) -> str:
     if not raw:
@@ -105,10 +200,8 @@ def credits_service_url() -> str:
 
 
 def credits_admin_key() -> str:
-    """Admin key for the credits service; falls back to admin_api_key."""
-    return str(
-        settings.get("credits.admin_key", "") or settings.get("admin_api_key", "") or ""
-    )
+    """Resolve the credits-service mechanism credential without fallback."""
+    return str(settings.get("credits.admin_key", "") or "")
 
 
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))

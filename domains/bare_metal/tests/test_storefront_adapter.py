@@ -107,14 +107,14 @@ def test_authoritative_empty_projection_closes_tracked_listing(tmp_path):
     calls = []
     source = bare_metal_publication_adapter(
         projection_snapshot=lambda: [_projection(resources=False)],
-        close_listing=lambda base_url, listing_id, private_key: (
-            calls.append((base_url, listing_id, private_key))
+        close_listing=lambda base_url, listing_id: (
+            calls.append((base_url, listing_id))
             or {"status": "closed"}
         ),
         publish_existing_listing=lambda **kwargs: kwargs,
     )
 
-    closed = source.close_stale(path, "https://seller", "private-key")
+    closed = source.close_stale(path, "https://seller")
 
     assert closed == ["listing-1"]
-    assert calls == [("https://seller", "listing-1", "private-key")]
+    assert calls == [("https://seller", "listing-1")]

@@ -1,12 +1,14 @@
 [project]
 name = "arkhai-kit-identity"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
-description = "Pluggable identity models and signature verifiers for the market"
+description = "Canonical marketplace identities and authenticated envelopes"
 requires-python = ">=3.10,<3.14"
 dependencies = [
+    "cryptography>=43",
     "eth-account>=0.13.0",
     "pydantic>=2",
+    "rfc8785>=0.1.4",
 ]
 
 [build-system]

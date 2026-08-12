@@ -20,11 +20,16 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from dynaconf import Dynaconf
 
 from core_storefront.capacity import CapacityDelta
 from market_storefront.services import capacity_client as cc
 from tests._settings_overrides import settings_overrides
-from tests.fake_site import FakeSite
+from tests.fake_site import (
+    FakeSite,
+    TEST_MARKETPLACE_SIGNER,
+    TEST_SITE_AUTHORITIES,
+)
 
 
 @pytest.fixture
@@ -40,7 +45,10 @@ def site() -> FakeSite:
 @pytest.fixture
 def client(site: FakeSite) -> cc.SiteCapacityClient:
     return cc.SiteCapacityClient(
-        "http://site-authority:8081", "test-key", transport=site.transport(),
+        "http://site-authority:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
+        transport=site.transport(),
     )
 
 
@@ -72,22 +80,39 @@ def _settings(
     sites: dict | None = None,
     placement: str = "fill_first",
     use_site_projection_for_listings: bool = False,
-):
-    return SimpleNamespace(
-        capacity=SimpleNamespace(
-            authority_url=url, poll_interval=0.01,
-            sites=sites, placement=placement,
-            use_site_projection_for_listings=use_site_projection_for_listings,
-        ),
-        provisioning=SimpleNamespace(service_url="http://prov:8081"),
-        admin_api_key="test-key",
+) -> Dynaconf:
+    source = Dynaconf(environments=False)
+    source.set(
+        "identity.principal",
+        TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
     )
+    source.set(
+        "provisioning.identity.principals",
+        [
+            principal.model_dump(mode="json")
+            for principal in TEST_SITE_AUTHORITIES.identities
+        ],
+    )
+    source.set("capacity.authority_url", url)
+    source.set("capacity.poll_interval", 0.01)
+    source.set("capacity.sites", sites)
+    source.set("capacity.placement", placement)
+    source.set(
+        "capacity.use_site_projection_for_listings",
+        use_site_projection_for_listings,
+    )
+    source.set("provisioning.service_url", "http://prov:8081")
+    return source
 
 
 @pytest.fixture(autouse=True)
 def _reset_aggregate_cache():
     cc._aggregate_state.update(key=None, client=None)
-    yield
+    with patch(
+        "market_storefront.container.resolved_marketplace_signer",
+        TEST_MARKETPLACE_SIGNER,
+    ):
+        yield
     cc._aggregate_state.update(key=None, client=None)
 
 
@@ -201,10 +226,16 @@ async def test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_a
     # Swap in the fake transports for each named site without going
     # through real HTTP.
     built._sites["small"] = cc.SiteCapacityClient(
-        "http://small:8081", "test-key", transport=small_site.transport(),
+        "http://small:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
+        transport=small_site.transport(),
     )
     built._sites["big"] = cc.SiteCapacityClient(
-        "http://big:8081", "test-key", transport=big_site.transport(),
+        "http://big:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
+        transport=big_site.transport(),
     )
 
     match = await built.probe(claim={"gpu_count": 2})
@@ -233,10 +264,16 @@ async def test_most_available_excludes_a_resource_type_mismatch_through_the_real
     ):
         built = cc.build_capacity_client(lambda: None)
     built._sites["wrong"] = cc.SiteCapacityClient(
-        "http://wrong:8081", "test-key", transport=wrong_type_site.transport(),
+        "http://wrong:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
+        transport=wrong_type_site.transport(),
     )
     built._sites["right"] = cc.SiteCapacityClient(
-        "http://right:8081", "test-key", transport=right_type_site.transport(),
+        "http://right:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
+        transport=right_type_site.transport(),
     )
 
     match = await built.probe(claim={"resource_type": "compute.cpu", "gpu_count": 1})
@@ -335,7 +372,9 @@ async def test_poller_positions_at_head_then_emits_new_deltas(site: FakeSite):
     """Each site's poller skips history, reconciles once, then streams
     site-tagged deltas onto the aggregate bus."""
     client = cc.SiteCapacityClient(
-        "http://site-authority:8081", "test-key",
+        "http://site-authority:8081",
+        signer=TEST_MARKETPLACE_SIGNER,
+        expected_authorities=TEST_SITE_AUTHORITIES,
         transport=site.transport(),
     )
     aggregate = cc.AggregateCapacityClient({"dc-a": client})

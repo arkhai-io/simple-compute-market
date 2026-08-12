@@ -1,0 +1,130 @@
+global:
+  rpc:
+    enabled: true
+    chainId: 31337
+    host: arkhai-node-operator-dev-env
+    port: 8545
+  integrationTests:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+
+registry:
+  image:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  identity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    credentialSecret:
+      name: evm-registry-identity
+      key: credential
+
+provisioning:
+  server:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  identity:
+    principal:
+      scheme: eip191
+      identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+    credentialSecret:
+      name: evm-provisioning-identity
+      key: credential
+  storefrontIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+  adminIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
+  storefront:
+    agentName: evm-bob
+
+e2e-tests:
+  enabled: false
+  createSecret: false
+  secretName: arkhai-e2e-credentials
+
+storefront:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  agents:
+    - name: evm-bob
+      port: 8001
+      component: seller
+      autoRegister: false
+      identity:
+        principal:
+          scheme: eip191
+          identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        credentialSecret:
+          name: evm-bob-marketplace-identity
+          key: credential
+        servicePeers:
+          provisioning_default:
+            role: service
+            siteId: default
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        administrators:
+          operator:
+            principals:
+              - scheme: eip191
+                identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+      secret:
+        createSecret: false
+        secretName: evm-bob-runtime
+        configKey: storefront.secrets.toml
+      config:
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: eip191
+              identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+        seller:
+          agentId: evm-bob
+          dbPath: /var/lib/arkhai/agent.db
+          logFilePath: ./logs/evm-bob.log
+          resourcesCsvPath: /app/src/market_storefront/data/kvm1-machine.csv
+          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+          enableEventQueue: false
+          provisioning:
+            mode: mock
+            identity:
+              principals:
+                - scheme: eip191
+                  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          negotiation:
+            policies:
+              - has_matching_inventory_guard
+              - escrow_shape_guard
+              - bisection
+          integrations: {}
+        chain:
+          name: anvil
+          alkahestAddressConfigPath: /app/src/market_storefront/data/alkahest_anvil_addresses.json
+        hostedSettlement:
+          enabled: false
+          contractVersion: 0.1.0
+          expectedSchemaVersion: 4
+          requiredCapabilities:
+            - conditional-escrow.v1
+            - stripe-connect-separate-charges-transfers.v1
+            - account-owner-retirement.v1
+            - portable-attestation.v1
+            - eas-arbiter.v1
+            - scheme-tagged-identities.v1
+            - account-owner-admission.v1
+            - account-owner-rotation.v1
+            - signer-injected-client.v1
+            - provider-neutral-seller-onboarding.v1

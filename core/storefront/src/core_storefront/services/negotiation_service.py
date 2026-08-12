@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Awaitable, Callable
+from market_identity import Identity
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ class NegotiationService:
         *,
         listing_id: str,
         terminal_state: str | None = None,
-        buyer_address: str | None = None,
+        buyer_principal: Identity | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -74,7 +76,7 @@ class NegotiationService:
         return await self._db.list_negotiations_for_listing(
             listing_id=listing_id,
             terminal_state=terminal_state,
-            buyer_address=buyer_address,
+            buyer_principal=buyer_principal,
             limit=limit,
             offset=offset,
         )
@@ -112,17 +114,12 @@ class NegotiationService:
         action: str,
         proposal: dict[str, Any] | None,
         reason: str | None,
+        actor_principal: Identity,
     ) -> dict[str, Any]:
-        """Drive one negotiation round as the admin (no buyer signature required).
+        """Drive one negotiation round as an authenticated administrator.
 
-        Delegates to ``continue_sync_negotiation`` using the thread's
-        recorded counterparty as the nominal buyer address so message
-        attribution stays consistent.
-
-        Raises:
-            NegotiationServiceError(400) — invalid action or missing proposal
-            NegotiationServiceError(404) — thread not found / wrong order
-            NegotiationServiceError(409) — thread already terminal
+        Raises ``NegotiationServiceError`` for invalid, missing, or terminal
+        negotiations and invalid proposals.
         """
         if action not in ("counter", "accept", "exit"):
             raise NegotiationServiceError(
@@ -144,8 +141,9 @@ class NegotiationService:
                 buyer_action=action,
                 buyer_proposal=proposal,
                 buyer_reason=reason,
-                # Use thread's counterparty so message attribution is consistent.
-                buyer_address=thread.get("their_agent_id") or "admin",
+                actor_principal=actor_principal,
+                buyer_principal=thread["buyer_principal"],
+                seller_principal=thread["seller_principal"],
             )
         except ValueError as exc:
             raise NegotiationServiceError(str(exc), status_code=400) from exc
@@ -163,6 +161,7 @@ class NegotiationService:
         listing_id: str,
         neg_id: str,
         amount: int,
+        actor_principal: Identity,
     ) -> dict[str, Any]:
         """Commit a negotiation as terminal-success at the given amount.
 
@@ -189,14 +188,12 @@ class NegotiationService:
             or 3600
         )
 
-        # Write the acceptance message and terminal state directly via sqlite_client,
-        # bypassing NegotiationThreadTransaction which requires the thread-store
-        # singleton (initialised with identity+URL only during storefront startup).
-        # For an admin-initiated force-accept there is no identity context needed.
+        # Persist the authenticated administrator as the exact message author.
         from datetime import datetime as _dt
         await self._db.save_negotiation_message(
             negotiation_id=neg_id,
-            sender="admin",
+            sender_principal=actor_principal,
+            sender_role="admin",
             our_price=amount,
             their_price=amount,
             proposed_price=amount,
@@ -221,6 +218,7 @@ class NegotiationService:
             listing_id=listing_id,
             agreed_amount=int(amount),
             source="admin",
+            actor_principal=actor_principal.model_dump(mode="json"),
         )
 
         return {

@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 class ValidatePublishRequest(BaseModel):
     """Body for POST /api/v1/listings/validate-publish.
 
-    Mirrors the non-auth fields of POST /listings so tests can pass the
-    same listing payload they constructed locally. No signature is
-    required — this endpoint never writes.
+    Carries the same listing fields as POST /listings. The route authenticates
+    the complete normalized model as a canonical v2 marketplace request before
+    performing its read-only schema check.
     """
 
     listing_id: str = Field(description="Listing ID to validate")
@@ -43,9 +43,9 @@ class ValidatePublishRequest(BaseModel):
 class ValidatePublishResponse(BaseModel):
     """Result of POST /api/v1/listings/validate-publish.
 
-    ``valid`` is True when all structural checks pass — the payload
-    would be accepted by POST /agents/{agent_id}/listings (ignoring
-    auth and agent registration, which are environment concerns).
+    ``valid`` is True when all structural checks pass — the normalized payload
+    would be accepted by POST /listings after the caller separately satisfies
+    publisher ownership.
     When ``valid`` is False, ``errors`` lists the specific problems.
     """
 

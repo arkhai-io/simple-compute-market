@@ -18,7 +18,7 @@ class PublicationSource:
 
     name: str
     open_keys: Callable[[str], set[str]]
-    close_stale: Callable[[str, str, str | None], list[str]]
+    close_stale: Callable[[str, str], list[str]]
     available_candidates: Callable[[str], list[dict[str, Any]]]
     skip_keys: Callable[[dict[str, Any]], set[str]]
     offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
@@ -32,7 +32,6 @@ class PublicationSource:
             list[dict[str, Any]],
             list[dict[str, Any]],
             int | None,
-            str | None,
         ],
         dict[str, Any] | None,
     ]

@@ -47,7 +47,7 @@ from core_storefront.capacity_remote import site_events_poller  # noqa: F401 —
 from market_fulfillment import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
-from market_storefront.utils.config import settings
+from market_storefront.utils.config import get_provisioning_authorities, settings
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +63,8 @@ site.
 SQLiteClientFactory = Callable[[], Any]
 
 
-def _capacity_settings() -> tuple[dict[str, str], str, str]:
-    """Resolve (sites{name→url}, admin_key, placement) from settings.
+def _capacity_settings() -> tuple[dict[str, str], str]:
+    """Resolve ``(sites{name→url}, placement)`` from public settings.
 
     Read at call time so tests that patch
     ``market_storefront.utils.config.settings`` are honored. Sites come
@@ -76,7 +76,6 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
     from market_storefront.utils import config
 
     cap = getattr(config.settings, "capacity", None)
-    admin_key = str(getattr(config.settings, "admin_api_key", "") or "")
     placement = str(getattr(cap, "placement", "") or "fill_first").strip()
 
     sites: dict[str, str] = {}
@@ -106,7 +105,7 @@ def _capacity_settings() -> tuple[dict[str, str], str, str]:
             "[provisioning].service_url (the provisioning service hosts "
             "the site authority).",
         )
-    return sites, admin_key, placement
+    return sites, placement
 
 
 async def member_availability_view(
@@ -243,10 +242,24 @@ _aggregate_state: dict[str, Any] = {"key": None, "client": None}
 def _aggregate_for(
     sqlite_client_factory: SQLiteClientFactory,
     sites: Mapping[str, str],
-    admin_key: str,
     placement_name: str,
 ) -> AggregateCapacityClient:
-    key = (tuple(sorted(sites.items())), admin_key, placement_name)
+    from market_storefront import container
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("storefront marketplace signer is unavailable")
+    expected_authorities = get_provisioning_authorities()
+    key = (
+        tuple(sorted(sites.items())),
+        placement_name,
+        signer.identity.scheme.value,
+        signer.identity.identifier,
+        tuple(
+            (principal.scheme.value, principal.identifier)
+            for principal in expected_authorities.identities
+        ),
+    )
     if _aggregate_state["key"] == key:
         return _aggregate_state["client"]
     placement = PLACEMENT_POLICIES.get(placement_name)
@@ -274,7 +287,14 @@ def _aggregate_for(
             ),
         )
     aggregate = AggregateCapacityClient(
-        {name: SiteCapacityClient(url, admin_key) for name, url in sites.items()},
+        {
+            name: SiteCapacityClient(
+                url,
+                signer=signer,
+                expected_authorities=expected_authorities,
+            )
+            for name, url in sites.items()
+        },
         placement=placement,
     )
     aggregate.subscribe(
@@ -293,8 +313,8 @@ def build_capacity_client(
     Always an ``AggregateCapacityClient`` over the configured site
     authorities (one site is just the degenerate aggregation).
     """
-    sites, admin_key, placement_name = _capacity_settings()
-    return _aggregate_for(sqlite_client_factory, sites, admin_key, placement_name)
+    sites, placement_name = _capacity_settings()
+    return _aggregate_for(sqlite_client_factory, sites, placement_name)
 
 
 # ---------------------------------------------------------------------------
@@ -470,13 +490,32 @@ def build_fulfillment_client(
     ``reservation_sites`` dict instance, so routing knowledge learned by one
     aggregator is immediately visible to the other.
     """
-    sites, admin_key, _ = _capacity_settings()
-    key = tuple(sorted(sites.items())), admin_key
+    sites, _ = _capacity_settings()
+    from market_storefront import container
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("storefront marketplace signer is unavailable")
+    expected_authorities = get_provisioning_authorities()
+    key = (
+        tuple(sorted(sites.items())),
+        signer.identity.scheme.value,
+        signer.identity.identifier,
+        tuple(
+            (principal.scheme.value, principal.identifier)
+            for principal in expected_authorities.identities
+        ),
+    )
     if _fulfillment_aggregate_state["key"] == key:
         return _fulfillment_aggregate_state["client"]
     aggregate = AggregateFulfillmentClient(
         {
-            name: ComputeProvisioningClient(url, admin_key=admin_key)
+            name: ComputeProvisioningClient(
+                url,
+                signer=signer,
+                caller_role="seller",
+                expected_authorities=expected_authorities,
+            )
             for name, url in sites.items()
         },
         reservation_sites=capacity_client.reservation_sites,

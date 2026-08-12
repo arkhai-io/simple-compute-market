@@ -34,11 +34,11 @@ def test_resolve_negotiation_config_preserves_policy_tables(monkeypatch):
 
 
 def test_load_buyer_chain_builds_dispatch_for_policy_table(monkeypatch):
-    from domains.vms.buyer.buyer_client import _load_buyer_chain
+    from domains.vms.buyer.buyer_client import load_buyer_chain
 
     monkeypatch.setattr("domains.vms.buyer.common.buyer_chains", lambda: {})
 
-    chain = _load_buyer_chain(policies={
+    chain = load_buyer_chain(policies={
         "erc20": "erc20_bisection",
         "native_token": {"policy": "native_token_bisection"},
     })

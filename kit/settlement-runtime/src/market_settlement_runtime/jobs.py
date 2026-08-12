@@ -7,7 +7,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .models import Party
+from market_identity import Identity
+
 from .runtime import SettlementRuntime
 
 
@@ -16,7 +17,7 @@ class PreparedSettlement:
     agreement_ref: str
     obligations: tuple[dict[str, Any], ...]
     selected_obligation_index: int
-    local_role: Party
+    local_principal: Identity
     mechanism_ref: str
     mechanism_receipt: dict[str, Any] | None
     fulfillment_input: Any
@@ -27,8 +28,8 @@ class PreparedSettlement:
             raise ValueError("agreement_ref must be non-empty")
         if not self.obligations:
             raise ValueError("prepared settlement must contain obligations")
-        if self.local_role not in {"buyer", "seller"}:
-            raise ValueError("local_role must be buyer or seller")
+        if not isinstance(self.local_principal, Identity):
+            raise TypeError("local_principal must be a canonical marketplace identity")
         if not 0 <= self.selected_obligation_index < len(self.obligations):
             raise ValueError("selected_obligation_index is out of range")
         if not self.mechanism_ref:
@@ -103,7 +104,7 @@ class SettlementJobCoordinator:
         selected = records[prepared.selected_obligation_index]
         await self._runtime.adopt(
             selected.obligation_ref,
-            local_role=prepared.local_role,
+            local_principal=prepared.local_principal,
             mechanism_ref=prepared.mechanism_ref,
             receipt=prepared.mechanism_receipt,
         )
@@ -152,7 +153,7 @@ class SettlementJobCoordinator:
                 await self._runtime.bind_fulfillment(
                     obligation_ref,
                     outcome.fulfillment_ref,
-                    local_role=prepared.local_role,
+                    local_principal=prepared.local_principal,
                 )
             except Exception as exc:
                 outcome = FulfillmentOutcome(

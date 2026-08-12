@@ -7,7 +7,8 @@ import json
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from market_identity import Identity
+from pydantic import BaseModel, Field, model_validator
 
 Party = Literal["buyer", "seller"]
 OperationKind = Literal[
@@ -41,6 +42,20 @@ def canonical_json(value: Any) -> str:
 
 def obligation_payload_hash(obligation: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json(dict(obligation)).encode()).hexdigest()
+
+
+def _canonical_obligation_principals(
+    obligation: Mapping[str, Any],
+) -> tuple[dict[str, Any], Identity, Identity]:
+    snapshot = dict(obligation)
+    for field in ("payer_principal", "claimant_principal"):
+        if field not in snapshot:
+            raise ValueError(f"settlement obligation requires {field}")
+    payer = Identity.model_validate(snapshot["payer_principal"])
+    claimant = Identity.model_validate(snapshot["claimant_principal"])
+    snapshot["payer_principal"] = payer.model_dump(mode="json")
+    snapshot["claimant_principal"] = claimant.model_dump(mode="json")
+    return snapshot, payer, claimant
 
 
 def derive_obligation_ref(
@@ -79,6 +94,8 @@ class SettlementObligationRecord(BaseModel):
     obligation_index: int = Field(ge=0)
     obligation_hash: str
     obligation: dict[str, Any]
+    payer_principal: Identity
+    claimant_principal: Identity
     mechanism_ref: str | None = None
     mechanism_status: str | None = None
     mechanism_state: dict[str, Any] = Field(default_factory=dict)
@@ -96,11 +113,46 @@ class SettlementObligationRecord(BaseModel):
     last_error: str | None = None
     version: int = Field(default=0, ge=0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def bind_principals(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        data = dict(value)
+        obligation = data.get("obligation")
+        if not isinstance(obligation, Mapping):
+            return data
+        payer_value = data.get("payer_principal")
+        claimant_value = data.get("claimant_principal")
+        if payer_value is not None and claimant_value is not None:
+            payer = Identity.model_validate(payer_value)
+            claimant = Identity.model_validate(claimant_value)
+            if (
+                "payer_principal" in obligation
+                or "claimant_principal" in obligation
+            ):
+                snapshot, nested_payer, nested_claimant = (
+                    _canonical_obligation_principals(obligation)
+                )
+                if nested_payer != payer or nested_claimant != claimant:
+                    raise ValueError(
+                        "settlement obligation principals do not match its record"
+                    )
+                data["obligation"] = snapshot
+            data["payer_principal"] = payer
+            data["claimant_principal"] = claimant
+            return data
+        snapshot, payer, claimant = _canonical_obligation_principals(obligation)
+        data["obligation"] = snapshot
+        data["payer_principal"] = payer
+        data["claimant_principal"] = claimant
+        return data
+
     @classmethod
     def from_obligation(
         cls, *, agreement_ref: str, obligation_index: int, obligation: Mapping[str, Any]
     ) -> "SettlementObligationRecord":
-        snapshot = dict(obligation)
+        snapshot, payer, claimant = _canonical_obligation_principals(obligation)
         return cls(
             obligation_ref=derive_obligation_ref(
                 agreement_ref, obligation_index, snapshot
@@ -109,6 +161,8 @@ class SettlementObligationRecord(BaseModel):
             obligation_index=obligation_index,
             obligation_hash=obligation_payload_hash(snapshot),
             obligation=snapshot,
+            payer_principal=payer,
+            claimant_principal=claimant,
         )
 
 

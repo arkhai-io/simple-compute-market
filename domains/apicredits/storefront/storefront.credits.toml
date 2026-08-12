@@ -9,11 +9,19 @@ agent_id      = "tokenseller"
 port          = 8000
 base_url      = "http://credits-storefront:8000/"
 db_path       = "./src/apicredits_storefront/data/storefront/agent.db"
-admin_api_key = "test-api-key"
+
+[identity]
+scheme     = "eip191"
+identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+
+[identity.admin_principals]
+identities = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
 
 [wallet]
 address     = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
-private_key = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+private_key = "" # APICREDITS_STOREFRONT_WALLET__PRIVATE_KEY secret environment input
 
 [chains.anvil]
 rpc_url  = "ws://anvil:8545"
@@ -31,26 +39,40 @@ alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
 urls              = ["http://api-credits-registry:8080"]
 discovery_timeout = 5.0
 
+[registry.authorities."http://api-credits-registry:8080"]
+authority = "api-credits-registry"
+identities = [
+  { scheme = "ed25519", identifier = "skkdlQKuKGMKK6yy4MdFEP_N0yjDNP8-E5PnWy0x59w" },
+]
+
 [credits]
-# The credits service this storefront sells for. It hosts both the quota
-# ledger ([capacity] authority defaults to it) and the issuance/keys API.
+# The credits service this storefront sells for. It hosts the quota ledger
+# selected explicitly below and the separate issuance/keys mechanism API.
 service_url         = "http://credits-service:8082"
 admin_key           = "test-api-key"
 preflight_timeout   = 60
 fail_on_unreachable = true
 
 [capacity]
-# Authority defaults to credits.service_url. Poll fast — the suite waits
-# on delta-driven listing reconciliation (close on exhaustion).
-poll_interval    = 1
+# Poll fast — the suite waits on delta-driven listing reconciliation.
+poll_interval = 1
+seed_site     = "default"
 # Deliberately overrides the shipped default of 0; see storefront.bob.toml.
 # Local compose profile with no untrusted buyers, kept on so the
 # two-phase reserve path stays under e2e coverage.
 hold_ttl_seconds = 900
 
+[capacity.sites.default]
+url = "http://credits-service:8082"
+
+[capacity.sites.default.expected_authorities]
+identities = [
+  { scheme = "ed25519", identifier = "My6-jSfLcyOzpAHBwTtd1kvMwOEOzaHCtdEaA3eaheU" },
+]
+
 [negotiation]
-# Empty: the api-credits guards (api_credits_round_zero_guard,
-# buyer_counter_guard, credit_quota_guard, key_owned_by_buyer_wallet,
+# Empty: the API-credits guards (api_credits_round_zero_guard,
+# buyer_counter_guard, credit_quota_guard, key_owned_by_buyer_principal,
 # escrow_shape_guard) prepend automatically; the terminal default is
 # listed_price.
 policies = []

@@ -6,10 +6,15 @@ import json
 
 import httpx
 import pytest
+from market_identity import Identity, IdentityScheme
 
 from domains.apicredits.settlement.credits_client import (
     CreditsServiceClient,
     CreditsServiceError,
+)
+_PRINCIPAL = Identity(
+    scheme=IdentityScheme.EIP191,
+    identifier="0xabcdef0000000000000000000000000000000001",
 )
 
 
@@ -30,7 +35,7 @@ async def test_issue_contract_and_auth_header():
         escrow_uid="e1",
         quantity=2,
         key_mode="new",
-        buyer_wallet="0x1",
+        buyer_principal=_PRINCIPAL,
         capacity_reservation_id="r1",
         resource_id="q1",
     )
@@ -72,6 +77,7 @@ async def test_http_issuance_error_maps_reason_and_detail():
         await client.submit_credit_issuance(
             escrow_uid="e",
             quantity=1,
+            buyer_principal=_PRINCIPAL,
         )
 
     assert exc_info.value.reason == "quota_exhausted"

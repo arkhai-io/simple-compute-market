@@ -63,12 +63,23 @@ would falsely advertise collectability.
 
 The buyer CLI and registry executable are core-owned because their control flow is schema-opaque and extended through domain entry points or configuration. Storefront executables remain domain-owned composition roots where domain adapters and seller policy are wired into shared storefront machinery. A package move does not alter these authority boundaries.
 
+## Identity composition
+
+Marketplace identity is a foundation kit alongside the generic settlement lifecycle. It owns canonical principals, signer/verifier dispatch, authenticated request and response envelopes, replay handling, and rotation primitives. The dependency is deliberately one way: roles, domains, settlement adapters, and their composition roots may depend downward on these interfaces, while the identity kit imports no role, domain, settlement mechanism, hosted provider, or chain runtime.
+
+Composition roots resolve public identity and secret credential material separately, construct one scheme-neutral signer, and inject it into registry, negotiation, service-peer, and settlement clients. Core orchestration carries the complete principal and signer ports opaquely; it neither branches on scheme or private-key shape nor treats an identifier as a wallet address, provider account, or mechanism setting. Scheme plugins own identifier interpretation, while provider account references remain resources rather than credentials. A domain can therefore compose Ed25519 marketplace identity without an EVM package.
+
+Chain and provider dependencies enter only after a composition root selects a concrete mechanism. The selected domain or settlement adapter owns wallet derivation, chain preflight, RPC clients, and provider SDKs; a no-wallet hosted-fiat composition consequently does not instantiate an Alkahest client or import those dependencies into scheme-neutral orchestration.
+
+Hosted authentication remains a separately released protocol even when it uses the same marketplace signer and cryptographic scheme. The thin hosted adapter presents that signer through the exact manifest-pinned `hosted-settlement-client`, verifies that the manifest advertises the required identity contract before publishing fiat, and lets the client own hosted principal models, canonical bytes, headers, proofs, and response verification. This preserves each protocol's domain separation and prevents marketplace packages from copying or translating hosted wire logic.
+
 ## Current limits
 
 The composition contract covers the shipped role protocols and versioned domain contracts; it is not a claim that every possible market shape fits the current phases. Auctions, sealed-bid protocols, arbitrary settlement plans, and a universal storefront executable require explicit changes rather than inference from the extension points.
 
 ## Related contracts
 
+- [Marketplace identity](../marketplace-identity/spec.md)
 - [Registry discovery](../registry-discovery/spec.md)
 - [Negotiation protocol](../negotiation-protocol/spec.md)
 - [Settlement servicing](../settlement-servicing/spec.md)

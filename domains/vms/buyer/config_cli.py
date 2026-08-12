@@ -103,13 +103,20 @@ def config_get(
 
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
-# ($XDG_CONFIG_HOME/arkhai/buyer.toml). Every key is optional; the resolver
-# falls back to built-in defaults when a key is missing. The storefront
-# server and `market-storefront` CLI read a separate `storefront.toml` in
-# the same dir.
+# Public marketplace identity is required. Signing material is never written
+# here: inject it through the ARKHAI_IDENTITY_CREDENTIAL secret environment
+# variable. Hosted-fiat Ed25519 operation needs no [wallet] or [chains] table.
 
+[identity.principal]
+# scheme = "ed25519"
+# identifier = "<unpadded-base64url-public-key>"
+
+# EVM mechanism credentials only. Omit this entire table for fiat.stripe.v1.
 [wallet]
+# address = "0x..."
 # private_key = "0x..."
+
+[provisioning]
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
 # One [chains.<name>] table per chain the buyer wants to transact on.
@@ -132,6 +139,12 @@ _INIT_USER_TEMPLATE = """\
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs to discover listings from.
+# [registry.authorities."http://localhost:8080"]
+# authority = "registry"
+# identities = [
+#   { scheme = "ed25519", identifier = "<registry-public-key>" },
+# ]
+
 
 [registry.auth]
 # Free-form table of {url = "bearer-token"}. Keys must match `urls` above

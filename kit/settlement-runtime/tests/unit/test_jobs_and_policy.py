@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from market_identity import Identity, IdentityScheme
+
 from market_settlement_runtime import (
     FailurePolicy,
     FulfillmentOutcome,
@@ -11,11 +13,26 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
 )
 
+BUYER = Identity(
+    scheme=IdentityScheme.ED25519,
+    identifier="ERERERERERERERERERERERERERERERERERERERERERE",
+)
+SELLER = Identity(
+    scheme=IdentityScheme.ED25519,
+    identifier="IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+)
+
 
 def obligation(*, payer: str = "buyer") -> dict:
     return {
         "payer": payer,
         "claimant": "seller" if payer == "buyer" else "buyer",
+        "payer_principal": (
+            BUYER if payer == "buyer" else SELLER
+        ).model_dump(mode="json"),
+        "claimant_principal": (
+            SELLER if payer == "buyer" else BUYER
+        ).model_dump(mode="json"),
         "mechanism": "test.v1",
         "expiration_unix": 100,
     }
@@ -30,7 +47,7 @@ async def test_existing_job_still_registers_and_adopts_exact_seller_funded_oblig
         agreement_ref="agreement",
         obligations=(obligation(), obligation(payer="seller")),
         selected_obligation_index=1,
-        local_role="seller",
+        local_principal=SELLER,
         mechanism_ref="escrow-bond",
         mechanism_receipt={"verified": True},
         fulfillment_input=None,
@@ -75,7 +92,7 @@ async def test_new_job_binds_then_persists_and_wakes(tmp_path) -> None:
         agreement_ref="agreement",
         obligations=(obligation(),),
         selected_obligation_index=0,
-        local_role="seller",
+        local_principal=SELLER,
         mechanism_ref="escrow",
         mechanism_receipt=None,
         fulfillment_input={"private": "input"},

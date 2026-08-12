@@ -100,7 +100,6 @@ class PublicationCommand:
     selection: "PublicationSourceSelection"
     db_path: str
     base_url: str
-    private_key: str | None
     build_payload: PayloadBuilder
     publish_offer: PublishOffer
 
@@ -116,7 +115,6 @@ class PublicationCommand:
             self.selection,
             db_path=self.db_path,
             base_url=self.base_url,
-            private_key=self.private_key,
             build_payload=self.build_payload,
             publish_offer=self.publish_offer,
             skip_ids=skip_ids,
@@ -152,14 +150,12 @@ class PublicationSourceSelection:
         *,
         db_path: str,
         base_url: str,
-        private_key: str | None,
     ) -> dict[str, list[str]]:
         """Close stale listings for the selected sources."""
         return close_stale_publication_listings(
             self.build_sources(),
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
         )
 
     def open_keys(self, db_path: str) -> set[str]:
@@ -171,7 +167,6 @@ class PublicationSourceSelection:
         *,
         db_path: str,
         base_url: str,
-        private_key: str | None,
         build_payload: PayloadBuilder,
         publish_offer: PublishOffer,
     ) -> PublicationCommand:
@@ -180,7 +175,6 @@ class PublicationSourceSelection:
             selection=self,
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
             build_payload=build_payload,
             publish_offer=publish_offer,
         )
@@ -190,7 +184,6 @@ class PublicationSourceSelection:
         *,
         db_path: str,
         base_url: str,
-        private_key: str | None,
         build_payload: PayloadBuilder,
         publish_offer: PublishOffer,
         skip_ids: set[str] | None = None,
@@ -201,7 +194,6 @@ class PublicationSourceSelection:
         return self.run_command(
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
             build_payload=build_payload,
             publish_offer=publish_offer,
             skip_ids=skip_ids,
@@ -214,7 +206,6 @@ class PublicationSourceSelection:
         *,
         db_path: str,
         base_url: str,
-        private_key: str | None,
         build_payload: PayloadBuilder,
         publish_offer: PublishOffer,
         skip_ids: set[str] | None = None,
@@ -226,7 +217,6 @@ class PublicationSourceSelection:
             self,
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
             build_payload=build_payload,
             publish_offer=publish_offer,
             skip_ids=skip_ids,
@@ -240,11 +230,10 @@ def close_stale_publication_listings(
     *,
     db_path: str,
     base_url: str,
-    private_key: str | None,
 ) -> dict[str, list[str]]:
     """Close stale listings for every configured publication source."""
     return {
-        source.name: source.close_stale(db_path, base_url, private_key)
+        source.name: source.close_stale(db_path, base_url)
         for source in sources
     }
 
@@ -291,7 +280,6 @@ def publish_source_by_name(
     source_kwargs: dict[str, Any] | None = None,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -302,7 +290,6 @@ def publish_source_by_name(
         [source],
         db_path=db_path,
         base_url=base_url,
-        private_key=private_key,
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
@@ -314,7 +301,6 @@ def run_publication_cycle(
     *,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -333,7 +319,6 @@ def run_publication_cycle(
             selected,
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
         )
         if close_stale
         else {}
@@ -345,7 +330,6 @@ def run_publication_cycle(
         selected,
         db_path=db_path,
         base_url=base_url,
-        private_key=private_key,
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=covered,
@@ -364,7 +348,6 @@ def run_publication_cycle_by_name(
     source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -377,7 +360,6 @@ def run_publication_cycle_by_name(
         source_kwargs_by_name=source_kwargs_by_name,
         db_path=db_path,
         base_url=base_url,
-        private_key=private_key,
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
@@ -391,7 +373,6 @@ def run_publication_command(
     *,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -403,7 +384,6 @@ def run_publication_command(
         selection.build_sources(),
         db_path=db_path,
         base_url=base_url,
-        private_key=private_key,
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
@@ -419,7 +399,6 @@ def run_publication_command_by_name(
     source_kwargs_by_name: Mapping[str, Mapping[str, Any]] | None = None,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -434,7 +413,6 @@ def run_publication_command_by_name(
         ),
         db_path=db_path,
         base_url=base_url,
-        private_key=private_key,
         build_payload=build_payload,
         publish_offer=publish_offer,
         skip_ids=skip_ids,
@@ -448,7 +426,6 @@ def publish_round(
     *,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     build_payload: PayloadBuilder,
     publish_offer: PublishOffer,
     skip_ids: set[str] | None = None,
@@ -486,7 +463,6 @@ def publish_round(
                     accepted_escrows,
                     demands,
                     max_duration_seconds,
-                    private_key,
                 )
             except Exception as exc:
                 failed.append((candidate, f"{source.reopen_error_label}: {exc}"))

@@ -1,6 +1,6 @@
 """Main API router that aggregates all route modules."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from src.api.admin_routes import router as admin_router
 from src.api.api_key_auth import require_read_access
@@ -20,14 +20,10 @@ router = APIRouter()
 router.include_router(make_health_router())
 router.include_router(admin_router)
 
-# All-read routers carry the read gate wholesale. It no-ops when
-# ``settings.require_read_api_key`` is False, so public registries see
-# no behaviour change.
-_read_gate = [Depends(require_read_access)]
-router.include_router(make_system_router(), dependencies=_read_gate)
-router.include_router(filter_spec_router, dependencies=_read_gate)
-router.include_router(validate_router, dependencies=_read_gate)
-router.include_router(publisher_router, dependencies=_read_gate)
+router.include_router(make_system_router())
+router.include_router(filter_spec_router)
+router.include_router(validate_router)
+router.include_router(publisher_router)
 
 # The listing router mixes reads and writes, so each endpoint carries its
 # own read- or write-scoped dependency.

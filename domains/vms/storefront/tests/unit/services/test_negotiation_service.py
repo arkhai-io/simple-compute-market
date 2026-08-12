@@ -13,12 +13,17 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_identity import Ed25519Signer
 
 from core_storefront.services.negotiation_service import (
     NegotiationService,
     NegotiationServiceError,
 )
 
+
+BUYER = Ed25519Signer(b"\x31" * 32).identity
+SELLER = Ed25519Signer(b"\x32" * 32).identity
+ADMIN = Ed25519Signer(b"\x33" * 32).identity
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,7 +61,8 @@ def _thread(
     return {
         "negotiation_id": neg_id,
         "our_listing_id": order_id,
-        "their_agent_id": "0xBuyer",
+        "buyer_principal": BUYER.model_dump(mode="json"),
+        "seller_principal": SELLER.model_dump(mode="json"),
         "terminal_state": terminal_state,
         "agreed_price": agreed_price,
         "requested_duration_seconds": requested_duration_seconds,
@@ -71,6 +77,7 @@ def _order(order_id: str = "ord-1", duration_hours: int = 2) -> dict:
         "order_id": order_id,
         "status": "open",
         "max_duration_seconds": duration_hours * 3600,
+        "seller_principal": SELLER.model_dump(mode="json"),
         "offer_resource": {},
         "demand_resource": {},
     }
@@ -102,7 +109,7 @@ class TestListForOrder:
         db.list_negotiations_for_listing.assert_awaited_once_with(
             listing_id="ord-1",
             terminal_state=None,
-            buyer_address=None,
+            buyer_principal=None,
             limit=50,
             offset=0,
         )
@@ -115,14 +122,14 @@ class TestListForOrder:
         await svc.list_for_order(
             listing_id="ord-1",
             terminal_state="success",
-            buyer_address="0xBuyer",
+            buyer_principal=BUYER,
             limit=10,
             offset=5,
         )
         db.list_negotiations_for_listing.assert_awaited_once_with(
             listing_id="ord-1",
             terminal_state="success",
-            buyer_address="0xBuyer",
+            buyer_principal=BUYER,
             limit=10,
             offset=5,
         )
@@ -158,13 +165,27 @@ class TestAdvance:
     async def test_raises_400_invalid_action(self):
         svc = _make_service(AsyncMock())
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(listing_id="o", neg_id="n", action="fly", proposal=None, reason=None)
+            await svc.advance(
+                listing_id="o",
+                neg_id="n",
+                action="fly",
+                proposal=None,
+                reason=None,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 400
 
     async def test_raises_400_counter_without_price(self):
         svc = _make_service(AsyncMock())
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(listing_id="o", neg_id="n", action="counter", proposal=None, reason=None)
+            await svc.advance(
+                listing_id="o",
+                neg_id="n",
+                action="counter",
+                proposal=None,
+                reason=None,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 400
 
     async def test_raises_404_thread_not_found(self):
@@ -172,7 +193,14 @@ class TestAdvance:
         db.load_negotiation_thread_row.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(listing_id="o", neg_id="ghost", action="exit", proposal=None, reason=None)
+            await svc.advance(
+                listing_id="o",
+                neg_id="ghost",
+                action="exit",
+                proposal=None,
+                reason=None,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 404
 
     async def test_raises_404_thread_wrong_order(self):
@@ -180,7 +208,14 @@ class TestAdvance:
         db.load_negotiation_thread_row.return_value = _thread("neg-1", "ord-other")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(listing_id="ord-1", neg_id="neg-1", action="exit", proposal=None, reason=None)
+            await svc.advance(
+                listing_id="ord-1",
+                neg_id="neg-1",
+                action="exit",
+                proposal=None,
+                reason=None,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 404
 
     async def test_raises_409_already_terminal(self):
@@ -190,7 +225,14 @@ class TestAdvance:
         )
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(listing_id="ord-1", neg_id="neg-1", action="exit", proposal=None, reason=None)
+            await svc.advance(
+                listing_id="ord-1",
+                neg_id="neg-1",
+                action="exit",
+                proposal=None,
+                reason=None,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 409
 
     async def test_delegates_to_continue_sync_negotiation(self):
@@ -206,9 +248,17 @@ class TestAdvance:
             action="exit",
             proposal=None,
             reason="operator_decision",
+            actor_principal=ADMIN,
         )
 
         mock_continue.assert_awaited_once()
+        assert mock_continue.await_args.kwargs["actor_principal"] == ADMIN
+        assert mock_continue.await_args.kwargs["buyer_principal"] == BUYER.model_dump(
+            mode="json"
+        )
+        assert mock_continue.await_args.kwargs["seller_principal"] == SELLER.model_dump(
+            mode="json"
+        )
         assert result["action"] == "exit"
         assert result["neg_id"] == "neg-1"
 # ---------------------------------------------------------------------------
@@ -221,7 +271,12 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(listing_id="o", neg_id="ghost", amount=9000)
+            await svc.force_accept(
+                listing_id="o",
+                neg_id="ghost",
+                amount=9000,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 404
 
     async def test_raises_404_thread_wrong_order(self):
@@ -229,7 +284,12 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = _thread("neg-1", "ord-other")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(listing_id="ord-1", neg_id="neg-1", amount=9000)
+            await svc.force_accept(
+                listing_id="ord-1",
+                neg_id="neg-1",
+                amount=9000,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 404
 
     async def test_raises_409_already_terminal(self):
@@ -237,7 +297,12 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = _thread(terminal_state="success")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(listing_id="ord-1", neg_id="neg-1", amount=9000)
+            await svc.force_accept(
+                listing_id="ord-1",
+                neg_id="neg-1",
+                amount=9000,
+                actor_principal=ADMIN,
+            )
         assert exc_info.value.status_code == 409
 
     async def test_commits_agreed_terms_and_returns_result(self):
@@ -251,10 +316,14 @@ class TestForceAccept:
         stage_event = MagicMock()
         svc = _make_service(db, stage_event_fn=stage_event)
         result = await svc.force_accept(
-            listing_id="ord-1", neg_id="neg-1", amount=8500
+            listing_id="ord-1",
+            neg_id="neg-1",
+            amount=8500,
+            actor_principal=ADMIN,
         )
 
         db.save_negotiation_message.assert_awaited_once()
+        assert db.save_negotiation_message.await_args.kwargs["sender_principal"] == ADMIN
         db.update_negotiation_thread_terminal.assert_awaited_once_with(
             negotiation_id="neg-1",
             terminal_state="success",

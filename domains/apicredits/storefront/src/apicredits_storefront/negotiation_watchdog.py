@@ -14,7 +14,11 @@ from datetime import datetime, timedelta, timezone
 
 from core_storefront.stage_log import stage_event
 
-from apicredits_storefront.utils.config import settings
+from apicredits_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    resolve_identity_config,
+    settings,
+)
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
@@ -96,7 +100,11 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
 async def watchdog_loop() -> None:
     """Continuously sweep for stale negotiations."""
     await asyncio.sleep(15)
-    sqlite_client = SQLiteClient(db_path=settings.db_path)
+    sqlite_client = SQLiteClient(
+        db_path=settings.db_path,
+        local_listing_principal=resolve_identity_config().principal,
+        expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+    )
     while True:
         try:
             await asyncio.sleep(settings.negotiation_watchdog_interval)

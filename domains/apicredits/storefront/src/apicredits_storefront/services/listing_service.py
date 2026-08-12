@@ -15,13 +15,15 @@ from datetime import datetime
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_identity import Identity
 
 logger = logging.getLogger(__name__)
 
 
 class ListingService:
-    def __init__(self, *, sqlite_client) -> None:
+    def __init__(self, *, sqlite_client, seller_principal: Identity) -> None:
         self._db = sqlite_client
+        self._seller_principal = seller_principal
 
     async def publish_from_quota(
         self,
@@ -101,7 +103,8 @@ class ListingService:
             demands=listing.demands,
             fulfillment_resource=None,
             max_duration_seconds=None,
-            seller=BASE_URL_OVERRIDE,
+            storefront_url=BASE_URL_OVERRIDE,
+            seller_principal=self._seller_principal,
             oracle_address=None,
             paused=paused,
         )

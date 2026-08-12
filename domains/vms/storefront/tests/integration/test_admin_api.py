@@ -20,9 +20,17 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 
 import market_storefront.container as _container
-from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.middleware.admin_identity import (
+    administrator_identity_middleware,
+    initialize_administrator_identities,
+)
+from market_storefront.middleware.service_peer_auth import (
+    initialize_service_peer_identities,
+    service_peer_callback_middleware,
+)
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
@@ -31,22 +39,26 @@ from domains.vms.listings.reconciler import (
     record_derived_listing,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
+
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests._settings_overrides import settings_overrides
 
-ADMIN_KEY = "test-admin-key"
 
-def _key_enforcer(expected_key: str):
-    """Depends-compatible function that enforces a specific X-Admin-Key header.
-    Used in test fixtures to simulate production admin-key enforcement without
-    requiring a mutable CONFIG (which is a frozen dataclass).
-    """
-    from fastapi import Header, HTTPException
-    def _dep(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
-        if x_admin_key != expected_key:
-            raise HTTPException(status_code=403, detail="Valid X-Admin-Key header required")
-    return _dep
+_TEST_SELLER_PRINCIPAL = Identity(
+    scheme="eip191",
+    identifier="0x2222222222222222222222222222222222222222",
+)
+
+_MARKETPLACE_SIGNER = Ed25519Signer(b"\x61" * 32)
+_ADMIN_SIGNER = Ed25519Signer(b"\x62" * 32)
+_UNTRUSTED_ADMIN_SIGNER = Ed25519Signer(b"\x63" * 32)
+_SERVICE_SIGNER = Ed25519Signer(b"\x64" * 32)
+_MARKETPLACE_PUBLISHERS = TrustedIdentitySet(
+    identities=(_MARKETPLACE_SIGNER.identity,)
+)
+_ADMIN_PRINCIPALS = TrustedIdentitySet(identities=(_ADMIN_SIGNER.identity,))
+_SERVICE_PRINCIPALS = TrustedIdentitySet(identities=(_SERVICE_SIGNER.identity,))
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -66,41 +78,89 @@ def reset_pause_state():
 
 
 @pytest_asyncio.fixture
-async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+async def admin_app(db) -> AsyncIterator[FastAPI]:
     _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+    _container.resolved_marketplace_signer = _MARKETPLACE_SIGNER
+    _container.resolved_system_service = SystemService(
+        sqlite_client=db,
+        marketplace_signer=_MARKETPLACE_SIGNER,
+    )
 
-    app = FastAPI()
-    app.include_router(system_router)
-    app.include_router(admin_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
-
-    transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient(
-        "http://test", transport=transport, admin_key=ADMIN_KEY
-    ) as c:
-        yield c, db
+    with (
+        patch(
+            "market_storefront.middleware.admin_identity.get_administrator_configs",
+            return_value={"operator": _ADMIN_PRINCIPALS},
+        ),
+        patch(
+            "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
+            return_value={
+                "system-status": ("service", "default", _SERVICE_PRINCIPALS)
+            },
+        ),
+    ):
+        initialize_administrator_identities(db.db_path)
+        initialize_service_peer_identities(db.db_path)
+        app = FastAPI()
+        app.include_router(system_router)
+        app.include_router(admin_router)
+        app.middleware("http")(service_peer_callback_middleware)
+        app.middleware("http")(administrator_identity_middleware)
+        yield app
 
     _container.resolved_sqlite_client = None
+    _container.resolved_marketplace_signer = None
     _container.resolved_system_service = None
 
 
 @pytest_asyncio.fixture
-async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
-    _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+async def client(
+    admin_app, db
+) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+    transport = httpx.ASGITransport(app=admin_app)
+    async with StorefrontClient(
+        "http://test",
+        transport=transport,
+        signer=_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_MARKETPLACE_PUBLISHERS,
+    ) as c:
+        yield c, db
 
-    app = FastAPI()
-    app.include_router(system_router)
-    app.include_router(admin_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
-    transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient("http://test", transport=transport) as c:
+@pytest_asyncio.fixture
+async def client_untrusted(admin_app) -> AsyncIterator[StorefrontClient]:
+    transport = httpx.ASGITransport(app=admin_app)
+    async with StorefrontClient(
+        "http://test",
+        transport=transport,
+        signer=_UNTRUSTED_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_MARKETPLACE_PUBLISHERS,
+    ) as c:
         yield c
 
-    _container.resolved_sqlite_client = None
-    _container.resolved_system_service = None
+
+@pytest_asyncio.fixture
+async def unsigned_client(admin_app) -> AsyncIterator[httpx.AsyncClient]:
+    transport = httpx.ASGITransport(app=admin_app)
+    async with httpx.AsyncClient(
+        base_url="http://test",
+        transport=transport,
+    ) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def service_client(admin_app) -> AsyncIterator[StorefrontClient]:
+    transport = httpx.ASGITransport(app=admin_app)
+    async with StorefrontClient(
+        "http://test",
+        transport=transport,
+        signer=_SERVICE_SIGNER,
+        caller_role="service",
+        expected_publishers=_MARKETPLACE_PUBLISHERS,
+    ) as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
@@ -115,21 +175,20 @@ class TestHealthEndpoint:
         assert result.checks.get("database") == "ok"
         assert "registry" not in result.checks
 
-    async def test_system_status_includes_paused(self, client):
-        c, _ = client
-        result = await c.get_system_status()
+    async def test_system_status_includes_paused(self, service_client):
+        result = await service_client.get_system_status()
         assert result.paused is False
 
-    async def test_system_status_includes_registry_check(self, client):
-        c, _ = client
-        result = await c.get_system_status()
+    async def test_system_status_includes_registry_check(self, service_client):
+        result = await service_client.get_system_status()
         registry_check = result.checks.get("registry")
         assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
 
-    async def test_system_status_includes_negotiation_strategy_check(self, client):
-        c, _ = client
-        result = await c.get_system_status()
+    async def test_system_status_includes_negotiation_strategy_check(
+        self, service_client
+    ):
+        result = await service_client.get_system_status()
         strat_check = result.checks.get("negotiation_strategy")
         assert strat_check is not None
         assert isinstance(strat_check, str) and strat_check
@@ -137,7 +196,9 @@ class TestHealthEndpoint:
             f"Negotiation strategy would exit on every round: {strat_check!r}"
         )
 
-    async def test_system_status_surfaces_site_projection_state(self, db):
+    async def test_system_status_surfaces_site_projection_state(
+        self, db, service_client
+    ):
         """End-to-end: a populated projection status summary must survive
         SystemService -> HealthResponse (server, pydantic) -> HTTP JSON ->
         HealthResponse (client, dataclass) intact. Exercises the real route
@@ -162,45 +223,31 @@ class TestHealthEndpoint:
                 },
             },
         }
-        _container.resolved_sqlite_client = db
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
+            marketplace_signer=_MARKETPLACE_SIGNER,
             projection_status_provider=lambda: summary,
         )
-        try:
-            app = FastAPI()
-            app.include_router(system_router)
-            transport = httpx.ASGITransport(app=app)
-            async with StorefrontClient("http://test", transport=transport) as c:
-                result = await c.get_system_status()
-        finally:
-            _container.resolved_sqlite_client = None
-            _container.resolved_system_service = None
+        result = await service_client.get_system_status()
 
         assert result.site_projections == summary
         assert result.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
         assert result.site_projections["site-a"]["capacity_bucket"]["state"] == "unavailable"
 
-    async def test_health_omits_site_projections(self, db):
+    async def test_health_omits_site_projections(self, db, service_client):
         """The fast liveness probe (/health) must not carry this field at all."""
-        _container.resolved_sqlite_client = db
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
+            marketplace_signer=_MARKETPLACE_SIGNER,
             projection_status_provider=lambda: {"site-a": {}},
         )
-        try:
-            app = FastAPI()
-            app.include_router(system_router)
-            transport = httpx.ASGITransport(app=app)
-            async with StorefrontClient("http://test", transport=transport) as c:
-                result = await c.get_health()
-        finally:
-            _container.resolved_sqlite_client = None
-            _container.resolved_system_service = None
+        result = await service_client.get_health()
 
         assert result.site_projections is None
 
-    async def test_system_status_surfaces_listing_mode_explanations(self, db):
+    async def test_system_status_surfaces_listing_mode_explanations(
+        self, db, service_client
+    ):
         """Same real end-to-end round trip as
         test_system_status_surfaces_site_projection_state (above), for the
         sibling field -- this is exactly the layer that hid the original
@@ -212,39 +259,25 @@ class TestHealthEndpoint:
         explanations = {
             "site-a": {"gpu-pool": "unrecognized listing_mode 'bogus', using 'fungible'"},
         }
-        _container.resolved_sqlite_client = db
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
+            marketplace_signer=_MARKETPLACE_SIGNER,
             listing_mode_explanation_provider=lambda: explanations,
         )
-        try:
-            app = FastAPI()
-            app.include_router(system_router)
-            transport = httpx.ASGITransport(app=app)
-            async with StorefrontClient("http://test", transport=transport) as c:
-                result = await c.get_system_status()
-        finally:
-            _container.resolved_sqlite_client = None
-            _container.resolved_system_service = None
+        result = await service_client.get_system_status()
 
         assert result.listing_mode_explanations == explanations
 
-    async def test_health_omits_listing_mode_explanations(self, db):
+    async def test_health_omits_listing_mode_explanations(
+        self, db, service_client
+    ):
         """The fast liveness probe (/health) must not carry this field either."""
-        _container.resolved_sqlite_client = db
         _container.resolved_system_service = SystemService(
             sqlite_client=db,
+            marketplace_signer=_MARKETPLACE_SIGNER,
             listing_mode_explanation_provider=lambda: {"site-a": {}},
         )
-        try:
-            app = FastAPI()
-            app.include_router(system_router)
-            transport = httpx.ASGITransport(app=app)
-            async with StorefrontClient("http://test", transport=transport) as c:
-                result = await c.get_health()
-        finally:
-            _container.resolved_sqlite_client = None
-            _container.resolved_system_service = None
+        result = await service_client.get_health()
 
         assert result.listing_mode_explanations is None
 
@@ -254,10 +287,14 @@ class TestHealthEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestAdminPause:
-    async def test_requires_admin_key(self, client_no_key):
+    async def test_missing_auth_is_rejected(self, unsigned_client):
+        response = await unsigned_client.post("/api/v1/admin/pause", json={})
+        assert response.status_code == 401
+
+    async def test_valid_untrusted_principal_is_rejected(self, client_untrusted):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.admin_pause()
-        assert "403" in str(exc_info.value)
+            await client_untrusted.admin_pause()
+        assert exc_info.value.status_code == 403
 
     async def test_pause_sets_flag(self, client):
         c, _ = client
@@ -265,10 +302,10 @@ class TestAdminPause:
         assert result.paused is True
         assert _server._GLOBALLY_PAUSED is True
 
-    async def test_pause_reflected_in_system_status(self, client):
+    async def test_pause_reflected_in_system_status(self, client, service_client):
         c, _ = client
         await c.admin_pause()
-        status = await c.get_system_status()
+        status = await service_client.get_system_status()
         assert status.paused is True
 
 
@@ -277,10 +314,10 @@ class TestAdminPause:
 # ---------------------------------------------------------------------------
 
 class TestAdminResume:
-    async def test_requires_admin_key(self, client_no_key):
+    async def test_rejects_untrusted_principal(self, client_untrusted):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.admin_resume()
-        assert "403" in str(exc_info.value)
+            await client_untrusted.admin_resume()
+        assert exc_info.value.status_code == 403
 
     async def test_resume_clears_flag(self, client):
         c, _ = client
@@ -290,11 +327,11 @@ class TestAdminResume:
         assert result.paused is False
         assert _server._GLOBALLY_PAUSED is False
 
-    async def test_resume_reflected_in_system_status(self, client):
+    async def test_resume_reflected_in_system_status(self, client, service_client):
         c, _ = client
         await c.admin_pause()
         await c.admin_resume()
-        status = await c.get_system_status()
+        status = await service_client.get_system_status()
         assert status.paused is False
 
 # ---------------------------------------------------------------------------
@@ -313,10 +350,10 @@ class TestAdminImportResources:
         'RTX 5080,90.0,"California, US",kvm1\n'
     )
 
-    async def test_requires_admin_key(self, client_no_key):
+    async def test_rejects_untrusted_principal(self, client_untrusted):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.admin_import_resources(self._VALID_CSV.encode())
-        assert "403" in str(exc_info.value)
+            await client_untrusted.admin_import_resources(self._VALID_CSV.encode())
+        assert exc_info.value.status_code == 403
 
     async def test_imports_valid_csv(self, client):
         c, db = client
@@ -411,7 +448,8 @@ async def _seed_dynamic_listing_pool_rows(
             demands=[],
             fulfillment_resource=None,
             max_duration_seconds=3600,
-            seller="http://seller",
+            storefront_url="http://seller",
+            seller_principal=_TEST_SELLER_PRINCIPAL,
         )
         if record_derived:
             record_derived_listing(
@@ -721,17 +759,18 @@ class TestFulfillmentEvents:
 
         assert "502" in str(exc_info.value)
 
-    async def test_usage_started_closes_oversized_listings(self, client):
+    async def test_usage_started_closes_oversized_listings(
+        self, db, service_client
+    ):
         from tests.fake_site import site_capacity
-
-        c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            response = await c.notify_usage_started(
+            response = await service_client.notify_usage_started(
                 capacity_reservation_id,
+                site_id="default",
                 escrow_uid="escrow-2x",
                 provider_id="provider-a",
                 provider_lease_id="lease-2x",
@@ -749,23 +788,28 @@ class TestFulfillmentEvents:
         # provisioning service's to advance.
         assert fake.reservations[capacity_reservation_id]["state"] == "reserved"
 
-    async def test_capacity_released_releases_and_reopens(self, client):
+    async def test_capacity_released_releases_and_reopens(
+        self, db, service_client
+    ):
         from tests.fake_site import site_capacity
-
-        c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            closed = await c.notify_usage_started(
-                capacity_reservation_id, escrow_uid="escrow-2x",
+            closed = await service_client.notify_usage_started(
+                capacity_reservation_id,
+                site_id="default",
+                escrow_uid="escrow-2x",
             )
             assert sorted(closed["closed_listing_ids"]) == [
                 "listing-3x", "listing-4x",
             ]
 
-            response = await c.notify_capacity_released(capacity_reservation_id)
+            response = await service_client.notify_capacity_released(
+                capacity_reservation_id,
+                site_id="default",
+            )
 
         assert response["capacity_reservation_id"] == capacity_reservation_id
         assert response["state"] == "released"
@@ -785,23 +829,28 @@ class TestFulfillmentEvents:
         assert fake.reservations[capacity_reservation_id]["state"] == "released"
         assert fake._available("pool-h200-1") == 4
 
-    async def test_manual_compute_listings_reopen_after_release(self, client):
+    async def test_manual_compute_listings_reopen_after_release(
+        self, db, service_client
+    ):
         from tests.fake_site import site_capacity
-
-        c, db = client
         await _seed_dynamic_listing_pool_rows(db, record_derived=False)
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            closed = await c.notify_usage_started(
-                capacity_reservation_id, escrow_uid="escrow-2x",
+            closed = await service_client.notify_usage_started(
+                capacity_reservation_id,
+                site_id="default",
+                escrow_uid="escrow-2x",
             )
             assert sorted(closed["closed_listing_ids"]) == [
                 "listing-3x", "listing-4x",
             ]
 
-            response = await c.notify_capacity_released(capacity_reservation_id)
+            response = await service_client.notify_capacity_released(
+                capacity_reservation_id,
+                site_id="default",
+            )
 
         assert sorted(response["reopened_listing_ids"]) == [
             "listing-3x", "listing-4x",
@@ -819,17 +868,18 @@ class TestFulfillmentEvents:
             4: "open",
         }
 
-    async def test_fulfillment_failed_releases_with_failure_metadata(self, client):
+    async def test_fulfillment_failed_releases_with_failure_metadata(
+        self, db, service_client
+    ):
         from tests.fake_site import site_capacity
-
-        c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         fake = _fake_pool_site()
 
         with site_capacity(fake) as capacity:
             capacity_reservation_id = await _ledger_hold(capacity, gpu_count=2)
-            response = await c.notify_fulfillment_failed(
+            response = await service_client.notify_fulfillment_failed(
                 capacity_reservation_id,
+                site_id="default",
                 provider_id="provider-a",
                 provider_job_id="job-create-1",
                 resource_id="provider-resource-2x",
@@ -846,15 +896,16 @@ class TestFulfillmentEvents:
         assert reservation["failure_message"] == "host rejected request"
         assert fake._available("pool-h200-1") == 4
 
-    async def test_release_of_unknown_reservation_is_idempotent(self, client):
+    async def test_release_of_unknown_reservation_is_idempotent(
+        self, service_client
+    ):
         """The watchdog usually released first; a second capacity-released
         for the same (or an unknown) reservation must land cleanly."""
         from tests.fake_site import FakeSite, site_capacity
-
-        c, _ = client
         with site_capacity(FakeSite()):
-            response = await c.notify_capacity_released(
+            response = await service_client.notify_capacity_released(
                 "ledger-only-alloc",
+                site_id="default",
                 resource_id="compute-kvm1-001",
                 released_at="2026-06-10T00:00:00Z",
             )
@@ -945,11 +996,10 @@ class TestRealOrchestrationCacheToReconciliation:
 # ---------------------------------------------------------------------------
 
 class TestStreamEvents:
-    async def test_requires_admin_key(self, client_no_key):
-        """Events endpoint requires admin key; client without key receives 403."""
+    async def test_rejects_untrusted_principal(self, client_untrusted):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.get_events()
-        assert "403" in str(exc_info.value)
+            await client_untrusted.get_events()
+        assert exc_info.value.status_code == 403
 
     async def test_returns_empty_list_on_fresh_db(self, client):
         c, _ = client
@@ -1046,11 +1096,12 @@ class TestPatchResource:
             # No attributes.vm_host → capacity gate skipped
         )
 
-    async def test_requires_admin_key(self, client_no_key):
-        c = client_no_key
+    async def test_rejects_untrusted_principal(self, client_untrusted):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.patch_resource("compute-patch-001", state="available")
-        assert exc_info.value.status_code in (401, 403)
+            await client_untrusted.patch_resource(
+                "compute-patch-001", state="available"
+            )
+        assert exc_info.value.status_code == 403
 
     async def test_patch_state_to_available(self, client):
         c, db = client

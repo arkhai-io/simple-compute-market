@@ -1,7 +1,7 @@
 """Phase 4 of the escrow-templates rollout: row-level templates drive
 publishing instead of CHAINS broadcast + min_price/token synthesis.
 
-These tests exercise the new branch in ``_publish_round``: when a row
+These tests exercise the template branch in ``_publish_command_round``: when a row
 carries materialized ``accepted_escrows`` (written by the CSV importer's
 Phase-3 DSL parser), publishing reads it straight, scales rate values
 against the entry's chain, and skips the legacy ``get_erc20_escrow_obligation_default``
@@ -16,7 +16,10 @@ import sqlite3
 
 import pytest
 
-from market_storefront.cli_publish import _publish_round, _scale_template_entries
+from market_storefront.cli_publish import (
+    _publish_command_round,
+    _scale_template_entries,
+)
 from market_alkahest.token import ERC20TokenMetadata, TokenResolutionError
 from market_config.config_loader import ChainConfig
 
@@ -136,12 +139,9 @@ def _round_kwargs(**overrides):
     base = dict(
         base_url="http://agent",
         wallet_address=_WALLET_ADDRESS,
-        private_key=None,
         default_min_price=None,
         default_token_address=None,
         default_max_duration_seconds=None,
-        rpc_url="http://rpc",
-        chain_id=84532,
     )
     base.update(overrides)
     return base
@@ -237,7 +237,7 @@ def test_scale_template_entries_rejects_overprecision(chains):
 
 
 # ---------------------------------------------------------------------------
-# _publish_round template branch
+# _publish_command_round template branch
 # ---------------------------------------------------------------------------
 
 
@@ -279,7 +279,8 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
         alkahest_mod, "get_erc20_escrow_obligation_default", boom_alkahest,
     )
 
-    published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed = result.published, result.failed
     assert len(published) == 1
     assert not failed
     entry = calls[0]["accepted_escrows"][0]
@@ -324,7 +325,8 @@ def test_publish_round_template_multi_chain_emits_one_entry_per_chain(
         ),
     )
 
-    published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed = result.published, result.failed
     assert len(published) == 1
     assert not failed
     chains_seen = [e["chain_name"] for e in captured[0]["escrows"]]
@@ -358,7 +360,8 @@ def test_publish_round_template_ignores_row_min_price(tmp_path, monkeypatch):
             or {"status": "created", "listing_id": "l1"}
         ),
     )
-    published, _, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published = result.published
     assert len(published) == 1
     entry = captured[0]["escrows"][0]
     assert entry["chain_name"] == "base-sepolia"
@@ -382,7 +385,8 @@ def test_publish_round_template_bad_chain_fails_row(tmp_path, monkeypatch):
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: pytest.fail("should not publish"),
     )
-    _, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    failed = result.failed
     assert len(failed) == 1
     assert failed[0][0]["resource_id"] == "compute-bad-chain"
     assert "unknown chain" in failed[0][1]
@@ -404,14 +408,14 @@ def test_publish_round_template_unresolvable_token_fails_row(tmp_path, monkeypat
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: pytest.fail("should not publish"),
     )
-    _, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    failed = result.failed
     assert len(failed) == 1
     assert "unresolvable" in failed[0][1]
 
 
-def test_publish_round_no_template_falls_back_to_legacy(tmp_path, monkeypatch):
-    """Rows without accepted_escrows still use the min_price/token + CHAINS
-    broadcast path. Backward compat during the rollout."""
+def test_publish_round_no_template_uses_synthesized_payload(tmp_path, monkeypatch):
+    """Rows without accepted_escrows synthesize payloads from price and chains."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -432,10 +436,10 @@ def test_publish_round_no_template_falls_back_to_legacy(tmp_path, monkeypatch):
             or {"status": "created", "listing_id": "l1"}
         ),
     )
-    published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed = result.published, result.failed
     assert len(published) == 1
     assert not failed
-    # Legacy path broadcasts to every chain in CHAINS — confirms the
-    # fallback is engaged when no template is set on the row.
+    # The synthesized path emits one accepted escrow for each configured chain.
     seen_chains = [e["chain_name"] for e in captured[0]["escrows"]]
     assert set(seen_chains) == {"base-sepolia", "optimism-sepolia"}

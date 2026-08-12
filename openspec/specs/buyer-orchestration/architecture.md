@@ -52,12 +52,21 @@ Recovery starts from the latest authoritative persisted handoff. If negotiation 
 
 Aggregation is buyer-local policy over discovered offers. Settlement-specific aggregation mechanisms may come from kit packages, but core does not assume a particular escrow, token, or market-domain score. Aggregation output is converted through domain codecs before entering negotiation.
 
+## Identity-first execution
+
+The composition root gives buyer orchestration one marketplace signer. The signer exposes an exact `{scheme, identifier}` principal; matching identifier text under another scheme is a different credential and cannot authorize the buyer. Discovery-authenticated calls, negotiation, storefront settlement, heartbeats, and recovery use that scheme-neutral operation, so core never receives a raw private-key field, infers a principal from wallet material, or branches on the signer's scheme.
+
+Marketplace identity and transaction credentials have independent lifetimes. Wallet and chain settings are optional until domain and settlement selection identifies an EVM effect. A hosted-fiat path therefore uses the same buyer lifecycle with an Ed25519 signer and without wallet derivation, balance or gas checks, RPC or chain configuration, or an Alkahest client. An Alkahest path separately resolves and validates the EVM wallet and chain inputs owned by that adapter; even when marketplace signing and transaction signing use the same underlying EIP-191 key by explicit configuration, core does not infer that coupling.
+
+Run logs persist the canonical public principal, signature-contract version, accepted obligation and operation identities, and domain state required to resume. They do not serialize credential material. Recovery checks the complete recorded principal and permits a different credential only when a completed rotation authorizes it as an active replacement, before submitting another authenticated or settlement mutation.
+
 ## Current limits
 
 The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.
 
 ## Related contracts
 
+- [Marketplace identity](../marketplace-identity/spec.md)
 - [Market composition](../market-composition/spec.md)
 - [Registry discovery](../registry-discovery/spec.md)
 - [Negotiation protocol](../negotiation-protocol/spec.md)

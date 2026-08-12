@@ -21,6 +21,18 @@ class Project:
 
 
 PROJECTS: dict[str, Project] = {
+    "kit/identity": Project(
+        "kit/identity",
+        "arkhai-kit-identity",
+        ("kit/identity/tests",),
+        ("dist-identity",),
+    ),
+    "kit/hosted-settlement": Project(
+        "kit/hosted-settlement",
+        "arkhai-kit-hosted-settlement",
+        ("kit/hosted-settlement/tests",),
+        ("dist-hosted-client", "dist-kits"),
+    ),
     "kit/settlement-runtime": Project(
         "kit/settlement-runtime",
         "arkhai-kit-settlement-runtime",
@@ -36,6 +48,12 @@ PROJECTS: dict[str, Project] = {
     "kit/site": Project(
         "kit/site", "arkhai-kit-site", ("kit/site/tests",), ("dist-kits",)
     ),
+    "kit/site-client": Project(
+        "kit/site-client",
+        "arkhai-kit-site-client",
+        ("kit/site-client/tests",),
+        ("dist-kits",),
+    ),
     "kit/resource-pools": Project(
         "kit/resource-pools",
         "arkhai-kit-resource-pools",
@@ -47,6 +65,78 @@ PROJECTS: dict[str, Project] = {
         "arkhai-kit-fulfillment",
         ("kit/fulfillment/tests",),
         ("dist-kits",),
+    ),
+    "kit/policy": Project(
+        "kit/policy",
+        "arkhai-kit-policy",
+        ("kit/policy/tests",),
+        ("dist-policy",),
+    ),
+    "core/registry-client": Project(
+        "core/registry-client",
+        "arkhai-core-registry-client",
+        ("core/registry-client/tests",),
+        ("dist-registry-client",),
+    ),
+    "core/registry": Project(
+        "core/registry",
+        "arkhai-core-registry",
+        ("core/registry/tests",),
+        ("dist-arkhai-core-registry",),
+    ),
+    "core/storefront-client": Project(
+        "core/storefront-client",
+        "arkhai-core-storefront-client",
+        ("core/storefront-client/tests",),
+        ("dist-storefront-client",),
+    ),
+    "core/buyer": Project(
+        "core/buyer",
+        "arkhai-core-buyer",
+        ("core/buyer/tests",),
+        ("dist-arkhai-core-buyer",),
+    ),
+    "core/storefront": Project(
+        "core/storefront",
+        "arkhai-core-storefront",
+        ("core/storefront/tests",),
+        ("dist-arkhai-core-storefront",),
+    ),
+    "domains/vms/domain": Project(
+        "domains/vms/domain",
+        "arkhai-vms",
+        ("domains/vms/domain/tests",),
+        ("dist",),
+    ),
+    "domains/vms/buyer": Project(
+        "domains/vms/buyer",
+        "arkhai-vms-buyer",
+        ("domains/vms/buyer/tests",),
+        ("dist",),
+    ),
+    "domains/vms/provisioning/adapter": Project(
+        "domains/vms/provisioning/adapter",
+        "arkhai-vms-provisioning-adapter",
+        ("domains/vms/provisioning/adapter/tests",),
+        ("dist",),
+    ),
+    "domains/apicredits": Project(
+        "domains/apicredits",
+        "arkhai-apicredits-domain",
+        ("domains/apicredits/tests",),
+        ("dist",),
+    ),
+    "domains/apicredits/buyer": Project(
+        "domains/apicredits/buyer",
+        "arkhai-apicredits-buyer",
+        ("domains/apicredits/buyer/tests",),
+        ("dist",),
+    ),
+    "domains/apicredits/service": Project(
+        "domains/apicredits/service",
+        "arkhai-apicredits-service",
+        ("domains/apicredits/service/src/tests",),
+        ("dist",),
     ),
     "domains/vms/storefront": Project(
         "domains/vms/storefront",
@@ -60,10 +150,28 @@ PROJECTS: dict[str, Project] = {
         ("domains/apicredits/storefront/tests",),
         ("dist",),
     ),
+    "domains/bare_metal": Project(
+        "domains/bare_metal",
+        "arkhai-bare-metal",
+        ("domains/bare_metal/tests",),
+        ("dist",),
+    ),
     "domains/bare_metal/storefront": Project(
         "domains/bare_metal/storefront",
         "arkhai-bare-metal-storefront",
         ("domains/bare_metal/storefront/tests",),
+        ("dist",),
+    ),
+    "domains/bare_metal/provisioning/adapter": Project(
+        "domains/bare_metal/provisioning/adapter",
+        "arkhai-bare-metal-provisioning-adapter",
+        ("domains/bare_metal/provisioning/adapter/tests",),
+        ("dist",),
+    ),
+    "e2e-tests": Project(
+        "e2e-tests",
+        "arkhai-e2e-tests",
+        ("e2e-tests",),
         ("dist",),
     ),
     "provisioning/compute/service": Project(
@@ -84,6 +192,55 @@ PROJECTS: dict[str, Project] = {
 }
 
 IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
+    "kit/identity": (
+        "core/registry-client",
+        "core/registry",
+        "core/buyer",
+        "core/storefront",
+        "core/storefront-client",
+        "kit/settlement-runtime",
+        "kit/hosted-settlement",
+        "kit/policy",
+        "kit/site-client",
+        "domains/vms/buyer",
+        "domains/apicredits/buyer",
+        "domains/vms/domain",
+        "domains/apicredits",
+        "domains/apicredits/service",
+        "domains/vms/storefront",
+        "domains/apicredits/storefront",
+        "domains/bare_metal/storefront",
+        "domains/bare_metal",
+        "e2e-tests",
+        "domains/vms/provisioning/adapter",
+        "domains/bare_metal/provisioning/adapter",
+        "provisioning/compute/service",
+    ),
+    "core/registry-client": (
+        "core/registry",
+        "core/buyer",
+        "core/storefront",
+        "domains/apicredits/storefront",
+        "domains/vms/storefront",
+        "e2e-tests",
+    ),
+    "core/storefront-client": (
+        "domains/vms/storefront",
+        "domains/vms/provisioning/adapter",
+        "domains/bare_metal/provisioning/adapter",
+        "provisioning/compute/service",
+        "e2e-tests",
+    ),
+    "kit/site-client": (
+        "domains/apicredits/storefront",
+        "domains/vms/storefront",
+        "domains/bare_metal/provisioning/adapter",
+        "provisioning/compute/service",
+        "e2e-tests",
+    ),
+    "kit/hosted-settlement": (
+        "domains/vms/storefront",
+    ),
     "kit/settlement-runtime": (
         "kit/alkahest",
         "domains/vms/storefront",

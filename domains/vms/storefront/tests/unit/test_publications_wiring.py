@@ -8,15 +8,32 @@ asserts on actual rows.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from market_identity import Ed25519Signer
 
 from market_storefront.services import publication_service
-from market_storefront.utils.multi_registry_client import PublishResult
+from core_storefront.multi_registry_client import PublishResult
+from market_storefront.utils.config import BASE_URL_OVERRIDE
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
+
+_SELLER = Ed25519Signer(b"\x73" * 32)
+_SELLER_PRINCIPAL = _SELLER.identity
+
+def _registry_publish_response(listing_id: str) -> dict:
+    """Body returned after the registry client verifies a signed response."""
+    return {
+        "listing_id": listing_id,
+        "publisher_id": 1,
+        "publisher_principals": {
+            "identities": [_SELLER_PRINCIPAL.model_dump(mode="json")],
+        },
+        "status": "open",
+        "created_at": "2026-08-11T00:00:00",
+        "updated_at": "2026-08-11T00:00:00",
+    }
 
 
 def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
@@ -51,7 +68,8 @@ class TestPublishOrderRecordsPublications:
     async def test_invalid_legacy_row_is_rejected_before_registry_contact(self):
         order = {
             "listing_id": "legacy-invalid",
-            "seller": "http://seller.test",
+            "storefront_url": BASE_URL_OVERRIDE,
+            "seller_principal": _SELLER_PRINCIPAL,
             "offer_resource": {
                 "gpu_model": "H200", "gpu_count": 1,
                 "sla": 99.9, "region": "test",
@@ -72,7 +90,8 @@ class TestPublishOrderRecordsPublications:
 
         listing = Listing.model_validate({
             "listing_id": "mutated-listing",
-            "seller": "http://seller.test",
+            "storefront_url": BASE_URL_OVERRIDE,
+            "seller_principal": _SELLER_PRINCIPAL,
             "offer_resource": {
                 "resource_id": "res-before-mutation", "gpu_model": "H200",
                 "gpu_count": 1, "sla": 99.9, "region": "test",
@@ -96,7 +115,8 @@ class TestPublishOrderRecordsPublications:
     ):
         order = {
             "listing_id": "L1",
-            "seller": "http://seller.test",
+            "storefront_url": BASE_URL_OVERRIDE,
+            "seller_principal": _SELLER_PRINCIPAL,
             "offer_resource": {
                 "resource_id": "res-L1", "gpu_model": "H200",
                 "gpu_count": 1, "sla": 99.9, "region": "test",
@@ -112,30 +132,43 @@ class TestPublishOrderRecordsPublications:
         results = [
             PublishResult(
                 registry_url="http://r1", success=True,
-                response={"listing_id": "r1-id"}, error=None,
-                payload={"listing_id": "L1"}, registry_assigned_id="r1-id",
+                response=_registry_publish_response("L1"), error=None,
+                payload={"listing_id": "L1"}, registry_assigned_id="L1",
             ),
             PublishResult(
                 registry_url="http://r2", success=True,
-                response={"listing_id": "r2-id"}, error=None,
-                payload={"listing_id": "L1"}, registry_assigned_id="r2-id",
+                response=_registry_publish_response("L1"), error=None,
+                payload={"listing_id": "L1"}, registry_assigned_id="L1",
             ),
         ]
         cm, _client = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.services.publication_service._make_registry_client",
-                  return_value=cm),
-            settings_overrides(enable_registry_discovery=True,
-                               **{"wallet.private_key": "0xkey"}),
+            patch(
+                "market_storefront.services.publication_service._make_registry_client",
+                return_value=cm,
+            ),
+            patch(
+                "market_storefront.services.publication_service.stage_event",
+            ) as stage_event,
+            settings_overrides(enable_registry_discovery=True),
         ):
             out = await publication_service.publish_order_to_registry(order)
         assert out["status"] == "published"
+        assert stage_event.call_args.kwargs["agent_url"] == BASE_URL_OVERRIDE
+        assert stage_event.call_args.kwargs["seller_principal"] == (
+            _SELLER_PRINCIPAL.model_dump(mode="json")
+        )
+        publish_kwargs = _client.publish_listing_per_registry.await_args.kwargs
+        assert set(publish_kwargs) == {"payloads"}
+        published_request = publish_kwargs["payloads"]["http://r1"]
+        assert published_request.storefront_url == BASE_URL_OVERRIDE
+        assert not hasattr(published_request, "private_key")
 
         rows = await patched_sqlite.load_publications(listing_id="L1")
         assert {r["registry_url"] for r in rows} == {"http://r1", "http://r2"}
         for r in rows:
             assert r["status"] == "published"
-            assert r["registry_assigned_id"] in {"r1-id", "r2-id"}
+            assert r["registry_assigned_id"] == "L1"
 
     @pytest.mark.asyncio
     async def test_partial_failure_records_both_statuses(self, patched_sqlite):
@@ -144,7 +177,8 @@ class TestPublishOrderRecordsPublications:
         one. This is the audit trail consumers will read to retry."""
         order = {
             "listing_id": "Lpartial",
-            "seller": "http://seller.test",
+            "storefront_url": BASE_URL_OVERRIDE,
+            "seller_principal": _SELLER_PRINCIPAL,
             "offer_resource": {
                 "resource_id": "res-Lpartial", "gpu_model": "H200",
                 "gpu_count": 1, "sla": 99.9, "region": "test",
@@ -166,17 +200,18 @@ class TestPublishOrderRecordsPublications:
             ),
             PublishResult(
                 registry_url="http://r2", success=True,
-                response={"listing_id": "r2-id"}, error=None,
+                response=_registry_publish_response("Lpartial"), error=None,
                 payload={"listing_id": "Lpartial"},
-                registry_assigned_id="r2-id",
+                registry_assigned_id="Lpartial",
             ),
         ]
         cm, _ = _mock_multi_registry(["http://r1", "http://r2"], results)
         with (
-            patch("market_storefront.services.publication_service._make_registry_client",
-                  return_value=cm),
-            settings_overrides(enable_registry_discovery=True,
-                               **{"wallet.private_key": "0xkey"}),
+            patch(
+                "market_storefront.services.publication_service._make_registry_client",
+                return_value=cm,
+            ),
+            settings_overrides(enable_registry_discovery=True),
         ):
             out = await publication_service.publish_order_to_registry(order)
         # At least one OK → overall status is 'published'.

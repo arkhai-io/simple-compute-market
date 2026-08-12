@@ -1,12 +1,8 @@
 """Unit tests for database initialisation helpers.
 
-These tests cover the branching logic in ``_apply_migrations()``:
-
-- A database with no ``alembic_version`` table is *stamped* at head (not
-  upgraded), so the full migration chain is not replayed against a schema
-  that ``create_all`` already built correctly.
-- A database that already has ``alembic_version`` tracking in place is
-  *upgraded*, applying only migrations that have not yet been recorded.
+Fresh databases are built at current metadata and stamped at head. Versioned
+databases upgrade normally. Recognized unversioned schemas are stamped at their
+actual boundary and upgraded, so legacy owner data is never mislabeled as head.
 - The Alembic ``Config`` object passed to either command carries the live
   database URL from ``settings`` and a ``script_location`` that resolves
   to the real ``alembic/`` directory on disk.
@@ -22,9 +18,12 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.db.database import _apply_migrations
+from src.db.models import Base, Publisher, PublisherIdentity
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +92,33 @@ class TestApplyMigrations:
         assert mock_upgrade.call_args[0][1] == "head"
         mock_stamp.assert_not_called()
 
+    def test_unversioned_principal_schema_is_upgraded_from_detected_boundary(self):
+        legacy = _make_engine()
+        with legacy.begin() as connection:
+            connection.execute(text("CREATE TABLE publishers (publisher_id INTEGER)"))
+            connection.execute(
+                text(
+                    "CREATE TABLE identities (id INTEGER, publisher_id INTEGER, "
+                    "scheme VARCHAR, identifier VARCHAR)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE listings (listing_id VARCHAR, publisher_id INTEGER, "
+                    "settlement_options JSON)"
+                )
+            )
+
+        with (
+            patch("src.db.database.engine", legacy),
+            patch("alembic.command.stamp") as mock_stamp,
+            patch("alembic.command.upgrade") as mock_upgrade,
+        ):
+            _apply_migrations()
+
+        assert mock_stamp.call_args[0][1] == "015_listing_settlement_options"
+        assert mock_upgrade.call_args[0][1] == "head"
+
     def test_config_carries_live_database_url(self):
         """The Config passed to stamp/upgrade uses the live settings URL."""
         from src.config import settings
@@ -131,3 +157,33 @@ class TestApplyMigrations:
         assert os.path.basename(os.path.normpath(script_location)) == "alembic", (
             f"Expected script_location to end in 'alembic', got {script_location!r}"
         )
+
+
+def test_sqlite_rejects_a_second_primary_identity_for_one_publisher():
+    engine = _make_engine()
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    publisher = Publisher()
+    session.add(publisher)
+    session.flush()
+    session.add(
+        PublisherIdentity(
+            publisher_id=publisher.publisher_id,
+            scheme="ed25519",
+            identifier="a" * 43,
+            status="primary",
+        )
+    )
+    session.commit()
+    session.add(
+        PublisherIdentity(
+            publisher_id=publisher.publisher_id,
+            scheme="ed25519",
+            identifier="b" * 43,
+            status="primary",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()

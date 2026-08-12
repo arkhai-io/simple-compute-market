@@ -7,16 +7,33 @@ routes to return 404.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from core_storefront.models.system_models import AdminPauseResponse
+from core_storefront.auth import AuthenticatedPrincipal
+from core_storefront.identity_authority import (
+    IdentityAuthorityError,
+    StorefrontIdentityAuthority,
+)
+from core_storefront.identity_lifecycle import (
+    inspect_identity,
+    retire_rotated_identity,
+    rotate_identity,
+)
+from core_storefront.models.system_models import (
+    AdminPauseResponse,
+    IdentityRetirementRequest,
+    IdentityStatusResponse,
+)
 from core_storefront.stage_log import stage_event
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from market_identity import RotationRequest
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
@@ -69,6 +86,83 @@ class AdminController:
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
+
+    @staticmethod
+    def _operator(request: Request) -> AuthenticatedPrincipal:
+        authenticated = getattr(request.state, "marketplace_authenticated", None)
+        if not isinstance(authenticated, AuthenticatedPrincipal):
+            raise HTTPException(
+                status_code=403,
+                detail="Administrator principal authentication is required",
+            )
+        return authenticated
+
+    @router.post(
+        "/identity/rotations",
+        response_model=IdentityStatusResponse,
+        summary="Apply a two-proof marketplace identity rotation",
+    )
+    async def rotate_marketplace_identity(
+        self,
+        body: RotationRequest,
+        request: Request,
+    ) -> IdentityStatusResponse:
+        operator = self._operator(request)
+        try:
+            return await asyncio.to_thread(
+                rotate_identity,
+                StorefrontIdentityAuthority(self._db.db_path),
+                request=body,
+                operator=operator.principal,
+                now=int(time.time()),
+            )
+        except IdentityAuthorityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.get(
+        "/identity/status",
+        response_model=IdentityStatusResponse,
+        summary="Inspect one marketplace identity subject",
+    )
+    async def marketplace_identity_status(
+        self,
+        request: Request,
+        authority: str = Query(min_length=1, max_length=256),
+        subject: str = Query(min_length=1, max_length=256),
+    ) -> IdentityStatusResponse:
+        self._operator(request)
+        try:
+            return await asyncio.to_thread(
+                inspect_identity,
+                StorefrontIdentityAuthority(self._db.db_path),
+                authority=authority,
+                subject=subject,
+                now=int(time.time()),
+            )
+        except IdentityAuthorityError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.post(
+        "/identity/retirements",
+        response_model=IdentityStatusResponse,
+        summary="Retire the old principal from an applied rotation",
+    )
+    async def retire_marketplace_identity(
+        self,
+        body: IdentityRetirementRequest,
+        request: Request,
+    ) -> IdentityStatusResponse:
+        operator = self._operator(request)
+        try:
+            return await asyncio.to_thread(
+                retire_rotated_identity,
+                StorefrontIdentityAuthority(self._db.db_path),
+                request=body,
+                operator=operator.principal,
+                now=int(time.time()),
+            )
+        except IdentityAuthorityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post(
         "/pause",

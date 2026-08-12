@@ -65,7 +65,6 @@ def test_core_runner_publishes_exact_opaque_bare_metal_payload(tmp_path):
         config=StorefrontPublicationCommandConfig(
             db_path=path,
             base_url="https://seller.example",
-            private_key=None,
             close_stale=False,
         ),
         callbacks=StorefrontPublicationCommandCallbacks(

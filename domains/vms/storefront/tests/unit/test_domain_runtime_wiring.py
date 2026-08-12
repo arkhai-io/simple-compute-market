@@ -5,6 +5,7 @@ import pytest
 from core_storefront.models.listing_models import CreateListingRequest
 from market_storefront.domain_runtime import get_market_domain_contract
 from market_storefront.services.listing_service import ListingService
+from tests.fake_site import TEST_MARKETPLACE_SIGNER
 
 
 _ACCEPTED_ESCROWS = [{
@@ -26,7 +27,11 @@ def test_storefront_resolves_vm_domain_runtime() -> None:
 
 
 def test_listing_service_validates_offer_through_domain_runtime() -> None:
-    svc = ListingService(sqlite_client=object(), alkahest_clients=None)
+    svc = ListingService(
+        sqlite_client=object(),
+        alkahest_clients=None,
+        marketplace_signer=TEST_MARKETPLACE_SIGNER,
+    )
 
     with pytest.raises(ValueError, match="offer_resource must include gpu_model"):
         svc._parse_offer_and_escrows(

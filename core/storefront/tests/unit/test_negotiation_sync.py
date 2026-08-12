@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+from market_identity import Identity
+
 
 from core_storefront.negotiation_sync import (
     coerce_pinned_proposal,
     history_from_messages,
     proposal_with_amount,
 )
+
+BUYER = Identity(scheme="eip191", identifier="0x" + "11" * 20)
+SELLER = Identity(scheme="eip191", identifier="0x" + "22" * 20)
 
 
 def test_proposal_with_amount_overlays_fields_without_mutating_pinned() -> None:
@@ -39,17 +44,17 @@ def test_history_from_messages_reconstructs_rounds_from_pinned_proposal() -> Non
     pinned = {"chain_name": "anvil", "fields": {"token": "0xToken"}}
     messages = [
         {
-            "sender": "buyer",
+            "sender_principal": BUYER.model_dump(mode="json"),
             "action_taken": "make_offer",
             "proposed_price": "10",
         },
         {
-            "sender": "seller",
+            "sender_principal": SELLER.model_dump(mode="json"),
             "action_taken": "counter_offer",
             "proposed_price": "15",
         },
         {
-            "sender": "buyer",
+            "sender_principal": BUYER.model_dump(mode="json"),
             "action_taken": "exit_negotiation",
             "proposed_price": None,
         },
@@ -57,7 +62,7 @@ def test_history_from_messages_reconstructs_rounds_from_pinned_proposal() -> Non
 
     history = history_from_messages(
         messages,
-        "seller",
+        SELLER,
         buyer_pinned_proposal=pinned,
     )
 

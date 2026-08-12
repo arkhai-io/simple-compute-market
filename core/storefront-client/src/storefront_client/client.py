@@ -8,41 +8,64 @@ Two clients with identical method signatures:
 Both clients:
 - Own their HTTP session internally — callers never create or pass a session.
 - Accept a ``transport=`` kwarg at construction for in-process test injection.
-- Raise ``StorefrontClientError`` on non-2xx responses.
+- Raise ``StorefrontClientError`` on unexpected non-2xx responses.
 - Return typed model objects from all methods.
 
 Usage (async)::
 
+    from market_identity import Ed25519Signer, Identity
     from storefront_client import StorefrontClient
 
-    client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
+    client = StorefrontClient(
+        "http://seller-storefront:8001",
+        signer=Ed25519Signer(seed),
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(
+            identities=(
+                Identity(
+                    scheme="ed25519",
+                    identifier="configured-publisher-key",
+                ),
+            )
+        ),
+    )
     async with client:
-        resp = await client.create_listing(
-            agent_wallet_address="0xSellerWallet",
-            offer={...},
-            accepted_escrows=[{"chain_name": ..., "escrow_address": ...,
-                               "fields": {...}, "price_per_hour": ...}],
+        resp = await client.negotiate_new(
+            listing_id="listing-id",
+            initial_amount=100,
+            provision_terms={...},
         )
-
-Usage (sync, e.g. smoke tests)::
-
-    from storefront_client import SyncStorefrontClient
-
-    client = SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...")
-    health = client.get_health()
-    client.close()
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
-from typing import Any, Optional
+import urllib.parse
+from typing import Any
 
 import httpx
+from market_identity import (
+    EMPTY_BODY,
+    Identity,
+    RotationIntent,
+    RotationRequest,
+    Signer,
+    TrustedIdentitySet,
+    canonical_json,
+    sign_rotation,
+)
 
+from storefront_client.auth import (
+    SignedRequest,
+    StorefrontAuthenticationError,
+    build_authenticated_request,
+    verify_authenticated_response,
+)
 from storefront_client.models import (
     EvaluateNegotiateResponse,
+    IdentitySubjectStatusResponse,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
@@ -76,7 +99,6 @@ class StorefrontClientError(Exception):
         self.status_code = status_code
 
 
-
 def _validate_provision_terms_envelope(
     provision_terms: dict[str, Any],
 ) -> dict[str, Any]:
@@ -107,84 +129,15 @@ def _validate_provision_terms_envelope(
         "payload": dict(payload),
     }
 
+
 # ---------------------------------------------------------------------------
-# EIP-191 signing helpers — shared by both clients
+# Marketplace identity v2 helpers — shared by both clients
 # ---------------------------------------------------------------------------
 
 
-def _sign_eip191(private_key: str, message: str) -> str:
-    """Sign *message* with *private_key* using EIP-191 personal_sign."""
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
-    msg = encode_defunct(text=message)
-    signed = Account.sign_message(msg, private_key=private_key)
-    return signed.signature.hex()
-
-
-def _address_from_private_key(private_key: str) -> str:
-    """Derive the EIP-191 wallet address (lowercase) for a private key."""
-    from eth_account import Account
-    return Account.from_key(private_key).address.lower()
-
-
-def _signed_request_headers(
-    private_key: str,
-    message: str,
-    *,
-    identity_scheme: str = "eip191",
-    identity_identifier: str | None = None,
-) -> dict[str, str]:
-    """Return the four signed-request headers for an arbitrary ``message``.
-
-    Differs from :func:`_build_auth_headers` only in that the caller has
-    already composed the full canonical message (used by per-endpoint
-    constructions that include the timestamp inline). Always emits the
-    ``X-Identity-Scheme`` / ``X-Identity`` pair.
-    """
-    ts = str(int(time.time()))
-    full_message = f"{message}:{ts}"
-    sig = _sign_eip191(private_key, full_message)
-    identifier = identity_identifier or _address_from_private_key(private_key)
-    return {
-        "X-Timestamp": ts,
-        "X-Signature": sig,
-        "X-Identity-Scheme": identity_scheme,
-        "X-Identity": identifier,
-    }
-
-
-def _build_auth_headers(
-    private_key: str,
-    operation: str,
-    resource_id: str,
-    *,
-    identity_scheme: str = "eip191",
-    identity_identifier: str | None = None,
-) -> dict[str, str]:
-    """Build signed-request headers for the storefront.
-
-    Headers emitted:
-      ``X-Timestamp`` / ``X-Signature`` — EIP-191 signature of
-      ``"<operation>:<resource_id>:<timestamp>"``.
-      ``X-Identity-Scheme`` / ``X-Identity`` — the scheme-tagged identity
-      that the signature attests; defaults to ``("eip191", <address derived
-      from private_key>)``. Servers that predate the pluggable-identity
-      headers ignore them; servers that don't dispatch through their
-      identity-scheme registry.
-    """
-    timestamp = str(int(time.time()))
-    message = f"{operation}:{resource_id}:{timestamp}"
-    signature = _sign_eip191(private_key, message)
-    identifier = identity_identifier or _address_from_private_key(private_key)
-    return {
-        "X-Timestamp": timestamp,
-        "X-Signature": signature,
-        "X-Identity-Scheme": identity_scheme,
-        "X-Identity": identifier,
-    }
-
-
-def _build_listings_params(*, limit: int, offset: int, **filters: Any) -> dict[str, Any]:
+def _build_listings_params(
+    *, limit: int, offset: int, **filters: Any
+) -> dict[str, Any]:
     """Pack listing-list filter kwargs into URL params, dropping ``None`` and
     serializing booleans as the lowercase strings FastAPI expects.
     """
@@ -196,6 +149,35 @@ def _build_listings_params(*, limit: int, offset: int, **filters: Any) -> dict[s
     return params
 
 
+def _query_resource(prefix: str, params: dict[str, Any]) -> str:
+    pairs = sorted((key, str(value)) for key, value in params.items())
+    query = urllib.parse.urlencode(
+        pairs,
+        quote_via=urllib.parse.quote,
+        safe="",
+    )
+    return f"{prefix}?{query}"
+
+
+_ROTATION_AUTHORITIES = frozenset(
+    {"storefront.administrator", "storefront.service-peer"}
+)
+
+
+def _validate_rotation_authority(authority: str) -> str:
+    if authority not in _ROTATION_AUTHORITIES:
+        raise ValueError(
+            "authority must be 'storefront.administrator' or 'storefront.service-peer'"
+        )
+    return authority
+
+
+def _rotation_resource(authority: str, subject: str) -> str:
+    return "/".join(
+        urllib.parse.quote(component, safe="") for component in (authority, subject)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared base — route paths, auth, response parsing
 # ---------------------------------------------------------------------------
@@ -205,27 +187,136 @@ class _StorefrontClientBase:
     def __init__(
         self,
         base_url: str,
-        private_key: Optional[str],
+        signer: Signer | None,
+        caller_role: str | None,
+        expected_publishers: TrustedIdentitySet | None,
         timeout: float,
-        admin_key: Optional[str] = None,
     ) -> None:
+        if signer is not None and not isinstance(signer, Signer):
+            raise TypeError("signer must implement market_identity.Signer")
+        if signer is not None and caller_role is None:
+            raise ValueError("caller_role is required when signer is configured")
+        if signer is None and caller_role is not None:
+            raise ValueError("caller_role requires signer")
+        if signer is not None and expected_publishers is None:
+            raise ValueError(
+                "expected_publishers is required when signer is configured"
+            )
+        if signer is None and expected_publishers is not None:
+            raise ValueError("expected_publishers requires signer")
+        if expected_publishers is not None and not isinstance(
+            expected_publishers, TrustedIdentitySet
+        ):
+            raise TypeError(
+                "expected_publishers must be a market_identity.TrustedIdentitySet"
+            )
+        if (
+            signer is not None
+            and caller_role == "seller"
+            and expected_publishers is not None
+            and not expected_publishers.allows(signer.identity)
+        ):
+            raise ValueError("seller signer identity must be in expected_publishers")
         self._base = base_url.rstrip("/")
-        self._private_key = private_key
+        self._signer = signer
+        self._caller_role = caller_role
+        self._expected_publishers = expected_publishers
         self._timeout = timeout
-        self._admin_key = admin_key
+        self._signed_requests: dict[str, SignedRequest] = {}
 
     def _url(self, path: str) -> str:
         return f"{self._base}{path}"
 
-    def _auth_headers(self, operation: str, resource_id: str) -> dict[str, str]:
-        if not self._private_key:
-            return {}
-        return _build_auth_headers(self._private_key, operation, resource_id)
+    def _signed_request(
+        self,
+        *,
+        role: str,
+        method: str,
+        operation: str,
+        resource: str,
+        body: Any = EMPTY_BODY,
+        request_id: str | None = None,
+    ) -> SignedRequest:
+        if self._signer is None:
+            raise ValueError("this operation requires a configured signer")
+        if self._caller_role != role:
+            raise ValueError(
+                f"this operation requires caller_role={role!r}, "
+                f"not {self._caller_role!r}"
+            )
+        if request_id is not None and request_id in self._signed_requests:
+            existing = self._signed_requests[request_id]
+            content = None if body is EMPTY_BODY else canonical_json(body)
+            context = (role, method.upper(), operation, resource, content)
+            existing_context = (
+                existing.role,
+                existing.method,
+                existing.operation,
+                existing.resource,
+                existing.content,
+            )
+            if context != existing_context:
+                raise ValueError("request_id was reused with changed request content")
+            if (
+                existing.headers["X-Market-Identity-Scheme"]
+                != self._signer.identity.scheme.value
+                or existing.headers["X-Market-Identity-Identifier"]
+                != self._signer.identity.identifier
+            ):
+                raise ValueError("configured signer identity changed")
+        signed = build_authenticated_request(
+            signer=self._signer,
+            role=role,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        if request_id is not None:
+            self._signed_requests[request_id] = signed
+        return signed
 
-    def _admin_headers(self) -> dict[str, str]:
-        if not self._admin_key:
-            return {}
-        return {"X-Admin-Key": self._admin_key}
+    def _principal_body(self) -> dict[str, str]:
+        if self._signer is None:
+            raise ValueError("this operation requires a configured signer")
+        return self._signer.identity.model_dump(mode="json")
+
+    def _require_admin_rotation_operator(
+        self,
+        *,
+        authority: str,
+        principal: Identity,
+        phase: str,
+    ) -> None:
+        if authority == "storefront.administrator" and (
+            self._signer is None or self._signer.identity != principal
+        ):
+            raise ValueError(
+                f"administrator rotation {phase} requires the client signer "
+                "to match the rotation principal"
+            )
+
+    def _verify_response(
+        self,
+        response: httpx.Response,
+        request: SignedRequest,
+        body: Any,
+    ) -> None:
+        if self._expected_publishers is None:
+            raise StorefrontClientError(
+                "authenticated responses require pinned expected_publishers"
+            )
+        try:
+            verify_authenticated_response(
+                headers=response.headers,
+                expected_publishers=self._expected_publishers,
+                request=request,
+                status=response.status_code,
+                body=body,
+            )
+        except StorefrontAuthenticationError as exc:
+            raise StorefrontClientError(str(exc)) from exc
 
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
@@ -248,10 +339,14 @@ class StorefrontClient(_StorefrontClientBase):
     ----------
     base_url:
         Base URL of the storefront (e.g. ``http://localhost:8001``).
-    private_key:
-        EIP-191 private key for signing auth headers. When ``None`` auth
-        headers are omitted — only works if the storefront has
-        ``AGENT_WALLET_ADDRESS`` unset.
+    signer:
+        Scheme-neutral marketplace signer used for authenticated operations.
+    caller_role:
+        Explicit role bound into every authenticated request. It must match the
+        route's required role.
+    expected_publishers:
+        Required with ``signer``. Authenticated responses must carry a valid v2
+        signature from this exact one-or-two-principal trusted set.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -261,13 +356,20 @@ class StorefrontClient(_StorefrontClientBase):
     def __init__(
         self,
         base_url: str,
-        private_key: Optional[str] = None,
+        signer: Signer | None = None,
         *,
+        caller_role: str | None = None,
+        expected_publishers: TrustedIdentitySet | None = None,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
-        admin_key: Optional[str] = None,
     ) -> None:
-        super().__init__(base_url, private_key, timeout, admin_key)
+        super().__init__(
+            base_url,
+            signer,
+            caller_role,
+            expected_publishers,
+            timeout,
+        )
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -283,13 +385,118 @@ class StorefrontClient(_StorefrontClientBase):
     async def __aexit__(self, *_: Any) -> None:
         await self.close()
 
-    async def _post(self, path: str, body: dict, *, extra_headers: dict | None = None) -> dict:
+    async def _authenticated_post(
+        self,
+        path: str,
+        body: Any,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="POST",
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
         url = self._url(path)
         resp = await self._client.post(
-            path, json=body, headers=extra_headers or {}, timeout=self._timeout
+            path,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
         )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"POST {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
         self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"POST {url} returned non-object JSON")
+        return payload
+
+    async def _authenticated_get(
+        self,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+        allowed_statuses: frozenset[int] = frozenset(),
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = await self._client.get(
+            path,
+            params=params,
+            headers=signed.headers,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"GET {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
+        if resp.status_code not in allowed_statuses:
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"GET {url} returned non-object JSON")
+        return payload
+
+    async def _authenticated_patch(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="PATCH",
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = await self._client.patch(
+            path,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
+        )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"PATCH {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
+        return payload
 
     async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
@@ -305,22 +512,22 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(await self._get("/health"))
 
-    async def get_system_status(self) -> HealthResponse:
-        """GET /api/v1/system/status — includes paused flag and check results.
-
-        Does NOT raise on HTTP 503.  A 503 from this endpoint means the
-        storefront is degraded (e.g. registry unreachable) but still returns a
-        structured HealthResponse that callers can inspect.  Only unexpected
-        status codes (4xx, non-503 5xx) raise StorefrontClientError.
-        """
-        url = self._url("/api/v1/system/status")
-        resp = await self._client.get(
-            "/api/v1/system/status", timeout=self._timeout,
-            headers=self._admin_headers(),
+    async def get_system_status(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> HealthResponse:
+        """GET signed system status; a verified 503 remains inspectable."""
+        return HealthResponse.from_dict(
+            await self._authenticated_get(
+                "/api/v1/system/status",
+                role="service",
+                operation="admin_system_status",
+                resource="system/status",
+                request_id=request_id,
+                allowed_statuses=frozenset({503}),
+            )
         )
-        if resp.status_code not in (200, 503):
-            self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return HealthResponse.from_dict(resp.json())
 
     async def get_events(
         self,
@@ -330,24 +537,30 @@ class StorefrontClient(_StorefrontClientBase):
         stage: str | None = None,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        request_id: str | None = None,
     ) -> StageEventListResponse:
-        """GET /api/v1/system/events — historical query (admin key required)."""
-        params: dict[str, Any] = {"since_id": since_id, "limit": limit}
+        """GET /api/v1/system/events through admin v2 authentication."""
+        params: dict[str, Any] = {
+            "since_id": since_id,
+            "limit": limit,
+            "stream": "false",
+        }
         if stage is not None:
             params["stage"] = stage
         if listing_id is not None:
             params["listing_id"] = listing_id
         if negotiation_id is not None:
             params["negotiation_id"] = negotiation_id
-        url = self._url("/api/v1/system/events")
-        resp = await self._client.get(
-            "/api/v1/system/events",
-            params=params,
-            headers=self._admin_headers(),
-            timeout=self._timeout,
+        return StageEventListResponse.from_dict(
+            await self._authenticated_get(
+                "/api/v1/system/events",
+                params=params,
+                role="admin",
+                operation="admin_system_events",
+                resource=_query_resource("system-events", params),
+                request_id=request_id,
+            )
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return StageEventListResponse.from_dict(resp.json())
 
     async def wait_for_stage_event(
         self,
@@ -370,6 +583,7 @@ class StorefrontClient(_StorefrontClientBase):
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
+
         deadline = _time.monotonic() + timeout
         cursor = since_id
         while _time.monotonic() < deadline:
@@ -385,6 +599,7 @@ class StorefrontClient(_StorefrontClientBase):
                 if ev.stage == stage and ev.event == event:
                     return ev
             import asyncio as _asyncio
+
             await _asyncio.sleep(poll_interval)
         raise TimeoutError(
             f"Stage event stage={stage!r} event={event!r} "
@@ -393,7 +608,7 @@ class StorefrontClient(_StorefrontClientBase):
         )
 
     # ------------------------------------------------------------------
-    # Listings API (GET endpoints unauthenticated; write endpoints admin-key)
+    # Listings API (GET endpoints unauthenticated; admin writes use v2 auth)
     # ------------------------------------------------------------------
 
     async def list_listings(
@@ -411,7 +626,10 @@ class StorefrontClient(_StorefrontClientBase):
         ``/filter-spec`` and ``/listings`` for those.
         """
         params = _build_listings_params(
-            status=status, paused=paused, limit=limit, offset=offset,
+            status=status,
+            paused=paused,
+            limit=limit,
+            offset=offset,
         )
         return ListingListResponse.from_dict(
             await self._get("/api/v1/listings", params=params)
@@ -423,23 +641,39 @@ class StorefrontClient(_StorefrontClientBase):
             await self._get(f"/api/v1/listings/{listing_id}")
         )
 
-    async def pause_listing(self, listing_id: str) -> ListingPauseResponse:
-        """POST /api/v1/listings/{listing_id}/pause  (admin key required)"""
+    async def pause_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/pause."""
         return ListingPauseResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/pause",
                 {},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_pause_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
-    async def resume_listing(self, listing_id: str) -> ListingPauseResponse:
-        """POST /api/v1/listings/{listing_id}/resume  (admin key required)"""
+    async def resume_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/resume."""
         return ListingPauseResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/resume",
                 {},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_resume_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -452,24 +686,49 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         *,
         terminal_state: str | None = None,
-        buyer_address: str | None = None,
+        buyer_principal: Identity | None = None,
         limit: int = 50,
         offset: int = 0,
+        request_id: str | None = None,
     ) -> "NegotiationListResponse":
-        """GET /api/v1/listings/{listing_id}/negotiations"""
+        """GET /api/v1/listings/{listing_id}/negotiations through admin v2 auth."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
             params["terminal_state"] = terminal_state
-        if buyer_address is not None:
-            params["buyer_address"] = buyer_address
+        if buyer_principal is not None:
+            if not isinstance(buyer_principal, Identity):
+                raise TypeError("buyer_principal must be a market_identity.Identity")
+            params["buyer_scheme"] = buyer_principal.scheme.value
+            params["buyer_identifier"] = buyer_principal.identifier
+        prefix = f"{listing_id}/negotiations"
         return NegotiationListResponse.from_dict(
-            await self._get(f"/api/v1/listings/{listing_id}/negotiations", params=params)
+            await self._authenticated_get(
+                f"/api/v1/listings/{listing_id}/negotiations",
+                params=params,
+                role="admin",
+                operation="admin_list_negotiations",
+                resource=_query_resource(prefix, params),
+                request_id=request_id,
+            )
         )
 
-    async def get_negotiation(self, listing_id: str, neg_id: str) -> "NegotiationDetail":
-        """GET /api/v1/listings/{listing_id}/negotiations/{neg_id}"""
+    async def get_negotiation(
+        self,
+        listing_id: str,
+        neg_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> "NegotiationDetail":
+        """GET one negotiation through admin v2 authentication."""
+        resource = f"{listing_id}/negotiations/{neg_id}"
         return NegotiationDetail.from_dict(
-            await self._get(f"/api/v1/listings/{listing_id}/negotiations/{neg_id}")
+            await self._authenticated_get(
+                f"/api/v1/listings/{resource}",
+                role="admin",
+                operation="admin_get_negotiation",
+                resource=resource,
+                request_id=request_id,
+            )
         )
 
     async def advance_negotiation(
@@ -480,6 +739,7 @@ class StorefrontClient(_StorefrontClientBase):
         action: str,
         proposal: dict[str, Any] | None = None,
         reason: str | None = None,
+        request_id: str | None = None,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
         body: dict[str, Any] = {"action": action}
@@ -488,10 +748,13 @@ class StorefrontClient(_StorefrontClientBase):
         if reason is not None:
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
                 body,
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_advance_negotiation",
+                resource=f"{listing_id}/{neg_id}",
+                request_id=request_id,
             )
         )
 
@@ -501,13 +764,17 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         amount: int,
+        request_id: str | None = None,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
                 {"amount": int(amount)},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_force_accept_negotiation",
+                resource=f"{listing_id}/{neg_id}",
+                request_id=request_id,
             )
         )
 
@@ -515,52 +782,204 @@ class StorefrontClient(_StorefrontClientBase):
     # Admin API
     # ------------------------------------------------------------------
 
-    async def admin_pause(self) -> AdminPauseResponse:
-        """POST /admin/pause  (admin key required)"""
+    async def admin_pause(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> AdminPauseResponse:
+        """POST /api/v1/admin/pause."""
         return AdminPauseResponse.from_dict(
-            await self._post("/api/v1/admin/pause", {}, extra_headers=self._admin_headers())
+            await self._authenticated_post(
+                "/api/v1/admin/pause",
+                {},
+                role="admin",
+                operation="admin_pause",
+                resource="",
+                request_id=request_id,
+            )
         )
 
-    async def admin_resume(self) -> AdminPauseResponse:
-        """POST /admin/resume  (admin key required)"""
+    async def admin_resume(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> AdminPauseResponse:
+        """POST /api/v1/admin/resume."""
         return AdminPauseResponse.from_dict(
-            await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
+            await self._authenticated_post(
+                "/api/v1/admin/resume",
+                {},
+                role="admin",
+                operation="admin_resume",
+                resource="",
+                request_id=request_id,
+            )
+        )
+
+    async def admin_initiate_identity_rotation(
+        self,
+        *,
+        authority: str,
+        subject: str,
+        current_signer: Signer,
+        replacement_signer: Signer,
+        nonce: str,
+        overlap_seconds: int,
+        expires_at: int,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Apply one canonical rotation carrying both possession proofs."""
+        authority = _validate_rotation_authority(authority)
+        self._require_admin_rotation_operator(
+            authority=authority,
+            principal=current_signer.identity,
+            phase="initiation",
+        )
+        rotation = sign_rotation(
+            current_signer=current_signer,
+            replacement_signer=replacement_signer,
+            intent=RotationIntent(
+                current=current_signer.identity,
+                replacement=replacement_signer.identity,
+                subject=subject,
+                authority=authority,
+                nonce=nonce,
+                overlap_seconds=overlap_seconds,
+                expires_at=expires_at,
+            ),
+        )
+        return IdentitySubjectStatusResponse.from_dict(
+            await self._authenticated_post(
+                "/api/v1/admin/identity/rotations",
+                rotation.model_dump(mode="json"),
+                role="admin",
+                operation="admin_rotate_identity",
+                resource=_rotation_resource(authority, subject),
+                request_id=request_id,
+            )
+        )
+
+    async def admin_complete_identity_rotation(
+        self,
+        *,
+        rotation: RotationRequest,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Retire the old principal from an applied two-proof rotation."""
+        if not isinstance(rotation, RotationRequest):
+            raise TypeError("rotation must be a market_identity.RotationRequest")
+        intent = rotation.intent
+        authority = _validate_rotation_authority(intent.authority)
+        self._require_admin_rotation_operator(
+            authority=authority,
+            principal=intent.replacement,
+            phase="completion",
+        )
+        body = {
+            "authority": authority,
+            "subject": intent.subject,
+            "rotation_nonce": intent.nonce,
+            "principal": intent.current.model_dump(mode="json"),
+        }
+        return IdentitySubjectStatusResponse.from_dict(
+            await self._authenticated_post(
+                "/api/v1/admin/identity/retirements",
+                body,
+                role="admin",
+                operation="admin_retire_identity",
+                resource=_rotation_resource(authority, intent.subject),
+                request_id=request_id,
+            )
+        )
+
+    async def admin_get_identity_status(
+        self,
+        *,
+        authority: str,
+        subject: str,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Inspect current and retired bindings for one identity subject."""
+        authority = _validate_rotation_authority(authority)
+        params = {"authority": authority, "subject": subject}
+        return IdentitySubjectStatusResponse.from_dict(
+            await self._authenticated_get(
+                "/api/v1/admin/identity/status",
+                params=params,
+                role="admin",
+                operation="admin_identity_status",
+                resource=_query_resource("identity-status", params),
+                request_id=request_id,
+            )
         )
 
     async def admin_interrupt_deal(
-        self, escrow_uid: str, *, reason: str = "operator_interruption",
-        interrupted_at_utc: str | None = None, dry_run: bool = False,
+        self,
+        escrow_uid: str,
+        *,
+        reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None,
+        dry_run: bool = False,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
-        return await self._post(
+        return await self._authenticated_post(
             f"/api/v1/admin/deals/{escrow_uid}/interrupt",
-            body, extra_headers=self._admin_headers(),
+            body,
+            role="admin",
+            operation="admin_interrupt_deal",
+            resource=escrow_uid,
+            request_id=request_id,
         )
 
     async def admin_import_resources(
-        self, csv_content: bytes, filename: str = "resources.csv"
+        self,
+        csv_content: bytes,
+        filename: str = "resources.csv",
+        *,
+        request_id: str | None = None,
     ) -> ImportResourcesResponse:
-        """POST /admin/portfolio/resources/import  (admin key required).
-
-        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
-        upserts regardless of current table state — use to force a clobber
-        of the current inventory without restarting the pod.
-
-        ``csv_content`` is the raw bytes of the CSV file. Typically read
-        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
-        """
-        url = self._url("/api/v1/admin/portfolio/resources/import")
+        """Upload a CSV using a signed boundary-independent descriptor."""
+        if not isinstance(csv_content, bytes):
+            raise TypeError("csv_content must be bytes")
+        descriptor = {
+            "filename": filename,
+            "media_type": "text/csv",
+            "sha256": hashlib.sha256(csv_content).hexdigest(),
+            "size": len(csv_content),
+        }
+        signed = self._signed_request(
+            role="admin",
+            method="POST",
+            operation="admin_import_resources",
+            resource="portfolio/resources",
+            body=descriptor,
+            request_id=request_id,
+        )
+        headers = dict(signed.headers)
+        headers.pop("Content-Type", None)
+        path = "/api/v1/admin/portfolio/resources/import"
+        url = self._url(path)
         resp = await self._client.post(
-            "/api/v1/admin/portfolio/resources/import",
+            path,
             files={"file": (filename, csv_content, "text/csv")},
-            headers=self._admin_headers(),
+            headers=headers,
             timeout=self._timeout,
         )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"POST {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
         self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return ImportResourcesResponse.from_dict(resp.json())
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"POST {url} returned non-object JSON")
+        return ImportResourcesResponse.from_dict(payload)
 
     async def admin_reserve_capacity(
         self,
@@ -568,44 +987,71 @@ class StorefrontClient(_StorefrontClientBase):
         required_attributes: dict[str, Any],
         listing_id: str | None = None,
         escrow_uid: str | None = None,
+        request_id: str | None = None,
     ) -> ReserveCapacityResponse:
-        """POST /admin/portfolio/reservations  (admin key required)."""
+        """POST /api/v1/admin/portfolio/reservations."""
+        body = {
+            "required_attributes": required_attributes,
+            "listing_id": listing_id,
+            "escrow_uid": escrow_uid,
+        }
         return ReserveCapacityResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 "/api/v1/admin/portfolio/reservations",
-                {
-                    "required_attributes": required_attributes,
-                    "listing_id": listing_id,
-                    "escrow_uid": escrow_uid,
-                },
-                extra_headers=self._admin_headers(),
+                body,
+                role="admin",
+                operation="admin_reserve_capacity",
+                resource=listing_id or escrow_uid or "",
+                request_id=request_id,
             )
         )
 
-    async def get_resource(self, resource_id: str) -> dict:
-        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
-
-        Returns the current state of the resource row — same shape as patch_resource.
-        404 if the resource_id does not exist.
-        """
-        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
-        resp = await self._client.get(
-            f"/api/v1/admin/portfolio/resources/{resource_id}",
-            headers=self._admin_headers(),
-            timeout=self._timeout,
+    async def admin_release_reservations(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> "ReleaseReservationsResponse":
+        """POST /api/v1/admin/portfolio/release-reservations."""
+        return ReleaseReservationsResponse.from_dict(
+            await self._authenticated_post(
+                "/api/v1/admin/portfolio/release-reservations",
+                {},
+                role="admin",
+                operation="admin_release_reservations",
+                resource="",
+                request_id=request_id,
+            )
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+
+    async def get_resource(
+        self,
+        resource_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}."""
+        return await self._authenticated_get(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            role="admin",
+            operation="admin_get_resource",
+            resource=resource_id,
+            request_id=request_id,
+        )
 
     async def notify_capacity_released(
         self,
         capacity_reservation_id: str,
         *,
+        site_id: str,
         resource_id: "str | None" = None,
         provider_lease_id: "str | None" = None,
         released_at: "str | None" = None,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/fulfillment/events/capacity-released  (admin key required).
+        """Post a service-authenticated capacity release callback.
+
+        Reuse ``request_id`` with an identical body after an uncertain
+        acknowledgement; changed reuse is rejected locally.
 
         Deal-scoped event from the capacity side: the reservation's lease
         ended and its capacity returned to the pool. The site authority's
@@ -613,23 +1059,30 @@ class StorefrontClient(_StorefrontClientBase):
         storefront — it replaces the legacy resource PATCH for
         ledger-held reservations.
         """
-        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        body: dict = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
         if resource_id is not None:
             body["resource_id"] = resource_id
         if provider_lease_id is not None:
             body["provider_lease_id"] = provider_lease_id
         if released_at is not None:
             body["released_at"] = released_at
-        return await self._post(
+        return await self._authenticated_post(
             "/api/v1/admin/fulfillment/events/capacity-released",
             body,
-            extra_headers=self._admin_headers(),
+            role="service",
+            operation="fulfillment_capacity_released",
+            resource=capacity_reservation_id,
+            request_id=request_id,
         )
 
     async def notify_usage_started(
         self,
         capacity_reservation_id: str,
         *,
+        site_id: str,
         escrow_uid: "str | None" = None,
         provider_id: "str | None" = None,
         provider_lease_id: "str | None" = None,
@@ -638,15 +1091,19 @@ class StorefrontClient(_StorefrontClientBase):
         vm_target: "str | None" = None,
         gpu_count: "int | None" = None,
         lease_end_utc: "str | None" = None,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/fulfillment/events/usage-started  (admin key required).
+        """Post a service-authenticated usage-started callback.
 
         Deal-scoped progress event: the reservation moved from held to
         actually leased/in-use. Progress events carry no capacity effect
         of their own (the reservation stays held throughout), but do
         reconcile derived listings against current availability.
         """
-        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        body: dict = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
         if escrow_uid is not None:
             body["escrow_uid"] = escrow_uid
         if provider_id is not None:
@@ -663,16 +1120,20 @@ class StorefrontClient(_StorefrontClientBase):
             body["gpu_count"] = gpu_count
         if lease_end_utc is not None:
             body["lease_end_utc"] = lease_end_utc
-        return await self._post(
+        return await self._authenticated_post(
             "/api/v1/admin/fulfillment/events/usage-started",
             body,
-            extra_headers=self._admin_headers(),
+            role="service",
+            operation="fulfillment_usage_started",
+            resource=capacity_reservation_id,
+            request_id=request_id,
         )
 
     async def notify_fulfillment_failed(
         self,
         capacity_reservation_id: str,
         *,
+        site_id: str,
         escrow_uid: "str | None" = None,
         provider_id: "str | None" = None,
         provider_job_id: "str | None" = None,
@@ -680,14 +1141,18 @@ class StorefrontClient(_StorefrontClientBase):
         reason: "str | None" = None,
         message: "str | None" = None,
         logs_ref: "str | None" = None,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/fulfillment/events/failed  (admin key required).
+        """Post a service-authenticated fulfillment-failed callback.
 
         Deal-scoped event: provisioning failed for this reservation.
         Releases the held capacity through the site authority and
         applies the storefront's own fulfillment failure policy.
         """
-        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        body: dict = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
         if escrow_uid is not None:
             body["escrow_uid"] = escrow_uid
         if provider_id is not None:
@@ -702,10 +1167,13 @@ class StorefrontClient(_StorefrontClientBase):
             body["message"] = message
         if logs_ref is not None:
             body["logs_ref"] = logs_ref
-        return await self._post(
+        return await self._authenticated_post(
             "/api/v1/admin/fulfillment/events/failed",
             body,
-            extra_headers=self._admin_headers(),
+            role="service",
+            operation="fulfillment_failed",
+            resource=capacity_reservation_id,
+            request_id=request_id,
         )
 
     async def patch_resource(
@@ -714,8 +1182,9 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         state: "str | None" = None,
         attributes: "dict | None" = None,
+        request_id: str | None = None,
     ) -> dict:
-        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}.
 
         Partial update of a resource row. Only supplied (non-None) fields are
         written. Returns the full resource row after the patch.
@@ -725,25 +1194,25 @@ class StorefrontClient(_StorefrontClientBase):
             body["state"] = state
         if attributes is not None:
             body["attributes"] = attributes
-        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
-        resp = await self._client.patch(
+        return await self._authenticated_patch(
             f"/api/v1/admin/portfolio/resources/{resource_id}",
-            json=body,
-            headers=self._admin_headers(),
-            timeout=self._timeout,
+            body,
+            role="admin",
+            operation="admin_patch_resource",
+            resource=resource_id,
+            request_id=request_id,
         )
-        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        return resp.json()
 
     async def evaluate_negotiate(
         self,
         listing_id: str,
         *,
         proposal: dict[str, Any],
+        buyer_principal: Identity,
         requested_duration_seconds: int | None = None,
-        buyer_address: str = "",
+        request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
         Runs the configured negotiation strategy against a synthetic buyer
         proposal without creating a negotiation thread or writing to the
@@ -753,51 +1222,73 @@ class StorefrontClient(_StorefrontClientBase):
         ``EvaluateNegotiateResponse.would_negotiate=False`` when the
         strategy would exit immediately.
         """
-        body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
+        if not isinstance(buyer_principal, Identity):
+            raise TypeError("buyer_principal must be a market_identity.Identity")
+        body: dict[str, Any] = {
+            "proposal": proposal,
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+        }
         if requested_duration_seconds is not None:
             body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
-            await self._post(
-                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
-                extra_headers=self._admin_headers(),
+            await self._authenticated_post(
+                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
+                body,
+                role="admin",
+                operation="admin_evaluate_negotiation",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
-
-
 
     async def create_listing(
         self,
         *,
-        agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
+        settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
+        request_id: str | None = None,
     ) -> StorefrontListingCreateResponse:
-        """Create a listing with one or more supported settlement choices."""
-        headers = self._auth_headers("create_listing", agent_wallet_address)
+        """Create a listing through the seller-authenticated v2 contract."""
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows or [],
             "settlement_options": settlement_options or [],
+            "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
-            await self._post("/api/v1/listings/create", body, extra_headers=headers)
+            await self._authenticated_post(
+                "/api/v1/listings/create",
+                body,
+                role="seller",
+                operation="create_listing",
+                resource="",
+                request_id=request_id,
+            )
         )
 
-    async def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
-        """POST /api/v1/listings/{listing_id}/close"""
-        headers = self._auth_headers("close_listing", listing_id)
+    async def close_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> StorefrontListingCloseResponse:
+        """POST /api/v1/listings/{listing_id}/close."""
         return StorefrontListingCloseResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/close",
-                {},
-                extra_headers=headers,
+                EMPTY_BODY,
+                role="seller",
+                operation="close_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -805,27 +1296,29 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        buyer_address: str | None = None,
-        amount: str | None = None,
+        buyer_principal: Identity,
+        buyer_evm_address: str,
+        amount: str | int | None = None,
         token: str | None = None,
+        request_id: str | None = None,
     ) -> StorefrontListingRefundResponse:
-        """POST /api/v1/listings/{listing_id}/refund
-
-        ``buyer_address`` is optional; the storefront resolves it from the
-        listing's recorded buyer when omitted.
-        """
-        headers = self._auth_headers("refund_listing", listing_id)
-        body: dict[str, Any] = {}
-        if buyer_address is not None:
-            body["buyer_address"] = buyer_address
-        if amount is not None:
-            body["amount"] = amount
-        if token is not None:
-            body["token"] = token
+        """POST /api/v1/listings/{listing_id}/refund."""
+        if not isinstance(buyer_principal, Identity):
+            raise TypeError("buyer_principal must be a market_identity.Identity")
+        body: dict[str, Any] = {
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "buyer_evm_address": buyer_evm_address,
+            "amount": amount,
+            "token": token,
+        }
         return StorefrontListingRefundResponse.from_dict(
-            await self._post(
+            await self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/refund",
-                body, extra_headers=headers,
+                body,
+                role="seller",
+                operation="refund_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -833,28 +1326,36 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        fulfillment_uid: str | None = None,
+        escrow_uid: str,
+        fulfillment_uid: str,
+        request_id: str | None = None,
     ) -> StorefrontListingClaimResponse:
-        """POST /listings/claim"""
-        headers = self._auth_headers("claim_listing", listing_id)
-        body: dict[str, Any] = {"listing_id": listing_id}
-        if fulfillment_uid:
-            body["fulfillment_uid"] = fulfillment_uid
+        """POST /api/v1/listings/{listing_id}/claim."""
+        body: dict[str, Any] = {
+            "escrow_uid": escrow_uid,
+            "claimant_principal": self._principal_body(),
+            "fulfillment_uid": fulfillment_uid,
+        }
         return StorefrontListingClaimResponse.from_dict(
-            await self._post("/listings/claim", body, extra_headers=headers)
+            await self._authenticated_post(
+                f"/api/v1/listings/{listing_id}/claim",
+                body,
+                role="seller",
+                operation="claim_listing",
+                resource=listing_id,
+                request_id=request_id,
+            )
         )
-
 
     # ------------------------------------------------------------------
     # Buyer protocol — negotiate / settle
-    # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
+    # Marketplace identity v2 binds the exact canonical body and request context.
     # ------------------------------------------------------------------
 
     async def negotiate_new(
         self,
         *,
         listing_id: str,
-        buyer_address: str,
         initial_amount: int | None,
         provision_terms: dict[str, Any],
         buyer_agent_url: str = "",
@@ -866,8 +1367,10 @@ class StorefrontClient(_StorefrontClientBase):
         literal_fields: dict[str, Any] | None = None,
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+        """POST /api/v1/negotiate/new through the buyer v2 contract.
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates only its generic shape and never constructs or
@@ -875,15 +1378,10 @@ class StorefrontClient(_StorefrontClientBase):
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"negotiate_new:{listing_id}",
-            identity_identifier=buyer_address,
-        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         fields = dict(proposal_fields or {})
         if initial_amount is not None:
-            fields.setdefault("amount", int(initial_amount))
+            fields.setdefault("amount", str(initial_amount))
         literals = dict(literal_fields or {})
         if token or literal_fields is None:
             literals.setdefault("token", token or ("0x" + "0" * 40))
@@ -900,15 +1398,21 @@ class StorefrontClient(_StorefrontClientBase):
             proposal["demands"] = demands
         body = {
             "listing_id": listing_id,
-            "buyer_address": buyer_address,
+            "buyer_principal": self._principal_body(),
             "provision_terms": _validate_provision_terms_envelope(
                 provision_terms,
             ),
             "proposal": proposal,
+            "settlement_selection": settlement_selection,
             "buyer_agent_url": buyer_agent_url,
         }
-        return await self._post(
-            "/api/v1/negotiate/new", body, extra_headers=headers,
+        return await self._authenticated_post(
+            "/api/v1/negotiate/new",
+            body,
+            role="buyer",
+            operation="negotiate_new",
+            resource=listing_id,
+            request_id=request_id,
         )
 
     async def negotiate_continue(
@@ -916,9 +1420,10 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        buyer_address: str,
         proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         reason: str | None = None,
+        request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}.
 
@@ -926,18 +1431,20 @@ class StorefrontClient(_StorefrontClientBase):
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
         buyer's absolute new offer in base units.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"negotiate_continue:{neg_id}",
-            identity_identifier=buyer_address,
-        )
-        body: dict = {"action": action, "buyer_address": buyer_address}
-        if proposal is not None:
-            body["proposal"] = proposal
-        if reason is not None:
-            body["reason"] = reason
-        return await self._post(
-            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
+        body: dict[str, Any] = {
+            "action": action,
+            "buyer_principal": self._principal_body(),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
+            "reason": reason,
+        }
+        return await self._authenticated_post(
+            f"/api/v1/negotiate/{neg_id}",
+            body,
+            role="buyer",
+            operation="negotiate_continue",
+            resource=neg_id,
+            request_id=request_id,
         )
 
     async def settle(
@@ -945,32 +1452,31 @@ class StorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         negotiation_id: str,
-        buyer_address: str,
+        buyer_evm_address: str,
         ssh_public_key: str = "",
         chain_name: str = "anvil",
+        request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
 
-        ``chain_name`` tells the seller which configured ``[chains.<name>]``
-        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
-        for compatibility with the e2e fixture; non-anvil consumers must
-        pass their own value.
+        ``buyer_evm_address`` is the selected EVM settlement-effect address; it
+        is deliberately distinct from the signer-owned marketplace principal.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"settle_escrow:{escrow_uid}",
-            identity_identifier=buyer_address,
-        )
-        body: dict = {
+        body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
-            "buyer_address": buyer_address,
+            "buyer_principal": self._principal_body(),
+            "buyer_evm_address": buyer_evm_address,
+            "ssh_public_key": ssh_public_key,
             "chain_name": chain_name,
         }
-        if ssh_public_key:
-            body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
-            await self._post(
-                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
+            await self._authenticated_post(
+                f"/api/v1/settle/{escrow_uid}",
+                body,
+                role="buyer",
+                operation="settle_escrow",
+                resource=escrow_uid,
+                request_id=request_id,
             )
         )
 
@@ -978,29 +1484,25 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        buyer_address: str,
+        request_id: str | None = None,
     ) -> SettleStatusResponse:
-        """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        headers = _signed_request_headers(
-            self._private_key,
-            f"settle_status:{escrow_uid}",
-            identity_identifier=buyer_address,
+        """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
+        return SettleStatusResponse.from_dict(
+            await self._authenticated_get(
+                f"/api/v1/settle/{escrow_uid}/status",
+                role="buyer",
+                operation="settle_status",
+                resource=escrow_uid,
+                request_id=request_id,
+            )
         )
-        url = self._url(f"/api/v1/settle/{escrow_uid}/status")
-        resp = await self._client.get(
-            f"/api/v1/settle/{escrow_uid}/status",
-            params={"buyer_address": buyer_address},
-            headers=headers,
-            timeout=self._timeout,
-        )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return SettleStatusResponse.from_dict(resp.json())
 
     async def wait_for_settlement(
         self,
         escrow_uid: str,
         *,
         timeout: float = 60.0,
+        request_id: str | None = None,
     ) -> SettleWaitResponse:
         """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
 
@@ -1015,15 +1517,18 @@ class StorefrontClient(_StorefrontClientBase):
 
         Raises ``StorefrontClientError`` on non-2xx responses.
         """
-        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
-        resp = await self._client.get(
-            f"/api/v1/admin/settle/{escrow_uid}/wait",
-            params={"timeout": timeout},
-            headers=self._admin_headers(),
-            timeout=timeout + 10.0,
+        timeout_value = str(timeout)
+        return SettleWaitResponse.from_dict(
+            await self._authenticated_get(
+                f"/api/v1/admin/settle/{escrow_uid}/wait",
+                params={"timeout": timeout_value},
+                role="admin",
+                operation="admin_settle_wait",
+                resource=f"{escrow_uid}?timeout={timeout_value}",
+                request_id=request_id,
+                timeout=timeout + 10.0,
+            )
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return SettleWaitResponse.from_dict(resp.json())
 
     async def verify_settle(
         self,
@@ -1034,8 +1539,9 @@ class StorefrontClient(_StorefrontClientBase):
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
+        """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
@@ -1048,9 +1554,13 @@ class StorefrontClient(_StorefrontClientBase):
             "listing_id": listing_id,
             "chain_name": chain_name,
         }
-        return await self._post(
-            f"/api/v1/admin/settle/{escrow_uid}/verify", body,
-            extra_headers=self._admin_headers(),
+        return await self._authenticated_post(
+            f"/api/v1/admin/settle/{escrow_uid}/verify",
+            body,
+            role="admin",
+            operation="admin_verify_settlement",
+            resource=escrow_uid,
+            request_id=request_id,
         )
 
     async def evaluate_settle(
@@ -1060,8 +1570,9 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/settle/{escrow_uid}/evaluate — dry-run provisioning job spec (admin key).
+        """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
         Resolves a host from inventory and builds the job spec without chain reads,
         DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
@@ -1072,10 +1583,15 @@ class StorefrontClient(_StorefrontClientBase):
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
         }
-        return await self._post(
-            f"/api/v1/admin/settle/{escrow_uid}/evaluate", body,
-            extra_headers=self._admin_headers(),
+        return await self._authenticated_post(
+            f"/api/v1/admin/settle/{escrow_uid}/evaluate",
+            body,
+            role="admin",
+            operation="admin_evaluate_settlement",
+            resource=escrow_uid,
+            request_id=request_id,
         )
+
 
 # ---------------------------------------------------------------------------
 # Sync client
@@ -1092,8 +1608,12 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ----------
     base_url:
         Base URL of the storefront.
-    private_key:
-        EIP-191 private key for signing auth headers.
+    signer:
+        Scheme-neutral marketplace signer used for authenticated operations.
+    caller_role:
+        Explicit role bound into every authenticated request.
+    expected_publishers:
+        Required with ``signer``; pins v2 responses to one or two publishers.
     timeout:
         HTTP timeout in seconds.
     transport:
@@ -1103,13 +1623,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def __init__(
         self,
         base_url: str,
-        private_key: Optional[str] = None,
+        signer: Signer | None = None,
         *,
+        caller_role: str | None = None,
+        expected_publishers: TrustedIdentitySet | None = None,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
-        admin_key: Optional[str] = None,
     ) -> None:
-        super().__init__(base_url, private_key, timeout, admin_key)
+        super().__init__(
+            base_url,
+            signer,
+            caller_role,
+            expected_publishers,
+            timeout,
+        )
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
@@ -1125,21 +1652,118 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    def _post(self, path: str, body: dict, *, extra_headers: dict | None = None) -> dict:
+    def _authenticated_post(
+        self,
+        path: str,
+        body: Any,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="POST",
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
         url = self._url(path)
         resp = self._client.post(
-            path, json=body, headers=extra_headers or {}, timeout=self._timeout
+            path,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
         )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"POST {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
         self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"POST {url} returned non-object JSON")
+        return payload
 
-    def _patch(self, path: str, body: dict, *, extra_headers: dict | None = None) -> dict:
+    def _authenticated_get(
+        self,
+        path: str,
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        params: dict[str, Any] | None = None,
+        request_id: str | None = None,
+        allowed_statuses: frozenset[int] = frozenset(),
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
+        url = self._url(path)
+        resp = self._client.get(
+            path,
+            params=params,
+            headers=signed.headers,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"GET {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
+        if resp.status_code not in allowed_statuses:
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"GET {url} returned non-object JSON")
+        return payload
+
+    def _authenticated_patch(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        role: str,
+        operation: str,
+        resource: str,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        signed = self._signed_request(
+            role=role,
+            method="PATCH",
+            operation=operation,
+            resource=resource,
+            body=body,
+            request_id=request_id,
+        )
         url = self._url(path)
         resp = self._client.patch(
-            path, json=body, headers=extra_headers or {}, timeout=self._timeout
+            path,
+            content=signed.content,
+            headers=signed.headers,
+            timeout=self._timeout,
         )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"PATCH {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
         self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        return resp.json()
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"PATCH {url} returned non-object JSON")
+        return payload
 
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
@@ -1155,21 +1779,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /health"""
         return HealthResponse.from_dict(self._get("/health"))
 
-    def get_system_status(self) -> HealthResponse:
-        """GET /api/v1/system/status — includes paused flag and check results.
-
-        Does NOT raise on HTTP 503.  A 503 from this endpoint means the
-        storefront is degraded but still returns a structured HealthResponse.
-        Only unexpected status codes (4xx, non-503 5xx) raise StorefrontClientError.
-        """
-        url = self._url("/api/v1/system/status")
-        resp = self._client.get(
-            "/api/v1/system/status", timeout=self._timeout,
-            headers=self._admin_headers(),
+    def get_system_status(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> HealthResponse:
+        """GET signed system status; a verified 503 remains inspectable."""
+        return HealthResponse.from_dict(
+            self._authenticated_get(
+                "/api/v1/system/status",
+                role="service",
+                operation="admin_system_status",
+                resource="system/status",
+                request_id=request_id,
+                allowed_statuses=frozenset({503}),
+            )
         )
-        if resp.status_code not in (200, 503):
-            self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return HealthResponse.from_dict(resp.json())
 
     def get_events(
         self,
@@ -1179,24 +1804,30 @@ class SyncStorefrontClient(_StorefrontClientBase):
         stage: str | None = None,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        request_id: str | None = None,
     ) -> StageEventListResponse:
-        """GET /api/v1/system/events — historical query (admin key required)."""
-        params: dict[str, Any] = {"since_id": since_id, "limit": limit}
+        """GET /api/v1/system/events through admin v2 authentication."""
+        params: dict[str, Any] = {
+            "since_id": since_id,
+            "limit": limit,
+            "stream": "false",
+        }
         if stage is not None:
             params["stage"] = stage
         if listing_id is not None:
             params["listing_id"] = listing_id
         if negotiation_id is not None:
             params["negotiation_id"] = negotiation_id
-        url = self._url("/api/v1/system/events")
-        resp = self._client.get(
-            "/api/v1/system/events",
-            params=params,
-            headers=self._admin_headers(),
-            timeout=self._timeout,
+        return StageEventListResponse.from_dict(
+            self._authenticated_get(
+                "/api/v1/system/events",
+                params=params,
+                role="admin",
+                operation="admin_system_events",
+                resource=_query_resource("system-events", params),
+                request_id=request_id,
+            )
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return StageEventListResponse.from_dict(resp.json())
 
     def wait_for_stage_event(
         self,
@@ -1219,6 +1850,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
+
         deadline = _time.monotonic() + timeout
         cursor = since_id
         while _time.monotonic() < deadline:
@@ -1254,7 +1886,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
     ) -> ListingListResponse:
         """GET /api/v1/listings — see :meth:`StorefrontClient.list_listings`."""
         params = _build_listings_params(
-            status=status, paused=paused, limit=limit, offset=offset,
+            status=status,
+            paused=paused,
+            limit=limit,
+            offset=offset,
         )
         return ListingListResponse.from_dict(
             self._get("/api/v1/listings", params=params)
@@ -1264,23 +1899,39 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /api/v1/listings/{listing_id}"""
         return ListingSummary.from_dict(self._get(f"/api/v1/listings/{listing_id}"))
 
-    def pause_listing(self, listing_id: str) -> ListingPauseResponse:
-        """POST /api/v1/listings/{listing_id}/pause  (admin key required)"""
+    def pause_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/pause."""
         return ListingPauseResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/pause",
                 {},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_pause_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
-    def resume_listing(self, listing_id: str) -> ListingPauseResponse:
-        """POST /api/v1/listings/{listing_id}/resume  (admin key required)"""
+    def resume_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/resume."""
         return ListingPauseResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/resume",
                 {},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_resume_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -1293,24 +1944,49 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         *,
         terminal_state: str | None = None,
-        buyer_address: str | None = None,
+        buyer_principal: Identity | None = None,
         limit: int = 50,
         offset: int = 0,
+        request_id: str | None = None,
     ) -> NegotiationListResponse:
-        """GET /api/v1/listings/{listing_id}/negotiations"""
+        """GET /api/v1/listings/{listing_id}/negotiations through admin v2 auth."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
             params["terminal_state"] = terminal_state
-        if buyer_address is not None:
-            params["buyer_address"] = buyer_address
+        if buyer_principal is not None:
+            if not isinstance(buyer_principal, Identity):
+                raise TypeError("buyer_principal must be a market_identity.Identity")
+            params["buyer_scheme"] = buyer_principal.scheme.value
+            params["buyer_identifier"] = buyer_principal.identifier
+        prefix = f"{listing_id}/negotiations"
         return NegotiationListResponse.from_dict(
-            self._get(f"/api/v1/listings/{listing_id}/negotiations", params=params)
+            self._authenticated_get(
+                f"/api/v1/listings/{listing_id}/negotiations",
+                params=params,
+                role="admin",
+                operation="admin_list_negotiations",
+                resource=_query_resource(prefix, params),
+                request_id=request_id,
+            )
         )
 
-    def get_negotiation(self, listing_id: str, neg_id: str) -> NegotiationDetail:
-        """GET /api/v1/listings/{listing_id}/negotiations/{neg_id}"""
+    def get_negotiation(
+        self,
+        listing_id: str,
+        neg_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> NegotiationDetail:
+        """GET one negotiation through admin v2 authentication."""
+        resource = f"{listing_id}/negotiations/{neg_id}"
         return NegotiationDetail.from_dict(
-            self._get(f"/api/v1/listings/{listing_id}/negotiations/{neg_id}")
+            self._authenticated_get(
+                f"/api/v1/listings/{resource}",
+                role="admin",
+                operation="admin_get_negotiation",
+                resource=resource,
+                request_id=request_id,
+            )
         )
 
     def advance_negotiation(
@@ -1321,6 +1997,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         action: str,
         proposal: dict[str, Any] | None = None,
         reason: str | None = None,
+        request_id: str | None = None,
     ) -> NegotiationActionResponse:
         """POST .../advance  (admin key required)"""
         body: dict[str, Any] = {"action": action}
@@ -1329,10 +2006,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if reason is not None:
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
                 body,
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_advance_negotiation",
+                resource=f"{listing_id}/{neg_id}",
+                request_id=request_id,
             )
         )
 
@@ -1342,13 +2022,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         amount: int,
+        request_id: str | None = None,
     ) -> NegotiationActionResponse:
         """POST .../force-accept  (admin key required)"""
         return NegotiationActionResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
                 {"amount": int(amount)},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_force_accept_negotiation",
+                resource=f"{listing_id}/{neg_id}",
+                request_id=request_id,
             )
         )
 
@@ -1356,52 +2040,204 @@ class SyncStorefrontClient(_StorefrontClientBase):
     # Admin API
     # ------------------------------------------------------------------
 
-    def admin_pause(self) -> AdminPauseResponse:
-        """POST /admin/pause  (admin key required)"""
+    def admin_pause(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> AdminPauseResponse:
+        """POST /api/v1/admin/pause."""
         return AdminPauseResponse.from_dict(
-            self._post("/api/v1/admin/pause", {}, extra_headers=self._admin_headers())
+            self._authenticated_post(
+                "/api/v1/admin/pause",
+                {},
+                role="admin",
+                operation="admin_pause",
+                resource="",
+                request_id=request_id,
+            )
         )
 
-    def admin_resume(self) -> AdminPauseResponse:
-        """POST /admin/resume  (admin key required)"""
+    def admin_resume(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> AdminPauseResponse:
+        """POST /api/v1/admin/resume."""
         return AdminPauseResponse.from_dict(
-            self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
+            self._authenticated_post(
+                "/api/v1/admin/resume",
+                {},
+                role="admin",
+                operation="admin_resume",
+                resource="",
+                request_id=request_id,
+            )
+        )
+
+    def admin_initiate_identity_rotation(
+        self,
+        *,
+        authority: str,
+        subject: str,
+        current_signer: Signer,
+        replacement_signer: Signer,
+        nonce: str,
+        overlap_seconds: int,
+        expires_at: int,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Apply one canonical rotation carrying both possession proofs."""
+        authority = _validate_rotation_authority(authority)
+        self._require_admin_rotation_operator(
+            authority=authority,
+            principal=current_signer.identity,
+            phase="initiation",
+        )
+        rotation = sign_rotation(
+            current_signer=current_signer,
+            replacement_signer=replacement_signer,
+            intent=RotationIntent(
+                current=current_signer.identity,
+                replacement=replacement_signer.identity,
+                subject=subject,
+                authority=authority,
+                nonce=nonce,
+                overlap_seconds=overlap_seconds,
+                expires_at=expires_at,
+            ),
+        )
+        return IdentitySubjectStatusResponse.from_dict(
+            self._authenticated_post(
+                "/api/v1/admin/identity/rotations",
+                rotation.model_dump(mode="json"),
+                role="admin",
+                operation="admin_rotate_identity",
+                resource=_rotation_resource(authority, subject),
+                request_id=request_id,
+            )
+        )
+
+    def admin_complete_identity_rotation(
+        self,
+        *,
+        rotation: RotationRequest,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Retire the old principal from an applied two-proof rotation."""
+        if not isinstance(rotation, RotationRequest):
+            raise TypeError("rotation must be a market_identity.RotationRequest")
+        intent = rotation.intent
+        authority = _validate_rotation_authority(intent.authority)
+        self._require_admin_rotation_operator(
+            authority=authority,
+            principal=intent.replacement,
+            phase="completion",
+        )
+        body = {
+            "authority": authority,
+            "subject": intent.subject,
+            "rotation_nonce": intent.nonce,
+            "principal": intent.current.model_dump(mode="json"),
+        }
+        return IdentitySubjectStatusResponse.from_dict(
+            self._authenticated_post(
+                "/api/v1/admin/identity/retirements",
+                body,
+                role="admin",
+                operation="admin_retire_identity",
+                resource=_rotation_resource(authority, intent.subject),
+                request_id=request_id,
+            )
+        )
+
+    def admin_get_identity_status(
+        self,
+        *,
+        authority: str,
+        subject: str,
+        request_id: str | None = None,
+    ) -> IdentitySubjectStatusResponse:
+        """Inspect current and retired bindings for one identity subject."""
+        authority = _validate_rotation_authority(authority)
+        params = {"authority": authority, "subject": subject}
+        return IdentitySubjectStatusResponse.from_dict(
+            self._authenticated_get(
+                "/api/v1/admin/identity/status",
+                params=params,
+                role="admin",
+                operation="admin_identity_status",
+                resource=_query_resource("identity-status", params),
+                request_id=request_id,
+            )
         )
 
     def admin_interrupt_deal(
-        self, escrow_uid: str, *, reason: str = "operator_interruption",
-        interrupted_at_utc: str | None = None, dry_run: bool = False,
+        self,
+        escrow_uid: str,
+        *,
+        reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None,
+        dry_run: bool = False,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Interrupt an active interruptible deal through the admin control plane."""
         body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
         if interrupted_at_utc is not None:
             body["interrupted_at_utc"] = interrupted_at_utc
-        return self._post(
+        return self._authenticated_post(
             f"/api/v1/admin/deals/{escrow_uid}/interrupt",
-            body, extra_headers=self._admin_headers(),
+            body,
+            role="admin",
+            operation="admin_interrupt_deal",
+            resource=escrow_uid,
+            request_id=request_id,
         )
 
     def admin_import_resources(
-        self, csv_content: bytes, filename: str = "resources.csv"
+        self,
+        csv_content: bytes,
+        filename: str = "resources.csv",
+        *,
+        request_id: str | None = None,
     ) -> ImportResourcesResponse:
-        """POST /admin/portfolio/resources/import  (admin key required).
-
-        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
-        upserts regardless of current table state — use to force a clobber
-        of the current inventory without restarting the pod.
-
-        ``csv_content`` is the raw bytes of the CSV file. Typically read
-        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
-        """
-        url = self._url("/api/v1/admin/portfolio/resources/import")
+        """Upload a CSV using a signed boundary-independent descriptor."""
+        if not isinstance(csv_content, bytes):
+            raise TypeError("csv_content must be bytes")
+        descriptor = {
+            "filename": filename,
+            "media_type": "text/csv",
+            "sha256": hashlib.sha256(csv_content).hexdigest(),
+            "size": len(csv_content),
+        }
+        signed = self._signed_request(
+            role="admin",
+            method="POST",
+            operation="admin_import_resources",
+            resource="portfolio/resources",
+            body=descriptor,
+            request_id=request_id,
+        )
+        headers = dict(signed.headers)
+        headers.pop("Content-Type", None)
+        path = "/api/v1/admin/portfolio/resources/import"
+        url = self._url(path)
         resp = self._client.post(
-            "/api/v1/admin/portfolio/resources/import",
+            path,
             files={"file": (filename, csv_content, "text/csv")},
-            headers=self._admin_headers(),
+            headers=headers,
             timeout=self._timeout,
         )
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise StorefrontClientError(
+                f"POST {url} returned non-JSON response authentication body"
+            ) from exc
+        self._verify_response(resp, signed, payload)
         self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return ImportResourcesResponse.from_dict(resp.json())
+        if not isinstance(payload, dict):
+            raise StorefrontClientError(f"POST {url} returned non-object JSON")
+        return ImportResourcesResponse.from_dict(payload)
 
     def admin_reserve_capacity(
         self,
@@ -1409,74 +2245,172 @@ class SyncStorefrontClient(_StorefrontClientBase):
         required_attributes: dict[str, Any],
         listing_id: str | None = None,
         escrow_uid: str | None = None,
+        request_id: str | None = None,
     ) -> ReserveCapacityResponse:
-        """POST /admin/portfolio/reservations  (admin key required)."""
+        """POST /api/v1/admin/portfolio/reservations."""
+        body = {
+            "required_attributes": required_attributes,
+            "listing_id": listing_id,
+            "escrow_uid": escrow_uid,
+        }
         return ReserveCapacityResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 "/api/v1/admin/portfolio/reservations",
-                {
-                    "required_attributes": required_attributes,
-                    "listing_id": listing_id,
-                    "escrow_uid": escrow_uid,
-                },
-                extra_headers=self._admin_headers(),
+                body,
+                role="admin",
+                operation="admin_reserve_capacity",
+                resource=listing_id or escrow_uid or "",
+                request_id=request_id,
             )
         )
 
-    def admin_release_reservations(self) -> "ReleaseReservationsResponse":
-        """POST /admin/portfolio/release-reservations  (admin key required).
-
-        Forces every ``reserved`` compute resource back to ``available``.
-        Sledgehammer — prefer ``admin_release_one_reservation(resource_id)``
-        for production operator workflows. This bulk variant is mainly for
-        e2e teardown between back-to-back runs against the same stack
-        (mocked provisioning never expires leases).
-        """
+    def admin_release_reservations(
+        self,
+        *,
+        request_id: str | None = None,
+    ) -> "ReleaseReservationsResponse":
+        """POST /api/v1/admin/portfolio/release-reservations."""
         return ReleaseReservationsResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 "/api/v1/admin/portfolio/release-reservations",
                 {},
-                extra_headers=self._admin_headers(),
+                role="admin",
+                operation="admin_release_reservations",
+                resource="",
+                request_id=request_id,
             )
         )
 
-    def admin_release_one_reservation(
-        self, resource_id: str
-    ) -> "ReleaseReservationsResponse":
-        """POST /admin/portfolio/resources/{resource_id}/release-reservation
-        (admin key required).
-
-        Surgical: releases exactly the named reserved resource. Idempotent
-        on already-available rows (returns released_count=0 instead of
-        erroring). 404 if the row doesn't exist.
-
-        For an actually-stuck VM, pair this with provisioning's
-        ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` — that operation
-        runs real Ansible against the host, while this endpoint only clears
-        the storefront's own bookkeeping.
-        """
-        return ReleaseReservationsResponse.from_dict(
-            self._post(
-                f"/api/v1/admin/portfolio/resources/{resource_id}/release-reservation",
-                {},
-                extra_headers=self._admin_headers(),
-            )
-        )
-
-    def get_resource(self, resource_id: str) -> dict:
-        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
-
-        Returns the current state of the resource row — same shape as patch_resource.
-        404 if the resource_id does not exist.
-        """
-        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
-        resp = self._client.get(
+    def get_resource(
+        self,
+        resource_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}."""
+        return self._authenticated_get(
             f"/api/v1/admin/portfolio/resources/{resource_id}",
-            headers=self._admin_headers(),
-            timeout=self._timeout,
+            role="admin",
+            operation="admin_get_resource",
+            resource=resource_id,
+            request_id=request_id,
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+
+    def notify_capacity_released(
+        self,
+        capacity_reservation_id: str,
+        *,
+        site_id: str,
+        resource_id: str | None = None,
+        provider_lease_id: str | None = None,
+        released_at: str | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        """Post a service-authenticated capacity release callback.
+
+        Reuse ``request_id`` with an identical body after an uncertain
+        acknowledgement; changed reuse is rejected locally.
+        """
+        body: dict[str, Any] = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
+        if resource_id is not None:
+            body["resource_id"] = resource_id
+        if provider_lease_id is not None:
+            body["provider_lease_id"] = provider_lease_id
+        if released_at is not None:
+            body["released_at"] = released_at
+        return self._authenticated_post(
+            "/api/v1/admin/fulfillment/events/capacity-released",
+            body,
+            role="service",
+            operation="fulfillment_capacity_released",
+            resource=capacity_reservation_id,
+            request_id=request_id,
+        )
+
+    def notify_usage_started(
+        self,
+        capacity_reservation_id: str,
+        *,
+        site_id: str,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_lease_id: str | None = None,
+        resource_id: str | None = None,
+        vm_host: str | None = None,
+        vm_target: str | None = None,
+        gpu_count: int | None = None,
+        lease_end_utc: str | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        """Post a service-authenticated usage-started callback."""
+        body: dict[str, Any] = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
+        optional = {
+            "escrow_uid": escrow_uid,
+            "provider_id": provider_id,
+            "provider_lease_id": provider_lease_id,
+            "resource_id": resource_id,
+            "vm_host": vm_host,
+            "vm_target": vm_target,
+            "gpu_count": gpu_count,
+            "lease_end_utc": lease_end_utc,
+        }
+        body.update(
+            {key: value for key, value in optional.items() if value is not None}
+        )
+        return self._authenticated_post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            body,
+            role="service",
+            operation="fulfillment_usage_started",
+            resource=capacity_reservation_id,
+            request_id=request_id,
+        )
+
+    def notify_fulfillment_failed(
+        self,
+        capacity_reservation_id: str,
+        *,
+        site_id: str,
+        escrow_uid: str | None = None,
+        provider_id: str | None = None,
+        provider_job_id: str | None = None,
+        resource_id: str | None = None,
+        reason: str | None = None,
+        message: str | None = None,
+        logs_ref: str | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        """Post a service-authenticated fulfillment-failed callback."""
+        body: dict[str, Any] = {
+            "capacity_reservation_id": capacity_reservation_id,
+            "site_id": site_id,
+        }
+        optional = {
+            "escrow_uid": escrow_uid,
+            "provider_id": provider_id,
+            "provider_job_id": provider_job_id,
+            "resource_id": resource_id,
+            "reason": reason,
+            "message": message,
+            "logs_ref": logs_ref,
+        }
+        body.update(
+            {key: value for key, value in optional.items() if value is not None}
+        )
+        return self._authenticated_post(
+            "/api/v1/admin/fulfillment/events/failed",
+            body,
+            role="service",
+            operation="fulfillment_failed",
+            resource=capacity_reservation_id,
+            request_id=request_id,
+        )
 
     def patch_resource(
         self,
@@ -1484,8 +2418,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         state: "str | None" = None,
         attributes: "dict | None" = None,
+        request_id: str | None = None,
     ) -> dict:
-        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}.
 
         Partial update of a resource row. Only supplied (non-None) fields are
         written; unspecified fields are left unchanged. Returns the full
@@ -1502,10 +2437,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
             body["state"] = state
         if attributes is not None:
             body["attributes"] = attributes
-        return self._patch(
+        return self._authenticated_patch(
             f"/api/v1/admin/portfolio/resources/{resource_id}",
             body,
-            extra_headers=self._admin_headers(),
+            role="admin",
+            operation="admin_patch_resource",
+            resource=resource_id,
+            request_id=request_id,
         )
 
     def evaluate_negotiate(
@@ -1513,10 +2451,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         *,
         proposal: dict[str, Any],
+        buyer_principal: Identity,
         requested_duration_seconds: int | None = None,
-        buyer_address: str = "",
+        request_id: str | None = None,
     ) -> EvaluateNegotiateResponse:
-        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
 
         Runs the configured negotiation strategy against a synthetic buyer
         proposal without creating a negotiation thread or writing to the
@@ -1526,51 +2465,73 @@ class SyncStorefrontClient(_StorefrontClientBase):
         ``EvaluateNegotiateResponse.would_negotiate=False`` when the
         strategy would exit immediately.
         """
-        body: dict[str, Any] = {"proposal": proposal, "buyer_address": buyer_address}
+        if not isinstance(buyer_principal, Identity):
+            raise TypeError("buyer_principal must be a market_identity.Identity")
+        body: dict[str, Any] = {
+            "proposal": proposal,
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+        }
         if requested_duration_seconds is not None:
             body["requested_duration_seconds"] = int(requested_duration_seconds)
         return EvaluateNegotiateResponse.from_dict(
-            self._post(
-                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
-                extra_headers=self._admin_headers(),
+            self._authenticated_post(
+                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate",
+                body,
+                role="admin",
+                operation="admin_evaluate_negotiation",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
-
-
 
     def create_listing(
         self,
         *,
-        agent_wallet_address: str,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
+        settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
         max_duration_seconds: int | None = None,
         paused: bool = False,
+        request_id: str | None = None,
     ) -> StorefrontListingCreateResponse:
-        """Create a listing with one or more supported settlement choices."""
-        headers = self._auth_headers("create_listing", agent_wallet_address)
+        """Create a listing through the seller-authenticated v2 contract."""
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows or [],
             "settlement_options": settlement_options or [],
+            "settlement_config": settlement_config,
             "demands": demands or [],
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
-            self._post("/api/v1/listings/create", body, extra_headers=headers)
+            self._authenticated_post(
+                "/api/v1/listings/create",
+                body,
+                role="seller",
+                operation="create_listing",
+                resource="",
+                request_id=request_id,
+            )
         )
 
-    def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
-        """POST /api/v1/listings/{listing_id}/close"""
-        headers = self._auth_headers("close_listing", listing_id)
+    def close_listing(
+        self,
+        listing_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> StorefrontListingCloseResponse:
+        """POST /api/v1/listings/{listing_id}/close."""
         return StorefrontListingCloseResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/close",
-                {},
-                extra_headers=headers,
+                EMPTY_BODY,
+                role="seller",
+                operation="close_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -1578,27 +2539,29 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        buyer_address: str | None = None,
-        amount: str | None = None,
+        buyer_principal: Identity,
+        buyer_evm_address: str,
+        amount: str | int | None = None,
         token: str | None = None,
+        request_id: str | None = None,
     ) -> StorefrontListingRefundResponse:
-        """POST /api/v1/listings/{listing_id}/refund
-
-        ``buyer_address`` is optional; the storefront resolves it from the
-        listing's recorded buyer when omitted.
-        """
-        headers = self._auth_headers("refund_listing", listing_id)
-        body: dict[str, Any] = {}
-        if buyer_address is not None:
-            body["buyer_address"] = buyer_address
-        if amount is not None:
-            body["amount"] = amount
-        if token is not None:
-            body["token"] = token
+        """POST /api/v1/listings/{listing_id}/refund."""
+        if not isinstance(buyer_principal, Identity):
+            raise TypeError("buyer_principal must be a market_identity.Identity")
+        body: dict[str, Any] = {
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "buyer_evm_address": buyer_evm_address,
+            "amount": amount,
+            "token": token,
+        }
         return StorefrontListingRefundResponse.from_dict(
-            self._post(
+            self._authenticated_post(
                 f"/api/v1/listings/{listing_id}/refund",
-                body, extra_headers=headers,
+                body,
+                role="seller",
+                operation="refund_listing",
+                resource=listing_id,
+                request_id=request_id,
             )
         )
 
@@ -1606,27 +2569,36 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        fulfillment_uid: str | None = None,
+        escrow_uid: str,
+        fulfillment_uid: str,
+        request_id: str | None = None,
     ) -> StorefrontListingClaimResponse:
-        """POST /listings/claim"""
-        headers = self._auth_headers("claim_listing", listing_id)
-        body: dict[str, Any] = {"listing_id": listing_id}
-        if fulfillment_uid:
-            body["fulfillment_uid"] = fulfillment_uid
+        """POST /api/v1/listings/{listing_id}/claim."""
+        body: dict[str, Any] = {
+            "escrow_uid": escrow_uid,
+            "claimant_principal": self._principal_body(),
+            "fulfillment_uid": fulfillment_uid,
+        }
         return StorefrontListingClaimResponse.from_dict(
-            self._post("/listings/claim", body, extra_headers=headers)
+            self._authenticated_post(
+                f"/api/v1/listings/{listing_id}/claim",
+                body,
+                role="seller",
+                operation="claim_listing",
+                resource=listing_id,
+                request_id=request_id,
+            )
         )
 
     # ------------------------------------------------------------------
     # Buyer protocol — negotiate / settle
-    # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
+    # Marketplace identity v2 binds the exact canonical body and request context.
     # ------------------------------------------------------------------
 
     def negotiate_new(
         self,
         *,
         listing_id: str,
-        buyer_address: str,
         initial_amount: int | None,
         provision_terms: dict[str, Any],
         buyer_agent_url: str = "",
@@ -1638,21 +2610,18 @@ class SyncStorefrontClient(_StorefrontClientBase):
         literal_fields: dict[str, Any] | None = None,
         rates: list[dict[str, Any]] | None = None,
         demands: list[dict[str, Any]] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+        """POST /api/v1/negotiate/new through the buyer v2 contract.
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"negotiate_new:{listing_id}",
-            identity_identifier=buyer_address,
-        )
         exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         fields = dict(proposal_fields or {})
         if initial_amount is not None:
-            fields.setdefault("amount", int(initial_amount))
+            fields.setdefault("amount", str(initial_amount))
         literals = dict(literal_fields or {})
         if token or literal_fields is None:
             literals.setdefault("token", token or ("0x" + "0" * 40))
@@ -1669,15 +2638,21 @@ class SyncStorefrontClient(_StorefrontClientBase):
             proposal["demands"] = demands
         body = {
             "listing_id": listing_id,
-            "buyer_address": buyer_address,
+            "buyer_principal": self._principal_body(),
             "provision_terms": _validate_provision_terms_envelope(
                 provision_terms,
             ),
             "proposal": proposal,
+            "settlement_selection": settlement_selection,
             "buyer_agent_url": buyer_agent_url,
         }
-        return self._post(
-            "/api/v1/negotiate/new", body, extra_headers=headers,
+        return self._authenticated_post(
+            "/api/v1/negotiate/new",
+            body,
+            role="buyer",
+            operation="negotiate_new",
+            resource=listing_id,
+            request_id=request_id,
         )
 
     def negotiate_continue(
@@ -1685,9 +2660,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        buyer_address: str,
         proposal: dict[str, Any] | None = None,
+        settlement_selection: dict[str, Any] | None = None,
         reason: str | None = None,
+        request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}.
 
@@ -1695,18 +2671,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
         omitted for ``accept`` / ``exit``. ``fields["amount"]`` carries the
         buyer's absolute new offer in base units.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"negotiate_continue:{neg_id}",
-            identity_identifier=buyer_address,
-        )
-        body: dict = {"action": action, "buyer_address": buyer_address}
-        if proposal is not None:
-            body["proposal"] = proposal
-        if reason is not None:
-            body["reason"] = reason
-        return self._post(
-            f"/api/v1/negotiate/{neg_id}", body, extra_headers=headers,
+        body: dict[str, Any] = {
+            "action": action,
+            "buyer_principal": self._principal_body(),
+            "proposal": proposal,
+            "settlement_selection": settlement_selection,
+            "reason": reason,
+        }
+        return self._authenticated_post(
+            f"/api/v1/negotiate/{neg_id}",
+            body,
+            role="buyer",
+            operation="negotiate_continue",
+            resource=neg_id,
+            request_id=request_id,
         )
 
     def settle(
@@ -1714,32 +2692,31 @@ class SyncStorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         negotiation_id: str,
-        buyer_address: str,
+        buyer_evm_address: str,
         ssh_public_key: str = "",
         chain_name: str = "anvil",
+        request_id: str | None = None,
     ) -> SettleResponse:
-        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically.
+        """POST /api/v1/settle/{escrow_uid} through the buyer v2 contract.
 
-        ``chain_name`` tells the seller which configured ``[chains.<name>]``
-        entry to dispatch the on-chain verify against. Defaults to ``"anvil"``
-        for compatibility with the e2e fixture; non-anvil consumers must
-        pass their own value.
+        ``buyer_evm_address`` is the selected EVM settlement-effect address; it
+        is deliberately distinct from the signer-owned marketplace principal.
         """
-        headers = _signed_request_headers(
-            self._private_key,
-            f"settle_escrow:{escrow_uid}",
-            identity_identifier=buyer_address,
-        )
-        body: dict = {
+        body: dict[str, Any] = {
             "negotiation_id": negotiation_id,
-            "buyer_address": buyer_address,
+            "buyer_principal": self._principal_body(),
+            "buyer_evm_address": buyer_evm_address,
+            "ssh_public_key": ssh_public_key,
             "chain_name": chain_name,
         }
-        if ssh_public_key:
-            body["ssh_public_key"] = ssh_public_key
         return SettleResponse.from_dict(
-            self._post(
-                f"/api/v1/settle/{escrow_uid}", body, extra_headers=headers,
+            self._authenticated_post(
+                f"/api/v1/settle/{escrow_uid}",
+                body,
+                role="buyer",
+                operation="settle_escrow",
+                resource=escrow_uid,
+                request_id=request_id,
             )
         )
 
@@ -1747,29 +2724,25 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        buyer_address: str,
+        request_id: str | None = None,
     ) -> SettleStatusResponse:
-        """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
-        headers = _signed_request_headers(
-            self._private_key,
-            f"settle_status:{escrow_uid}",
-            identity_identifier=buyer_address,
+        """GET /api/v1/settle/{escrow_uid}/status through buyer v2 auth."""
+        return SettleStatusResponse.from_dict(
+            self._authenticated_get(
+                f"/api/v1/settle/{escrow_uid}/status",
+                role="buyer",
+                operation="settle_status",
+                resource=escrow_uid,
+                request_id=request_id,
+            )
         )
-        url = self._url(f"/api/v1/settle/{escrow_uid}/status")
-        resp = self._client.get(
-            f"/api/v1/settle/{escrow_uid}/status",
-            params={"buyer_address": buyer_address},
-            headers=headers,
-            timeout=self._timeout,
-        )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return SettleStatusResponse.from_dict(resp.json())
 
     def wait_for_settlement(
         self,
         escrow_uid: str,
         *,
         timeout: float = 60.0,
+        request_id: str | None = None,
     ) -> SettleWaitResponse:
         """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
 
@@ -1784,15 +2757,18 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         Raises ``StorefrontClientError`` on non-2xx responses.
         """
-        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
-        resp = self._client.get(
-            f"/api/v1/admin/settle/{escrow_uid}/wait",
-            params={"timeout": timeout},
-            headers=self._admin_headers(),
-            timeout=timeout + 10.0,  # client timeout slightly longer than server cap
+        timeout_value = str(timeout)
+        return SettleWaitResponse.from_dict(
+            self._authenticated_get(
+                f"/api/v1/admin/settle/{escrow_uid}/wait",
+                params={"timeout": timeout_value},
+                role="admin",
+                operation="admin_settle_wait",
+                resource=f"{escrow_uid}?timeout={timeout_value}",
+                request_id=request_id,
+                timeout=timeout + 10.0,
+            )
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return SettleWaitResponse.from_dict(resp.json())
 
     def verify_settle(
         self,
@@ -1803,8 +2779,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agreed_duration_seconds: int,
         listing_id: str,
         chain_name: str = "anvil",
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
+        """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
         Reads the escrow from chain on ``chain_name`` and confirms it
         matches the supplied terms. Returns dict with valid=True/False
@@ -1817,9 +2794,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "listing_id": listing_id,
             "chain_name": chain_name,
         }
-        return self._post(
-            f"/api/v1/admin/settle/{escrow_uid}/verify", body,
-            extra_headers=self._admin_headers(),
+        return self._authenticated_post(
+            f"/api/v1/admin/settle/{escrow_uid}/verify",
+            body,
+            role="admin",
+            operation="admin_verify_settlement",
+            resource=escrow_uid,
+            request_id=request_id,
         )
 
     def evaluate_settle(
@@ -1829,8 +2810,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         ssh_public_key: str = "",
         duration_seconds: int = 3600,
+        request_id: str | None = None,
     ) -> dict:
-        """POST /api/v1/admin/settle/{escrow_uid}/evaluate — dry-run provisioning job spec (admin key).
+        """POST /api/v1/admin/settle/{escrow_uid}/evaluate.
 
         Resolves a host from inventory and builds the job spec without chain reads,
         DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
@@ -1841,7 +2823,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "ssh_public_key": ssh_public_key,
             "duration_seconds": duration_seconds,
         }
-        return self._post(
-            f"/api/v1/admin/settle/{escrow_uid}/evaluate", body,
-            extra_headers=self._admin_headers(),
+        return self._authenticated_post(
+            f"/api/v1/admin/settle/{escrow_uid}/evaluate",
+            body,
+            role="admin",
+            operation="admin_evaluate_settlement",
+            resource=escrow_uid,
+            request_id=request_id,
         )

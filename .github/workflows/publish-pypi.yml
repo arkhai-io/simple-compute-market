@@ -8,6 +8,7 @@ on:
       - 'core/**'
       - 'domains/vms/**'
       - 'domains/apicredits/**'
+      - 'domains/bare_metal/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
 
@@ -72,6 +73,7 @@ jobs:
             kit-identity: ['kit/identity/**', '.github/workflows/publish-pypi.yml']
             kit-policy: ['kit/policy/**', '.github/workflows/publish-pypi.yml']
             kit-settlement-runtime: ['kit/settlement-runtime/**', '.github/workflows/publish-pypi.yml']
+            kit-hosted-settlement: ['kit/hosted-settlement/**', 'manifests/hosted-settlement-v0.1.0-trust.json', '.github/workflows/publish-pypi.yml']
             core: ['core/src/**', 'core/pyproject.toml', 'core/README.md', '.github/workflows/publish-pypi.yml']
             core-buyer: ['core/buyer/**', '.github/workflows/publish-pypi.yml']
             core-storefront: ['core/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -79,13 +81,16 @@ jobs:
             core-registry-client: ['core/registry-client/**', '.github/workflows/publish-pypi.yml']
             core-registry: ['core/registry/**', '.github/workflows/publish-pypi.yml']
             kit-site: ['kit/site/**', '.github/workflows/publish-pypi.yml']
+            kit-site-client: ['kit/site-client/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
+            bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-provisioning-adapter: ['domains/bare_metal/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             vms: ['domains/vms/domain/**', '.github/workflows/publish-pypi.yml']
             vms-buyer: ['domains/vms/buyer/**', '.github/workflows/publish-pypi.yml']
             vms-provisioning-adapter: ['domains/vms/provisioning/adapter/**', '.github/workflows/publish-pypi.yml']
             compute-provisioning-service: ['provisioning/compute/service/**', '.github/workflows/publish-pypi.yml']
             vms-storefront: ['domains/vms/storefront/**', '.github/workflows/publish-pypi.yml']
+            apicredits-domain: ['domains/apicredits/pyproject.toml', 'domains/apicredits/src/**', 'domains/apicredits/tests/**', '.github/workflows/publish-pypi.yml']
             apicredits-buyer: ['domains/apicredits/buyer/**', '.github/workflows/publish-pypi.yml']
             apicredits-middleware: ['domains/apicredits/middleware/python/**', '.github/workflows/publish-pypi.yml']
             apicredits-storefront: ['domains/apicredits/storefront/**', '.github/workflows/publish-pypi.yml']
@@ -106,6 +111,7 @@ jobs:
             {"key": "kit-identity",           "path": "kit/identity",                     "dist": "arkhai-kit-identity"},
             {"key": "kit-policy",             "path": "kit/policy",                       "dist": "arkhai-kit-policy"},
             {"key": "kit-settlement-runtime", "path": "kit/settlement-runtime",               "dist": "arkhai-kit-settlement-runtime"},
+            {"key": "kit-hosted-settlement",  "path": "kit/hosted-settlement",            "dist": "arkhai-kit-hosted-settlement"},
             {"key": "core",                   "path": "core",                             "dist": "arkhai-core"},
             {"key": "core-buyer",             "path": "core/buyer",                       "dist": "arkhai-core-buyer"},
             {"key": "core-storefront",        "path": "core/storefront",                  "dist": "arkhai-core-storefront"},
@@ -113,13 +119,16 @@ jobs:
             {"key": "core-registry-client",   "path": "core/registry-client",             "dist": "arkhai-core-registry-client"},
             {"key": "core-registry",          "path": "core/registry",                    "dist": "arkhai-core-registry"},
             {"key": "kit-site",              "path": "kit/site",                        "dist": "arkhai-kit-site"},
+            {"key": "kit-site-client",       "path": "kit/site-client",                 "dist": "arkhai-kit-site-client"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
+            {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-provisioning-adapter", "path": "domains/bare_metal/provisioning/adapter", "dist": "arkhai-bare-metal-provisioning-adapter"},
             {"key": "vms",                   "path": "domains/vms/domain",              "dist": "arkhai-vms"},
             {"key": "vms-buyer",              "path": "domains/vms/buyer",                "dist": "arkhai-vms-buyer", "wheel_only": true},
             {"key": "vms-provisioning-adapter", "path": "domains/vms/provisioning/adapter", "dist": "arkhai-vms-provisioning-adapter"},
             {"key": "compute-provisioning-service", "path": "provisioning/compute/service", "dist": "arkhai-compute-provisioning-service"},
             {"key": "vms-storefront",         "path": "domains/vms/storefront",           "dist": "arkhai-vms-storefront"},
+            {"key": "apicredits-domain",       "path": "domains/apicredits",               "dist": "arkhai-apicredits-domain"},
             {"key": "apicredits-buyer",        "path": "domains/apicredits/buyer",          "dist": "arkhai-apicredits-buyer", "wheel_only": true},
             {"key": "apicredits-middleware",   "path": "domains/apicredits/middleware/python", "dist": "arkhai-apicredits-middleware"},
             {"key": "apicredits-storefront",   "path": "domains/apicredits/storefront",     "dist": "arkhai-apicredits-storefront"},
@@ -184,8 +193,14 @@ jobs:
           manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["manifest_filename"])')"
           wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["client_wheel"]["filename"])')"
           test -n "$repository"
-          gh release download "v$version" --repo "$repository" \
-            --pattern "$manifest" --pattern "$wheel" --dir .dist
+          gh release download "v$version" --repo "$repository" --dir .dist \
+            --pattern "$manifest" \
+            --pattern "$wheel" \
+            --pattern "openapi-v0.1.0.json" \
+            --pattern "conformance-v0.1.0.json" \
+            --pattern "migrations-v4.json" \
+            --pattern "sbom.spdx.json" \
+            --pattern "provenance.intoto.json"
       - name: Verify staged hosted client release
         if: steps.check.outputs.skip == 'false' && matrix.dist == 'arkhai-kit-hosted-settlement'
         run: make verify-hosted-release

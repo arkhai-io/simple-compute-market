@@ -119,13 +119,11 @@ class SettlementServicingWorker:
         initial: SettlementObligationRecord,
         now: float,
     ) -> None:
-        claimant = initial.obligation.get("claimant")
-        if claimant not in {"buyer", "seller"}:
-            raise ValueError("obligation claimant must be buyer or seller")
+        claimant_principal = initial.claimant_principal
         try:
             status = await self._runtime.reconcile_status(
                 obligation_ref=initial.obligation_ref,
-                local_role=claimant,
+                local_principal=claimant_principal,
                 worker_id=self._worker_id,
             )
         except Exception as exc:
@@ -165,7 +163,7 @@ class SettlementServicingWorker:
             try:
                 checked = await self._runtime.check(
                     obligation_ref=record.obligation_ref,
-                    local_role=claimant,
+                    local_principal=claimant_principal,
                     worker_id=self._worker_id,
                 )
             except Exception as exc:
@@ -192,7 +190,7 @@ class SettlementServicingWorker:
         try:
             collected = await self._runtime.collect(
                 obligation_ref=record.obligation_ref,
-                local_role=claimant,
+                local_principal=claimant_principal,
                 worker_id=self._worker_id,
             )
         except Exception as exc:

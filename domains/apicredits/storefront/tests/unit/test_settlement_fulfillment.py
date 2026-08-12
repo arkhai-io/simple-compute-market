@@ -18,14 +18,26 @@ from domains.apicredits.settlement.credits_client import (
 )
 from domains.apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from market_core import ImmutableFulfillmentCapability
+from market_identity import Ed25519Signer
+from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 
-_BUYER = "0xBuyerAAAA0000000000000000000000000000ab"
+_BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
+_SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 _OFFER = {
     "kind": "api_credits.v1",
     "service_name": "Acme Inference",
     "base_url": "https://api.acme.example",
     "resource_id": "svc-quota",
 }
+
+
+def _settlement_request(negotiation_id: str) -> ApiCreditsSettleRequest:
+    return ApiCreditsSettleRequest(
+        negotiation_id=negotiation_id,
+        buyer_principal=_BUYER_PRINCIPAL,
+        buyer_evm_address="0x" + "33" * 20,
+        chain_name="anvil",
+    )
 
 
 def _events():
@@ -64,7 +76,7 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
         escrow_uid="0xescrow1",
         offer_resource=_OFFER,
         quantity=3,
-        buyer_wallet=_BUYER,
+        buyer_principal=_BUYER_PRINCIPAL,
         listing_id="L-tok",
         service_url="http://tokens:8082",
         admin_key="k",
@@ -106,6 +118,7 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
         escrow_uid="0xescrow2",
         offer_resource=_OFFER,
         quantity=3,
+        buyer_principal=_BUYER_PRINCIPAL,
         service_url="http://tokens:8082",
         admin_key="k",
         stage_event=stage_event,
@@ -142,6 +155,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch):
         escrow_uid="0xescrow3",
         offer_resource=_OFFER,
         quantity=3,
+        buyer_principal=_BUYER_PRINCIPAL,
         key_mode="new",
         service_url="http://tokens:8082",
         admin_key="k",
@@ -175,6 +189,7 @@ async def test_fulfillment_service_normalizes_order_through_domain_runtime(
         escrow_uid="0xescrow-runtime",
         order={"offer_resource": dict(_OFFER)},
         quantity=3,
+        buyer_principal=_BUYER_PRINCIPAL,
     )
 
     assert result["status"] == "fulfilled"
@@ -207,6 +222,7 @@ async def test_fulfillment_service_rejects_invalid_domain_listing(monkeypatch):
                 },
             },
             quantity=3,
+            buyer_principal=_BUYER_PRINCIPAL,
         )
 
 
@@ -354,12 +370,14 @@ async def settled_db(tmp_path, monkeypatch):
         ],
         fulfillment_resource=None,
         max_duration_seconds=None,
-        seller="http://seller:8002",
+        storefront_url="http://seller:8002",
+        seller_principal=_SELLER_PRINCIPAL,
     )
     response = await start_sync_negotiation(
         sqlite_client=client,
         our_listing_id="L-tok",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
         proposal=EscrowProposal(
             chain_name="anvil",
             escrow_address=escrow_addr,
@@ -374,7 +392,7 @@ async def settled_db(tmp_path, monkeypatch):
             payload={"quantity": 3, "key": {"mode": "new"}},
         ),
         our_base_url="http://seller:8002",
-        their_agent_url=_BUYER,
+        their_agent_url="http://buyer:9000",
     )
     assert response["action"] == "accept"
     assert response.get("settlement_plan"), response
@@ -424,7 +442,11 @@ def _build_settlement_composition(db):
     )
     coordinator = SettlementJobCoordinator(
         runtime,
-        prepare=partial(prepare_api_credit_settlement, sqlite_client=db),
+        prepare=partial(
+            prepare_api_credit_settlement,
+            sqlite_client=db,
+            local_principal=_SELLER_PRINCIPAL,
+        ),
         reserve_start=partial(
             reserve_api_credit_settlement,
             db,
@@ -483,6 +505,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(
         negotiation_id=neg_id,
         mechanism_client=mechanism_client,
         chain_name="anvil",
+        request=_settlement_request(neg_id),
     )
     assert result["status"] == "provisioning"
     assert domain_runtime.serialize_api_credit_settlement_start(result) == {
@@ -528,6 +551,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(
         negotiation_id=neg_id,
         mechanism_client=mechanism_client,
         chain_name="anvil",
+        request=_settlement_request(neg_id),
     )
     assert again["status"] == "ready"
     assert len(fulfillment_calls) == 1
@@ -567,6 +591,7 @@ async def test_legacy_ready_row_recovers_into_shared_servicing(
         negotiation_id=neg_id,
         mechanism_client=object(),
         chain_name="anvil",
+        request=_settlement_request(neg_id),
     )
 
     assert result["status"] == "ready"
@@ -600,5 +625,6 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
             negotiation_id=neg_id,
             mechanism_client=object(),
             chain_name="anvil",
+            request=_settlement_request(neg_id),
         )
     assert await db.load_escrow(escrow_uid="0xbad") is None

@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from market_identity import Identity
 from pydantic import BaseModel, Field, model_validator
-
-
-class IdentityRef(BaseModel):
-    """Scheme-tagged identity, the same shape as the key ownership claim."""
-
-    scheme: str = Field(min_length=1)
-    id: str = Field(min_length=1)
 
 
 class KeyDisposition(BaseModel):
@@ -31,18 +25,18 @@ class IssuanceRequest(BaseModel):
     escrow_uid: str = Field(min_length=1)
     quantity: int = Field(ge=1)
     key: KeyDisposition
-    buyer: Optional[IdentityRef] = Field(
+    buyer: Optional[Identity] = Field(
         default=None,
         description=(
-            "The purchasing identity from the deal (wallet in v1). "
+            "The purchasing marketplace principal from the deal. "
             "Existing-mode issuance re-checks the target key's ownership "
             "claim against it; new keys bind it as owner unless an "
             "explicit owner is given."
         ),
     )
-    owner: Optional[IdentityRef] = Field(
+    owner: Optional[Identity] = Field(
         default=None,
-        description="Explicit ownership claim for a new key (overrides buyer).",
+        description="Explicit marketplace principal for a new key (overrides buyer).",
     )
     capacity_reservation_id: Optional[str] = Field(
         default=None, description="The negotiation-time quota hold, if one was taken.",

@@ -1,8 +1,8 @@
 """Buyer-side scalar policy objects.
 
-Concrete ``BuyerPolicy`` registrations for the scalar-amount escrow
-formats every Alkahest market domain trades in (ARCHITECTURE.md, "Buyer
-negotiation policy surface"). Both scalar policies share the same
+Concrete ``BuyerPolicy`` registrations for scalar-amount settlement formats
+shared by market domains (ARCHITECTURE.md, "Buyer negotiation policy surface").
+Both scalar policies share the same
 parameter surface and format compatibility; they differ only in the
 middleware terminal:
 
@@ -42,7 +42,7 @@ from market_policy.buyer_policy import (
 
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     """Return the primary per-unit rate from the first settlement choice."""
-    from market_alkahest.schemas import primary_rate_value
+    from market_core.schemas import primary_rate_value
 
     accepted = listing.get("accepted_escrows") or []
     if isinstance(accepted, str):

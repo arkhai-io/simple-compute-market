@@ -20,41 +20,46 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from market_core.schemas import SettlementPlan
+from market_settlement_runtime import derive_obligation_ref
+
 from .buy_orchestrator import (
     AgreedTerms,
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
-    submit_settlement,
+    submit_settlement_request,
     wait_for_settlement,
 )
-from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
+from .escrow_client import looks_like_propagation_lag
+from .hosted_settlement import (
+    start_hosted_settlement,
+    wait_for_hosted_settlement,
+)
+from .deal_helpers import (
+    load_deal_context,
+    make_deal_publisher_trust_resolver,
+    open_run_log,
+    resolve_chain_settings,
+)
 from .run_log import read_run
 
 
-def _chain_name_from_run_log(run_id: str) -> Optional[str]:
-    """Look up the chain the deal targets, from the run-log.
+def _chain_name_from_run_log(run_id: str, *, signer) -> Optional[str]:
+    """Look up the explicit EVM mechanism chain recorded for a run."""
 
-    Source priority:
-      1. ``escrow_created`` event (recorded at escrow creation time).
-      2. ``run_started`` event (recorded when ``market negotiate`` picked
-         the chain from the listing's accepted_escrows).
-
-    Settling on a different chain would fail, so we trust whichever
-    event the buyer wrote first.
-    """
-    for ev in read_run(run_id):
+    for ev in read_run(run_id, signer=signer):
         if ev.get("event") == "escrow_created":
-            cn = ev.get("chain_name")
-            if isinstance(cn, str) and cn:
-                return cn
+            chain_name = ev.get("chain_name")
+            if isinstance(chain_name, str) and chain_name:
+                return chain_name
             terms = ev.get("terms") or {}
-            cn = terms.get("chain_name")
-            if isinstance(cn, str) and cn:
-                return cn
+            chain_name = terms.get("chain_name")
+            if isinstance(chain_name, str) and chain_name:
+                return chain_name
         if ev.get("event") == "run_started":
-            cn = ev.get("chain_name")
-            if isinstance(cn, str) and cn:
-                return cn
+            chain_name = ev.get("chain_name")
+            if isinstance(chain_name, str) and chain_name:
+                return chain_name
     return None
 
 
@@ -86,6 +91,22 @@ def _accepted_proposal_chain(deal) -> Optional[str]:
     return None
 
 
+def _hosted_obligation(deal) -> dict | None:
+    if deal.settlement_plan is None:
+        return None
+    plan = SettlementPlan.model_validate(deal.settlement_plan)
+    hosted = [
+        obligation
+        for obligation in plan.obligations
+        if obligation.mechanism == "fiat.stripe.v1"
+    ]
+    if not hosted:
+        return None
+    if len(plan.obligations) != 1 or len(hosted) != 1:
+        raise ValueError("hosted recovery requires exactly one hosted obligation")
+    return hosted[0].model_dump(mode="json")
+
+
 def run_settle_from_log(
     *,
     run_id: str,
@@ -115,30 +136,113 @@ def run_settle_from_log(
     timeout, non-``ready`` terminal status).
     """
     console = console or Console()
-    deal = load_deal_context(run_id)
+    from .common import (
+        chain_by_name,
+        resolve_buyer_signer,
+        resolve_identity_config,
+        resolve_identity_credential,
+    )
+
+    identity_config = resolve_identity_config()
+    signer = resolve_buyer_signer(
+        identity_config,
+        resolve_identity_credential(),
+    )
+    deal = load_deal_context(run_id, signer=signer)
+    resolve_seller_principals = make_deal_publisher_trust_resolver(run_id, deal, signer)
+    log = open_run_log(run_id, signer=signer)
+    log.event("settle_resumed", run_id=run_id)
+
+    hosted_obligation = _hosted_obligation(deal)
+    if hosted_obligation is not None:
+        obligation_ref = derive_obligation_ref(
+            deal.negotiation_id,
+            0,
+            hosted_obligation,
+        )
+        settlement_ref = escrow_uid or deal.settlement_ref
+        if settlement_ref is None:
+            started = start_hosted_settlement(
+                seller_url=deal.seller_url,
+                negotiation_id=deal.negotiation_id,
+                obligation_ref=obligation_ref,
+                principal=deal.buyer_principal,
+                signer=signer,
+                resolve_seller_principals=resolve_seller_principals,
+            )
+            settlement_ref = started.get("settlement_ref")
+            if not isinstance(settlement_ref, str) or not settlement_ref:
+                raise RuntimeError(
+                    "storefront returned no opaque hosted settlement reference"
+                )
+            log.event(
+                "settlement_started",
+                settlement_ref=settlement_ref,
+                status=started.get("status"),
+                action_kind=(started.get("action") or {}).get("kind"),
+                action_expires_at_unix=(started.get("action") or {}).get(
+                    "expires_at_unix"
+                ),
+            )
+
+        def _open_action(action: dict) -> None:
+            url = action.get("url")
+            if isinstance(url, str) and url:
+                import webbrowser
+
+                console.print("[dim]opening hosted checkout action[/dim]")
+                webbrowser.open(url)
+
+        def _hosted_poll(attempt: int, body: dict) -> None:
+            action = body.get("action") or {}
+            log.event(
+                "hosted_settlement_poll",
+                attempt=attempt,
+                settlement_ref=settlement_ref,
+                status=body.get("status"),
+                action_kind=action.get("kind"),
+                action_expires_at_unix=action.get("expires_at_unix"),
+            )
+
+        final = wait_for_hosted_settlement(
+            seller_url=deal.seller_url,
+            settlement_ref=settlement_ref,
+            principal=deal.buyer_principal,
+            signer=signer,
+            poll_interval=poll_interval,
+            total_timeout=settlement_timeout,
+            on_poll=_hosted_poll,
+            on_action=_open_action,
+            resolve_seller_principals=resolve_seller_principals,
+        )
+        status = str(final.get("status") or "unknown")
+        log.event(
+            "hosted_settlement_terminal",
+            settlement_ref=settlement_ref,
+            status=status,
+        )
+        log.end(status, settlement_ref=settlement_ref)
+        if status not in {"ready", "collected"}:
+            raise typer.Exit(7)
+        return final
+
     effective_token = token_contract or deal.token_contract
-    # Precedence: explicit --token-decimals override > value recorded in
-    # the run-log during the original buy > chain decimals() lookup
-    # (delegated to resolve_chain_settings when this is None). The old
-    # fallback to 18 silently produced wrong escrow amounts for non-18-
-    # decimal tokens (USDC = 6).
     effective_token_decimals: Optional[int] = (
         int(token_decimals)
         if token_decimals is not None
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
-    from .common import chain_by_name
     chain_cfg_name = (
         chain_name
         or _accepted_proposal_chain(deal)
-        or _chain_name_from_run_log(run_id)
+        or _chain_name_from_run_log(run_id, signer=signer)
         or _first_listing_chain(deal)
     )
     if not chain_cfg_name:
         typer.secho(
-            "Could not determine the chain from the run-log or deal context. "
-            "Pass --chain to specify which configured chain to settle on.",
-            err=True, fg=typer.colors.RED,
+            "Could not determine the selected EVM chain. Pass --chain.",
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
     chain_cfg = chain_by_name(chain_cfg_name)
@@ -151,14 +255,17 @@ def run_settle_from_log(
         )
         resolved_ssh_public_key = resolve_ssh_public_key(override=ssh_public_key)
         missing: list[str] = []
+        if not resolved_buyer_address:
+            missing.append("wallet.address")
         if not resolved_buyer_private_key:
             missing.append("wallet.private_key")
         if not resolved_ssh_public_key:
-            missing.append("wallet.ssh_public_key")
+            missing.append("provisioning.ssh_public_key")
         if missing:
             typer.secho(
-                "Missing required config: " + ", ".join(missing),
-                err=True, fg=typer.colors.RED,
+                "Missing required EVM config: " + ", ".join(missing),
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         chain = SimpleNamespace(
@@ -181,9 +288,6 @@ def run_settle_from_log(
             token_decimals=effective_token_decimals,
         )
 
-    log = open_run_log(run_id)
-    log.event("settle_resumed", run_id=run_id)
-
     resolved_uid = escrow_uid or deal.escrow_uid
     effective_duration = (
         duration_seconds if duration_seconds is not None else deal.duration_seconds
@@ -198,7 +302,9 @@ def run_settle_from_log(
     header.add_row("Agreed price (per hour)", str(deal.agreed_amount))
     header.add_row("Duration (seconds)", str(effective_duration))
     if chain.token_contract:
-        header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
+        header.add_row(
+            "Token", f"{chain.token_contract} (decimals={chain.token_decimals})"
+        )
     if resolved_uid:
         header.add_row("Escrow UID", resolved_uid + " (skip create)")
     console.print(Panel(header, title="market settle", border_style="cyan"))
@@ -232,7 +338,7 @@ def run_settle_from_log(
         from market_alkahest.alkahest import (
             get_erc20_escrow_obligation_default,
         )
-        from core_buyer.escrow_client import (
+        from .escrow_client import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
         )
@@ -241,8 +347,7 @@ def run_settle_from_log(
             from market_alkahest.schemas import EscrowTerms
 
             escrow_terms_list = [
-                EscrowTerms.model_validate(item)
-                for item in deal.accepted_escrow_terms
+                EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
             ]
         elif deal.accepted_escrow_proposal is not None:
             proposal = EscrowProposal(**deal.accepted_escrow_proposal)
@@ -284,7 +389,8 @@ def run_settle_from_log(
             log.end("error", error=f"escrow_create: {exc}")
             typer.secho(
                 f"escrow.create failed on-chain: {exc}",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(4) from exc
         if not uids:
@@ -292,7 +398,8 @@ def run_settle_from_log(
             log.end("error", error="escrow_create: no uid returned")
             typer.secho(
                 "escrow.create returned no uid — buyer terms list was empty.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(4)
         resolved_uid = uids[0]
@@ -301,14 +408,20 @@ def run_settle_from_log(
 
     # --- Stage 4: submit settlement -------------------------------
     try:
-        submit_body = submit_settlement(
+        submit_body = submit_settlement_request(
             seller_url=deal.seller_url,
             escrow_uid=resolved_uid,
-            negotiation_id=deal.negotiation_id,
-            ssh_public_key=chain.ssh_public_key,
-            buyer_address=chain.buyer_address,
-            buyer_private_key=chain.buyer_private_key,
-            chain_name=chain.chain_name,
+            payload={
+                "negotiation_id": deal.negotiation_id,
+                "ssh_public_key": chain.ssh_public_key,
+                "buyer_evm_address": chain.buyer_address,
+                "chain_name": chain.chain_name,
+            },
+            principal=deal.buyer_principal,
+            signer=signer,
+            max_attempts=6,
+            retryable=looks_like_propagation_lag,
+            resolve_seller_principals=resolve_seller_principals,
         )
     except RuntimeError as exc:
         log.event("settle_submit_failed", error=str(exc))
@@ -326,8 +439,9 @@ def run_settle_from_log(
         final = wait_for_settlement(
             seller_url=deal.seller_url,
             escrow_uid=resolved_uid,
-            buyer_address=chain.buyer_address,
-            buyer_private_key=chain.buyer_private_key,
+            principal=deal.buyer_principal,
+            signer=signer,
+            resolve_seller_principals=resolve_seller_principals,
             poll_interval=poll_interval,
             total_timeout=settlement_timeout,
             on_poll=_on_poll,
@@ -335,7 +449,9 @@ def run_settle_from_log(
     except TimeoutError as exc:
         log.event("settle_terminal", status="timeout", error=str(exc))
         log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
-        typer.secho(f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW)
+        typer.secho(
+            f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW
+        )
         raise typer.Exit(6) from exc
 
     log.event("settle_terminal", body=final)
@@ -371,59 +487,75 @@ def register(app: typer.Typer) -> None:
     @app.command("settle")
     def settle(
         run_id: str = typer.Option(
-            ..., "--from", "--run", "-r",
+            ...,
+            "--from",
+            "--run",
+            "-r",
             help="Buyer run-id from a prior `market negotiate` to resume "
-                 "from (see `market logs runs`).",
+            "from (see `market logs runs`).",
         ),
         escrow_uid: Optional[str] = typer.Option(
-            None, "--escrow-uid", "-u",
+            None,
+            "--escrow-uid",
+            "-u",
             help="Skip escrow.create when the on-chain escrow already exists. "
-                 "If absent, the run-log is checked for an `escrow_created` event.",
+            "If absent, the run-log is checked for an `escrow_created` event.",
         ),
         token_contract: Optional[str] = typer.Option(
-            None, "--token-contract",
+            None,
+            "--token-contract",
             help="Legacy ERC-20 token override for old run-logs without an "
-                 "accepted escrow proposal. Current run-logs settle from the "
-                 "seller-accepted proposal.",
+            "accepted escrow proposal. Current run-logs settle from the "
+            "seller-accepted proposal.",
         ),
         token_decimals: Optional[int] = typer.Option(
-            None, "--token-decimals",
+            None,
+            "--token-decimals",
             help="Legacy ERC-20 decimals override for old run-logs without "
-                 "an accepted escrow proposal.",
+            "an accepted escrow proposal.",
         ),
         duration_hours: Optional[float] = typer.Option(
-            None, "--duration-hours", "-t",
+            None,
+            "--duration-hours",
+            "-t",
             help="Override the lease duration the escrow funds (hours, fractional ok). "
-                 "Default: from the run-log if recorded.",
+            "Default: from the run-log if recorded.",
         ),
         expiration_seconds: int = typer.Option(
-            3600, "--expiration",
+            3600,
+            "--expiration",
             help="Escrow deadline (seconds from now) for the reclaim_expired escape hatch.",
         ),
         ssh_public_key: Optional[str] = typer.Option(
-            None, "--ssh-public-key",
+            None,
+            "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
         buyer_address: Optional[str] = typer.Option(
-            None, "--buyer-address",
+            None,
+            "--buyer-address",
             help="Override buyer wallet address (default: derived from wallet.private_key).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
-            None, "--buyer-priv-key",
+            None,
+            "--buyer-priv-key",
             help="Override buyer private key (default: wallet.private_key).",
         ),
         chain_name: Optional[str] = typer.Option(
-            None, "--chain",
+            None,
+            "--chain",
             help="Override which configured [chains.<name>] entry to settle on. "
-                 "When omitted, reads chain_name from the accepted proposal "
-                 "or escrow_created event.",
+            "When omitted, reads chain_name from the accepted proposal "
+            "or escrow_created event.",
         ),
         poll_interval: float = typer.Option(
-            DEFAULT_SETTLEMENT_POLL_INTERVAL, "--poll-interval",
+            DEFAULT_SETTLEMENT_POLL_INTERVAL,
+            "--poll-interval",
             help="Seconds between /settle/status polls.",
         ),
         settlement_timeout: float = typer.Option(
-            DEFAULT_SETTLEMENT_TIMEOUT, "--settlement-timeout",
+            DEFAULT_SETTLEMENT_TIMEOUT,
+            "--settlement-timeout",
             help="Max seconds to wait for provisioning before giving up.",
         ),
     ) -> None:

@@ -1,0 +1,142 @@
+global:
+  rpc:
+    enabled: false
+  integrationTests:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+  provisioningIdentity:
+    scheme: ed25519
+    identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+
+registry:
+  image:
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  identity:
+    authority: registry-a
+    principal:
+      scheme: ed25519
+      identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+    credentialSecret:
+      name: fiat-registry-identity
+      key: credential
+
+provisioning:
+  server:
+    image:
+      digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  identity:
+    principal:
+      scheme: ed25519
+      identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+    credentialSecret:
+      name: fiat-provisioning-identity
+      key: credential
+  storefrontIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+  adminIdentity:
+    principals:
+      - scheme: ed25519
+        identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+  storefront:
+    agentName: fiat-bob
+
+dev-env:
+  enabled: false
+
+validate-contracts:
+  enabled: false
+
+e2e-tests:
+  enabled: false
+  createSecret: false
+  secretName: arkhai-e2e-unused
+
+storefront:
+  image:
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  agents:
+    - name: fiat-bob
+      port: 8001
+      component: seller
+      autoRegister: false
+      identity:
+        principal:
+          scheme: ed25519
+          identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
+        credentialSecret:
+          name: fiat-bob-marketplace-identity
+          key: credential
+        servicePeers:
+          provisioning_default:
+            role: service
+            siteId: default
+            principals:
+              - scheme: ed25519
+                identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+        administrators:
+          operator:
+            principals:
+              - scheme: ed25519
+                identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
+      secret:
+        createSecret: false
+        secretName: ""
+        configKey: storefront.secrets.toml
+      config:
+        registryAuthority:
+          authority: registry-a
+          principals:
+            - scheme: ed25519
+              identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+        seller:
+          agentId: fiat-bob
+          dbPath: /var/lib/arkhai/agent.db
+          logFilePath: ./logs/fiat-bob.log
+          resourcesCsvPath: ""
+          sshPublicKey: ""
+          enableEventQueue: false
+          provisioning:
+            mode: mock
+            identity:
+              principals:
+                - scheme: ed25519
+                  identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+          negotiation:
+            policies:
+              - has_matching_inventory_guard
+              - escrow_shape_guard
+              - bisection
+          integrations: {}
+        hostedSettlement:
+          enabled: true
+          baseUrl: https://hosted-settlement.example.test
+          authorityId: hosted-authority
+          environment: test
+          expectedAuthority:
+            principals:
+              - scheme: ed25519
+                identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
+          expectedManifestDigest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          contractVersion: 0.1.0
+          expectedSchemaVersion: 4
+          requestTimeoutSeconds: 10
+          preflightTimeoutSeconds: 5
+          allowInsecureLoopback: false
+          requiredCapabilities:
+            - account-owner-retirement.v1
+            - conditional-escrow.v1
+            - stripe-connect-separate-charges-transfers.v1
+            - portable-attestation.v1
+            - eas-arbiter.v1
+            - scheme-tagged-identities.v1
+            - account-owner-admission.v1
+            - account-owner-rotation.v1
+            - signer-injected-client.v1
+            - provider-neutral-seller-onboarding.v1
+          resolvers: {}

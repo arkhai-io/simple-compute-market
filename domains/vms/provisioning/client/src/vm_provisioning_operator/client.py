@@ -5,26 +5,10 @@ Two clients with identical method signatures:
 ``ProvisioningClient``      — async, backed by ``httpx.AsyncClient``
 ``SyncProvisioningClient``  — sync,  backed by ``httpx.Client``
 
-Both clients:
-- Own their HTTP session internally — callers never create or pass a session
-- Accept a ``transport=`` kwarg at construction for in-process test injection
-- Send ``X-Admin-Key`` on every request when ``admin_key`` is set
-- Send ``X-Agent-ID`` on every request when ``agent_id`` is set
-- Raise ``ProvisioningError`` on non-2xx responses
-- Return typed model objects from all methods
-
-Usage (async)::
-
-    client = ProvisioningClient("http://provisioning:8081", admin_key="…")
-    async with client:
-        submit = await client.create_vm("kvm1", CreateVmRequest(...))
-        result = await client.poll_until_complete(submit.job_id)
-
-Usage (sync, e.g. smoke tests)::
-
-    client = SyncProvisioningClient("http://provisioning:8081")
-    hosts = client.list_hosts()
-    client.close()
+Both clients own their HTTP session, authenticate every non-health request with
+the caller's marketplace signer, pin and verify the provisioning authority on
+every response, raise ``ProvisioningError`` on non-2xx responses, and return
+typed model objects.
 
 Polling pattern
 ---------------
@@ -35,9 +19,11 @@ or call ``get_job`` for custom polling logic.
 
 from __future__ import annotations
 
+import hashlib
 import asyncio
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -53,6 +39,13 @@ from compute_provisioning import (
     PoolUpdate,
     PoolValidateResponse,
 )
+from compute_provisioning.client import (
+    ComputeProvisioningAuthenticationError,
+    ComputeProvisioningClient,
+    canonical_provisioning_request_body,
+    resolve_provisioning_route,
+)
+from market_identity import EMPTY_BODY, Signer, TrustedIdentitySet
 from vm_provisioning_operator.models import (
     AnsibleReadinessResponse,
     CreateVmRequest,
@@ -103,25 +96,94 @@ class _ProvisioningClientBase:
     def __init__(
         self,
         base_url: str,
-        admin_key: Optional[str],
+        signer: Signer,
+        expected_authorities: TrustedIdentitySet,
         timeout: float,
-        agent_id: Optional[str] = None,
     ) -> None:
+        if not isinstance(signer, Signer):
+            raise TypeError("signer must implement market_identity.Signer")
+        if not isinstance(expected_authorities, TrustedIdentitySet):
+            raise TypeError(
+                "expected_authorities must be a market_identity.TrustedIdentitySet"
+            )
         self._base = base_url.rstrip("/")
-        self._admin_key = admin_key
-        self._agent_id = agent_id
+        self._signer = signer
+        self._caller_role = "admin"
+        self._expected_authorities = expected_authorities
+        self._max_timestamp_skew = 300
+        self._request_contexts: dict[
+            str, tuple[str, str, str, str]
+        ] = {}
         self._timeout = timeout
 
     def _url(self, path: str) -> str:
         return f"{self._base}{path}"
 
-    def _headers(self) -> dict[str, str]:
-        h: dict[str, str] = {}
-        if self._admin_key:
-            h["X-Admin-Key"] = self._admin_key
-        if self._agent_id:
-            h["X-Agent-ID"] = self._agent_id
-        return h
+    def _authentication(
+        self,
+        method: str,
+        path: str,
+        body: Any = EMPTY_BODY,
+        *,
+        query: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> tuple[dict[str, str], str, str, str]:
+        authenticated_body = canonical_provisioning_request_body(
+            method, path, body, query=query
+        )
+        operation, resource = resolve_provisioning_route(
+            method, path, authenticated_body
+        )
+        resolved_request_id = request_id or uuid.uuid4().hex
+        headers = ComputeProvisioningClient._request_headers(
+            self,
+            method=method,
+            operation=operation,
+            resource=resource,
+            body=authenticated_body,
+            request_id=resolved_request_id,
+        )
+        return headers, operation, resource, resolved_request_id
+
+    def _verified_body(
+        self,
+        response: httpx.Response,
+        *,
+        method: str,
+        operation: str,
+        resource: str,
+        request_id: str,
+        accepted_statuses: frozenset[int] | None = None,
+    ) -> Any:
+        if response.content:
+            try:
+                body: Any = response.json()
+            except ValueError:
+                body = response.text
+        else:
+            body = EMPTY_BODY
+        try:
+            ComputeProvisioningClient._verify_response(
+                self,
+                response,
+                method=method,
+                operation=operation,
+                resource=resource,
+                request_id=request_id,
+                body=body,
+            )
+        except ComputeProvisioningAuthenticationError as exc:
+            raise ProvisioningError(
+                str(exc), status_code=exc.status_code
+            ) from exc
+        if accepted_statuses is None or response.status_code not in accepted_statuses:
+            self._raise_for_status(
+                method,
+                str(response.request.url),
+                response.status_code,
+                response.text,
+            )
+        return body
 
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
@@ -141,35 +203,18 @@ class _ProvisioningClientBase:
 
 
 class ProvisioningClient(_ProvisioningClientBase):
-    """Async HTTP client for the provisioning service REST API.
-
-    Parameters
-    ----------
-    base_url:
-        Base URL of the provisioning service.
-    admin_key:
-        Shared operator admin key sent as ``X-Admin-Key`` on every request
-        (the storefront's ``admin_api_key``). ``None`` for local dev where
-        the service runs with no key configured.
-    agent_id:
-        Operator-assigned agent identifier sent as ``X-Agent-ID`` when provisioning
-        auth is enabled.
-    timeout:
-        HTTP timeout in seconds.
-    transport:
-        Optional ``httpx.AsyncBaseTransport`` for in-process test injection.
-    """
+    """Authenticated asynchronous operator client for the provisioning service."""
 
     def __init__(
         self,
         base_url: str,
-        admin_key: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        signer: Signer,
+        expected_authorities: TrustedIdentitySet,
         *,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, admin_key, timeout, agent_id)
+        super().__init__(base_url, signer, expected_authorities, timeout)
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -186,49 +231,79 @@ class ProvisioningClient(_ProvisioningClientBase):
         await self.close()
 
     async def _get(self, path: str, *, params: dict | None = None) -> dict:
-        url = self._url(path)
-        resp = await self._client.get(
-            path, params=params, headers=self._headers()
+        wire_params = {
+            key: (
+                str(value).lower() if isinstance(value, bool) else str(value)
+            )
+            for key, value in (params or {}).items()
+            if value is not None
+        }
+        headers, operation, resource, request_id = self._authentication(
+            "GET", path, query=wire_params
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+        response = await self._client.get(
+            path, params=wire_params or None, headers=headers
+        )
+        return self._verified_body(
+            response,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
+
+    async def _json_request(self, method: str, path: str, body: Any) -> dict:
+        payload = (
+            body.model_dump(mode="json", exclude_none=True)
+            if hasattr(body, "model_dump")
+            else (body or {})
+        )
+        headers, operation, resource, request_id = self._authentication(
+            method, path, payload
+        )
+        response = await self._client.request(
+            method, path, json=payload, headers=headers
+        )
+        return self._verified_body(
+            response,
+            method=method,
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
 
     async def _post(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = await self._client.post(
-            path, json=payload, headers=self._headers()
-        )
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        return await self._json_request("POST", path, body)
 
     async def _put(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = await self._client.put(path, json=payload, headers=self._headers())
-        self._raise_for_status("PUT", url, resp.status_code, resp.text)
-        return resp.json()
+        return await self._json_request("PUT", path, body)
 
     async def _patch(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = await self._client.patch(path, json=payload, headers=self._headers())
-        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        return resp.json()
+        return await self._json_request("PATCH", path, body)
 
     async def _delete(self, path: str) -> dict:
-        url = self._url(path)
-        resp = await self._client.delete(path, headers=self._headers())
-        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
-        return resp.json()
+        return await self._json_request("DELETE", path, {})
 
     async def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
-        url = self._url(path)
-        resp = await self._client.post(
-            path, files=files, data=data, headers=self._headers()
+        request = self._client.build_request("POST", path, files=files, data=data)
+        content = await request.aread()
+        content_type = request.headers["content-type"].split(";", 1)[0].lower()
+        descriptor = {
+            "content_type": content_type,
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        headers, operation, resource, request_id = self._authentication(
+            "POST", path, descriptor
         )
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        request.headers.update(headers)
+        response = await self._client.send(request)
+        return self._verified_body(
+            response,
+            method="POST",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
 
     # ------------------------------------------------------------------
     # VM lifecycle
@@ -351,10 +426,7 @@ class ProvisioningClient(_ProvisioningClientBase):
 
     async def export_pools_yaml(self) -> str:
         """GET /api/v1/pools/export — canonical authoritative YAML."""
-        path = "/api/v1/pools/export"
-        resp = await self._client.get(path, headers=self._headers())
-        self._raise_for_status("GET", self._url(path), resp.status_code, resp.text)
-        return resp.text
+        return await self._get("/api/v1/pools/export")
 
     async def create_pool(self, body: PoolCreate) -> PoolResponse:
         """POST /api/v1/pools"""
@@ -389,26 +461,26 @@ class ProvisioningClient(_ProvisioningClientBase):
     # ------------------------------------------------------------------
 
     async def get_health(self) -> dict:
-        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
-
-        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
-        """
-        return await self._get("/health")
+        """GET /health — public local liveness without outbound dependencies."""
+        response = await self._client.get("/health")
+        self._raise_for_status(
+            "GET", self._url("/health"), response.status_code, response.text
+        )
+        return response.json()
 
     async def get_system_status(self) -> dict:
-        """GET /api/v1/system/status — full diagnostic status.
-
-        Includes outbound HTTP probes against the storefront and lease watchdog
-        state. Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
-
-        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
-        responses — 503 indicates a degraded but reachable service, not an error.
-        """
-        url = self._url("/api/v1/system/status")
-        resp = await self._client.get("/api/v1/system/status", headers=self._headers())
-        if resp.status_code not in (200, 503):
-            self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+        """Return the authenticated full diagnostic status, accepting degraded 503."""
+        path = "/api/v1/system/status"
+        headers, operation, resource, request_id = self._authentication("GET", path)
+        response = await self._client.get(path, headers=headers)
+        return self._verified_body(
+            response,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+            accepted_statuses=frozenset({200, 503}),
+        )
 
     async def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
@@ -647,37 +719,18 @@ class ProvisioningClient(_ProvisioningClientBase):
 
 
 class SyncProvisioningClient(_ProvisioningClientBase):
-    """Synchronous HTTP client for the provisioning service REST API.
-
-    Identical method signatures to ``ProvisioningClient`` but blocking.
-    Suitable for synchronous smoke tests and scripts.
-
-    Parameters
-    ----------
-    base_url:
-        Base URL of the provisioning service.
-    admin_key:
-        Shared operator admin key sent as ``X-Admin-Key`` on every request
-        (the storefront's ``admin_api_key``). ``None`` for local dev.
-    agent_id:
-        Operator-assigned agent identifier sent as ``X-Agent-ID`` when provisioning
-        auth is enabled.
-    timeout:
-        HTTP timeout in seconds.
-    transport:
-        Optional ``httpx.BaseTransport`` for in-process test injection.
-    """
+    """Authenticated synchronous operator client for the provisioning service."""
 
     def __init__(
         self,
         base_url: str,
-        admin_key: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        signer: Signer,
+        expected_authorities: TrustedIdentitySet,
         *,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        super().__init__(base_url, admin_key, timeout, agent_id)
+        super().__init__(base_url, signer, expected_authorities, timeout)
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
@@ -694,43 +747,79 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         self.close()
 
     def _get(self, path: str, *, params: dict | None = None) -> dict:
-        url = self._url(path)
-        resp = self._client.get(path, params=params, headers=self._headers())
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+        wire_params = {
+            key: (
+                str(value).lower() if isinstance(value, bool) else str(value)
+            )
+            for key, value in (params or {}).items()
+            if value is not None
+        }
+        headers, operation, resource, request_id = self._authentication(
+            "GET", path, query=wire_params
+        )
+        response = self._client.get(
+            path, params=wire_params or None, headers=headers
+        )
+        return self._verified_body(
+            response,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
+
+    def _json_request(self, method: str, path: str, body: Any) -> dict:
+        payload = (
+            body.model_dump(mode="json", exclude_none=True)
+            if hasattr(body, "model_dump")
+            else (body or {})
+        )
+        headers, operation, resource, request_id = self._authentication(
+            method, path, payload
+        )
+        response = self._client.request(
+            method, path, json=payload, headers=headers
+        )
+        return self._verified_body(
+            response,
+            method=method,
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
 
     def _post(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = self._client.post(path, json=payload, headers=self._headers())
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        return self._json_request("POST", path, body)
 
     def _put(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = self._client.put(path, json=payload, headers=self._headers())
-        self._raise_for_status("PUT", url, resp.status_code, resp.text)
-        return resp.json()
+        return self._json_request("PUT", path, body)
 
     def _patch(self, path: str, body: Any) -> dict:
-        url = self._url(path)
-        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
-        resp = self._client.patch(path, json=payload, headers=self._headers())
-        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
-        return resp.json()
+        return self._json_request("PATCH", path, body)
 
     def _delete(self, path: str) -> dict:
-        url = self._url(path)
-        resp = self._client.delete(path, headers=self._headers())
-        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
-        return resp.json()
+        return self._json_request("DELETE", path, {})
 
     def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
-        url = self._url(path)
-        resp = self._client.post(path, files=files, data=data, headers=self._headers())
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        return resp.json()
+        request = self._client.build_request("POST", path, files=files, data=data)
+        content = request.read()
+        content_type = request.headers["content-type"].split(";", 1)[0].lower()
+        descriptor = {
+            "content_type": content_type,
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        headers, operation, resource, request_id = self._authentication(
+            "POST", path, descriptor
+        )
+        request.headers.update(headers)
+        response = self._client.send(request)
+        return self._verified_body(
+            response,
+            method="POST",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+        )
 
     # VM lifecycle (sync mirrors)
     def create_vm(self, host: str, body: CreateVmRequest) -> JobSubmitResponse:
@@ -818,10 +907,7 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         return PoolResponse(**(self._get(f"/api/v1/pools/{pool_id}")))
 
     def export_pools_yaml(self) -> str:
-        path = "/api/v1/pools/export"
-        resp = self._client.get(path, headers=self._headers())
-        self._raise_for_status("GET", self._url(path), resp.status_code, resp.text)
-        return resp.text
+        return self._get("/api/v1/pools/export")
 
     def create_pool(self, body: PoolCreate) -> PoolResponse:
         return PoolResponse(**(self._post("/api/v1/pools/", body)))
@@ -847,31 +933,24 @@ class SyncProvisioningClient(_ProvisioningClientBase):
 
     # System / readiness (sync mirrors)
     def get_health(self) -> dict:
-        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
-
-        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
-        Use ``get_system_status()`` for the full diagnostic status including
-        storefront connectivity and watchdog state.
-        """
-        return self._get("/health")
+        response = self._client.get("/health")
+        self._raise_for_status(
+            "GET", self._url("/health"), response.status_code, response.text
+        )
+        return response.json()
 
     def get_system_status(self) -> dict:
-        """GET /api/v1/system/status — full diagnostic status.
-
-        Includes outbound HTTP probes against the storefront (storefront,
-        storefront_auth checks) and lease watchdog state. Suitable for
-        operator diagnostics and e2e pre-flight checks.
-
-        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
-        responses — 503 indicates a degraded but reachable service, not an error.
-
-        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
-        """
-        url = self._url("/api/v1/system/status")
-        resp = self._client.get("/api/v1/system/status", headers=self._headers())
-        if resp.status_code not in (200, 503):
-            self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return resp.json()
+        path = "/api/v1/system/status"
+        headers, operation, resource, request_id = self._authentication("GET", path)
+        response = self._client.get(path, headers=headers)
+        return self._verified_body(
+            response,
+            method="GET",
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+            accepted_statuses=frozenset({200, 503}),
+        )
 
     def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.

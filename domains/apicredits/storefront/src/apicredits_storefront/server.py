@@ -22,12 +22,13 @@ from apicredits_storefront.domain_runtime import (
     prepare_api_credit_settlement,
     reserve_api_credit_settlement,
 )
-from apicredits_storefront.utils.config import AGENT_ID, settings
+from apicredits_storefront.utils.config import AGENT_ID, BASE_URL_OVERRIDE, settings
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 from apicredits_storefront.utils.sync_negotiation import continue_sync_negotiation
-from core_storefront.openapi import install_admin_key_openapi
+from core_storefront.openapi import install_marketplace_identity_openapi
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from apicredits_storefront.middleware.response_auth import authenticate_response
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,13 @@ async def lifespan(_: FastAPI):
     from apicredits_storefront.services.fulfillment_service import (
         build_api_credit_failure_policy,
     )
-    from apicredits_storefront.utils.config import CHAINS
+    from apicredits_storefront.utils.config import (
+        CHAINS,
+        resolve_admin_identities,
+        resolve_registry_authorities,
+        resolve_evm_wallet,
+        resolve_identity_signer,
+    )
     from market_alkahest import AlkahestConditionalEscrowClient
     from market_settlement_runtime import (
         SettlementJobCoordinator,
@@ -74,7 +81,15 @@ async def lifespan(_: FastAPI):
         SettlementSQLiteRepository,
     )
 
-    sqlite_client = get_sqlite_client()
+    marketplace_signer = resolve_identity_signer()
+    resolve_admin_identities()
+    if settings.enable_registry_discovery:
+        resolve_registry_authorities()
+    resolve_evm_wallet()
+    sqlite_client = get_sqlite_client(
+        local_listing_principal=marketplace_signer.identity,
+        expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+    )
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = alkahest_service.build_clients()
     settlement_repository = SettlementSQLiteRepository(
@@ -108,6 +123,7 @@ async def lifespan(_: FastAPI):
         prepare=partial(
             prepare_api_credit_settlement,
             sqlite_client=sqlite_client,
+            local_principal=marketplace_signer.identity,
         ),
         reserve_start=partial(
             reserve_api_credit_settlement,
@@ -129,9 +145,11 @@ async def lifespan(_: FastAPI):
     _container.resolved_settlement_runtime = settlement_runtime
     _container.resolved_settlement_worker = settlement_worker
     _container.resolved_settlement_coordinator = settlement_coordinator
+    _container.resolved_marketplace_signer = marketplace_signer
     _container.resolved_failure_policy = build_api_credit_failure_policy()
     _container.resolved_listing_service = ListingService(
         sqlite_client=sqlite_client,
+        seller_principal=marketplace_signer.identity,
     )
     _container.resolved_negotiation_service = NegotiationService(
         sqlite_client=sqlite_client,
@@ -156,9 +174,8 @@ app = FastAPI(
     title="Arkhai API-Credits Storefront",
     description=(
         "Seller-side storefront for the Arkhai API-credits marketplace.\n\n"
-        "**Admin endpoints** require an `X-Admin-Key` header.\n\n"
-        "**Buyer-facing endpoints** (`/api/v1/negotiate/*`, `/api/v1/settle/*`) "
-        "require EIP-191 signed `X-Signature` + `X-Timestamp` headers."
+        "Admin and authenticated endpoints require the shared scheme-tagged "
+        "marketplace request-signature version 2 headers."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -166,9 +183,10 @@ app = FastAPI(
     swagger_ui_parameters={"persistAuthorization": True},
 )
 app.state.market_domain = get_market_domain_contract()
+app.middleware("http")(authenticate_response)
 
 
-install_admin_key_openapi(app, root_path=settings.gateway.root_path)
+install_marketplace_identity_openapi(app, root_path=settings.gateway.root_path)
 
 # Controller imports after module-level app exists.
 from apicredits_storefront.controllers.system_controller import router as system_router  # noqa: E402

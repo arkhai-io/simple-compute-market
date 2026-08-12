@@ -9,10 +9,16 @@ from .adapters import (
 )
 from .client import (
     ComputeProvisioningClient,
+    ComputeProvisioningAuthenticationError,
     ComputeProvisioningClientProtocol,
     ComputeProvisioningError,
     ComputeProvisioningJobError,
     ComputeProvisioningTimeoutError,
+    PROVISIONING_ROUTE_CONTRACTS,
+    ProvisioningRouteContract,
+    canonical_provisioning_request_body,
+    resolve_provisioning_route_contract,
+    resolve_provisioning_route,
 )
 from .contracts import (
     COMPUTE_PROVISIONING_CONTRACT_VERSION,
@@ -81,10 +87,16 @@ __all__ = [
     "COMPUTE_PROVISIONING_CONTRACT_VERSION",
     "SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS",
     "ComputeProvisioningClient",
+    "ComputeProvisioningAuthenticationError",
     "ComputeProvisioningClientProtocol",
     "ComputeProvisioningError",
     "ComputeProvisioningJobError",
     "ComputeProvisioningTimeoutError",
+    "PROVISIONING_ROUTE_CONTRACTS",
+    "ProvisioningRouteContract",
+    "canonical_provisioning_request_body",
+    "resolve_provisioning_route_contract",
+    "resolve_provisioning_route",
     "CredentialEnvelope",
     "ExecutorActionEnvelope",
     "ExecutorAdapter",

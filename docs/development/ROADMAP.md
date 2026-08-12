@@ -77,7 +77,7 @@ Pricing is the binding constraint on negotiating the shape. Commercial resolutio
 
 **Current state.** The storefront-to-site direction is already one-to-many: a storefront aggregates several configured site clients, ranks them per request, routes each reservation to one authority, and persists the selected binding. A single provisioner can register VM and bare-metal adapters concurrently, and the site authority already resolves cross-mode conflicts over one physical resource. The buyer CLI already loads several market-domain contracts in one process, and the core carrier already validates a set of contracts and rejects duplicate identities.
 
-The site-to-storefront direction is **not** many-to-many. A provisioning service binds to one storefront: it holds a single `storefront_url`, and a single shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so two storefronts sharing one provisioner would share one secret with no isolation between them. The reverse channel's per-deal override for that URL exists in the event sink but no storefront ever populates it, so it always falls through to the global setting. Making one site serve several storefronts is part of this goal's work, not a property to build on.
+The site-to-storefront direction remains **one-to-one**. A provisioning service still binds to one `storefront_url`, and the reverse channel's per-deal override for that URL exists in the event sink but no storefront populates it, so it always falls through to the global setting. Authentication no longer forces both directions to share one secret: each peer has its own Secret-backed signer, and exact scheme-tagged trust pins bind requests and signed responses. Making one site serve several storefronts therefore requires explicit topology and routing work, not another identity path.
 
 The site models this correctly already. A capacity resource carries `publication_views` keyed by view identity — `bare_metal.v1`, `vm.ansible_pool_defaults.v1` — off one row per host identity, with a guard rejecting several capacity resources mapping to the same host, and `Cross-mode physical accounting` requires a shareable VM slice and an exclusive bare-metal claim on one host to conflict before executor work starts. One physical resource, several form-factor projections, is how inventory is already represented.
 
@@ -98,7 +98,6 @@ The direction is settled: several compute-family contracts hosted in one storefr
 | Listings do not publish their offering mode, so the registry's form-factor filter matches nothing | [`publish-multidimensional-listing-shape`](../../openspec/changes/publish-multidimensional-listing-shape/) |
 | Bare metal has no runnable seller storefront composition; the trusted per-resource projection and selected-site fulfillment routing it needs are incomplete | [`market-platform-bare-metal-10-storefront-composition`](../../openspec/changes/market-platform-bare-metal-10-storefront-composition/) |
 | Selected-authority ownership, cross-mode rejection, and executor strictness have never been exercised together across more than one authority | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
-| Service-to-service identity is one shared secret that both gates inbound requests and signs outbound callbacks | [`service-identity-signing`](../../openspec/changes/service-identity-signing/) |
 
 ---
 
@@ -177,14 +176,14 @@ Restoring a non-zero hold default is `billable-capacity-reservations`' own work:
 
 ## Hosted settlement release status
 
-The marketplace consumer path for `fiat.stripe.v1` is owned by
-[`add-hosted-fiat-settlement`](../../openspec/changes/add-hosted-fiat-settlement/).
-It remains an active change until the independently released client/image
-manifest is pinned and cross-repository success, refund, restart,
-distribution, signature, SBOM, and provenance evidence passes. External
-Stripe test credentials, a reachable webhook, a supported EAS endpoint, and a
-deployment cluster are evidence gates, not reasons to weaken the authority
-boundary or describe platform custody as on-chain escrow.
+The marketplace consumes `fiat.stripe.v1` through the signed
+hosted-settlement client and image contract described by
+[`settlement-servicing`](../../openspec/specs/settlement-servicing/spec.md).
+The platform authority owns Checkout, Connect transfer, refund, and recovery
+state; portable attestations and EAS arbiters supply condition evidence without
+turning provider-custodied funds into on-chain or segregated escrow. New hosted
+mechanisms must preserve that authority boundary and the immutable
+manifest/capability verification path.
 
 ---
 

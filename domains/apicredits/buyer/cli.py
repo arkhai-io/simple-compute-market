@@ -24,7 +24,8 @@ from .listing_cli import listing_app
 
 credits_app = typer.Typer(no_args_is_help=True)
 credits_app.add_typer(
-    listing_app, name="listing",
+    listing_app,
+    name="listing",
     help="Browse API-credit listings (list/show).",
 )
 buy_module.register(credits_app)
@@ -35,7 +36,8 @@ settle_module.register(credits_app)
 def register(app: typer.Typer) -> None:
     """Register the API-credits schema's buyer commands on the core app."""
     app.add_typer(
-        credits_app, name="credits",
+        credits_app,
+        name="credits",
         help="API-credit market: discover, buy, top up keys.",
     )
 
@@ -44,9 +46,7 @@ def _buyer_market_domain() -> MarketDomainContract:
     base = market_domain()
     return replace(
         base,
-        declared_capabilities=(
-            base.declared_capabilities | {DomainCapability.BUYER}
-        ),
+        declared_capabilities=(base.declared_capabilities | {DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
             register_commands=register,
             build_provision_terms=make_api_credits_provision_terms,

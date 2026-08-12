@@ -8,6 +8,7 @@ from typing import Any
 
 from market_core.schemas import EscrowProposal, SettlementPlan
 from market_settlement_runtime import SettlementRuntime
+from market_identity import Identity
 
 from .models import (
     BareMetalSettleRequest,
@@ -43,24 +44,28 @@ class BareMetalSettlementService:
         *,
         escrow_uid: str,
         negotiation_id: str,
+        buyer_principal: Identity,
+        seller_principal: Identity,
     ) -> BareMetalSettleResponse:
         return BareMetalSettleResponse(
             escrow_uid=escrow_uid,
             negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
 
     async def _owned_thread(
         self,
         *,
         negotiation_id: str,
-        buyer_identity: str,
+        buyer_principal: Identity,
     ) -> dict[str, Any]:
         thread = await self.db.load_negotiation_thread_row(
             negotiation_id=negotiation_id,
         )
         if thread is None:
             raise SettlementRequestError("negotiation not found", status_code=404)
-        if thread.get("buyer") != buyer_identity:
+        if thread.get("buyer_principal") != buyer_principal:
             raise SettlementRequestError("negotiation buyer mismatch", status_code=403)
         return thread
 
@@ -69,12 +74,12 @@ class BareMetalSettlementService:
         *,
         escrow_uid: str,
         request: BareMetalSettleRequest,
-        buyer_identity: str,
+        buyer_principal: Identity,
     ) -> BareMetalSettleResponse:
         existing = await self.db.load_escrow(escrow_uid=escrow_uid)
         thread = await self._owned_thread(
             negotiation_id=request.negotiation_id,
-            buyer_identity=buyer_identity,
+            buyer_principal=buyer_principal,
         )
         if thread.get("terminal_state") != "success":
             raise SettlementRequestError("negotiation is not accepted")
@@ -128,6 +133,8 @@ class BareMetalSettlementService:
                 proposal=proposal,
                 agreed_amount=int(agreed_amount),
                 duration_seconds=terms.duration_seconds,
+                buyer_principal=buyer_principal,
+                seller_principal=Identity.model_validate(thread["seller_principal"]),
                 seller_wallet_address=self.seller_wallet,
                 chain_config_paths=self.chain_config_paths,
             )
@@ -169,6 +176,10 @@ class BareMetalSettlementService:
                 return self._response(
                     escrow_uid=escrow_uid,
                     negotiation_id=request.negotiation_id,
+                    buyer_principal=buyer_principal,
+                    seller_principal=Identity.model_validate(
+                        thread["seller_principal"],
+                    ),
                 )
             if any(record.mechanism_ref == escrow_uid for record in records):
                 raise SettlementRequestError(
@@ -262,20 +273,22 @@ class BareMetalSettlementService:
         return self._response(
             escrow_uid=escrow_uid,
             negotiation_id=request.negotiation_id,
+            buyer_principal=buyer_principal,
+            seller_principal=Identity.model_validate(thread["seller_principal"]),
         )
 
     async def status(
         self,
         *,
         escrow_uid: str,
-        buyer_identity: str,
+        buyer_principal: Identity,
     ) -> BareMetalSettleStatusResponse:
         escrow = await self.db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:
             raise SettlementRequestError("escrow not found", status_code=404)
         await self._owned_thread(
             negotiation_id=str(escrow["negotiation_id"]),
-            buyer_identity=buyer_identity,
+            buyer_principal=buyer_principal,
         )
         try:
             aggregate = await self.settlement_runtime.get_status(
@@ -298,5 +311,12 @@ class BareMetalSettlementService:
         return BareMetalSettleStatusResponse(
             escrow_uid=escrow_uid,
             negotiation_id=str(escrow["negotiation_id"]),
+            buyer_principal=buyer_principal,
+            seller_principal=Identity.model_validate(
+                (await self._owned_thread(
+                    negotiation_id=str(escrow["negotiation_id"]),
+                    buyer_principal=buyer_principal,
+                ))["seller_principal"],
+            ),
             status=str(escrow["status"]),
         )

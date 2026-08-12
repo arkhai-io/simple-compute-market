@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_key
+from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from core_storefront.models.negotiation_models import (
     AdvanceRequest,
     AdvanceResponse,
@@ -42,7 +42,6 @@ class NegotiationsController:
         self,
         listing_id: str,
         terminal_state: Annotated[str | None, Query()] = None,
-        buyer_address: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> NegotiationListResponse:
@@ -50,7 +49,6 @@ class NegotiationsController:
             threads = await self._svc.list_for_order(
                 listing_id=listing_id,
                 terminal_state=terminal_state or None,
-                buyer_address=buyer_address or None,
                 limit=limit,
                 offset=offset,
             )
@@ -84,7 +82,7 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/advance",
         response_model=AdvanceResponse,
         summary="Drive one negotiation round (admin)",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def advance_negotiation(
         self,
@@ -111,7 +109,7 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/force-accept",
         response_model=ForceAcceptResponse,
         summary="Force-accept a negotiation (admin)",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def force_accept_negotiation(
         self,

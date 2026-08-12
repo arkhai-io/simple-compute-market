@@ -1,7 +1,42 @@
-# VM compute market on the local dev chain — standalone bring-up.
-#   docker compose -f compose.vms.yml up
-# Just the shared Anvil chain + the VM domain stack, with no API-credits
-# services. See domains/vms/compose.yml.
+# VM compute market with explicit local-EVM effects. Marketplace signer
+# credentials are loaded from operator-owned env files containing only
+# ARKHAI_IDENTITY_CREDENTIAL; wallet/chain settings remain in the selected
+# EVM runtime profile and its separate secret overlay.
 include:
   - compose.dev.yml
   - domains/vms/compose.yml
+
+services:
+  registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=registry-a
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x90f79bf6eb2c4f870365e785982e1f101e93b906
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  registry-b:
+    environment:
+      - REGISTRY_AUTHORITY_SCHEME=eip191
+      - REGISTRY_AUTHORITY_ID=registry-b
+      - REGISTRY_AUTHORITY_IDENTIFIER=0x15d34aaf54267db7d7c367839aaf71a00a2c6a65
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  bob-storefront:
+    env_file:
+      - ${VMS_BOB_EVM_WALLET_ENV_FILE:?set Bob EVM wallet environment file}
+      - ${VMS_BOB_IDENTITY_ENV_FILE:?set Bob signer credential environment file}
+  alice-storefront:
+    env_file:
+      - ${VMS_ALICE_IDENTITY_ENV_FILE:?set Alice signer credential environment file}
+      - ${VMS_ALICE_EVM_WALLET_ENV_FILE:?set Alice EVM wallet environment file}
+  provisioning:
+    env_file:
+      - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
+    environment:
+      - PROVISIONING_IDENTITY__PRINCIPAL__SCHEME=eip191
+      - PROVISIONING_IDENTITY__PRINCIPAL__IDENTIFIER=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+      - 'PROVISIONING_STOREFRONT_IDENTITY__PRINCIPALS=[{"scheme":"eip191","identifier":"0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"}]'
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - 'PROVISIONING_ADMIN_IDENTITY__PRINCIPALS=[{"scheme":"eip191","identifier":"0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"}]'

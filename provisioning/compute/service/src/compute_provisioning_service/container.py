@@ -15,13 +15,24 @@ from vm_provisioning_adapter.runtime import build_vm_runtime
 
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db.database import create_db_engine, create_session_factory
+from compute_provisioning_service.identity import resolve_identity_context
+from compute_provisioning_service.middleware.auth import (
+    SqlAlchemyProvisioningReplayStore,
+)
 from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
 from compute_provisioning_service.composition import compose_adapter_bundles
 from compute_provisioning_service.services.compute_contract_service import ComputeContractService
-from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
+from compute_provisioning_service.services.deal_event_sink import (
+    SqlAlchemyCapacityReleaseOutbox,
+    StorefrontLifecycleEventSink,
+    notify_storefront_capacity_released,
+)
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
+from compute_provisioning_service.services.principal_authority import (
+    SqlAlchemyProvisioningPrincipalAuthority,
+)
 from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementRepository,
@@ -135,7 +146,12 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg, site_authority, release_dispatcher, release_jobs, lifecycle_event_sink
+    cfg,
+    site_authority,
+    release_dispatcher,
+    release_jobs,
+    lifecycle_event_sink,
+    capacity_release_outbox,
 ):
     return LeaseLifecycleService(
         cfg,
@@ -148,6 +164,7 @@ def _make_lease_lifecycle(
                 cfg, reservation, sink=lifecycle_event_sink
             )
         ),
+        capacity_release_outbox=capacity_release_outbox,
     )
 
 
@@ -174,6 +191,16 @@ class Container(containers.DeclarativeContainer):
     session_factory = providers.Singleton(
         _make_session_factory,
         engine=db_engine,
+    )
+
+    identity_context = providers.Singleton(
+        resolve_identity_context,
+        settings=config,
+    )
+
+    provisioning_replay_store = providers.Singleton(
+        SqlAlchemyProvisioningReplayStore,
+        session_factory=session_factory,
     )
 
     # ------------------------------------------------------------------
@@ -374,10 +401,25 @@ class Container(containers.DeclarativeContainer):
         unit_of_work=fulfillment_unit_of_work,
     )
 
+    principal_authority = providers.Singleton(
+        SqlAlchemyProvisioningPrincipalAuthority,
+        session_factory=session_factory,
+        bootstrap=identity_context,
+    )
+
     lifecycle_event_sink = providers.Singleton(
         StorefrontLifecycleEventSink,
         settings=config,
+        identity=identity_context,
+        principal_authority=principal_authority,
     )
+
+
+    capacity_release_outbox = providers.Singleton(
+        SqlAlchemyCapacityReleaseOutbox,
+        session_factory=session_factory,
+    )
+
 
     lease_lifecycle_service = providers.Singleton(
         _make_lease_lifecycle,
@@ -386,6 +428,7 @@ class Container(containers.DeclarativeContainer):
         release_dispatcher=release_dispatcher,
         release_jobs=release_job_dispatcher,
         lifecycle_event_sink=lifecycle_event_sink,
+        capacity_release_outbox=capacity_release_outbox,
     )
 
     lease_watchdog = providers.Singleton(

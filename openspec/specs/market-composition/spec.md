@@ -155,6 +155,40 @@ The hosted client and service MUST use their released body-bound request-signing
 - **WHEN** the adapter invokes the external authority
 - **THEN** signing binds operation, resource, canonical body hash, and timestamp under the released client contract without importing an internal marketplace auth module
 
+
+### Requirement: From-below identity capability
+
+Canonical principal, signer/verifier dispatch, authenticated-envelope, replay, and rotation contracts MUST live in a foundation kit. Core roles MAY consume that kit, and domain and settlement implementations MAY receive its opaque interfaces, but identity code MUST NOT depend on role composition, a concrete domain, a settlement mechanism, a hosted provider, or chain runtime. Core orchestration MUST carry complete scheme-tagged principals opaquely and MUST NOT interpret identifiers as wallet addresses, provider accounts, or mechanism configuration.
+
+#### Scenario: A new market domain is installed
+
+- **WHEN** the domain composes buyer and storefront roles without blockchain functionality
+- **THEN** it can use the shared Ed25519 identity capability without importing an EVM or hosted-provider package
+
+#### Scenario: Core carries a non-chain principal
+
+- **WHEN** registry, negotiation, service-peer, or settlement orchestration receives an Ed25519 principal
+- **THEN** it preserves the complete scheme and identifier as the authenticated actor without deriving a wallet, provider account, or chain setting
+
+### Requirement: Composition roots inject signers
+
+Role and domain composition roots MUST construct signers from separately resolved identity credentials and inject them into registry, negotiation, service-peer, and settlement clients. Core/domain APIs MUST NOT select behavior by raw private-key fields or duplicate signer implementations. Concrete domain or settlement adapters MUST own any chain wallet, RPC, or provider dependency and resolve it only after selecting the corresponding mechanism. A hosted-settlement adapter MUST delegate hosted principals, canonical bytes, headers, proofs, and response verification to the exact manifest-pinned released hosted client and MUST verify its advertised identity capability before publishing the hosted option.
+
+#### Scenario: VM composition selects hosted fiat
+
+- **WHEN** the VM root receives an Ed25519 signer and a manifest-compatible hosted adapter
+- **THEN** the same scheme-neutral core lifecycle runs without an Alkahest client, wallet derivation, or chain preflight
+
+#### Scenario: A chain mechanism is selected
+
+- **WHEN** a composition selects an Alkahest or other EVM effect
+- **THEN** its concrete mechanism adapter resolves the required wallet, chain, and provider dependencies without exposing them to scheme-neutral core orchestration
+
+#### Scenario: Hosted fiat is published
+
+- **WHEN** a composition installs the hosted adapter with a manifest-pinned hosted client
+- **THEN** the adapter verifies the required identity capability and delegates the hosted wire contract to that client rather than copying canonicalization, headers, signatures, or response verification
+
 ## Evidence
 
 - Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.

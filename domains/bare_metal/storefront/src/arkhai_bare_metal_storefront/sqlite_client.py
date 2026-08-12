@@ -21,6 +21,7 @@ from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_core import MarketDomainContract, validate_domain_contract
 from market_settlement_runtime import settlement_migrations
+from market_identity import Identity
 from pydantic import BaseModel
 
 from .domain_runtime import get_market_domain_contract
@@ -45,11 +46,17 @@ class SQLiteClient(CoreSQLiteClient):
         db_path: str,
         *,
         domain: MarketDomainContract | None = None,
+        local_listing_principal: Identity | None = None,
+        expected_legacy_sellers: tuple[str, ...] = (),
     ) -> None:
         self._market_domain = validate_domain_contract(
             domain or get_market_domain_contract(),
         )
-        super().__init__(db_path)
+        super().__init__(
+            db_path,
+            local_listing_principal=local_listing_principal,
+            expected_legacy_sellers=expected_legacy_sellers,
+        )
 
     def _domain_migrations(self) -> tuple[MigrationLike, ...]:
         return (*settlement_migrations(), *BARE_METAL_STOREFRONT_MIGRATIONS)
@@ -116,9 +123,9 @@ class SQLiteClient(CoreSQLiteClient):
         *,
         negotiation_id: str,
         listing_id: str,
-        seller_id: str,
+        seller_principal: Identity,
         buyer_agent_id: str,
-        buyer_identity: str,
+        buyer_principal: Identity,
         seller_reference_amount: int,
         strategy: str,
         message: BareMetalMessage,
@@ -176,13 +183,14 @@ class SQLiteClient(CoreSQLiteClient):
                       our_agent_id, their_agent_id, status, created_at,
                       updated_at, terminal_state, requested_duration_seconds,
                       buyer_escrow_proposal, agreed_price,
-                      agreed_duration_seconds, agreed_at, buyer
-                    ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      agreed_duration_seconds, agreed_at,
+                      buyer_scheme, buyer_identifier,
+                      seller_scheme, seller_identifier
+                    ) VALUES (?, ?, '', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id,
                         listing_id,
-                        seller_id,
                         buyer_agent_id,
                         status,
                         now,
@@ -193,7 +201,10 @@ class SQLiteClient(CoreSQLiteClient):
                         None if agreed_amount is None else str(agreed_amount),
                         message.duration_seconds if agreed_amount is not None else None,
                         now if agreed_amount is not None else None,
-                        buyer_identity,
+                        buyer_principal.scheme.value,
+                        buyer_principal.identifier,
+                        seller_principal.scheme.value,
+                        seller_principal.identifier,
                     ),
                 )
                 conn.execute(
@@ -204,7 +215,7 @@ class SQLiteClient(CoreSQLiteClient):
                     """,
                     (
                         negotiation_id,
-                        seller_id,
+                        f"{seller_principal.scheme.value}:{seller_principal.identifier}",
                         str(seller_reference_amount),
                         strategy,
                     ),
@@ -212,14 +223,16 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.execute(
                     """
                     INSERT INTO negotiation_messages(
-                      negotiation_id, round, sender, our_price, their_price,
-                      proposed_price, action_taken, message_type, timestamp
-                    ) VALUES (?, 0, ?, ?, ?, ?, 'initial_proposal',
+                      negotiation_id, round, sender_scheme, sender_identifier,
+                      our_price, their_price, proposed_price, action_taken,
+                      message_type, timestamp
+                    ) VALUES (?, 0, ?, ?, ?, ?, ?, 'initial_proposal',
                               'initial_proposal', ?)
                     """,
                     (
                         negotiation_id,
-                        buyer_agent_id,
+                        buyer_principal.scheme.value,
+                        buyer_principal.identifier,
                         str(seller_reference_amount),
                         None if buyer_amount is None else str(buyer_amount),
                         None if buyer_amount is None else str(buyer_amount),
@@ -229,13 +242,15 @@ class SQLiteClient(CoreSQLiteClient):
                 conn.execute(
                     """
                     INSERT INTO negotiation_messages(
-                      negotiation_id, round, sender, our_price, their_price,
-                      proposed_price, action_taken, message_type, timestamp
-                    ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)
+                      negotiation_id, round, sender_scheme, sender_identifier,
+                      our_price, their_price, proposed_price, action_taken,
+                      message_type, timestamp
+                    ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id,
-                        seller_id,
+                        seller_principal.scheme.value,
+                        seller_principal.identifier,
                         str(seller_reference_amount),
                         None if buyer_amount is None else str(buyer_amount),
                         None if seller_amount is None else str(seller_amount),
@@ -268,7 +283,8 @@ class SQLiteClient(CoreSQLiteClient):
         status: str,
         created_at: str,
         updated_at: str,
-        seller: str,
+        seller_principal: Identity,
+        storefront_url: str,
         listing: BareMetalListing | Mapping[str, Any],
         accepted_escrows: list[dict[str, Any]],
         demands: list[dict[str, Any]] | None = None,
@@ -284,7 +300,8 @@ class SQLiteClient(CoreSQLiteClient):
             offer_resource=normalized.model_dump(mode="json", exclude_none=True),
             fulfillment_resource=None,
             max_duration_seconds=normalized.max_duration_seconds,
-            seller=seller,
+            storefront_url=storefront_url,
+            seller_principal=seller_principal,
             oracle_address=oracle_address,
             paused=paused,
             accepted_escrows=accepted_escrows,

@@ -1,21 +1,90 @@
 """Schema-invariant buyer config resolution.
 
-Wallet, chain, negotiation-policy, and storefront-URL resolution from
-the buyer's TOML (via ``market_config``) with CLI overrides taking
-precedence. Moved verbatim from the VM buyer's ``common`` module when
-the API-credits domain became the second schema plugin; domain packages
-keep what interprets their own vocabulary (the VM SSH key resolver,
-repo paths) and re-export these.
+Marketplace identity is resolved from public configuration and separately
+injected secret material. Generic scalar and wallet values remain here;
+domain packages own concrete chain selection and mechanism interpretation.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 import typer
+from market_identity import Identity, IdentityScheme, Signer, create_signer
 
-if TYPE_CHECKING:
-    from market_config.config_loader import ChainConfig
+
+IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityConfig:
+    """Public buyer identity configuration, separate from signer credentials."""
+
+    principal: Identity
+
+
+def resolve_identity_config(
+    *,
+    override_scheme: str | None = None,
+    override_identifier: str | None = None,
+) -> IdentityConfig:
+    """Resolve the buyer's public ``[identity]`` principal."""
+
+    scheme = resolve_config_value(
+        override=override_scheme,
+        toml_path="identity.scheme",
+    )
+    identifier = resolve_config_value(
+        override=override_identifier,
+        toml_path="identity.identifier",
+    )
+    missing = [
+        name
+        for name, value in (
+            ("identity.scheme", scheme),
+            ("identity.identifier", identifier),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            "Missing required public identity config: " + ", ".join(missing)
+        )
+    return IdentityConfig(
+        principal=Identity(
+            scheme=IdentityScheme(scheme),
+            identifier=identifier,
+        )
+    )
+
+
+def resolve_identity_credential(
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Read signer material from the buyer's secret-only environment boundary."""
+
+    credential = (environ if environ is not None else os.environ).get(
+        IDENTITY_CREDENTIAL_ENV
+    )
+    if not credential:
+        raise RuntimeError(
+            f"Missing required signer credential in {IDENTITY_CREDENTIAL_ENV}"
+        )
+    return credential
+
+
+def resolve_buyer_signer(
+    config: IdentityConfig,
+    credential: bytes | str,
+) -> Signer:
+    """Build the configured signer and fail closed on principal mismatch."""
+
+    signer = create_signer(config.principal.scheme, credential)
+    if signer.identity != config.principal:
+        raise ValueError("resolved signer identity does not match configured principal")
+    return signer
 
 
 def resolve_config_value(
@@ -33,6 +102,7 @@ def resolve_config_value(
         return override
     if toml_path:
         from market_config.config_loader import get_dotted, load_user_config
+
         v = get_dotted(load_user_config(), toml_path)
         if v not in (None, ""):
             return str(v)
@@ -77,6 +147,7 @@ def resolve_buyer_wallet(
     pk = resolve_config_value(override=override_pk, toml_path="wallet.private_key")
     if pk:
         from market_config.config_loader import derive_wallet_address
+
         derived = derive_wallet_address(pk)
         if derived:
             if not addr:
@@ -86,138 +157,10 @@ def resolve_buyer_wallet(
                     f"warning: wallet.address ({addr}) does not match address "
                     f"derived from wallet.private_key ({derived}); using the "
                     f"configured address.",
-                    err=True, fg=typer.colors.YELLOW,
+                    err=True,
+                    fg=typer.colors.YELLOW,
                 )
     return addr, pk
-
-
-def buyer_chains() -> dict[str, "ChainConfig"]:
-    """Return the buyer's configured ``[chains.<name>]`` tables.
-
-    Thin wrapper around :func:`market_config.config_loader.chains_from_config`
-    so the buyer codebase has one place for config-loader access.
-    Empty dict when no chains are configured — callers decide whether
-    that's fatal (most operations are; ``config show`` isn't).
-    """
-    from market_config.config_loader import chains_from_config, ChainConfig  # noqa: F401
-    return chains_from_config()
-
-
-def select_chain_for_listing(
-    listing: dict | None,
-    *,
-    override: str | None = None,
-    yes: bool = False,
-) -> "ChainConfig":
-    """Pick a configured chain to use for this listing's escrow.
-
-    Intersection rules:
-      - ``override`` must match a name in ``buyer_chains()`` (raises otherwise).
-      - When the listing carries ``accepted_escrows``, the chosen chain
-        must also appear in the listing's chain_name set. The override is
-        validated against this intersection; the interactive default is
-        the first intersection member.
-      - When ``yes=True`` and no override is given, picks the first
-        intersection member silently (or raises if the intersection is
-        empty / multiple).
-
-    Returns the selected :class:`ChainConfig`. Raises :class:`typer.Exit`
-    on unrecoverable failure.
-    """
-    chains = buyer_chains()
-    if not chains:
-        typer.secho(
-            "No [chains.<name>] tables configured in buyer.toml. Run "
-            "`market config init-user` to scaffold one.",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-
-    listing_chain_names: set[str] = set()
-    if listing is not None:
-        for entry in listing.get("accepted_escrows") or []:
-            if isinstance(entry, dict):
-                name = entry.get("chain_name")
-                if isinstance(name, str) and name:
-                    listing_chain_names.add(name)
-
-    candidates: list[str]
-    if listing_chain_names:
-        candidates = [n for n in chains if n in listing_chain_names]
-        if not candidates:
-            typer.secho(
-                f"None of the buyer's configured chains ({sorted(chains)}) match "
-                f"the listing's accepted chains ({sorted(listing_chain_names)}).",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-    else:
-        candidates = list(chains)
-
-    if override:
-        if override not in chains:
-            typer.secho(
-                f"--chain {override!r} is not in [chains.<name>] config. "
-                f"Available: {sorted(chains)}.",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        if listing_chain_names and override not in listing_chain_names:
-            typer.secho(
-                f"--chain {override!r} is not accepted by this listing "
-                f"({sorted(listing_chain_names)}).",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        return chains[override]
-
-    if len(candidates) == 1:
-        return chains[candidates[0]]
-
-    if yes:
-        typer.secho(
-            f"Multiple matching chains ({candidates}); pass --chain to pick one "
-            "when running with --yes.",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-
-    # Interactive prompt — default to first match.
-    default_idx = 0
-    typer.echo("Pick a chain to settle this deal on:")
-    for i, n in enumerate(candidates):
-        marker = " (default)" if i == default_idx else ""
-        typer.echo(f"  [{i}] {n}{marker}")
-    raw = typer.prompt(
-        "Select", default=str(default_idx), show_default=True,
-    )
-    try:
-        idx = int(raw)
-    except ValueError:
-        typer.secho(f"Not a number: {raw!r}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(2)
-    if idx < 0 or idx >= len(candidates):
-        typer.secho(f"Out of range: {idx}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(2)
-    return chains[candidates[idx]]
-
-
-def chain_by_name(name: str) -> "ChainConfig":
-    """Look up one chain by name from the buyer's config.
-
-    Raises :class:`typer.Exit` if the name isn't configured — used by
-    commands like ``market settle --from <run_id>`` that know which
-    chain they're on from a recorded source of truth.
-    """
-    chains = buyer_chains()
-    chain = chains.get(name)
-    if chain is None:
-        typer.secho(
-            f"Chain {name!r} not configured. Available: {sorted(chains)}.",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-    return chain
 
 
 def resolve_storefront_url(
@@ -232,6 +175,7 @@ def resolve_storefront_url(
     if agent_url:
         return agent_url
     from market_config.config_loader import get_dotted, load_user_config
+
     cfg = load_user_config()
     base_url = get_dotted(cfg, "seller.base_url")
     if isinstance(base_url, str) and base_url:

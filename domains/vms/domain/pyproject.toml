@@ -11,7 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 storefront = [
-    "arkhai-core-storefront>=0.2.0",
+    "arkhai-core-storefront>=0.3.0",
 ]
 
 [project.entry-points."market.storefront_domains"]
@@ -29,6 +29,6 @@ pythonpath = ["src"]
 
 [dependency-groups]
 dev = [
-    "arkhai-core-storefront>=0.2.0",
+    "arkhai-core-storefront>=0.3.0",
     "pytest>=8.0",
 ]

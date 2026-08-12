@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from market_identity import Identity
+
 
 from market_core.schemas import EscrowDemand
 
@@ -17,21 +19,9 @@ from market_core.schemas import EscrowDemand
 # listing_id is in the URL path for all lifecycle operations.
 # ---------------------------------------------------------------------------
 
-
-class HostedSettlementListingInput(BaseModel):
-    """VM listing request for one operator-configured hosted condition profile."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    account_ref: str = Field(min_length=1, max_length=256)
-    currency: str = Field(pattern=r"^[a-z]{3}$")
-    rate_minor_units: int = Field(gt=0)
-    condition_profile: str = Field(min_length=1, max_length=128)
-    resolver_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
 class CreateListingRequest(BaseModel):
     """Body for POST /api/v1/listings/create."""
+    model_config = ConfigDict(extra="forbid")
 
     offer: dict[str, Any] = Field(description="Offered compute resource dict")
     accepted_escrows: list[dict[str, Any]] = Field(
@@ -42,11 +32,11 @@ class CreateListingRequest(BaseModel):
         default_factory=list,
         description="Mechanism-neutral settlement choices.",
     )
-    hosted_settlement: HostedSettlementListingInput | None = Field(
+    settlement_config: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "VM-only hosted fiat input resolved against operator-owned condition "
-            "and resolver configuration before publication."
+            "Schema-opaque settlement configuration interpreted by the "
+            "storefront composition."
         ),
     )
     demands: list[EscrowDemand] = Field(
@@ -70,45 +60,46 @@ class CreateListingRequest(BaseModel):
         if (
             not self.accepted_escrows
             and not self.settlement_options
-            and self.hosted_settlement is None
+            and self.settlement_config is None
         ):
             raise ValueError("at least one settlement choice is required")
         return self
 
 
 class RefundRequest(BaseModel):
-    """Body for POST /api/v1/listings/{listing_id}/refund.
-    listing_id is in the path; this body contains the payment details only.
+    """Explicit EVM refund inputs bound to the authenticated buyer principal."""
+    model_config = ConfigDict(extra="forbid")
 
-    ``buyer_address`` defaults to the listing's recorded buyer (the
-    storefront DB knows it once a deal closes); pass explicitly to
-    override. ``token`` (when given) is a 0x contract address. ``amount``
-    is a non-negative decimal-digit string in base units (uint256-safe);
-    Python int is accepted too for in-process callers. Human-decimal
-    scaling is a client concern — the storefront expects already-scaled
-    base-unit values.
-    """
 
-    buyer_address: str | None = None
+    buyer_principal: Identity
+    buyer_evm_address: str
     amount: str | int | None = None
     token: str | None = None
 
 
 class ClaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/claim."""
+    model_config = ConfigDict(extra="forbid")
+
 
     escrow_uid: str
+    claimant_principal: Identity
     fulfillment_uid: str
 
 
 class ReclaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/reclaim."""
+    model_config = ConfigDict(extra="forbid")
+
 
     escrow_uid: str
+    payer_principal: Identity
 
 
 class ArbitrateRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/arbitrate."""
+    model_config = ConfigDict(extra="forbid")
+
 
     escrow_uid: str | None = None
     fulfillment_uid: str | None = None
@@ -130,8 +121,16 @@ class ListingResponse(BaseModel):
     accepted_escrows: list[dict[str, Any]] | None = None
     demands: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
-    seller: str | None = None
+    storefront_url: str
+    seller_principal: Identity
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_seller_alias(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "seller" in value:
+            raise ValueError("listing seller alias is not accepted")
+        return value
 
 
 class ListingListResponse(BaseModel):
@@ -232,10 +231,7 @@ class EvaluateNegotiateRequest(BaseModel):
             "Defaults to 1 hour when omitted."
         ),
     )
-    buyer_address: str = Field(
-        default="",
-        description="Buyer wallet address (used for logging/context only; not auth-checked)",
-    )
+    buyer_principal: Identity
 
 
 class EvaluateNegotiateResponse(BaseModel):

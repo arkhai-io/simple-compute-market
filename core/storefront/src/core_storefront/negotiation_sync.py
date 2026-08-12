@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
+from market_identity import Identity
+
 
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_middleware import NegotiationRound
@@ -66,7 +68,7 @@ def coerce_pinned_proposal(value: Any) -> dict[str, Any] | None:
 
 def history_from_messages(
     messages: list[dict[str, Any]],
-    our_sender: str,
+    our_sender: Identity,
     *,
     buyer_pinned_proposal: dict[str, Any] | None,
 ) -> list[NegotiationRound]:
@@ -74,7 +76,9 @@ def history_from_messages(
     out: list[NegotiationRound] = []
     for i, message in enumerate(messages):
         sender: Literal["us", "them"] = (
-            "us" if message.get("sender") == our_sender else "them"
+            "us"
+            if message.get("sender_principal") == our_sender.model_dump(mode="json")
+            else "them"
         )
         action = _action_from_stored_message(message.get("action_taken", ""))
         amount = _stored_amount(message.get("proposed_price"))
@@ -118,7 +122,7 @@ def _stored_amount(value: Any) -> int | None:
 async def record_seller_decision_message(
     *,
     negotiation_id: str,
-    sender: str,
+    sender_principal: Identity,
     our_amount: int,
     their_amount: int,
     decision: NegotiationDecision,
@@ -148,7 +152,8 @@ async def record_seller_decision_message(
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_SELLER_DECISION") as txn:
         await txn.add_message(
             negotiation_id=negotiation_id,
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role="seller",
             our_price=our_amount,
             their_price=their_amount,
             proposed_price=stored_amount,
@@ -164,7 +169,8 @@ async def record_seller_decision_message(
 async def record_buyer_accept_message(
     *,
     negotiation_id: str,
-    sender: str,
+    sender_principal: Identity,
+    sender_role: Literal["buyer", "admin"] = "buyer",
     our_amount: int,
     accepted_amount: int,
 ) -> None:
@@ -174,7 +180,8 @@ async def record_buyer_accept_message(
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_ACCEPT") as txn:
         await txn.add_message(
             negotiation_id=negotiation_id,
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role=sender_role,
             our_price=our_amount,
             their_price=accepted_amount,
             proposed_price=accepted_amount,
@@ -187,7 +194,8 @@ async def record_buyer_accept_message(
 async def record_buyer_exit_message(
     *,
     negotiation_id: str,
-    sender: str,
+    sender_principal: Identity,
+    sender_role: Literal["buyer", "admin"] = "buyer",
     our_amount: int,
 ) -> None:
     """Persist buyer exit and mark the negotiation failed."""
@@ -196,7 +204,8 @@ async def record_buyer_exit_message(
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_EXIT") as txn:
         await txn.add_message(
             negotiation_id=negotiation_id,
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role=sender_role,
             our_price=our_amount,
             their_price=None,
             proposed_price=None,
@@ -209,7 +218,8 @@ async def record_buyer_exit_message(
 async def record_buyer_counter_message(
     *,
     negotiation_id: str,
-    sender: str,
+    sender_principal: Identity,
+    sender_role: Literal["buyer", "admin"] = "buyer",
     our_amount: int,
     counter_amount: int,
 ) -> None:
@@ -219,7 +229,8 @@ async def record_buyer_counter_message(
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_BUYER_COUNTER") as txn:
         await txn.add_message(
             negotiation_id=negotiation_id,
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role=sender_role,
             our_price=our_amount,
             their_price=counter_amount,
             proposed_price=counter_amount,
@@ -235,13 +246,15 @@ async def create_sync_negotiation_thread(
     their_listing_id: str,
     our_agent_id: str,
     their_agent_id: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     our_initial_amount: int,
     our_strategy: str,
     requested_duration_seconds: int | None,
     requested_start_utc: str | None,
     buyer_escrow_proposal: dict[str, Any] | None,
     provision_terms: dict[str, Any] | None = None,
-    opening_sender: str,
+    opening_sender_principal: Identity,
     opening_amount: int,
 ) -> None:
     """Create a sync negotiation thread and persist the buyer opening offer."""
@@ -254,6 +267,8 @@ async def create_sync_negotiation_thread(
             their_listing_id=their_listing_id,
             our_agent_id=our_agent_id,
             their_agent_id=their_agent_id,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
             our_initial_price=our_initial_amount,
             our_strategy=our_strategy,
             requested_duration_seconds=requested_duration_seconds,
@@ -263,7 +278,8 @@ async def create_sync_negotiation_thread(
         )
         await txn.add_message(
             negotiation_id=negotiation_id,
-            sender=opening_sender,
+            sender_principal=opening_sender_principal,
+            sender_role="buyer",
             our_price=our_initial_amount,
             their_price=opening_amount,
             proposed_price=opening_amount,

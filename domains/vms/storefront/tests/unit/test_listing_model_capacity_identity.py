@@ -9,7 +9,11 @@ from domains.vms.listings.models import Listing
 def _listing(pool_id=None, resource_id=None):
     return {
         "listing_id": "lst-test",
-        "seller": "http://seller.test",
+        "storefront_url": "http://seller.test",
+        "seller_principal": {
+            "scheme": "eip191",
+            "identifier": "0x2222222222222222222222222222222222222222",
+        },
         "offer_resource": {
             "resource_type": "compute",
             "gpu_model": "H200",

@@ -27,8 +27,20 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
+
+from src.api.api_key_auth import require_read_access
+from src.api.publisher_auth import (
+    authenticate_publisher_request,
+    cached_response,
+    canonical_query_body,
+    complete_authenticated_request,
+    registry_authority_signer,
+    signed_response,
+)
+from src.db.database import get_db
 
 
 # ---------------------------------------------------------------------------
@@ -183,11 +195,38 @@ def _spec_body(spec: FilterSpec) -> dict[str, Any]:
         "surfaces as 412 Precondition Failed instead of a silent shape change."
     ),
 )
-async def get_filter_spec() -> Response:
+async def get_filter_spec(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    authenticated = authenticate_publisher_request(
+        request=request,
+        db=db,
+        method="GET",
+        operation="filter.get",
+        resource="filter-spec",
+        body=canonical_query_body(request),
+        allowed_roles=frozenset({"buyer", "seller", "service"}),
+    )
+    require_read_access(request, db)
+    signer = registry_authority_signer(request)
+    replay = cached_response(authenticated, signer=signer)
+    if replay is not None:
+        return replay
     spec = get_loaded_spec()
     body = _spec_body(spec)
-    return Response(
-        content=json.dumps(body),
-        media_type="application/json",
-        headers={"ETag": f'"{body["etag"]}"'},
+    complete_authenticated_request(
+        authenticated=authenticated,
+        db=db,
+        status=200,
+        body=body,
     )
+    db.commit()
+    response = signed_response(
+        authenticated=authenticated,
+        signer=signer,
+        status=200,
+        body=body,
+    )
+    response.headers["ETag"] = f'"{body["etag"]}"'
+    return response

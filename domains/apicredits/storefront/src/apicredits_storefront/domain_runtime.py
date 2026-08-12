@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from typing import Any
+from market_identity import Identity
 
 from market_core import (
     DomainCapability,
@@ -82,7 +83,7 @@ class ApiCreditsFulfillmentInput:
     quantity: int
     key_mode: str
     key_id: str | None
-    buyer_wallet: str | None
+    buyer_principal: Identity
     listing_id: str | None
     negotiation_id: str
 
@@ -98,6 +99,7 @@ class ApiCreditsSettlementProjection:
 async def prepare_api_credit_settlement(
     *,
     sqlite_client: Any,
+    local_principal: Identity,
     escrow_uid: str,
     negotiation_id: str,
     mechanism_client: Any,
@@ -105,7 +107,8 @@ async def prepare_api_credit_settlement(
     request: Any = None,
 ) -> Any:
     """Verify and snapshot the exact durationless API-credit obligation."""
-    del request
+    if request is None:
+        raise ValueError("settlement request is required")
     from core_storefront.escrow_verification import verify_escrow_for_settlement
     from market_core.schemas import EscrowProposal
     from market_settlement_runtime import PreparedSettlement
@@ -128,6 +131,12 @@ async def prepare_api_credit_settlement(
         )
     if thread.get("agreed_price") is None:
         raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
+    buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
+    seller_principal = Identity.model_validate(thread.get("seller_principal"))
+    if request.buyer_principal != buyer_principal:
+        raise ValueError("settlement buyer principal does not match negotiation")
+    if seller_principal != local_principal:
+        raise ValueError("settlement seller principal does not match local identity")
 
     listing_id = thread.get("our_listing_id")
     order = (
@@ -168,6 +177,8 @@ async def prepare_api_credit_settlement(
     accepted = settlement.build_plan(
         proposal=proposal,
         agreed_amount=int(thread["agreed_price"]),
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
     )
     plan = accepted.get("settlement_plan")
     obligations_raw = plan.get("obligations") if isinstance(plan, dict) else None
@@ -176,6 +187,13 @@ async def prepare_api_credit_settlement(
             f"Negotiation {negotiation_id} has no accepted settlement obligations"
         )
     obligations = tuple(dict(obligation) for obligation in obligations_raw)
+    expected_payer = buyer_principal.model_dump(mode="json")
+    expected_claimant = seller_principal.model_dump(mode="json")
+    for obligation in obligations:
+        if obligation.get("payer_principal") != expected_payer:
+            raise ValueError("settlement obligation payer principal mismatch")
+        if obligation.get("claimant_principal") != expected_claimant:
+            raise ValueError("settlement obligation claimant principal mismatch")
     if not isinstance(matched_index, int) or not 0 <= matched_index < len(obligations):
         raise ValueError(
             f"Verified obligation index {matched_index!r} is outside the accepted plan"
@@ -191,7 +209,7 @@ async def prepare_api_credit_settlement(
 
     return PreparedSettlement(
         agreement_ref=negotiation_id,
-        local_role="seller",
+        local_principal=local_principal,
         obligations=obligations,
         selected_obligation_index=matched_index,
         mechanism_ref=escrow_uid,
@@ -202,7 +220,7 @@ async def prepare_api_credit_settlement(
             quantity=int(terms["quantity"]),
             key_mode=str(terms.get("key_mode") or "new"),
             key_id=terms.get("key_id"),
-            buyer_wallet=thread.get("buyer") or thread.get("their_agent_id"),
+            buyer_principal=buyer_principal,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
         ),
@@ -254,7 +272,7 @@ async def reserve_api_credit_settlement(
         await settlement_runtime.bind_fulfillment(
             obligation_ref,
             fulfillment_ref,
-            local_role=prepared.local_role,
+            local_principal=prepared.local_principal,
         )
         await wake_servicing(obligation_ref)
     return None if inserted else row
@@ -279,7 +297,7 @@ async def fulfill_api_credit_settlement(
             quantity=params.quantity,
             key_mode=params.key_mode,
             key_id=params.key_id,
-            buyer_wallet=params.buyer_wallet,
+            buyer_principal=params.buyer_principal,
             listing_id=params.listing_id,
             negotiation_id=params.negotiation_id,
         )

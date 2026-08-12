@@ -13,6 +13,7 @@ init: ## Install dependencies from public indexes and internal wheels
 
 reinit: ## Upgrade and reinstall changed internal wheel dependencies
 	uv sync --dev --find-links $(DIST_DIR) \
+		--reinstall-package arkhai-bare-metal-storefront \
 		--upgrade-package arkhai-bare-metal    --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-core          --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-storefront --reinstall-package arkhai-core-storefront \

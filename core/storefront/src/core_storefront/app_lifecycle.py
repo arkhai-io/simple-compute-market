@@ -12,6 +12,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from market_identity import Signer
+
+
 
 class LoggerLike(Protocol):
     def info(self, msg: str, *args: Any, **kwargs: Any) -> None: ...
@@ -22,6 +25,7 @@ class StorefrontLifecycleCallbacks:
     """Callbacks required to assemble a storefront lifespan."""
 
     get_sqlite_client: Callable[[], Any]
+    resolve_identity_signer: Callable[[], Signer]
     set_stage_event_db_path: Callable[[str], None]
     build_alkahest_clients: Callable[[], dict[str, Any]]
     build_listing_service: Callable[..., Any]
@@ -43,18 +47,22 @@ def build_storefront_lifespan(callbacks: StorefrontLifecycleCallbacks) -> Callab
     @asynccontextmanager
     async def lifespan(_: Any):
         sqlite_client = callbacks.get_sqlite_client()
+        marketplace_signer = callbacks.resolve_identity_signer()
         callbacks.set_stage_event_db_path(sqlite_client.db_path)
         alkahest_clients = callbacks.build_alkahest_clients()
 
         listing_service = callbacks.build_listing_service(
             sqlite_client=sqlite_client,
             alkahest_clients=alkahest_clients,
+            marketplace_signer=marketplace_signer,
         )
         negotiation_service = callbacks.build_negotiation_service(
             sqlite_client=sqlite_client,
+            marketplace_signer=marketplace_signer,
         )
         system_service = callbacks.build_system_service(
             sqlite_client=sqlite_client,
+            marketplace_signer=marketplace_signer,
         )
 
         callbacks.populate_container(
@@ -63,6 +71,7 @@ def build_storefront_lifespan(callbacks: StorefrontLifecycleCallbacks) -> Callab
             listing_service=listing_service,
             negotiation_service=negotiation_service,
             system_service=system_service,
+            marketplace_signer=marketplace_signer,
         )
 
         if callbacks.logger is not None:

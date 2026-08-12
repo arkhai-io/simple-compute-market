@@ -9,6 +9,8 @@ from typer.testing import CliRunner
 
 import core_buyer.cli as cli_mod
 from core_buyer.cli import build_app, parse_filter_options
+from market_identity import Ed25519Signer, TrustedIdentitySet
+from core_buyer.registry_config import RegistryAuthority
 from market_core import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     DomainCapability,
@@ -32,8 +34,26 @@ def _all_output(result) -> str:
 
 
 def _quiet_config(monkeypatch):
-    """Pin config-derived values so tests never read a real buyer.toml."""
-    monkeypatch.setattr(cli_mod, "resolve_indexer_auth", lambda: {})
+    """Pin identity/config values so tests never read user configuration."""
+    buyer = Ed25519Signer(b"\x01" * 32)
+    registry = Ed25519Signer(b"\x02" * 32)
+    monkeypatch.setattr(
+        cli_mod,
+        "_registry_identity_context",
+        lambda urls: (
+            buyer,
+            {
+                url: RegistryAuthority(
+                    authority="registry",
+                    principals=TrustedIdentitySet(
+                        identities=(registry.identity,)
+                    ),
+                )
+                for url in urls
+            },
+            {},
+        ),
+    )
     monkeypatch.setattr(
         cli_mod, "resolve_discovery_timeout", lambda *, override=None: override or 5.0
     )
@@ -48,9 +68,29 @@ def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     seen = {}
 
-    def fake_query(urls, timeout=30.0, *, filters=None, auth=None):
-        seen.update(urls=urls, timeout=timeout, filters=filters, auth=auth)
-        return [{"listing_id": "L1", "offer_resource": {"anything": 1}}]
+    def fake_query(
+        urls,
+        timeout=30.0,
+        *,
+        signer,
+        registry_authorities,
+        filters=None,
+        api_keys=None,
+    ):
+        seen.update(
+            urls=urls,
+            timeout=timeout,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            filters=filters,
+            api_keys=api_keys,
+        )
+        return [{
+            "listing_id": "L1",
+            "offer_resource": {"anything": 1},
+            "source_registry_url": "http://reg.example",
+            "source_registry_authority": "registry",
+        }]
 
     monkeypatch.setattr(cli_mod, "query_registry_for_matches_multi", fake_query)
 
@@ -64,14 +104,18 @@ def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
             "--limit", "7",
         ],
     )
-
     assert result.exit_code == 0, result.output
     assert seen["urls"] == ["http://reg.example"]
     assert seen["filters"] == {
         "limit": 7, "offset": 0, "gpu_model": "H200", "region": "eu",
     }
     assert json.loads(result.output) == [
-        {"listing_id": "L1", "offer_resource": {"anything": 1}}
+        {
+            "listing_id": "L1",
+            "offer_resource": {"anything": 1},
+            "source_registry_url": "http://reg.example",
+            "source_registry_authority": "registry",
+        }
     ]
 
 
@@ -79,7 +123,7 @@ def test_generic_listing_show_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
         cli_mod, "fetch_listing_dict_multi",
-        lambda urls, listing_id, timeout=30.0, *, auth=None: {"listing_id": listing_id},
+        lambda urls, listing_id, **_kwargs: {"listing_id": listing_id},
     )
     result = runner.invoke(
         build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],
@@ -92,7 +136,7 @@ def test_generic_listing_show_missing_listing_exits_nonzero(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
         cli_mod, "fetch_listing_dict_multi",
-        lambda urls, listing_id, timeout=30.0, *, auth=None: None,
+        lambda urls, listing_id, **_kwargs: None,
     )
     result = runner.invoke(
         build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],

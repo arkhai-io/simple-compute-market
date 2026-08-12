@@ -83,6 +83,7 @@ class ResourcePatchResponse(BaseModel):
 
 class FulfillmentStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -92,6 +93,7 @@ class FulfillmentStartedEventRequest(BaseModel):
 
 class FulfillmentFailedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_job_id: str | None = None
@@ -103,6 +105,7 @@ class FulfillmentFailedEventRequest(BaseModel):
 
 class UsageStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     escrow_uid: str | None = None
     provider_id: str | None = None
     provider_lease_id: str | None = None
@@ -115,12 +118,14 @@ class UsageStartedEventRequest(BaseModel):
 
 class ReleaseStartedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     provider_lease_id: str | None = None
     vm_remove_job_id: str | None = None
 
 
 class CapacityReleasedEventRequest(BaseModel):
     capacity_reservation_id: str
+    site_id: str
     provider_lease_id: str | None = None
     resource_id: str | None = None
     released_at: str | None = None

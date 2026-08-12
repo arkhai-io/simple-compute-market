@@ -1,14 +1,14 @@
 [project]
 name = "arkhai-core-storefront"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 description = "Core storefront role shell and protocol helpers"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-core>=0.2.0",
-    "arkhai-core-registry-client",
+    "arkhai-core-registry-client>=0.11.0",
     "arkhai-kit-config",
-    "arkhai-kit-identity",
+    "arkhai-kit-identity==0.2.0",
     "arkhai-kit-policy",
     "httpx>=0.27",
     "pydantic>=2",

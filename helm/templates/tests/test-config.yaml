@@ -8,13 +8,36 @@ continue to work.
 */}}
 {{- $smoke := .Values.global.smokeTests | default dict -}}
 {{- $config := $smoke.config | default dict -}}
-{{- $rpcUrl := (index .Values "validate-contracts").rpcUrl -}}
-{{- if not $rpcUrl -}}
-  {{- $rpcUrl = printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- $rpc := .Values.global.rpc | default dict -}}
+{{- $rpcUrl := "" -}}
+{{- if $rpc.enabled -}}
+  {{- $rpcUrl = (index .Values "validate-contracts").rpcUrl | default "" -}}
+  {{- if and (not $rpcUrl) $rpc.host $rpc.port -}}
+    {{- $rpcUrl = printf "http://%s:%d" $rpc.host (int $rpc.port) -}}
+  {{- end -}}
 {{- end -}}
 {{- $agents := .Values.storefront.agents | default list -}}
 {{- if not $agents -}}
   {{- fail "helm test config requires at least one storefront agent" -}}
+{{- end -}}
+{{- $provisioningTargetName := .Values.provisioning.storefront.agentName -}}
+{{- $provisioningStorefrontFound := false -}}
+{{- $provisioningStorefrontTrusted := false -}}
+{{- range $agent := $agents -}}
+  {{- if eq $agent.name $provisioningTargetName -}}
+    {{- $provisioningStorefrontFound = true -}}
+    {{- range $principal := ($.Values.provisioning.storefrontIdentity.principals | default list) -}}
+      {{- if and (eq $principal.scheme $agent.identity.principal.scheme) (eq $principal.identifier $agent.identity.principal.identifier) -}}
+        {{- $provisioningStorefrontTrusted = true -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $provisioningStorefrontFound -}}
+  {{- fail "provisioning storefront.agentName must match one configured storefront agent" -}}
+{{- end -}}
+{{- if not $provisioningStorefrontTrusted -}}
+  {{- fail "provisioning storefront principals must include the active storefront signer principal" -}}
 {{- end -}}
 {{- $storefrontTests := .Values.storefront.tests | default dict -}}
 {{- $targetName := $storefrontTests.targetAgentName | default "" -}}
@@ -32,21 +55,35 @@ continue to work.
   {{- end -}}
 {{- end -}}
 {{- $targetConfig := $targetAgent.config | default dict -}}
+{{- $registryAuthority := $targetConfig.registryAuthority | default dict -}}
 {{- $sellerConfig := $targetConfig.seller | default dict -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $generated := dict -}}
-{{- $_ := set $generated "rpc" (dict "url" $rpcUrl "chain_id" .Values.global.rpc.chainId) -}}
+{{- if $rpcUrl -}}
+{{- $rpcConfig := dict "url" $rpcUrl -}}
+{{- if $rpc.chainId -}}
+  {{- $_ := set $rpcConfig "chain_id" $rpc.chainId -}}
+{{- end -}}
+{{- $_ := set $generated "rpc" $rpcConfig -}}
+{{- end -}}
+{{- $registryURL := printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) -}}
 {{- $_ := set $generated "registry" (dict
-  "api_url" (printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port))
+  "api_url" $registryURL
+  "authorities" (dict $registryURL (dict
+    "authority" (required "registry authority id is required" $registryAuthority.authority)
+    "principals" (required "registry authority principals are required" $registryAuthority.principals)
+  ))
 ) -}}
 {{- $_ := set $generated $component (dict
   "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
   "base_url_override" ($sellerConfig.baseUrl | default "")
   "agent_id" ($targetAgent.agentId | default "")
 ) -}}
+{{- if and $rpc.enabled $rpc.host $rpc.port -}}
 {{- $_ := set $generated "buyer" (dict
-  "chain_rpc_url" (printf "ws://%s:%d" $.Values.global.rpc.host (int $.Values.global.rpc.port))
+  "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
 ) -}}
+{{- end -}}
 {{- $_ := set $generated "provisioning" (dict
   "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
 ) -}}

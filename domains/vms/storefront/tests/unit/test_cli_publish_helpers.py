@@ -4,7 +4,7 @@ The `--watch` mode's correctness hinges on these two functions:
 
 - `_open_order_resource_ids(db)` — returns the set of resource_ids that
   currently have an open sell order, so `--watch` can skip them.
-- `_publish_round(...)` — given a `skip_ids`, publishes one order per
+- `_publish_command_round(...)` — given a `skip_ids`, publishes one listing per
   available resource NOT in the skip set.
 
 Testing these against a real SQLite schema catches the most likely
@@ -19,6 +19,7 @@ import sqlite3
 from unittest.mock import patch
 
 import pytest
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 from market_storefront import cli_publish
 from market_storefront.cli_publish import (
@@ -30,7 +31,7 @@ from market_storefront.cli_publish import (
     _publication_adapters,
     _bare_metal_publication_source_selection,
     _publication_source_selection,
-    _publish_round,
+    _publish_command_round,
     _stale_open_listing_ids,
 )
 from domains.vms.listings.reconciler import (
@@ -46,6 +47,10 @@ from tests.fixtures.publish import validate_published_entry, validate_failed_res
 _MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 _WALLET_ADDRESS = "0x1111111111111111111111111111111111111111"
 _USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+_SITE_SIGNER = Ed25519Signer(b"\x51" * 32)
+_SITE_AUTHORITIES = TrustedIdentitySet(
+    identities=(Ed25519Signer(b"\x52" * 32).identity,)
+)
 _TOKEN_DECIMALS = {
     _MOCK_ADDRESS.lower(): ("MOCK", 0),
     _USDC_ADDRESS.lower(): ("USDC", 6),
@@ -76,7 +81,7 @@ def _stub_resolve_token(monkeypatch):
     monkeypatch.setattr(
         "market_storefront.cli_publish.resolve_token", fake_resolve, raising=False,
     )
-    # cli_publish imports resolve_token lazily inside _publish_round, so
+    # cli_publish imports resolve_token lazily inside _publish_command_round, so
     # patch the source module too.
     monkeypatch.setattr(
         "market_alkahest.token.resolve_token", fake_resolve,
@@ -104,6 +109,12 @@ def _stub_resolve_token(monkeypatch):
             ),
         },
         raising=False,
+    )
+    monkeypatch.setattr(
+        agent_config, "resolve_marketplace_signer", lambda: _SITE_SIGNER
+    )
+    monkeypatch.setattr(
+        agent_config, "get_provisioning_authorities", lambda: _SITE_AUTHORITIES
     )
 
 
@@ -223,16 +234,13 @@ def _insert_order(path: str, order_id: str, status: str, resource_id: str | None
 
 
 def _round_kwargs(**overrides):
-    """Common _publish_round kwargs; tests override specific keys."""
+    """Common _publish_command_round kwargs; tests override specific keys."""
     base = dict(
         base_url="http://agent",
         wallet_address=_WALLET_ADDRESS,
-        private_key=None,
         default_min_price="100",
         default_token_address=_MOCK_ADDRESS,
         default_max_duration_seconds=None,
-        rpc_url="http://rpc",
-        chain_id=1,
     )
     base.update(overrides)
     return base
@@ -305,7 +313,7 @@ def test_open_listing_resource_keys_include_gpu_slice(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _publish_round
+# _publish_command_round
 # ---------------------------------------------------------------------------
 
 
@@ -326,8 +334,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     calls: list[dict] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows, demands,
-        max_duration_seconds, wallet_address, private_key,
+        agent_url, offer, accepted_escrows, demands, max_duration_seconds,
     ):
         calls.append({
             "offer": offer,
@@ -339,9 +346,12 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
-    published, failed, skipped = _publish_round(
-        db_path=db, skip_ids={"compute-001"}, **_round_kwargs(),
+    result = _publish_command_round(
+        db_path=db,
+        skip_ids={"compute-001"},
+        **_round_kwargs(),
     )
+    published, failed, skipped = result.published, result.failed, result.skipped
 
     assert len(published) == 1, f"Expected exactly one publish, got {published}"
     assert len(skipped) == 1, f"Expected one skipped, got {skipped}"
@@ -369,9 +379,12 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
         lambda *a, **k: {"status": "created", "listing_id": "o1"},
     )
 
-    published, failed, skipped = _publish_round(
-        db_path=db, skip_ids=None, **_round_kwargs(),
+    result = _publish_command_round(
+        db_path=db,
+        skip_ids=None,
+        **_round_kwargs(),
     )
+    published, failed, skipped = result.published, result.failed, result.skipped
     assert len(published) == 1
     assert not failed
     assert not skipped
@@ -491,7 +504,8 @@ def test_publish_round_publishes_one_listing_per_available_slice(tmp_path, monke
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
-    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed, skipped = result.published, result.failed, result.skipped
 
     assert [c["gpu_count"] for c in calls] == [1, 2, 3, 4]
     assert len(published) == 4
@@ -614,7 +628,7 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
     )
 
     with settings_overrides(enable_registry_discovery=False):
-        published, failed, skipped = _publish_round(
+        result = _publish_command_round(
             db_path=db,
             skip_ids={
                 listing_resource_key("default", "compute-4x", 1),
@@ -623,6 +637,7 @@ def test_publish_round_reopens_existing_derived_listing_id(tmp_path, monkeypatch
             },
             **_round_kwargs(),
         )
+    published, failed, skipped = result.published, result.failed, result.skipped
 
     assert not failed
     assert [p["response"]["listing_id"] for p in published] == ["listing-3x-old"]
@@ -655,7 +670,7 @@ def test_publication_selection_can_compose_bare_metal(monkeypatch) -> None:
         return PublicationSource(
             name=name,
             open_keys=lambda _db: set(),
-            close_stale=lambda _db, _url, _key: [],
+            close_stale=lambda _db, _url: [],
             available_candidates=lambda _db: [],
             skip_keys=lambda _candidate: set(),
             offer_resource=lambda candidate: candidate,
@@ -690,19 +705,19 @@ def test_publish_round_normalizes_zero_duration_to_unlimited(tmp_path, monkeypat
     calls: list[int | None] = []
 
     def fake_publish(
-        agent_url, offer, accepted_escrows, demands,
-        max_duration_seconds, wallet_address, private_key,
+        agent_url, offer, accepted_escrows, demands, max_duration_seconds,
     ):
         calls.append(max_duration_seconds)
         return {"status": "created", "listing_id": "o1"}
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
-    published, failed, skipped = _publish_round(
+    result = _publish_command_round(
         db_path=db,
         skip_ids=None,
         **_round_kwargs(default_max_duration_seconds=0),
     )
+    published, failed, skipped = result.published, result.failed, result.skipped
 
     assert len(published) == 1
     assert not failed
@@ -722,17 +737,20 @@ def test_publish_round_preserves_positive_row_duration(tmp_path, monkeypatch):
 
     calls: list[int | None] = []
 
-    def fake_publish(agent_url, offer, accepted_escrows, demands, max_duration_seconds, wallet_address, private_key):
+    def fake_publish(
+        agent_url, offer, accepted_escrows, demands, max_duration_seconds,
+    ):
         calls.append(max_duration_seconds)
         return {"status": "created", "listing_id": "o1"}
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
-    published, failed, skipped = _publish_round(
+    result = _publish_command_round(
         db_path=db,
         skip_ids=None,
         **_round_kwargs(default_max_duration_seconds=0),
     )
+    published, failed, skipped = result.published, result.failed, result.skipped
 
     assert len(published) == 1
     assert not failed
@@ -775,7 +793,8 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
         ),
     )
 
-    published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed = result.published, result.failed
 
     by_rid = {c["offer"]["resource_id"]: c["accepted_escrows"][0] for c in calls}
     assert by_rid["compute-cheap"]["literal_fields"]["token"] == _USDC_ADDRESS
@@ -812,9 +831,11 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
         ),
     )
 
-    published, failed, _ = _publish_round(
-        db_path=db, **_round_kwargs(default_min_price=None),
+    result = _publish_command_round(
+        db_path=db,
+        **_round_kwargs(default_min_price=None),
     )
+    published, failed = result.published, result.failed
 
     assert [c["offer"]["resource_id"] for c in calls] == ["compute-priced"]
     assert len(published) == 1
@@ -845,11 +866,12 @@ def test_publish_round_priceless_publishes_with_empty_rates(tmp_path, monkeypatc
         ),
     )
 
-    published, failed, _ = _publish_round(
+    result = _publish_command_round(
         db_path=db,
         publish_priceless=True,
         **_round_kwargs(default_min_price=None),
     )
+    published, failed = result.published, result.failed
 
     assert len(published) == 1
     assert len(failed) == 0
@@ -880,9 +902,11 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
         ),
     )
 
-    published, failed, _ = _publish_round(
-        db_path=db, **_round_kwargs(default_min_price="500"),
+    result = _publish_command_round(
+        db_path=db,
+        **_round_kwargs(default_min_price="500"),
     )
+    published, failed = result.published, result.failed
 
     assert len(published) == 1
     assert len(failed) == 0
@@ -901,9 +925,11 @@ def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: {"status": "created"},
     )
-    published, failed, _ = _publish_round(
-        db_path=db, **_round_kwargs(default_min_price=None),
+    result = _publish_command_round(
+        db_path=db,
+        **_round_kwargs(default_min_price=None),
     )
+    published, failed = result.published, result.failed
     assert len(published) == 0
     assert len(failed) == 1
     assert "publish_priceless" in failed[0][1]
@@ -921,9 +947,11 @@ def test_publish_round_priceless_message_mentions_opt_in(tmp_path, monkeypatch):
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: {"status": "created"},
     )
-    _, failed, _ = _publish_round(
-        db_path=db, **_round_kwargs(default_min_price=None),
+    result = _publish_command_round(
+        db_path=db,
+        **_round_kwargs(default_min_price=None),
     )
+    failed = result.failed
     assert "publish_priceless" in failed[0][1]
     validate_failed_resource(failed[0])
 
@@ -941,7 +969,8 @@ def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
         pytest.fail("Should not publish a leased resource")
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
-    published, failed, skipped = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    published, failed, skipped = result.published, result.failed, result.skipped
     assert not published and not failed and not skipped
 
 
@@ -959,7 +988,8 @@ def test_publish_round_rejects_non_address_token(tmp_path, monkeypatch):
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: pytest.fail("should not publish a bad row"),
     )
-    _, failed, _ = _publish_round(db_path=db, **_round_kwargs())
+    result = _publish_command_round(db_path=db, **_round_kwargs())
+    failed = result.failed
     assert len(failed) == 1
     assert "0x" in failed[0][1]
     validate_failed_resource(failed[0])
@@ -979,9 +1009,11 @@ def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
         "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: pytest.fail("should not publish"),
     )
-    _, failed, _ = _publish_round(
-        db_path=db, **_round_kwargs(default_token_address=None),
+    result = _publish_command_round(
+        db_path=db,
+        **_round_kwargs(default_token_address=None),
     )
+    failed = result.failed
     assert len(failed) == 1
     assert "token" in failed[0][1]
     validate_failed_resource(failed[0])
@@ -991,126 +1023,132 @@ def test_publish_round_missing_token_with_no_default(tmp_path, monkeypatch):
 # _site_pool_projection_sync -- CLI's own synchronous projection fetch
 # ---------------------------------------------------------------------------
 
-class _FakeResponse:
-    def __init__(self, json_data, status_code=200):
-        self._json_data = json_data
-        self.status_code = status_code
+class _FakeSiteCapacityClient:
+    """Async site-client double matching the signed projection API."""
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+    _outcomes_by_url: dict[str, object] = {}
 
-    def json(self):
-        return self._json_data
+    def __init__(
+        self,
+        base_url,
+        signer,
+        expected_authorities,
+        *,
+        timeout,
+    ):
+        assert signer is _SITE_SIGNER
+        assert expected_authorities == _SITE_AUTHORITIES
+        assert timeout == 10
+        self.base_url = base_url
 
-
-class _FakeHttpxClient:
-    """Stands in for httpx.Client: supports the `with ... as http` usage
-    and routes .get(url) to a per-test-configured outcome by URL prefix."""
-
-    _responses_by_prefix: dict[str, object] = {}
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def get(self, url, headers=None):
-        for prefix, outcome in self._responses_by_prefix.items():
-            if url.startswith(prefix):
-                if isinstance(outcome, Exception):
-                    raise outcome
-                return outcome
-        raise AssertionError(f"unexpected URL in test: {url}")
+    async def resource_pool_projection(self):
+        outcome = self._outcomes_by_url[self.base_url]
+        if isinstance(outcome, Exception):
+            raise outcome
+        assert callable(outcome)
+        return outcome()
 
 
-def _fake_httpx_client_class(responses_by_prefix):
+def _fake_site_capacity_client_class(outcomes_by_url):
     return type(
-        "_FakeHttpxClient", (_FakeHttpxClient,),
-        {"_responses_by_prefix": responses_by_prefix},
+        "_ConfiguredFakeSiteCapacityClient",
+        (_FakeSiteCapacityClient,),
+        {"_outcomes_by_url": outcomes_by_url},
     )
 
 
 class TestSitePoolProjectionSync:
     def test_one_site_succeeds(self):
         rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": _FakeResponse({"resource_pools": rows}),
-        })
-        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
-             patch("httpx.Client", fake_client):
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": rows}}
+        )
+        with settings_overrides(
+            **{"capacity.sites": {"site-a": "http://site-a"}}
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = _site_pool_projection_sync()
         assert result == {"site-a": rows}
 
     def test_successful_empty_resource_pools_is_kept_not_dropped(self):
-        """A site that answers with genuinely zero pools must still be
-        present in the result as an empty list -- same distinction that
-        matters for the server-side site_pool_projection()."""
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": _FakeResponse({"resource_pools": []}),
-        })
-        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
-             patch("httpx.Client", fake_client):
+        """An authoritative empty projection remains distinguishable from failure."""
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": []}}
+        )
+        with settings_overrides(
+            **{"capacity.sites": {"site-a": "http://site-a"}}
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = _site_pool_projection_sync()
         assert result == {"site-a": []}
 
     def test_one_site_fails_others_still_reported(self):
         rows_b = [{"resource_pool_id": "gpu-pool-b", "resources": []}]
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": RuntimeError("connection refused"),
-            "http://site-b": _FakeResponse({"resource_pools": rows_b}),
-        })
-        with settings_overrides(**{
-            "capacity.sites": {"site-a": "http://site-a", "site-b": "http://site-b"},
-        }), patch("httpx.Client", fake_client):
+        fake_client = _fake_site_capacity_client_class(
+            {
+                "http://site-a": RuntimeError("connection refused"),
+                "http://site-b": lambda: {"resource_pools": rows_b},
+            }
+        )
+        with settings_overrides(
+            **{
+                "capacity.sites": {
+                    "site-a": "http://site-a",
+                    "site-b": "http://site-b",
+                }
+            }
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = _site_pool_projection_sync()
         assert result == {"site-b": rows_b}
         assert "site-a" not in result
 
     def test_all_sites_fail_returns_none(self):
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": RuntimeError("connection refused"),
-        })
-        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
-             patch("httpx.Client", fake_client):
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": RuntimeError("connection refused")}
+        )
+        with settings_overrides(
+            **{"capacity.sites": {"site-a": "http://site-a"}}
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = _site_pool_projection_sync()
         assert result is None
 
     def test_no_sites_configured_returns_none(self):
-        with settings_overrides(**{
-            "capacity.sites": {}, "capacity.authority_url": "",
-            "provisioning.service_url": "",
-        }):
+        with settings_overrides(
+            **{
+                "capacity.sites": {},
+                "capacity.authority_url": "",
+                "provisioning.service_url": "",
+            }
+        ):
             result = _site_pool_projection_sync()
         assert result is None
 
-    def test_http_error_status_treated_as_failure(self):
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": _FakeResponse({}, status_code=500),
-        })
-        with settings_overrides(**{"capacity.sites": {"site-a": "http://site-a"}}), \
-             patch("httpx.Client", fake_client):
+    def test_projection_client_error_is_treated_as_failure(self):
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": RuntimeError("HTTP 500")}
+        )
+        with settings_overrides(
+            **{"capacity.sites": {"site-a": "http://site-a"}}
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = _site_pool_projection_sync()
         assert result is None
 
 
 class TestSitePoolProjectionIfEnabled:
     def test_flag_disabled_returns_none_without_fetching(self):
-        with settings_overrides(**{"capacity.use_site_projection_for_listings": False}):
+        with settings_overrides(
+            **{"capacity.use_site_projection_for_listings": False}
+        ):
             assert cli_publish._site_pool_projection_if_enabled() is None
 
     def test_flag_enabled_fetches(self):
         rows = [{"resource_pool_id": "gpu-pool", "resources": []}]
-        fake_client = _fake_httpx_client_class({
-            "http://site-a": _FakeResponse({"resource_pools": rows}),
-        })
-        with settings_overrides(**{
-            "capacity.use_site_projection_for_listings": True,
-            "capacity.sites": {"site-a": "http://site-a"},
-        }), patch("httpx.Client", fake_client):
+        fake_client = _fake_site_capacity_client_class(
+            {"http://site-a": lambda: {"resource_pools": rows}}
+        )
+        with settings_overrides(
+            **{
+                "capacity.use_site_projection_for_listings": True,
+                "capacity.sites": {"site-a": "http://site-a"},
+            }
+        ), patch("market_site_client.SiteCapacityClient", fake_client):
             result = cli_publish._site_pool_projection_if_enabled()
         assert result == {"site-a": rows}

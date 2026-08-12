@@ -51,7 +51,6 @@ from core_storefront.publication_command import (
 from core_storefront.publication_sources import PublicationSource
 from core_storefront.publication_runner import (
     PublicationCommandResult,
-    PublicationCycleResult,
     PublicationSourceSelection,
 )
 
@@ -130,7 +129,7 @@ def _site_topology_sync() -> tuple[str | None, int]:
     from market_storefront.services.capacity_client import _capacity_settings
 
     try:
-        sites, _, _ = _capacity_settings()
+        sites, _ = _capacity_settings()
     except Exception:
         return None, 0
     return next(iter(sites), None), len(sites)
@@ -138,27 +137,34 @@ def _site_topology_sync() -> tuple[str | None, int]:
 
 def _capacity_snapshot_sync() -> list[dict[str, Any]] | None:
     """Aggregated site capacity snapshot, fetched synchronously for CLI flows."""
-    import httpx
+    import asyncio
 
+    from market_site_client import SiteCapacityClient
     from market_storefront.services.capacity_client import _capacity_settings
+    from market_storefront.utils.config import (
+        get_provisioning_authorities,
+        resolve_marketplace_signer,
+    )
 
     try:
-        sites, admin_key, _ = _capacity_settings()
+        sites, _ = _capacity_settings()
+        signer = resolve_marketplace_signer()
+        expected_authorities = get_provisioning_authorities()
     except Exception:
         return None
-    headers = {"X-Admin-Key": admin_key} if admin_key else {}
     resources: list[dict[str, Any]] = []
     answered = False
     home_site = next(iter(sites))
     for site_name, url in sites.items():
         try:
-            with httpx.Client(timeout=10) as http:
-                resp = http.get(
-                    f"{url}/api/v1/capacity/snapshot",
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                rows = resp.json().get("resources") or []
+            rows = asyncio.run(
+                SiteCapacityClient(
+                    url,
+                    signer,
+                    expected_authorities,
+                    timeout=10,
+                ).snapshot()
+            )
         except Exception as exc:
             typer.echo(
                 f"[capacity] site {site_name!r} snapshot failed: {exc}",
@@ -183,25 +189,33 @@ def _site_pool_projection_sync() -> dict[str, list[dict[str, Any]]] | None:
     populated in this process. No caching by design: the CLI isn't meant
     to operate at the storefront server's scale.
     """
-    import httpx
+    import asyncio
 
+    from market_site_client import SiteCapacityClient
     from market_storefront.services.capacity_client import _capacity_settings
+    from market_storefront.utils.config import (
+        get_provisioning_authorities,
+        resolve_marketplace_signer,
+    )
 
     try:
-        sites, admin_key, _ = _capacity_settings()
+        sites, _ = _capacity_settings()
+        signer = resolve_marketplace_signer()
+        expected_authorities = get_provisioning_authorities()
     except Exception:
         return None
-    headers = {"X-Admin-Key": admin_key} if admin_key else {}
     projection: dict[str, list[dict[str, Any]]] = {}
     for site_name, url in sites.items():
         try:
-            with httpx.Client(timeout=10) as http:
-                resp = http.get(
-                    f"{url}/api/v1/capacity/site-resource-pools",
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                rows = resp.json().get("resource_pools") or []
+            payload = asyncio.run(
+                SiteCapacityClient(
+                    url,
+                    signer,
+                    expected_authorities,
+                    timeout=10,
+                ).resource_pool_projection()
+            )
+            rows = payload.get("resource_pools") or []
         except Exception as exc:
             typer.echo(
                 f"[capacity] site {site_name!r} projection fetch failed: {exc}",
@@ -220,25 +234,33 @@ def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
     fetch here falls back to that function's own resource-list computation
     rather than failing the publish round.
     """
-    import httpx
+    import asyncio
 
+    from market_site_client import SiteCapacityClient
     from market_storefront.services.capacity_client import _capacity_settings
+    from market_storefront.utils.config import (
+        get_provisioning_authorities,
+        resolve_marketplace_signer,
+    )
 
     try:
-        sites, admin_key, _ = _capacity_settings()
+        sites, _ = _capacity_settings()
+        signer = resolve_marketplace_signer()
+        expected_authorities = get_provisioning_authorities()
     except Exception:
         return None
-    headers = {"X-Admin-Key": admin_key} if admin_key else {}
     buckets: dict[str, list[dict[str, Any]]] = {}
     for site_name, url in sites.items():
         try:
-            with httpx.Client(timeout=10) as http:
-                resp = http.get(
-                    f"{url}/api/v1/capacity/site-capacity-buckets",
-                    headers=headers,
-                )
-                resp.raise_for_status()
-                rows = resp.json().get("capacity_buckets") or []
+            payload = asyncio.run(
+                SiteCapacityClient(
+                    url,
+                    signer,
+                    expected_authorities,
+                    timeout=10,
+                ).capacity_bucket_projection()
+            )
+            rows = payload.get("capacity_buckets") or []
         except Exception as exc:
             typer.echo(
                 f"[capacity] site {site_name!r} capacity-bucket fetch failed: {exc}",
@@ -418,19 +440,19 @@ def _publish_offer(
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
-    wallet_address: str,
-    private_key: Optional[str],
 ) -> dict:
-    """POST /listings/create and return the response as a dict.
+    """POST /listings/create and return the callback response mapping."""
+    from .utils.config import resolve_marketplace_signer
 
-    Returns a dict (not the typed StorefrontListingCreateResponse) for
-    backward compat with `_publish_round`'s callers, which inspect
-    ``resp["listing_id"]`` and ``resp["status"]`` directly.
-    """
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    signer = resolve_marketplace_signer()
+    with SyncStorefrontClient(
+        agent_url,
+        signer=signer,
+        caller_role="seller",
+        expected_publisher=signer.identity,
+    ) as client:
         try:
             resp = client.create_listing(
-                agent_wallet_address=wallet_address,
                 offer=offer,
                 accepted_escrows=accepted_escrows,
                 demands=demands,
@@ -469,20 +491,21 @@ def _publish_existing_listing_to_registries(
     demands: list[dict],
     max_duration_seconds: int | None,
     storefront_url: str,
-    private_key: Optional[str],
 ) -> dict:
-    from .utils.config import settings
+    from market_config.registry_url import normalize_registry_url
 
+    from .utils.config import (
+        get_registry_authorities,
+        resolve_marketplace_signer,
+        settings,
+    )
+
+    signer = resolve_marketplace_signer()
     if not settings.enable_registry_discovery:
         return {"status": "disabled", "listing_id": listing_id}
-    if not private_key:
-        raise RuntimeError("wallet.private_key is required to publish to registry")
 
-    urls = (
-        list(settings.registry.urls)
-        if settings.registry.urls
-        else ["http://localhost:8080"]
-    )
+    urls = list(settings.registry.urls)
+    authorities = get_registry_authorities()
     errors: list[str] = []
     any_ok = False
     request = ListingRequest(
@@ -501,7 +524,6 @@ def _publish_existing_listing_to_registries(
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
         },
-        private_key=private_key,
     )
     for url in urls:
         try:
@@ -509,8 +531,16 @@ def _publish_existing_listing_to_registries(
                 url,
                 timeout=settings.registry.discovery_timeout,
                 api_key=_registry_auth_token(url),
+                signer=signer,
+                caller_role="seller",
+                expected_registries=authorities[
+                    normalize_registry_url(url)
+                ].principals,
+                registry_authority=authorities[
+                    normalize_registry_url(url)
+                ].authority,
             ) as client:
-                client.publish_listing(request, private_key)
+                client.publish_listing(request)
                 client.update_listing(listing_id, update)
             any_ok = True
         except Exception as exc:
@@ -533,7 +563,6 @@ def _reopen_derived_listing_if_present(
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
-    private_key: Optional[str],
 ) -> dict | None:
     derived = load_derived_listing_for_slice(
         db_path,
@@ -550,6 +579,9 @@ def _reopen_derived_listing_if_present(
     if derived.get("listing_status") == "open":
         return None
 
+    from .utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
     reopen_local_derived_listing(
         db_path,
         listing_id=listing_id,
@@ -563,7 +595,8 @@ def _reopen_derived_listing_if_present(
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
-        seller=base_url,
+        storefront_url=base_url,
+        seller_principal=signer.identity,
     )
     return _publish_existing_listing_to_registries(
         listing_id=listing_id,
@@ -572,7 +605,6 @@ def _reopen_derived_listing_if_present(
         demands=demands,
         max_duration_seconds=max_duration_seconds,
         storefront_url=base_url,
-        private_key=private_key,
     )
 
 
@@ -591,10 +623,17 @@ def _open_listing_ids(db_path: str) -> list[str]:
 def _close_order(
     agent_url: str,
     order_id: str,
-    private_key: Optional[str],
 ) -> dict:
     """POST /api/v1/listings/{listing_id}/close; return the response as a dict."""
-    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+    from .utils.config import resolve_marketplace_signer
+
+    signer = resolve_marketplace_signer()
+    with SyncStorefrontClient(
+        agent_url,
+        signer=signer,
+        caller_role="seller",
+        expected_publisher=signer.identity,
+    ) as client:
         try:
             resp = client.close_listing(order_id)
         except StorefrontClientError as exc:
@@ -611,12 +650,11 @@ def _close_stale_derived_listings(
     *,
     db_path: str,
     base_url: str,
-    private_key: Optional[str],
 ) -> list[str]:
     home_site, configured_site_count = _site_topology_sync()
     closed_listing_ids: list[str] = []
     for listing_id in _stale_open_listing_ids(db_path):
-        resp = _close_order(base_url, listing_id, private_key)
+        resp = _close_order(base_url, listing_id)
         if str(resp.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
     if home_site is not None:
@@ -658,7 +696,6 @@ def _reopen_vm_listing_if_present(
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
-    private_key: Optional[str],
 ) -> dict | None:
     return _reopen_derived_listing_if_present(
         db_path=db_path,
@@ -668,19 +705,15 @@ def _reopen_vm_listing_if_present(
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
-        private_key=private_key,
     )
 
 
 def _vm_publication_source_callbacks() -> VmPublicationSourceCallbacks:
     return VmPublicationSourceCallbacks(
         open_keys=_open_listing_resource_keys,
-        close_stale=lambda db_path, base_url, private_key: (
-            _close_stale_derived_listings(
-                db_path=db_path,
-                base_url=base_url,
-                private_key=private_key,
-            )
+        close_stale=lambda db_path, base_url: _close_stale_derived_listings(
+            db_path=db_path,
+            base_url=base_url,
         ),
         available_candidates=_available_resources,
         offer_resource=_offer_resource_for_listing,
@@ -736,17 +769,6 @@ def _publication_adapters() -> tuple[PublicationSource, ...]:
     return _publication_source_selection().build_sources()
 
 
-def _close_stale_publication_listings(
-    *,
-    db_path: str,
-    base_url: str,
-    private_key: Optional[str],
-) -> dict[str, list[str]]:
-    return _publication_source_selection().close_stale(
-        db_path=db_path,
-        base_url=base_url,
-        private_key=private_key,
-    )
 
 
 def _open_publication_keys(db_path: str) -> set[str]:
@@ -1191,12 +1213,9 @@ def _publish_command_round(
     db_path: str,
     base_url: str,
     wallet_address: str,
-    private_key: Optional[str],
     default_min_price: Optional[str],
     default_token_address: Optional[str],
     default_max_duration_seconds: int | None,
-    rpc_url: str,
-    chain_id: int,
     publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
     close_stale: bool = False,
@@ -1219,8 +1238,8 @@ def _publish_command_round(
             ``[seller.pricing].default_min_price`` as the negotiation floor).
           - False → skip the row, surfaced in ``failed``.
 
-    Returns (published, failed, skipped) — each a list of dicts keyed on
-    the resource.
+    Returns the core publication command result with published, failed, skipped,
+    and closed collections.
     """
 
     def build_payload(
@@ -1250,8 +1269,6 @@ def _publish_command_round(
                 accepted_escrows,
                 demands,
                 max_duration_seconds,
-                wallet_address,
-                private_key,
             )
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
@@ -1261,7 +1278,6 @@ def _publish_command_round(
         config=StorefrontPublicationCommandConfig(
             db_path=db_path,
             base_url=base_url,
-            private_key=private_key,
             close_stale=close_stale,
             skip_open=skip_open,
         ),
@@ -1273,12 +1289,6 @@ def _publish_command_round(
     )
 
 
-def _publish_round(
-    **kwargs: Any,
-) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
-    """Compatibility wrapper returning the legacy publish-round tuple."""
-    result = _publish_command_round(**kwargs)
-    return result.published, result.failed, result.skipped
 
 
 def run_watch_loop(
@@ -1286,12 +1296,9 @@ def run_watch_loop(
     db_path: str,
     base_url: str,
     wallet_address: str,
-    private_key: Optional[str],
     default_min_price: Optional[str],
     default_token_address: Optional[str],
     default_max_duration_seconds: int | None,
-    rpc_url: str,
-    chain_id: int,
     publish_priceless: bool = False,
     poll_interval: float,
     console: Optional[Console] = None,
@@ -1319,12 +1326,9 @@ def run_watch_loop(
                     db_path=db_path,
                     base_url=base_url,
                     wallet_address=wallet_address,
-                    private_key=private_key,
                     default_min_price=default_min_price,
                     default_token_address=default_token_address,
                     default_max_duration_seconds=default_max_duration_seconds,
-                    rpc_url=rpc_url,
-                    chain_id=chain_id,
                     publish_priceless=publish_priceless,
                     close_stale=True,
                     skip_open=True,
@@ -1500,11 +1504,10 @@ def register(app: typer.Typer) -> None:
         row-level price or a default are skipped (reported as failed).
         """
         console = Console()
-        from .utils.config import settings
+        from .utils.config import get_evm_wallet_address, settings
 
         base_url = resolve_storefront_url(storefront_url, default_port=8001)
-        private_key = settings.wallet.private_key
-        wallet_address = settings.wallet.address or ""
+        wallet_address = get_evm_wallet_address()
         db_path = _resolve_db_path(db)
         if not db_path:
             typer.secho(
@@ -1537,13 +1540,6 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
-        # The publish loop iterates CHAINS internally; rpc_url / chain_id
-        # are kept on the watch-loop signature for back-compat but use the
-        # first configured chain as a generic resolution target. Per-chain
-        # token resolution happens inside _publish_round.
-        first_chain = next(iter(CHAINS.values()))
-        rpc_url = first_chain.rpc_url
-        chain_id = first_chain.chain_id
 
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:
@@ -1568,7 +1564,7 @@ def register(app: typer.Typer) -> None:
             failed: list[tuple[str, str]] = []
             for oid in order_ids:
                 try:
-                    resp = _close_order(base_url, oid, private_key)
+                    resp = _close_order(base_url, oid)
                 except typer.Exit:
                     failed.append((oid, "HTTP error (see above)"))
                     continue
@@ -1608,28 +1604,17 @@ def register(app: typer.Typer) -> None:
         # One-shot path
         # ------------------------------------------------------------------
         if not watch:
-            published, failed, skipped = _publish_round(
+            result = _publish_command_round(
                 db_path=db_path,
                 base_url=base_url,
                 wallet_address=wallet_address,
-                private_key=private_key,
                 default_min_price=default_min_price,
                 default_token_address=default_token_address,
                 default_max_duration_seconds=default_max_duration_seconds,
-                rpc_url=rpc_url,
-                chain_id=chain_id,
                 publish_priceless=settings.pricing.publish_priceless,
                 skip_ids=_open_publication_keys(db_path),
                 close_stale=True,
                 skip_open=True,
-            )
-            result = PublicationCommandResult(
-                PublicationCycleResult(
-                    closed={},
-                    published=published,
-                    failed=failed,
-                    skipped=skipped,
-                ),
             )
             if result.no_new_listings:
                 console.print(
@@ -1690,12 +1675,9 @@ def register(app: typer.Typer) -> None:
             db_path=db_path,
             base_url=base_url,
             wallet_address=wallet_address,
-            private_key=private_key,
             default_min_price=default_min_price,
             default_token_address=default_token_address,
             default_max_duration_seconds=default_max_duration_seconds,
-            rpc_url=rpc_url,
-            chain_id=chain_id,
             publish_priceless=settings.pricing.publish_priceless,
             poll_interval=poll_interval,
             console=console,

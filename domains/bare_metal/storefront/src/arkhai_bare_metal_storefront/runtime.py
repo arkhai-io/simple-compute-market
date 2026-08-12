@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 from core_storefront.escrow_verification import verify_escrow_for_settlement
 from market_core import MarketDomainContract, validate_domain_contract
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
@@ -27,8 +30,11 @@ class BareMetalStorefrontRuntime:
 
     db: SQLiteClient
     domain: MarketDomainContract
-    seller_id: str
-    admin_key: str | None = None
+    seller_principal: Identity
+    admin_principals: TrustedIdentitySet
+    storefront_url: str
+    marketplace_signer: Signer = field(repr=False)
+    seller_evm_address: str
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
@@ -53,7 +59,7 @@ class BareMetalStorefrontRuntime:
         return BareMetalNegotiationService(
             db=self.db,
             domain=self.domain,
-            seller_id=self.seller_id,
+            seller_principal=self.seller_principal,
             round_hook=default_seller_round_hook(),
             build_plan=self.plan_builder,
         )
@@ -62,7 +68,7 @@ class BareMetalStorefrontRuntime:
         """Build commercial verification from explicitly configured chains."""
         return BareMetalSettlementService(
             db=self.db,
-            seller_wallet=self.seller_id,
+            seller_wallet=self.seller_evm_address,
             chain_clients=self.chain_clients,
             chain_config_paths=self.chain_config_paths,
             build_plan=self.plan_builder,
@@ -99,7 +105,7 @@ class BareMetalStorefrontRuntime:
             "status": "degraded" if "unavailable" in checks.values() else "ok",
             "checks": checks,
             "paused": paused,
-            "agent_id": self.seller_id or None,
+            "principal": self.seller_principal.model_dump(mode="json"),
             "resource_count": resource_count,
         }
 
@@ -112,6 +118,51 @@ def build_runtime_from_environment(
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
     )
+    try:
+        identity_config = IdentityConfig(
+            scheme=IdentityScheme(
+                os.environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", ""),
+            ),
+            identifier=os.environ.get(
+                "BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER",
+                "",
+            ),
+        )
+        raw_admin_identities = json.loads(
+            os.environ["BARE_METAL_STOREFRONT_ADMIN_IDENTITIES"],
+        )
+        if not isinstance(raw_admin_identities, list):
+            raise TypeError("admin identities must be a JSON list")
+        admin_principals = TrustedIdentitySet(
+            identities=tuple(
+                Identity.model_validate(value) for value in raw_admin_identities
+            ),
+        )
+        signer = resolve_storefront_signer(
+            identity_config,
+            os.environ["ARKHAI_IDENTITY_CREDENTIAL"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "bare-metal storefront requires public storefront identity, "
+            "1-2 admin identities, and a matching ARKHAI_IDENTITY_CREDENTIAL",
+        ) from exc
+    storefront_url = os.environ.get(
+        "BARE_METAL_STOREFRONT_PUBLIC_URL",
+        "",
+    ).rstrip("/")
+    if not storefront_url:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_PUBLIC_URL is required for listing ownership",
+        )
+    seller_evm_address = os.environ.get(
+        "BARE_METAL_STOREFRONT_EVM_ADDRESS",
+        "",
+    )
+    if not seller_evm_address:
+        raise RuntimeError(
+            "BARE_METAL_STOREFRONT_EVM_ADDRESS is required for Alkahest settlement",
+        )
     return BareMetalStorefrontRuntime(
         db=SQLiteClient(
             os.environ.get(
@@ -119,8 +170,13 @@ def build_runtime_from_environment(
                 "bare-metal-storefront.db",
             ),
             domain=selected_domain,
+            local_listing_principal=identity_config.principal,
+            expected_legacy_sellers=(storefront_url,),
         ),
         domain=selected_domain,
-        seller_id=os.environ.get("BARE_METAL_STOREFRONT_SELLER_ID", ""),
-        admin_key=os.environ.get("BARE_METAL_STOREFRONT_ADMIN_KEY") or None,
+        seller_principal=identity_config.principal,
+        storefront_url=storefront_url,
+        admin_principals=admin_principals,
+        marketplace_signer=signer,
+        seller_evm_address=seller_evm_address,
     )

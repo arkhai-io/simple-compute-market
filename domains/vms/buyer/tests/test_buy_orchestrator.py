@@ -17,31 +17,38 @@ What the tests verify:
 from __future__ import annotations
 
 import json
+import time
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+from urllib.request import Request
 
 import pytest
 
 from market_core.schemas import EscrowProposal, EscrowTerms
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
-
-_ESCROW_ADDR = "0x" + "cd" * 20
+from core_buyer.registry_config import RegistryAuthority
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 
 from domains.vms.buyer.buy_orchestrator import (
-    AgreedTerms,
     BuyConfig,
     BuyConstraints,
-    NegotiationResult,
     BuyResult,
+    NegotiationResult,
     make_legacy_negotiate_hook,
     make_legacy_settle_hook,
     run_buy,
-    submit_settlement,
+    submit_settlement_request,
 )
+from domains.vms.buyer.escrow_client import looks_like_propagation_lag
 from domains.vms.buyer.buyer_client import NegotiationOutcome
 
 
-_BUYER_PK = "0x" + "11" * 32
+_ESCROW_ADDR = "0x" + "cd" * 20
 _BUYER_ADDR = "0x" + "cc" * 20
 _SELLER_URL = "http://seller:8001"
 _SELLER_WALLET = "0x" + "bb" * 20
@@ -51,11 +58,23 @@ _RECIPIENT_ARBITER = "0x" + "cd" * 20
 _TOKEN = "0x" + "ab" * 20
 
 
-def _config(order_id: str = "buyer-1") -> BuyConfig:
+def _config(
+    order_id: str = "buyer-1",
+    *,
+    aggregation_policy: str | None = None,
+) -> BuyConfig:
+    trust = seller_principals()
     return BuyConfig(
         registry_urls=[_REGISTRY],
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
+        registry_authorities={
+            _REGISTRY: RegistryAuthority(
+                authority="registry",
+                principals=trust,
+            )
+        },
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        aggregation_policy=aggregation_policy,
     )
 
 
@@ -66,7 +85,9 @@ def _constraints(max_price=100, initial_price=50) -> BuyConstraints:
     )
 
 
-def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> VmProvisionTerms:
+def _provision(
+    duration_seconds=7200, ssh_public_key="ssh-rsa AAAA..."
+) -> VmProvisionTerms:
     return make_vm_provision_terms(
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
@@ -96,11 +117,13 @@ _ACCEPTED_ECHO = {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR,
         "fields": {"token": _TOKEN},
-        "demands": [{
-            "chain_name": "anvil",
-            "arbiter": _RECIPIENT_ARBITER,
-            "demand_data": {"recipient": _SELLER_WALLET},
-        }],
+        "demands": [
+            {
+                "chain_name": "anvil",
+                "arbiter": _RECIPIENT_ARBITER,
+                "demand_data": {"recipient": _SELLER_WALLET},
+            }
+        ],
         "expiration_unix": 1_800_000_000,
     },
 }
@@ -156,10 +179,13 @@ def _run_buy_with_legacy_hooks(
             derive_prices=derive_prices,
             chain=chain,
         )
+    if matches is not None:
+        matches = [_listing_with_identity(match) for match in matches]
     if settle is None:
         settle = make_legacy_settle_hook(
             config=config,
             provision=provision,
+            buyer_evm_address="0x" + "cc" * 20,
             build_escrow_terms=build_escrow_terms,
             create_escrow=create_escrow,
             confirm_settlement=confirm_settlement,
@@ -179,9 +205,58 @@ def _run_buy_with_legacy_hooks(
     )
 
 
+def _listing_with_identity(listing):
+    enriched = dict(listing)
+    seller_url = (
+        enriched.get("storefront_url")
+        or enriched.get("seller")
+        or enriched.get("seller_url")
+        or _SELLER_URL
+    )
+    enriched.update(
+        publisher_id=enriched.get(
+            "publisher_id", f"publisher-{enriched.get('listing_id', 'seller')}"
+        ),
+        storefront_url=seller_url,
+        publisher_principals=seller_principals().model_dump(mode="json"),
+    )
+    return enriched
+
+
+@contextmanager
+def _patched_transport(urlopen):
+    def _query(registry_urls, **_kwargs):
+        response = urlopen(Request(f"{registry_urls[0]}/api/v1/listings"))
+        payload = json.loads(response.read().decode("utf-8"))
+        return [_listing_with_identity(item) for item in payload.get("items", [])]
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "core_buyer.orchestrator.query_registry_for_matches_multi",
+                side_effect=_query,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "core_buyer.negotiation_client.urllib.request.urlopen",
+                side_effect=urlopen,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "core_buyer.orchestration.make_publisher_trust_resolver",
+                return_value=seller_principals,
+            )
+        )
+        yield
+
+
 @dataclass
 class _FakeResp:
     text: str
+    headers: dict[str, str] | None = None
+    status: int = 200
 
     def read(self):
         return self.text.encode("utf-8")
@@ -206,7 +281,16 @@ def _urlopen_sequence(responses):
             raise AssertionError(f"Unexpected urlopen call: {req.full_url}")
         nxt = queue.pop(0)
         body = nxt if isinstance(nxt, str) else json.dumps(nxt)
-        return _FakeResp(body)
+        headers = (
+            signed_response_headers(req, nxt)
+            if not isinstance(nxt, str)
+            and any(
+                key.lower() == "x-market-request-id"
+                for key, _value in req.header_items()
+            )
+            else {}
+        )
+        return _FakeResp(body, headers=headers)
 
     return _fn
 
@@ -217,10 +301,7 @@ def _urlopen_sequence(responses):
 
 
 def test_no_matches_returns_no_matches_status():
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence([{"items": []}]),
-    ):
+    with _patched_transport(_urlopen_sequence([{"items": []}])):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
@@ -235,13 +316,17 @@ def test_no_matches_returns_no_matches_status():
 def test_matches_can_be_preseeded_skipping_registry_query():
     """When caller passes matches directly, registry is never hit."""
     # Negotiation immediately exits so we don't need escrow/settle stubs.
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence([
-            # /negotiate/new → seller exits
-            {"negotiation_id": "neg-1", "action": "exit",
-             "reason": "no_matching_order"},
-        ]),
+    with _patched_transport(
+        _urlopen_sequence(
+            [
+                # /negotiate/new → seller exits
+                {
+                    "negotiation_id": "neg-1",
+                    "action": "exit",
+                    "reason": "no_matching_order",
+                },
+            ]
+        )
     ):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
@@ -306,9 +391,10 @@ def test_run_buy_composes_high_level_negotiate_and_settle_hooks():
     assert result.status == "ready"
     assert result.negotiation_id == "neg-custom"
     assert result.escrow_uid == "0xcustom"
+    expected_match = _listing_with_identity(matches[0])
     assert calls == [
-        ("negotiate_matches", [matches[0]]),
-        ("settle", matches[0]),
+        ("negotiate_matches", [expected_match]),
+        ("settle", expected_match),
     ]
     assert ("custom_negotiate", {"count": 1}) in events
     assert ("custom_settle", {"negotiation_id": "neg-custom"}) in events
@@ -323,17 +409,31 @@ def test_happy_path_drives_to_ready():
     """Full flow: discovery → negotiation (immediate accept) → escrow → submit → poll ready."""
     responses = [
         # 1. registry GET
-        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL,
-                      "max_duration_seconds": 7200}]},
+        {
+            "items": [
+                {
+                    "listing_id": "seller-1",
+                    "seller": _SELLER_URL,
+                    "max_duration_seconds": 7200,
+                }
+            ]
+        },
         # 2. /negotiate/new — seller accepts immediately
-        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_ACCEPTED_ECHO,
+        },
         # 3. POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         # 4. GET /settle/{uid}/status -> ready
-        {"status": "ready",
-         "fulfillment_uid": "0xattest",
-         "connection_details": "ssh alice@vm1",
-         "tenant_credentials": {"password": "hunter2"}},
+        {
+            "status": "ready",
+            "fulfillment_uid": "0xattest",
+            "connection_details": "ssh alice@vm1",
+            "tenant_credentials": {"password": "hunter2"},
+        },
     ]
 
     build_calls: list[tuple[EscrowProposal, str, int, int]] = []
@@ -349,10 +449,7 @@ def test_happy_path_drives_to_ready():
 
     events: list[tuple[str, dict]] = []
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
+    with _patched_transport(_urlopen_sequence(responses)):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
@@ -375,11 +472,17 @@ def test_happy_path_drives_to_ready():
     # build_escrow_terms received the proposal echoed by the seller +
     # the negotiated agreement.
     assert len(build_calls) == 1
-    captured_proposal, captured_seller, captured_price, captured_duration = build_calls[0]
+    captured_proposal, captured_seller, captured_price, captured_duration = build_calls[
+        0
+    ]
     assert captured_proposal.chain_name == "anvil"
     assert captured_proposal.escrow_address == _ESCROW_ADDR
     assert captured_proposal.fields["token"] == _TOKEN
-    assert (captured_seller, captured_price, captured_duration) == (_SELLER_WALLET, 50, 7200)
+    assert (captured_seller, captured_price, captured_duration) == (
+        _SELLER_WALLET,
+        50,
+        7200,
+    )
     # create_escrow received the canonical EscrowTerms list.
     assert len(create_calls) == 1
     assert len(create_calls[0]) == 1
@@ -408,33 +511,34 @@ def test_first_match_exits_second_agrees():
     # the "first match exits, fall through to second" semantic.
     # best_price runs negotiations in parallel, which
     # races for the FIFO urlopen mock and makes the test flaky.
-    config = BuyConfig(
-        registry_urls=[_REGISTRY],
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        aggregation_policy="cheapest_first",
-    )
+    config = _config(aggregation_policy="cheapest_first")
     responses = [
         # Registry returns two matches
-        {"items": [
-            {"listing_id": "seller-1", "seller": "http://seller1:8001"},
-            {"listing_id": "seller-2", "seller": "http://seller2:8001",
-             "max_duration_seconds": 3600},
-        ]},
+        {
+            "items": [
+                {"listing_id": "seller-1", "seller": "http://seller1:8001"},
+                {
+                    "listing_id": "seller-2",
+                    "seller": "http://seller2:8001",
+                    "max_duration_seconds": 3600,
+                },
+            ]
+        },
         # /negotiate/new on seller1 — exits
-        {"negotiation_id": "neg-1", "action": "exit",
-         "reason": "price_unreasonable"},
+        {"negotiation_id": "neg-1", "action": "exit", "reason": "price_unreasonable"},
         # /negotiate/new on seller2 — accepts
-        {"negotiation_id": "neg-2", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
+        {
+            "negotiation_id": "neg-2",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_ACCEPTED_ECHO,
+        },
         # POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         # GET /settle/{uid}/status → ready
         {"status": "ready", "fulfillment_uid": "0xattest"},
     ]
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
+    with _patched_transport(_urlopen_sequence(responses)):
         result = _run_buy_with_legacy_hooks(
             config=config,
             constraints=_constraints(),
@@ -459,16 +563,18 @@ def test_first_match_exits_second_agrees():
 def test_escrow_hook_failure_returns_exited_with_reason():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_ACCEPTED_ECHO,
+        },
     ]
 
     def _broken_escrow(escrows):
         raise RuntimeError("chain RPC down")
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
+    with _patched_transport(_urlopen_sequence(responses)):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
@@ -490,14 +596,16 @@ def test_escrow_hook_failure_returns_exited_with_reason():
 def test_provisioning_failed_returns_failed_status():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_ACCEPTED_ECHO,
+        },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
     ]
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
+    with _patched_transport(_urlopen_sequence(responses)):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
@@ -526,14 +634,16 @@ def test_settlement_timeout_returns_timeout_status():
     """Seller stays provisioning past the timeout → status=timeout."""
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "proposal": {"fields": {"amount": 50}}, **_ACCEPTED_ECHO},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {"fields": {"amount": 50}},
+            **_ACCEPTED_ECHO,
+        },
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal
 
-    with patch(
-        "core_buyer.orchestration.urllib.request.urlopen",
-        side_effect=_urlopen_sequence(responses),
-    ):
+    with _patched_transport(_urlopen_sequence(responses)):
         result = _run_buy_with_legacy_hooks(
             config=_config(),
             constraints=_constraints(),
@@ -543,7 +653,7 @@ def test_settlement_timeout_returns_timeout_status():
             create_escrow=lambda escrows: ["0xescrow"],
             settlement_poll_interval=0.01,
             settlement_total_timeout=0.05,  # very short
-            sleep=lambda _: None,
+            sleep=time.sleep,
         )
     assert result.status == "timeout"
     assert result.escrow_uid == "0xescrow"
@@ -581,11 +691,16 @@ def _settle_kwargs():
     return dict(
         seller_url=_SELLER_URL,
         escrow_uid="0x" + "ff" * 32,
-        negotiation_id="neg-1",
-        ssh_public_key="ssh-rsa AAAA...",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        chain_name="anvil",
+        payload={
+            "negotiation_id": "neg-1",
+            "buyer_evm_address": _BUYER_ADDR,
+            "chain_name": "anvil",
+            "ssh_public_key": "ssh-rsa AAAA...",
+        },
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+        retryable=looks_like_propagation_lag,
+        resolve_seller_principals=seller_principals,
     )
 
 
@@ -598,14 +713,19 @@ def test_submit_settlement_retries_on_propagation_lag(monkeypatch):
         if calls["n"] < 3:
             raise RuntimeError(
                 "POST .../settle/0xff... -> HTTP 400: "
-                "{\"detail\":\"Failed to read escrow 0xff... from chain: "
-                "ABI decoding failed: buffer overrun while deserializing\"}"
+                '{"detail":"Failed to read escrow 0xff... from chain: '
+                'ABI decoding failed: buffer overrun while deserializing"}'
             )
         return {"escrow_uid": "0x" + "ff" * 32, "status": "provisioning"}
 
     sleeps: list[float] = []
     monkeypatch.setattr("core_buyer.orchestration._signed_json", fake_signed_json)
-    out = submit_settlement(**_settle_kwargs(), sleep=sleeps.append, retry_backoff=0.0)
+    out = submit_settlement_request(
+        **_settle_kwargs(),
+        sleep=sleeps.append,
+        retry_backoff=0.0,
+        max_attempts=6,
+    )
 
     assert out["status"] == "provisioning"
     assert calls["n"] == 3
@@ -620,12 +740,12 @@ def test_submit_settlement_does_not_retry_other_400s(monkeypatch):
         calls["n"] += 1
         raise RuntimeError(
             "POST .../settle/0xff... -> HTTP 400: "
-            "{\"detail\":\"agreed_amount mismatch: 1000000 vs 2000000\"}"
+            '{"detail":"agreed_amount mismatch: 1000000 vs 2000000"}'
         )
 
     monkeypatch.setattr("core_buyer.orchestration._signed_json", fake_signed_json)
     with pytest.raises(RuntimeError, match="agreed_amount mismatch"):
-        submit_settlement(**_settle_kwargs(), sleep=lambda _s: None)
+        submit_settlement_request(**_settle_kwargs(), sleep=lambda _s: None)
     assert calls["n"] == 1
 
 
@@ -637,13 +757,13 @@ def test_submit_settlement_gives_up_after_max_attempts(monkeypatch):
         calls["n"] += 1
         raise RuntimeError(
             "POST .../settle/0xff... -> HTTP 400: "
-            "{\"detail\":\"Failed to read escrow 0xff... from chain: "
-            "ABI decoding failed: buffer overrun while deserializing\"}"
+            '{"detail":"Failed to read escrow 0xff... from chain: '
+            'ABI decoding failed: buffer overrun while deserializing"}'
         )
 
     monkeypatch.setattr("core_buyer.orchestration._signed_json", fake_signed_json)
     with pytest.raises(RuntimeError, match="buffer overrun"):
-        submit_settlement(
+        submit_settlement_request(
             **_settle_kwargs(),
             sleep=lambda _s: None,
             max_attempts=4,

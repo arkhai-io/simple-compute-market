@@ -5,8 +5,8 @@ on `market buy`.
 from __future__ import annotations
 
 import json
-import urllib.parse
 from typing import Any
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -20,6 +20,8 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from arkhai_vms import make_vm_provision_terms
+from core_buyer.registry_config import RegistryAuthority
+from identity_helpers import BUYER_SIGNER, seller_principals
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -35,6 +37,40 @@ from domains.vms.buyer.buy_cli import (
     _make_hosted_settle_hook,
     _select_hosted_option,
 )
+
+
+def _config(registry_url: str = "http://reg") -> BuyConfig:
+    return BuyConfig(
+        registry_urls=[registry_url],
+        registry_authorities={
+            registry_url: RegistryAuthority(
+                authority="registry",
+                principals=seller_principals(),
+            )
+        },
+        principal=BUYER_SIGNER.identity,
+        signer=BUYER_SIGNER,
+    )
+
+
+def _listing_with_identity(listing, registry_url: str = "http://reg"):
+    enriched = dict(listing)
+    seller_url = (
+        enriched.get("storefront_url")
+        or enriched.get("seller")
+        or enriched.get("seller_url")
+        or "http://seller"
+    )
+    enriched.update(
+        publisher_id=enriched.get(
+            "publisher_id", f"publisher-{enriched.get('listing_id', 'seller')}"
+        ),
+        storefront_url=seller_url,
+        publisher_principals=seller_principals().model_dump(mode="json"),
+        source_registry_url=registry_url,
+        source_registry_authority="registry",
+    )
+    return enriched
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -106,21 +142,28 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     from market_core.schemas import SettlementObligation, SettlementPlan
     from domains.vms.buyer.buyer_client import NegotiationOutcome
 
+    monkeypatch.setattr(
+        "domains.vms.buyer.buy_cli.make_publisher_trust_resolver",
+        lambda **_kwargs: seller_principals,
+    )
+
     starts: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.start_hosted_settlement",
-        lambda **kwargs: starts.append(kwargs)
-        or {
-            "settlement_ref": "settlement-1",
-            "status": "requires_action",
-            "action": {
-                "kind": "redirect",
-                "url": "https://checkout.example/session",
-                "expires_at_unix": 1_800_000_000,
-            },
-            "action_kind": "redirect",
-            "action_expires_at_unix": 1_800_000_000,
-        },
+        lambda **kwargs: (
+            starts.append(kwargs)
+            or {
+                "settlement_ref": "settlement-1",
+                "status": "requires_action",
+                "action": {
+                    "kind": "redirect",
+                    "url": "https://checkout.example/session",
+                    "expires_at_unix": 1_800_000_000,
+                },
+                "action_kind": "redirect",
+                "action_expires_at_unix": 1_800_000_000,
+            }
+        ),
     )
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.wait_for_hosted_settlement",
@@ -129,11 +172,7 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     opened: list[str] = []
     events: list[tuple[str, dict[str, Any]]] = []
     hook = _make_hosted_settle_hook(
-        config=BuyConfig(
-            registry_urls=["http://registry"],
-            buyer_address="0x" + "1" * 40,
-            buyer_private_key="0x" + "2" * 64,
-        ),
+        config=_config("http://registry"),
         provision=make_vm_provision_terms(
             duration_seconds=3600,
             ssh_public_key="ssh-ed25519 AAAA",
@@ -163,7 +202,10 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
 
     result = hook(
         NegotiationResult(
-            match={"listing_id": "L1", "seller": "http://seller"},
+            match=_listing_with_identity(
+                {"listing_id": "L1", "seller": "http://seller"},
+                "http://registry",
+            ),
             outcome=outcome,
         ),
         lambda stage, body: events.append((stage, body)),
@@ -220,6 +262,10 @@ def _run_buy_with_legacy_hooks(
     confirm_settlement=None,
     chain=None,
 ):
+    if matches is not None:
+        matches = [
+            _listing_with_identity(match, config.registry_urls[0]) for match in matches
+        ]
     negotiate = make_legacy_negotiate_hook(
         config=config,
         constraints=constraints,
@@ -232,6 +278,7 @@ def _run_buy_with_legacy_hooks(
     settle = make_legacy_settle_hook(
         config=config,
         provision=provision,
+        buyer_evm_address="0x" + "cc" * 20,
         build_escrow_terms=build_escrow_terms,
         create_escrow=create_escrow,
         confirm_settlement=confirm_settlement,
@@ -239,16 +286,20 @@ def _run_buy_with_legacy_hooks(
         settlement_total_timeout=settlement_total_timeout,
         sleep=sleep,
     )
-    return run_buy(
-        config=config,
-        constraints=constraints,
-        provision=provision,
-        negotiate=negotiate,
-        settle=settle,
-        matches=matches,
-        max_matches_to_try=max_matches_to_try,
-        on_event=on_event,
-    )
+    with mock.patch(
+        "core_buyer.orchestration.make_publisher_trust_resolver",
+        return_value=seller_principals,
+    ):
+        return run_buy(
+            config=config,
+            constraints=constraints,
+            provision=provision,
+            negotiate=negotiate,
+            settle=settle,
+            matches=matches,
+            max_matches_to_try=max_matches_to_try,
+            on_event=on_event,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -314,53 +365,80 @@ class TestExtractSellerMinPrice:
 
 
 class TestQueryRegistryFilters:
-    def _patch_urlopen(self, monkeypatch, body=b'{"items":[]}'):
+    def _patch_client(self, monkeypatch, items=()):
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
-            captured["url"] = req.full_url
-            return mock.MagicMock(
-                __enter__=lambda self: mock.MagicMock(read=lambda: body),
-                __exit__=lambda *a: False,
-            )
+        class FakeRegistryClient:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def list_listings(self, **kwargs):
+                captured["params"] = kwargs
+                return SimpleNamespace(
+                    listings=[
+                        SimpleNamespace(to_dict=lambda item=item: item)
+                        for item in items
+                    ]
+                )
 
         monkeypatch.setattr(
-            "core_buyer.orchestration.urllib.request.urlopen", fake_urlopen
+            "core_buyer.orchestrator.SyncRegistryClient",
+            FakeRegistryClient,
         )
         return captured
 
-    def test_no_filters_sends_only_status(self, monkeypatch):
-        captured = self._patch_urlopen(monkeypatch)
-        query_registry_for_matches("http://reg")
-        parsed = urllib.parse.urlparse(captured["url"])
-        params = urllib.parse.parse_qs(parsed.query)
-        assert params == {"status": ["open"]}
-
-    def test_filters_serialized_as_query_params(self, monkeypatch):
-        captured = self._patch_urlopen(monkeypatch)
-        query_registry_for_matches(
+    def _query(self, *, filters=None):
+        return query_registry_for_matches(
             "http://reg",
+            signer=BUYER_SIGNER,
+            registry_authority=RegistryAuthority(
+                authority="registry",
+                principals=seller_principals(),
+            ),
+            filters=filters,
+        )
+
+    def test_no_filters_sends_only_status(self, monkeypatch):
+        captured = self._patch_client(monkeypatch)
+        self._query()
+        assert captured["params"] == {
+            "status": "open",
+            "limit": 100,
+            "offset": 0,
+        }
+
+    def test_filters_are_forwarded_as_typed_query_params(self, monkeypatch):
+        captured = self._patch_client(monkeypatch)
+        self._query(
             filters={
                 "gpu_model": "H200",
                 "gpu_count_min": 4,
                 "datacenter_grade": True,
                 "static_ip": False,
-                "region": None,  # dropped
-            },
+                "region": None,
+            }
         )
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(captured["url"]).query)
-        assert params["gpu_model"] == ["H200"]
-        assert params["gpu_count_min"] == ["4"]
-        assert params["datacenter_grade"] == ["true"]
-        assert params["static_ip"] == ["false"]
-        assert "region" not in params  # None filtered out
+        assert captured["params"] == {
+            "status": "open",
+            "limit": 100,
+            "offset": 0,
+            "gpu_model": "H200",
+            "gpu_count_min": 4,
+            "datacenter_grade": True,
+            "static_ip": False,
+            "region": None,
+        }
 
     def test_returns_items_list(self, monkeypatch):
         items = [{"listing_id": "a"}, {"listing_id": "b"}]
-        body = json.dumps({"items": items}).encode("utf-8")
-        self._patch_urlopen(monkeypatch, body=body)
-        result = query_registry_for_matches("http://reg")
-        assert result == items
+        self._patch_client(monkeypatch, items)
+        assert self._query() == items
 
 
 def test_parse_filter_options_accepts_repeatable_key_value_pairs():
@@ -407,11 +485,7 @@ class TestRunBuyDerivePrices:
         provision = make_vm_provision_terms(
             duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA"
         )
-        config = BuyConfig(
-            registry_urls=["http://reg"],
-            buyer_address="0x" + "1" * 40,
-            buyer_private_key="0x" + "2" * 64,
-        )
+        config = _config()
         matches = [
             {
                 "listing_id": "L1",
@@ -475,11 +549,7 @@ class TestRunBuyDerivePrices:
         provision = make_vm_provision_terms(
             duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA"
         )
-        config = BuyConfig(
-            registry_urls=["http://reg"],
-            buyer_address="0x" + "1" * 40,
-            buyer_private_key="0x" + "2" * 64,
-        )
+        config = _config()
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
         result = _run_buy_with_legacy_hooks(
             config=config,
@@ -539,11 +609,7 @@ class TestConfirmSettlementGate:
         )
 
     def _config(self):
-        return BuyConfig(
-            registry_urls=["http://reg"],
-            buyer_address="0x" + "1" * 40,
-            buyer_private_key="0x" + "2" * 64,
-        )
+        return _config()
 
     def _constraints(self):
         return BuyConstraints(initial_price=50, max_price=200)
@@ -593,7 +659,7 @@ class TestConfirmSettlementGate:
 
         # Settlement submit + poll need stubbing too — short-circuit to "ready".
         monkeypatch.setattr(
-            "core_buyer.orchestration.submit_settlement",
+            "core_buyer.orchestration.submit_settlement_request",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(
@@ -625,7 +691,7 @@ class TestConfirmSettlementGate:
         """Default behavior (no callback) doesn't add a confirmation step."""
         self._setup_orchestrator(monkeypatch)
         monkeypatch.setattr(
-            "core_buyer.orchestration.submit_settlement",
+            "core_buyer.orchestration.submit_settlement_request",
             lambda **kw: {"status": "queued"},
         )
         monkeypatch.setattr(

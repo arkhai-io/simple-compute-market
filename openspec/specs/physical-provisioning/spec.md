@@ -6,6 +6,189 @@ Define the implemented allocation-backed executor dispatch, asynchronous job, an
 
 ## Requirements
 
+### Requirement: Service calls use the shared version 2 identity contract
+
+A provisioning authority MUST authenticate each inbound service request with
+the shared `arkhai.market-request-signature.v2` contract and MUST sign each
+mutation response with the shared response contract. Verification MUST use the
+complete counterparty principal selected by route and authority state, bind the
+canonical request or response body, enforce bounded freshness, classify replay
+durably, and run locally without a chain or external identity call. Only the
+version 2 request and response contracts authenticate the service boundary;
+shared credentials, caller-selected expected identities, and unsigned mutation
+responses MUST NOT do so.
+
+The authority MUST durably reserve `(principal, request_id)` with the canonical
+request digest before dispatch. An exact completed retry MUST return the
+recorded status and body under a freshly signed response without repeating the
+operation. One caller MAY reclaim an exact unfinished request after its
+dispatch lease expires; an in-progress exact retry or reuse with changed signed
+content MUST NOT dispatch a second operation.
+
+#### Scenario: An inbound request is authenticated
+
+- **WHEN** a storefront calls a provisioning authority with a correctly signed
+  version 2 request
+- **THEN** the authority verifies its role, exact registered principal, method,
+  semantic operation and resource, request identity, timestamp, and body before
+  dispatch
+
+#### Scenario: Request content is changed
+
+- **WHEN** any bound request field or body content is changed after signing
+- **THEN** verification fails before the authority performs the operation
+
+#### Scenario: A mutation response is returned
+
+- **WHEN** the authority acknowledges a state-changing request
+- **THEN** it signs the status, request identity, authority principal,
+  timestamp, and canonical response body, and the caller verifies that exact
+  authority before accepting the acknowledgement
+
+#### Scenario: An exact completed request is retried
+
+- **WHEN** a caller repeats the same canonical request with the same principal
+  and request identity after losing the acknowledgement
+- **THEN** the authority returns the recorded outcome under a fresh signed
+  response without dispatching the operation again
+
+#### Scenario: An unfinished request is retried
+
+- **WHEN** an exact retry arrives while the original dispatch lease remains
+  active
+- **THEN** the authority rejects it as still in progress without dispatching a
+  second operation
+
+#### Scenario: A request identity is replayed
+
+- **WHEN** a previously reserved request identity is reused with changed
+  content, operation, role, or principal
+- **THEN** the authority rejects it as a replay conflict rather than dispatching
+  the operation
+
+#### Scenario: Verification runs without external dependencies
+
+- **WHEN** an Ed25519 or EIP-191 signature is verified
+- **THEN** verification completes locally without a chain node, RPC endpoint,
+  or external identity service
+
+### Requirement: Provisioning role principals are exact and durably registered
+
+The provisioning authority MUST resolve the active complete scheme-tagged
+principal set for each required `seller` or `admin` role through its durable
+principal-authority registry. Initial configuration MAY seed a role only when
+the registry has no binding and MUST NOT overwrite persisted authority state.
+The route-selected role and registry-selected principal set MUST determine
+authorization; a body field, bare address, URL, provider identifier, or private
+credential MUST NOT select or imply authority.
+
+Provisioning clients MUST receive the endpoint and exact expected service
+authority principal from registry or composition context independently of
+request content. A cryptographically valid response from any other principal
+MUST fail verification.
+
+#### Scenario: A configured role seeds an empty registry
+
+- **WHEN** the authority starts without a persisted binding for a supported
+  caller role
+- **THEN** it records that role's configured complete principal as the first
+  authority generation
+
+#### Scenario: Configuration differs from durable authority state
+
+- **WHEN** a persisted role binding already exists and bootstrap configuration
+  names another principal
+- **THEN** the persisted registry remains authoritative
+
+#### Scenario: A valid unregistered principal calls a route
+
+- **WHEN** a cryptographically valid principal is absent from the active set
+  for the route's required role
+- **THEN** authorization fails before the handler or any external effect runs
+
+#### Scenario: A different service principal signs a response
+
+- **WHEN** a valid principal other than the client registry's expected
+  provisioning authority signs the response
+- **THEN** the client rejects the acknowledgement
+
+### Requirement: Provisioning identity credentials and package boundaries are isolated
+
+The provisioning service MUST construct its signer from private credential
+material supplied through an approved secret boundary, require that signer to
+match its configured public principal, and keep the service signer independent
+from storefront and administrator trust principals and optional chain-wallet
+credentials. Ordinary configuration, durable authority and replay records,
+request and response bodies, logs, manifests, and diagnostics MUST contain only
+public principals, trust pins, proofs, and operation metadata, never private
+signing material.
+
+Compute provisioning service and client packages MUST consume the shared
+identity package's scheme-tagged principals, signer and verifier contracts,
+canonical request and response models, replay primitives, and rotation models.
+They MUST NOT derive addresses, inspect raw private keys, branch on signature
+encoding, or define a second service-signature protocol.
+
+#### Scenario: A wallet-free authority is configured
+
+- **WHEN** the service and its counterparty use Ed25519 principals
+- **THEN** authenticated provisioning requests, responses, replay recovery, and
+  rotation run without an EVM wallet, RPC endpoint, chain ID, or EVM private key
+
+#### Scenario: EIP-191 is explicitly configured
+
+- **WHEN** a provisioning role uses an EIP-191 principal
+- **THEN** the same canonical request and response coverage applies and proof
+  verification remains local
+
+#### Scenario: The service credential is loaded
+
+- **WHEN** composition constructs the provisioning authority signer
+- **THEN** it consumes the secret-injected credential, verifies that the
+  resulting public principal matches configuration, and exposes only the
+  signer operation and public principal to orchestration
+
+#### Scenario: Provisioning package boundaries are inspected
+
+- **WHEN** service and client identity dependencies are checked
+- **THEN** protocol canonicalization, cryptographic scheme dispatch, replay
+  classification, and rotation proof validation resolve from the shared
+  identity package rather than provisioning-specific copies
+
+### Requirement: Counterparty principals rotate with dual proof
+
+A provisioning authority MUST rotate a durable role binding only when the
+active and replacement principals both sign the same bounded rotation
+statement for that stable role subject and authority. It MUST record the
+replacement as a new generation, accept both principals only during the
+recorded overlap, retire the old principal when the overlap closes, and retain
+the rotation audit. Disablement MUST remain distinct from rotation and MUST
+remove authority without assigning it to another principal.
+
+#### Scenario: A counterparty rotates its principal
+
+- **WHEN** valid old-principal and replacement-principal proofs authorize a
+  bounded overlap
+- **THEN** either principal authenticates the same counterparty role until the
+  overlap expires or the old principal is explicitly retired
+
+#### Scenario: Replacement proof is absent
+
+- **WHEN** a rotation request names a replacement principal without its proof
+  over the same rotation statement
+- **THEN** the authority does not bind or promote that principal
+
+#### Scenario: A retired principal is used
+
+- **WHEN** a counterparty signs with a principal whose overlap has ended
+- **THEN** the call is rejected
+
+#### Scenario: A counterparty is disabled
+
+- **WHEN** an operator disables a counterparty binding
+- **THEN** no principal retains authority, the audit history remains, and the
+  operation does not transfer that authority to another principal
+
 ### Requirement: Allocation-backed executor registration
 Market-managed VM and bare-metal leases MUST attach executor kind, target, and executor-specific reference data to an existing committed site allocation.
 
@@ -112,13 +295,13 @@ Shared storefront/provisioner DTOs, executor-neutral resource-pool models, and g
 #### Scenario: Provisioning service exposes resource-pool administration
 
 - **WHEN** the VM operator client or provisioning service creates, validates, imports, or returns a resource-pool model
-- **THEN** that executor-neutral model resolves from `compute_provisioning` and no removed generic provisioning-client package is required
+- **THEN** that executor-neutral model resolves from `compute_provisioning` without depending on a VM-domain generic provisioning-client package
 
 ### Requirement: Compute-owned provisioning service
 
 Cross-domain compute orchestration, including mechanism-neutral fulfillment coordination, MUST run from a deployable service owned by `provisioning/compute`, while VM and bare-metal packages retain their concrete executor and fulfillment-provider semantics and register them through explicit adapter bundles.
 
-#### Scenario: Extracted service starts with current adapters
+#### Scenario: Compute service starts with configured adapters
 
 - **WHEN** the compute provisioner starts with VM and bare-metal adapters configured
 - **THEN** it mounts generic job, lease, capacity, fulfillment, health, and watchdog surfaces plus each adapter's declared executor, provider, and operator surfaces
@@ -201,22 +384,36 @@ The payload also carries an optional `connection_info` object (`vm_name`, `host`
 - **WHEN** the recorded job's parsed result includes VM identity/connection fields
 - **THEN** `domain_result`'s `connection_info` carries them, without failing the credential fetch if any individual field is absent
 
-### Requirement: Clean ownership cutover
+### Requirement: Generic provisioning has one package owner
 
-After callers and deployments migrate, generic provisioning service and client paths under the VM domain MUST be removed rather than retained as aliases or compatibility distributions.
+Generic provisioning service and client paths MUST resolve from the top-level
+provisioning category. VM-domain packages MUST contain only concrete adapters
+and assets and MUST NOT expose generic aliases or compatibility distributions.
 
-#### Scenario: Extraction completes
+#### Scenario: Package ownership is inspected
 
-- **WHEN** repository package, import, image, and manifest references are reconciled
-- **THEN** generic compute provisioning resolves only from the top-level provisioning category and domain packages contain only their concrete adapters and assets
+- **WHEN** repository package, import, image, and manifest references are
+  inspected
+- **THEN** generic compute provisioning resolves only from the top-level
+  provisioning category and domain packages contain only their concrete
+  adapters and assets
 
-### Requirement: VM lease migration uses current provider contracts
+### Requirement: Persisted VM leases use provider contracts
 
-When an existing VM lease is represented in the fulfillment aggregate, the selected resource SHALL resolve through the current host and resource-pool configuration. The VM target SHALL be derived from the consistent legacy VM/executor target fields, and known create or teardown job identifiers SHALL be retained in provider metadata. Any prepared teardown operation SHALL be produced by the current VM Ansible provider's `prepare_teardown` contract using the snapshotted pool configuration rather than by constructing provider payload JSON independently.
+When a persisted VM lease is represented in the fulfillment aggregate, the
+selected resource SHALL resolve through host and resource-pool configuration.
+The VM target SHALL be derived from the consistent persisted VM and executor
+target fields, and known create or teardown job identifiers SHALL be retained
+in provider metadata. Any prepared teardown operation SHALL be produced by the
+VM Ansible provider's `prepare_teardown` contract using the snapshotted pool
+configuration rather than by constructing provider payload JSON independently.
 
-#### Scenario: Migrated lease resolves through current configuration
-- **WHEN** a pre-cutover VM lease is backfilled into the fulfillment aggregate
-- **THEN** its selected resource, VM target, and any prepared teardown operation are derived through the current host/resource-pool configuration and provider contract, not reconstructed by hand from legacy fields
+#### Scenario: A persisted VM lease resolves through provider configuration
+
+- **WHEN** a persisted VM lease is represented in the fulfillment aggregate
+- **THEN** its selected resource, VM target, and any prepared teardown operation
+  are derived through host and resource-pool configuration and the provider
+  contract rather than reconstructed independently
 
 
 ### Requirement: VM release delegates to durable fulfillment teardown
@@ -252,7 +449,7 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 ## Evidence
 
 - VM and bare-metal allocation executor metadata: `provisioning/compute/service/tests/integration/test_leases_api.py` and `test_bare_metal_leases_api.py`.
-- Multidimensional scheduling eligibility, including secondary-dimension rejection and legacy GPU-only requests: `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py`.
+- Multidimensional scheduling eligibility, including secondary-dimension rejection and GPU-only requests: `provisioning/compute/service/tests/unit/services/test_physical_settlement_scheduler.py`.
 - Persisted asynchronous job lifecycle and polling: `provisioning/compute/service/tests/integration/test_vms_api.py`.
 - Executor-specific release, failed-release capacity retention, retry, and force release: `provisioning/compute/service/tests/integration/test_bare_metal_leases_api.py`, `test_leases_api.py`, and `unit/services/test_ledger_lease_lifecycle.py`.
 - Adapter composition and generic import boundaries: `provisioning/compute/service/tests/unit/test_composition.py` and `test_import_boundaries.py`.
@@ -264,7 +461,7 @@ For an Ansible-backed VM pool, provider configuration identifies both the playbo
 
 Physical provisioning distinguishes **Capacity Reservation → Capacity Settlement Assignment → Physical Settlement → Provisioned Resource / Active Workload**. Generic scheduling chooses an eligible Settlement Resource. Physical Settlement is provider-specific execution on that assigned resource. Provider-specific reachability, credentials, topology, and execution failures remain downstream of generic scheduling eligibility.
 
-The current scheduling policy is deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, a per-dimension quantity map (`dimensions`/`available`, checked against every requested dimension), pool identity, and opaque attributes and do not import market-specific executor persistence models.
+Scheduling uses deterministic round-robin through a replaceable policy interface. Generic policy and orchestration code use resource kind, a per-dimension quantity map (`dimensions`/`available`, checked against every requested dimension), pool identity, and opaque attributes and do not import market-specific executor persistence models.
 
 ## Relationship to fulfillment
 

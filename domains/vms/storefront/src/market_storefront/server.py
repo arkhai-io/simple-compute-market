@@ -31,8 +31,22 @@ from core_storefront.stage_log import set_stage_event_db_path, stage_event
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import get_market_domain_contract
-from market_storefront.utils.config import AGENT_ID, settings
+from market_storefront.utils.config import (
+    AGENT_ID,
+    get_registry_authorities,
+    resolve_marketplace_signer,
+    settings,
+)
 from market_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront.middleware.admin_identity import (
+    administrator_identity_middleware,
+    initialize_administrator_identities,
+)
+from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
+from market_storefront.middleware.service_peer_auth import (
+    initialize_service_peer_identities,
+    service_peer_callback_middleware,
+)
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 
 logger = logging.getLogger(__name__)
@@ -89,26 +103,32 @@ def _build_listing_service(**kwargs):
     )
 
 
-def _build_negotiation_service(*, sqlite_client):
+def _build_negotiation_service(**kwargs):
     return NegotiationService(
-        sqlite_client=sqlite_client,
+        **kwargs,
         continue_negotiation=continue_sync_negotiation,
         stage_event=stage_event,
     )
 
 
-def _build_system_service(*, sqlite_client):
+def _build_system_service(**kwargs):
     from market_storefront.services.system_service import SystemService
 
-    return SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
+    return SystemService(agent_id=AGENT_ID, **kwargs)
 
 
-def _build_settlement_composition(*, sqlite_client, alkahest_clients):
+def _build_settlement_composition(
+    *,
+    sqlite_client,
+    alkahest_clients,
+    marketplace_signer,
+):
     from market_storefront.domain_runtime import build_settlement_runtime
 
     return build_settlement_runtime(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
+        marketplace_signer=marketplace_signer,
     )
 
 
@@ -119,8 +139,14 @@ def _populate_container(
     listing_service,
     negotiation_service,
     system_service,
+    marketplace_signer,
 ) -> None:
     _container.resolved_sqlite_client = sqlite_client
+    _container.resolved_marketplace_signer = marketplace_signer
+    if settings.enable_registry_discovery:
+        get_registry_authorities()
+    initialize_administrator_identities(sqlite_client.db_path)
+    initialize_service_peer_identities(sqlite_client.db_path)
     _container.resolved_alkahest_clients = alkahest_clients
     _container.resolved_listing_service = listing_service
     _container.resolved_negotiation_service = negotiation_service
@@ -128,6 +154,7 @@ def _populate_container(
     _container.resolved_settlement_composition = _build_settlement_composition(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
+        marketplace_signer=marketplace_signer,
     )
 
 
@@ -140,6 +167,7 @@ async def _run_startup_tasks() -> None:
 lifespan = build_storefront_lifespan(
     StorefrontLifecycleCallbacks(
         get_sqlite_client=get_sqlite_client,
+        resolve_identity_signer=resolve_marketplace_signer,
         set_stage_event_db_path=set_stage_event_db_path,
         build_alkahest_clients=_build_alkahest_clients,
         build_listing_service=_build_listing_service,
@@ -203,3 +231,8 @@ app = build_storefront_app(
         admin_settle_router,
     ),
 )
+
+
+app.middleware("http")(listing_lifecycle_middleware)
+app.middleware("http")(service_peer_callback_middleware)
+app.middleware("http")(administrator_identity_middleware)

@@ -1,8 +1,8 @@
-# Optional hosted-settlement E2E overlay. Use with compose.vms.yml after
-# staging the signed release and generating operator-owned environment/config files.
+# Hosted-settlement release overlay. Prepare the verified nonsecret image env
+# with `make prepare-hosted-compose` before invoking Compose.
 services:
   hosted-settlement-migrate:
-    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
     command: ["hosted-settlement-migrate"]
     env_file:
       - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
@@ -17,7 +17,7 @@ services:
       - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
 
   hosted-settlement-api:
-    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
     command: ["hosted-settlement-api", "--host", "0.0.0.0", "--port", "8080"]
     depends_on:
       hosted-settlement-migrate:
@@ -36,14 +36,18 @@ services:
       - hosted-settlement-data:/var/lib/hosted-settlement
       - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2).read()"]
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2)); required={'scheme-tagged-identities.v1','account-owner-admission.v1','account-owner-rotation.v1','account-owner-retirement.v1','signer-injected-client.v1','provider-neutral-seller-onboarding.v1'}; assert d.get('ready') and d.get('schema_version') == 4 and d.get('request_signature_protocol') == 'arkhai.hosted-request-signature.v2' and d.get('response_signature_protocol') == 'arkhai.hosted-response-signature.v2' and d.get('supported_identity_schemes') == ['eip191','ed25519'] and required.issubset(d.get('capabilities', []))"
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 10s
 
   hosted-settlement-worker:
-    image: ${HOSTED_SETTLEMENT_IMAGE_REFERENCE:?set verified image reference}@${HOSTED_SETTLEMENT_IMAGE_DIGEST:?set verified sha256 digest}
+    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
     command: ["hosted-settlement-worker", "--interval-seconds", "5"]
     depends_on:
       hosted-settlement-api:
@@ -66,8 +70,10 @@ services:
     depends_on:
       hosted-settlement-api:
         condition: service_healthy
+    env_file:
+      - ${VMS_BOB_IDENTITY_ENV_FILE:?set signer credential environment file}
     volumes:
-      - ${VMS_BOB_HOSTED_STOREFRONT_CONFIG:?set hosted storefront config}:/etc/arkhai/storefront.toml:ro
+      - ${VMS_BOB_HOSTED_STOREFRONT_CONFIG:-./config.hosted-fiat-ed25519.toml}:/etc/arkhai/storefront.toml:ro
 
 volumes:
   hosted-settlement-data:

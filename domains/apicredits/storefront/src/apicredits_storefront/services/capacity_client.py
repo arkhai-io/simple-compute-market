@@ -12,6 +12,7 @@ subscribed on the aggregate bus.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 from typing import Any, Callable, Mapping
 
@@ -23,46 +24,60 @@ from core_storefront.aggregation import (
 from core_storefront.capacity import CapacityDelta, CapacitySubscriber
 from core_storefront.capacity_remote import site_events_poller
 from market_site_client import SiteCapacityClient
+from market_identity import Identity, TrustedIdentitySet
 
 logger = logging.getLogger(__name__)
 
 SQLiteClientFactory = Callable[[], Any]
 
 
-def _capacity_settings() -> tuple[dict[str, str], str, str]:
-    """Resolve (sites{name→url}, admin_key, placement) from settings.
+@dataclass(frozen=True, slots=True)
+class CapacitySite:
+    url: str
+    expected_authorities: TrustedIdentitySet
 
-    Sites come from the ``[capacity.sites]`` table; with no table,
-    ``authority_url`` becomes the single site "default", falling back to
-    the credits service — that process hosts the quota ledger.
-    """
+
+def _capacity_settings() -> tuple[dict[str, CapacitySite], str]:
+    """Resolve stable site IDs to URLs and ordered public authority sets."""
     from apicredits_storefront.utils import config
 
-    admin_key = config.credits_admin_key()
     placement = str(
         config.settings.get("capacity.placement", "") or "fill_first"
     ).strip()
-
-    sites: dict[str, str] = {}
     raw_sites = config.settings.get("capacity.sites")
-    if raw_sites and hasattr(raw_sites, "items"):
-        for name, url in dict(raw_sites).items():
-            url = str(url or "").strip()
-            if url:
-                sites[str(name)] = url.rstrip("/")
-    if not sites:
-        url = str(config.settings.get("capacity.authority_url", "") or "").strip()
-        if not url:
-            url = config.credits_service_url()
-        if url:
-            sites["default"] = url.rstrip("/")
-    if not sites:
+    if not raw_sites or not hasattr(raw_sites, "items"):
         raise RuntimeError(
-            "No quota authority configured: set [capacity].authority_url / "
-            "[capacity.sites], or [credits].service_url (the credits service "
-            "hosts the quota ledger).",
+            "No quota authority configured: [capacity.sites] must map each "
+            "stable site ID to url and expected_authorities.",
         )
-    return sites, admin_key, placement
+    sites: dict[str, CapacitySite] = {}
+    for raw_name, raw_site in dict(raw_sites).items():
+        name = str(raw_name)
+        if not name or not hasattr(raw_site, "items"):
+            raise RuntimeError(f"capacity site {name!r} must be a table")
+        values = dict(raw_site)
+        url = str(values.get("url") or "").strip().rstrip("/")
+        try:
+            raw_authorities = dict(values.get("expected_authorities") or {})
+            identities = raw_authorities.get("identities")
+            if not isinstance(identities, (list, tuple)):
+                raise TypeError("identities must be a list")
+            expected_authorities = TrustedIdentitySet(
+                identities=tuple(
+                    Identity.model_validate(value) for value in identities
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"capacity site {name!r} has malformed expected_authorities"
+            ) from exc
+        if not url:
+            raise RuntimeError(f"capacity site {name!r} requires url")
+        sites[name] = CapacitySite(
+            url=url,
+            expected_authorities=expected_authorities,
+        )
+    return sites, placement
 
 
 # Delta kinds that shrink availability and can strand open listings.
@@ -115,11 +130,24 @@ _aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
 def _aggregate_for(
     sqlite_client_factory: SQLiteClientFactory,
-    sites: Mapping[str, str],
-    admin_key: str,
+    sites: Mapping[str, CapacitySite],
+    signer: Any,
     placement_name: str,
 ) -> AggregateCapacityClient:
-    key = (tuple(sorted(sites.items())), admin_key, placement_name)
+    key = (
+        tuple(
+            sorted(
+                (
+                    name,
+                    site.url,
+                    tuple(site.expected_authorities.identities),
+                )
+                for name, site in sites.items()
+            )
+        ),
+        signer.identity,
+        placement_name,
+    )
     if _aggregate_state["key"] == key:
         return _aggregate_state["client"]
     placement = PLACEMENT_POLICIES.get(placement_name)
@@ -131,7 +159,14 @@ def _aggregate_for(
         )
         placement = fill_first
     aggregate = AggregateCapacityClient(
-        {name: SiteCapacityClient(url, admin_key) for name, url in sites.items()},
+        {
+            name: SiteCapacityClient(
+                site.url,
+                signer=signer,
+                expected_authorities=site.expected_authorities,
+            )
+            for name, site in sites.items()
+        },
         placement=placement,
     )
     aggregate.subscribe(
@@ -146,8 +181,13 @@ def build_capacity_client(
     sqlite_client_factory: SQLiteClientFactory,
 ) -> AggregateCapacityClient:
     """Assemble the storefront's quota capacity client with subscribers."""
-    sites, admin_key, placement_name = _capacity_settings()
-    return _aggregate_for(sqlite_client_factory, sites, admin_key, placement_name)
+    from apicredits_storefront import container
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("marketplace signer must be resolved before capacity client")
+    sites, placement_name = _capacity_settings()
+    return _aggregate_for(sqlite_client_factory, sites, signer, placement_name)
 
 
 def remote_site_clients(client: Any) -> dict[str, SiteCapacityClient]:

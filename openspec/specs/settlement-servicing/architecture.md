@@ -70,9 +70,29 @@ engine therefore handles payment intervals and bonds.
 
 A heartbeat timestamp serves two purposes: it is part of the signed value and the monotonic replay key for one deal. Signature verification proves authorship; bounded clock skew and strict monotonicity prevent capture of an older valid heartbeat from extending an obligation after a newer one was accepted. Domain code owns the heartbeat payload's meaning, while core owns authentication and replay protection.
 
+Heartbeat authorization resolves the signer as the complete scheme-tagged
+principal assigned to the deal buyer. Matching identifier text under another
+scheme does not authenticate evidence even when the signature itself is
+cryptographically valid for that other principal.
+
 ## Capacity coupling
 
 Commercial abandonment may request early physical termination, but it does not directly free capacity. Settlement servicing shortens or ends the relevant lease intent; physical provisioning must still prove teardown before the site authority releases capacity.
+
+## Principal and mechanism boundaries
+
+Marketplace authorization binds payer, claimant, storefront, and service actors as complete scheme-tagged principals throughout plans, fulfillment references, heartbeats, start/status/reclaim requests, claims, and operation-journal reservations. Bare identifiers, hosted account references, provider identifiers, and EVM addresses inside mechanism payloads are resources or effect inputs, not credentials.
+
+A principal is a credential identity, while agreement, obligation, account, and
+provider references remain stable subjects or resources. The mechanism-neutral
+runtime therefore carries principals opaquely and never derives or persists a
+wallet or private-key alias from them.
+
+Wallet and chain configuration is mechanism-scoped. A hosted non-EVM obligation materializes, checks, collects, reclaims, and reconciles through an injected marketplace signer without an EVM wallet or RPC dependency. An Alkahest transaction or explicitly EVM-tagged condition validates its own address, wallet, RPC, chain, and contract inputs inside the owning adapter and never reinterprets an Ed25519 principal.
+
+## Hosted identity ownership
+
+The hosted adapter passes the marketplace signer through the exact manifest-pinned hosted client identity interface. Hosted canonicalization, headers, scheme wrappers, response verification, account-link behavior, and provider models remain owned by that released client. The adapter neither reproduces those bytes nor persists its private credential. Startup and publication preflight require the released manifest to advertise the configured principal scheme and contract version; otherwise the hosted mechanism remains unavailable.
 
 ## Current limits
 
@@ -82,6 +102,7 @@ splitter/oracle contract selection require a separate accepted design.
 
 ## Related contracts
 
+- [Marketplace identity](../marketplace-identity/spec.md)
 - [Negotiation protocol](../negotiation-protocol/spec.md)
 - [Physical provisioning](../physical-provisioning/spec.md)
 - [Buyer orchestration](../buyer-orchestration/spec.md)

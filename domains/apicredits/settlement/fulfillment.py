@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from typing import Any, Awaitable, Callable
+from market_identity import Identity
 
 from domains.apicredits.settlement.credits_client import (
     CreditsServiceClient,
@@ -81,7 +82,7 @@ async def fulfill_api_credits_obligation(
     quantity: int,
     key_mode: str = "new",
     key_id: str | None = None,
-    buyer_wallet: str | None = None,
+    buyer_principal: Identity,
     listing_id: str | None = None,
     credits_client: CreditsServiceClient | None = None,
     service_url: str | None = None,
@@ -148,7 +149,7 @@ async def fulfill_api_credits_obligation(
             quantity=quantity,
             key_mode=key_mode,
             key_id=key_id,
-            buyer_wallet=buyer_wallet,
+            buyer_principal=buyer_principal,
             capacity_reservation_id=capacity_reservation_id,
             resource_id=str(resource_id) if resource_id else None,
         )

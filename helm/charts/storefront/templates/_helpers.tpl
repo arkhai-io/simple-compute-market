@@ -42,10 +42,14 @@ Supports an optional global.imageRepository passed down from the parent.
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
 {{- end -}}
+{{- $name := .Values.image.name -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.image.name .Values.image.tag -}}
+  {{- $name = printf "%s/%s" $repo $name -}}
+{{- end -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" $name .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.name .Values.image.tag -}}
+{{- printf "%s:%s" $name .Values.image.tag -}}
 {{- end -}}
 {{- end }}
 
@@ -70,8 +74,9 @@ Agents connect to Anvil over WebSocket for event subscriptions.
 {{/*
 Compose the registry URL from global.registry.host and global.registry.port.
 */}}
-{{- define "registry.url" -}}
-{{- printf "http://%s:%d" .Values.global.registry.host (int .Values.global.registry.port) -}}
+{{- define "storefront.registryUrl" -}}
+{{- $host := default (printf "%s-registry" .Release.Name) .Values.global.registry.host -}}
+{{- printf "http://%s:%d" $host (int .Values.global.registry.port) -}}
 {{- end }}
 
 {{/*
@@ -145,32 +150,85 @@ string the ConfigMap template embeds under `storefront.toml`.
 
 Argument: dict with `root` (chart root) and `agent`.
 
-Pairs with `storefront.agentSecretsToml` — together they form the
-complete config the storefront runtime loader merges
-at startup. Sensitive values (wallet.address, wallet.private_key,
-admin_api_key, resources_csv_inline, integrations.gemini_api_key)
-live in the Secret-rendered overlay and are not duplicated here.
+Pairs with an operator-managed storefront.secrets.toml Secret overlay. Public
+identity values remain in this ConfigMap; identity credential material is
+injected directly from identity.credentialSecret as an environment variable.
 
-Topology-derived values (base_url, registry.urls, chain.rpc_url,
-provisioning.service_url) are composed from the chart's view of
-the cluster — never authored as hardcoded strings in values.yaml.
+Topology-derived values (base_url, registry.urls, and provisioning.service_url)
+are composed from the chart's view of the cluster rather than authored as
+hardcoded strings in values.yaml.
 
 Anything that isn't here (image, replicas, probes, Service objects,
 resources, autoRegister) is k8s-only and never ends up in the agent's
 storefront.toml.
 */}}
+{{- define "storefront.principalsToml" -}}
+{{- $principals := required (printf "%s principals are required" .label) .principals -}}
+{{- if or (lt (len $principals) 1) (gt (len $principals) 2) -}}
+{{- fail (printf "%s principals must contain one or two identities" .label) -}}
+{{- end -}}
+principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ scheme = {{ required (printf "%s principal scheme is required" $.label) $principal.scheme | quote }}, identifier = {{ required (printf "%s principal identifier is required" $.label) $principal.identifier | quote }} }{{ end }}]
+{{- end }}
+
 {{- define "storefront.agentConfigToml" -}}
 {{- $root := .root -}}
 {{- $agent := .agent -}}
 {{- $cfg := $agent.config -}}
 {{- $seller := $cfg.seller | default dict -}}
+{{- $identity := $agent.identity | default dict -}}
 {{- $chain := $cfg.chain | default dict -}}
 {{- $prov := $seller.provisioning | default dict -}}
+{{- $provIdentity := $prov.identity | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
 {{- $hosted := $cfg.hostedSettlement | default dict -}}
+{{- $registryAuthority := $cfg.registryAuthority | default dict -}}
+{{- $registryURL := default (include "storefront.registryUrl" $root) $cfg.registryUrl -}}
+{{- if not $cfg.registryUrl -}}
+  {{- if ne $registryAuthority.authority $root.Values.global.registryIdentity.authority -}}
+    {{- fail "storefront registry authority id must match the internal registry authority id" -}}
+  {{- end -}}
+  {{- $activeRegistryPrincipal := $root.Values.global.registryIdentity.principal -}}
+  {{- $activeRegistryTrusted := false -}}
+  {{- range $principal := ($registryAuthority.principals | default list) -}}
+    {{- if and (eq $principal.scheme $activeRegistryPrincipal.scheme) (eq $principal.identifier $activeRegistryPrincipal.identifier) -}}
+      {{- $activeRegistryTrusted = true -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $activeRegistryTrusted -}}
+    {{- fail "storefront registry authority principals must include the internal registry signer principal" -}}
+  {{- end -}}
+{{- end -}}
+{{- if $prov -}}
+  {{- $activeProvisioningPrincipal := $root.Values.global.provisioningIdentity -}}
+  {{- $provisioningAuthorityTrusted := false -}}
+  {{- range $principal := ($provIdentity.principals | default list) -}}
+    {{- if and (eq $principal.scheme $activeProvisioningPrincipal.scheme) (eq $principal.identifier $activeProvisioningPrincipal.identifier) -}}
+      {{- $provisioningAuthorityTrusted = true -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $provisioningAuthorityTrusted -}}
+    {{- fail "provisioning authority principals must include the active provisioning principal" -}}
+  {{- end -}}
+  {{- $provisioningSiteID := $prov.siteId | default "default" -}}
+  {{- $provisioningPeerTrusted := false -}}
+  {{- range $peerID, $peer := ($identity.servicePeers | default dict) -}}
+    {{- if and (eq ($peer.role | default "") "service") (eq ($peer.siteId | default "") $provisioningSiteID) -}}
+      {{- range $principal := ($peer.principals | default list) -}}
+        {{- if and (eq $principal.scheme $activeProvisioningPrincipal.scheme) (eq $principal.identifier $activeProvisioningPrincipal.identifier) -}}
+          {{- $provisioningPeerTrusted = true -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $provisioningPeerTrusted -}}
+    {{- fail "service-peer trust must include the active provisioning principal for the configured site" -}}
+  {{- end -}}
+{{- end -}}
+{{- $expectedAuthority := $hosted.expectedAuthority | default dict -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
 # Sensitive values come from the Secret overlay (storefront.secrets.toml).
+
 
 agent_id            = {{ $seller.agentId | quote }}
 port                = {{ $agent.port }}
@@ -182,21 +240,45 @@ resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
 
-[wallet]
-ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
+[identity.principal]
+scheme = {{ required "storefront agent identity.principal.scheme is required" $identity.principal.scheme | quote }}
+identifier = {{ required "storefront agent identity.principal.identifier is required" $identity.principal.identifier | quote }}
+{{- range $subject, $administrator := ($identity.administrators | default dict) }}
 
-[chains.{{ $chain.name | default "ethereum_sepolia" }}]
+[identity.administrators.{{ $subject }}]
+{{ include "storefront.principalsToml" (dict "label" (printf "identity administrator %s" $subject) "principals" $administrator.principals) }}
+{{- end }}
+{{- range $peerID, $peer := ($identity.servicePeers | default dict) }}
+
+[identity.service_peers.{{ $peerID }}]
+role = {{ required (printf "identity service peer %s role is required" $peerID) $peer.role | quote }}
+site_id = {{ required (printf "identity service peer %s siteId is required" $peerID) $peer.siteId | quote }}
+{{ include "storefront.principalsToml" (dict "label" (printf "identity service peer %s" $peerID) "principals" $peer.principals) }}
+{{- end }}
+
+{{- if $seller.sshPublicKey }}
+[wallet]
+ssh_public_key = {{ $seller.sshPublicKey | quote }}
+{{- end }}
+{{- if $chain.name }}
+
+[chains.{{ $chain.name }}]
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
-chain_id = {{ $root.Values.global.rpc.chainId | int }}
+chain_id = {{ required "global.rpc.chainId is required when a storefront chain is configured" $root.Values.global.rpc.chainId | int }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}
 {{- if $agent.agentId }}
 onchain_agent_id = {{ $agent.agentId | int }}
 {{- end }}
+{{- end }}
 
 [registry]
-urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
+urls = [{{ $registryURL | quote }}]
+
+[registry.authorities.{{ $registryURL | quote }}]
+authority = {{ required "storefront registry authority id is required" $registryAuthority.authority | quote }}
+{{ include "storefront.principalsToml" (dict "label" "storefront registry authority" "principals" $registryAuthority.principals) }}
 {{- if $agent.rootPath }}
 
 [gateway]
@@ -215,19 +297,26 @@ mode        = {{ $prov.mode | quote }}
 poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
+[provisioning.identity]
+{{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
+
 [hosted_settlement]
 enabled = {{ $hosted.enabled | default false }}
 base_url = {{ $hosted.baseUrl | default "" | quote }}
 authority_id = {{ $hosted.authorityId | default "" | quote }}
 environment = {{ $hosted.environment | default "" | quote }}
-expected_authority = {{ $hosted.expectedAuthority | default "" | quote }}
 expected_manifest_digest = {{ $hosted.expectedManifestDigest | default "" | quote }}
 contract_version = {{ $hosted.contractVersion | default "0.1.0" | quote }}
-expected_schema_version = {{ $hosted.expectedSchemaVersion | default 3 }}
+expected_schema_version = {{ $hosted.expectedSchemaVersion | default 4 }}
 timeout_seconds = {{ $hosted.requestTimeoutSeconds | default 10 }}
 preflight_timeout_seconds = {{ $hosted.preflightTimeoutSeconds | default 5 }}
 allow_insecure_loopback = {{ $hosted.allowInsecureLoopback | default false }}
 required_capabilities = [{{ range $i, $cap := ($hosted.requiredCapabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
+{{- if $hosted.enabled }}
+
+[settlement.hosted.authority]
+{{ include "storefront.principalsToml" (dict "label" "hosted settlement authority" "principals" $expectedAuthority.principals) }}
+{{- end }}
 {{- range $resolverID, $resolver := ($hosted.resolvers | default dict) }}
 
 [hosted_settlement.resolvers.{{ $resolverID }}]
@@ -244,20 +333,9 @@ policy_mode = {{ $neg.policyMode | quote }}
 {{- end }}
 
 {{/*
-Render the per-agent sensitive storefront.secrets.toml. The output is a
-single string the Secret template embeds under `storefront.secrets.toml`.
-
-Argument: dict with `root` (chart root) and `agent`.
-
-Pairs with `storefront.agentConfigToml`. The runtime loader
-deep-merges the two files, so emitting only the sensitive subset here
-(rather than the full config) is what keeps non-secret toggles in the
-ConfigMap and out of secret-rotation tooling.
-
-Sections rendered here intentionally include only the sensitive keys
-of their parent tables (e.g. [wallet] address + private_key, not
-ssh_public_key) — the rest of those tables comes from the ConfigMap
-side.
+Render optional non-identity runtime secrets for local smoke deployments.
+Marketplace signer material is never accepted by this helper: the Deployment
+reads it directly from identity.credentialSecret.
 */}}
 {{- define "storefront.agentSecretsToml" -}}
 {{- $root := .root -}}
@@ -265,14 +343,9 @@ side.
 {{- $cfg := $agent.config -}}
 {{- $seller := $cfg.seller | default dict -}}
 {{- $integ := $seller.integrations | default dict -}}
-{{- $hostedCredential := $agent.secret.hostedSettlementRequestCredential | default $agent.secret.privKey -}}
-{{- $adminKey := ($root.Values.global).adminApiKey | default "" -}}
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
 # Deep-merged on top of storefront.toml at runtime by dynaconf.
 
-{{- if $adminKey }}
-admin_api_key = {{ $adminKey | quote }}
-{{- end }}
 {{- if $agent.secret.resourcesCsvInline }}
 resources_csv_inline = """
 {{ $agent.secret.resourcesCsvInline }}
@@ -283,16 +356,7 @@ resources_csv_inline = """
 
 [registry.auth]
 # Key must match the rendered [registry] urls entry exactly.
-{{ default (include "registry.url" $root) ($cfg.registryUrl) | quote }} = {{ $agent.secret.registryAuthToken | quote }}
-{{- end }}
-
-[wallet]
-address     = {{ $agent.secret.walletAddress | quote }}
-private_key = {{ $agent.secret.privKey | quote }}
-{{- if $hostedCredential }}
-
-[hosted_settlement]
-request_credential = {{ $hostedCredential | quote }}
+{{ default (include "storefront.registryUrl" $root) ($cfg.registryUrl) | quote }} = {{ $agent.secret.registryAuthToken | quote }}
 {{- end }}
 {{- if or $integ.geminiApiKey $integ.gemini_api_key }}
 

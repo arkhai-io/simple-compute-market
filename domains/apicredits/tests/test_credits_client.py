@@ -11,12 +11,17 @@ import json
 
 import httpx
 import pytest
+from market_identity import Identity, IdentityScheme
 
 from domains.apicredits.settlement.credits_client import (
     CreditsServiceClient,
     CreditsServiceError,
 )
 
+_PRINCIPAL = Identity(
+    scheme=IdentityScheme.EIP191,
+    identifier="0xabcdef0000000000000000000000000000000001",
+)
 
 def _client(handler, admin_key: str = "test-admin-key") -> CreditsServiceClient:
     return CreditsServiceClient(
@@ -37,8 +42,9 @@ async def test_submit_credit_issuance_sends_expected_request():
         return httpx.Response(200, json={"key_id": "k1", "quantity": 10})
 
     client = _client(handle)
+    principal = _PRINCIPAL
     result = await client.submit_credit_issuance(
-        escrow_uid="esc-1", quantity=10, buyer_wallet="0xabc",
+        escrow_uid="esc-1", quantity=10, buyer_principal=principal,
     )
 
     assert captured["method"] == "POST"
@@ -46,7 +52,7 @@ async def test_submit_credit_issuance_sends_expected_request():
     assert captured["headers"]["x-admin-key"] == "test-admin-key"
     assert captured["body"]["escrow_uid"] == "esc-1"
     assert captured["body"]["quantity"] == 10
-    assert captured["body"]["buyer"] == {"scheme": "wallet", "id": "0xabc"}
+    assert captured["body"]["buyer"] == principal.model_dump(mode="json")
     assert result == {"key_id": "k1", "quantity": 10}
 
 
@@ -59,7 +65,11 @@ async def test_submit_credit_issuance_raises_typed_error_with_service_reason():
 
     client = _client(handle)
     with pytest.raises(CreditsServiceError) as excinfo:
-        await client.submit_credit_issuance(escrow_uid="esc-1", quantity=10)
+        await client.submit_credit_issuance(
+            escrow_uid="esc-1",
+            quantity=10,
+            buyer_principal=_PRINCIPAL,
+        )
 
     assert excinfo.value.reason == "quota_exhausted"
     assert excinfo.value.detail == "no capacity left"

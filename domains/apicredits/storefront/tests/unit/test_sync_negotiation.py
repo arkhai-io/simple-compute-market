@@ -18,10 +18,13 @@ from apicredits_storefront.utils.sync_negotiation import (
     start_sync_negotiation,
 )
 from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_identity import Ed25519Signer
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store
 
-_BUYER = "0xBuyerAAAA0000000000000000000000000000ab"
+_BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
+_SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
+_STRANGER_PRINCIPAL = Ed25519Signer(bytes.fromhex("33" * 32)).identity
 _TOKEN = "0x" + "01" * 20
 _ESCROW = "0x" + "11" * 20
 
@@ -117,7 +120,8 @@ async def db(tmp_path):
         ],
         fulfillment_resource=None,
         max_duration_seconds=None,
-        seller="http://seller:8002",
+        storefront_url="http://test-seller:8002",
+        seller_principal=_SELLER_PRINCIPAL,
     )
     return client
 
@@ -188,7 +192,8 @@ async def _start(db, *, amount=300, quantity=3, key_mode="new", key_id=None):
     return await start_sync_negotiation(
         sqlite_client=db,
         our_listing_id="L-tok",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
         proposal=_proposal(amount),
         provision_terms=_terms(quantity, key_mode, key_id),
         our_base_url="http://seller:8002",
@@ -206,7 +211,7 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
     assert response["accepted_provision_terms"]["payload"]["quantity"] == 3
     # Plan materialization needs a resolvable alkahest chain config (the
     # e2e topology provides one); here the proposal echo is the artifact.
-    assert response["accepted_escrow_proposal"]["fields"]["amount"] == 300
+    assert response["accepted_escrow_proposal"]["fields"]["amount"] == "300"
 
     neg_id = response["negotiation_id"]
     terms = await db.load_credit_terms(negotiation_id=neg_id)
@@ -233,11 +238,11 @@ async def test_quota_guard_rejects_uncovered_quantity(db, fake_capacity, key_rec
     assert not fake_capacity.reserved
 
 
-async def test_existing_key_owned_by_buyer_wallet(db, fake_capacity, key_records):
+async def test_existing_key_owned_by_buyer_principal(db, fake_capacity, key_records):
     key_records["ak_mine"] = {
         "key_id": "ak_mine",
-        "owner_scheme": "wallet",
-        "owner_id": _BUYER.upper().replace("0X", "0x"),
+        "owner_scheme": _BUYER_PRINCIPAL.scheme.value,
+        "owner_id": _BUYER_PRINCIPAL.identifier,
         "status": "active",
     }
     response = await _start(
@@ -258,8 +263,8 @@ async def test_existing_key_owned_by_buyer_wallet(db, fake_capacity, key_records
 async def test_existing_key_rejections(db, fake_capacity, key_records):
     key_records["ak_theirs"] = {
         "key_id": "ak_theirs",
-        "owner_scheme": "wallet",
-        "owner_id": "0x" + "99" * 20,
+        "owner_scheme": _STRANGER_PRINCIPAL.scheme.value,
+        "owner_id": _STRANGER_PRINCIPAL.identifier,
         "status": "active",
     }
     with pytest.raises(OfferUnfulfillableError) as exc:
@@ -307,7 +312,8 @@ async def test_bisection_counter_round_scales_by_quantity(
             buyer_action="accept",
             buyer_proposal=None,
             buyer_reason=None,
-            buyer_address=_BUYER,
+            buyer_principal=_BUYER_PRINCIPAL,
+            seller_principal=_SELLER_PRINCIPAL,
         )
     assert response["action"] == "accept"
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
@@ -333,6 +339,8 @@ def test_accepted_artifacts_stamp_the_seller_recipient(monkeypatch):
     monkeypatch.setattr(sn, "_seller_wallet_address", lambda: "0xSeLLeR0000")
 
     sn._accepted_escrow_artifacts(
+        buyer_principal=_BUYER_PRINCIPAL,
+        seller_principal=_SELLER_PRINCIPAL,
         proposal={"chain_name": "anvil", "escrow_address": _ESCROW},
         agreed_amount=300,
     )

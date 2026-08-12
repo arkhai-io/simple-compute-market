@@ -84,11 +84,11 @@ class SystemController:
         ``storefront``
             Can the provisioning service reach the storefront's ``/health`` endpoint?
             Values: ``ok``, ``unreachable``, ``timeout``, ``unconfigured``, ``http_N``.
-
         ``storefront_auth``
-            Can the provisioning service authenticate to the storefront admin API?
-            Values: ``ok``, ``unauthorized``, ``unconfigured``, or mirrors
-            ``storefront`` when the storefront is not reachable.
+            Can the provisioning service authenticate as the configured service
+            peer and verify the pinned storefront response principal?
+
+
 
         ``lease_watchdog``
             Current watchdog scheduling state.

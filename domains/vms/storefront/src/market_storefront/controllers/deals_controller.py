@@ -43,10 +43,9 @@ class DealsController:
         response_model=DealHeartbeatResponse,
         summary="Record a buyer liveness heartbeat for an active deal",
         description=(
-            "Buyer-facing. Requires EIP-191 signed `X-Signature` + "
-            "`X-Timestamp` headers; the timestamp is the heartbeat's "
-            "claimed send time and must be strictly newer than the "
-            "deal's last recorded heartbeat."
+            "Buyer-facing. Requires marketplace v2 request authentication; "
+            "the authenticated timestamp is the heartbeat's claimed send time "
+            "and must be strictly newer than the deal's last recorded heartbeat."
         ),
     )
     async def deal_heartbeat(
@@ -61,46 +60,61 @@ class DealsController:
         )
         from market_storefront.utils.config import settings
 
-        buyer_auth.deal_heartbeat_auth(escrow_uid, body, request)
+        auth = await buyer_auth.deal_heartbeat_auth(escrow_uid, body, request)
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, response = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=response)
+            return DealHeartbeatResponse.model_validate(response)
+
 
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
-        if escrow is None:
-            raise HTTPException(status_code=404, detail=f"Unknown deal {escrow_uid}")
-
-        # Bind the heartbeat to the deal's buyer when the negotiation
-        # recorded one — a valid signature from the wrong wallet is not
-        # evidence for this deal.
-        thread = await self._db.load_negotiation_thread_row(
-            negotiation_id=escrow.get("negotiation_id"),
-        )
-        recorded_buyer = (thread or {}).get("buyer") or ""
-        if (
-            recorded_buyer.startswith("0x")
-            and recorded_buyer.lower() != body.buyer_address.lower()
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail="signer is not this deal's buyer",
+        negotiation_id = (escrow or {}).get("negotiation_id")
+        if negotiation_id is None:
+            composition = _container.resolved_settlement_composition
+            record = (
+                await composition.repository.load_settlement_obligation_by_mechanism_ref(
+                    escrow_uid
+                )
+                if composition is not None
+                else None
             )
+            negotiation_id = (record or {}).get("agreement_ref")
+        if not negotiation_id:
+            raise HTTPException(status_code=404, detail=f"Unknown deal {escrow_uid}")
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id,
+        )
+        if (thread or {}).get("buyer_principal") != body.buyer_principal.model_dump(
+            mode="json"
+        ):
+            raise HTTPException(status_code=403, detail="wrong deal buyer principal")
+        if (thread or {}).get("seller_principal") != body.seller_principal.model_dump(
+            mode="json"
+        ):
+            raise HTTPException(status_code=403, detail="wrong deal seller principal")
 
         try:
             payload = validate_vm_heartbeat_payload(body.payload)
         except VmHeartbeatError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        # The signed X-Timestamp is the claimed send time (already
-        # skew-checked by signature verification; heartbeats re-check
-        # against their own window and enforce monotonicity).
         try:
-            sent_at = float(request.headers.get("X-Timestamp", ""))
+            sent_at = float(request.headers.get("X-Market-Timestamp", ""))
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Missing X-Timestamp") from exc
+            raise HTTPException(
+                status_code=400,
+                detail="Missing X-Market-Timestamp",
+            ) from exc
 
         try:
             record = await record_heartbeat(
                 self._db,
                 deal_ref=escrow_uid,
-                signer=body.buyer_address,
+                buyer_principal=body.buyer_principal,
+                seller_principal=body.seller_principal,
                 sent_at_unix=sent_at,
                 payload=payload,
             )
@@ -112,13 +126,15 @@ class DealsController:
             "service",
             "heartbeat_recorded",
             deal_ref=escrow_uid,
-            signer=body.buyer_address,
+            principal=body.buyer_principal.model_dump(mode="json"),
             count=count,
             status=payload.get("status"),
         )
         cadence = float(getattr(settings, "heartbeat_interval_seconds", 60))
         return DealHeartbeatResponse(
             deal_ref=escrow_uid,
+            buyer_principal=body.buyer_principal,
+            seller_principal=body.seller_principal,
             sent_at_unix=record["sent_at_unix"],
             heartbeat_count=count,
             next_expected_by_unix=record["sent_at_unix"] + cadence,

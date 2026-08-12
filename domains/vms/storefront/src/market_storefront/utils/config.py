@@ -1,45 +1,36 @@
 """Storefront configuration via dynaconf.
 
-Layered (highest priority last):
-  1. ``settings.toml`` next to this package — committed defaults documenting
-     every supported key.
-  2. ``$XDG_CONFIG_HOME/arkhai/storefront.toml`` — ConfigMap base.
-  3. ``$XDG_CONFIG_HOME/arkhai/storefront.secrets.toml`` — Secret overlay
-     (wallet key, admin API key, gemini key, inline resources CSV).
-  4. ``STOREFRONT_*`` environment variables (separator ``__``).
+Public profile values come from ``storefront.toml`` and environment-specific
+secrets come from ``storefront.secrets.toml`` or an approved environment
+Secret. Marketplace signing material is never loaded into Dynaconf:
+``ARKHAI_IDENTITY_CREDENTIAL`` is resolved at the composition root and passed
+directly to the identity signer factory.
 
-Direct attribute access: ``settings.port``, ``settings.wallet.private_key``,
-``settings.provisioning.service_url``, ``settings.registry.urls``. See
-``settings.toml`` for the schema.
-
-Module-level constants are computed once at import:
-
-* ``AGENT_ID`` — validated Python identifier, default ``"root_agent"``.
-* ``AGENT_NAME`` — ``settings.agent_name``, falling back to ``AGENT_ID``.
-* ``BASE_URL_OVERRIDE`` — ``settings.base_url`` with ZeroTier placeholder
-  resolution applied.
-* ``CHAINS`` — ``dict[str, ChainConfig]`` built from the ``[chains.<name>]``
-  TOML tables. Storefront call sites that need on-chain dispatch look up
-  ``CHAINS[chain_name]`` where ``chain_name`` comes from the incoming
-  proposal / escrow context.
+Wallet and chain tables are optional EVM-mechanism configuration. Hosted-only
+storefronts leave them absent; Alkahest call sites read them through the
+explicit ``get_evm_wallet_*`` helpers only after that mechanism is selected.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from pathlib import Path
 from typing import Any
 
+from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
+from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from dynaconf import Dynaconf
 from market_config.config_loader import (  # type: ignore[import-not-found]
     ChainConfig,
     EscrowTemplate,
     chains_from_config,
-    derive_wallet_address,
     escrow_templates_from_config,
     storefront_config_files,
 )
+from market_config.registry_url import normalize_registry_url
+from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -47,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_AGENT_ID = "root_agent"
+IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
 _DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
 
 
@@ -62,27 +54,6 @@ def _build_settings() -> Dynaconf:
         merge_enabled=True,
     )
 
-    # Derive wallet.address from wallet.private_key when only the key is
-    # set. The address is a deterministic function of the key, so there's
-    # no reason to require both in config. When both are set and disagree
-    # the configured address wins (user might be intentionally signing
-    # for a delegated address), but we log a warning so the mismatch
-    # doesn't hide later confusion.
-    pk = str(s.get("wallet.private_key", "") or "")
-    addr_cfg = str(s.get("wallet.address", "") or "")
-    if pk:
-        derived_addr = derive_wallet_address(pk)
-        if derived_addr:
-            if not addr_cfg:
-                s.set("wallet.address", derived_addr)
-            elif addr_cfg.lower() != derived_addr.lower():
-                logger.warning(
-                    "[CONFIG] wallet.address (%s) does not match the address "
-                    "derived from wallet.private_key (%s); using the configured "
-                    "address.",
-                    addr_cfg,
-                    derived_addr,
-                )
     return s
 
 
@@ -153,12 +124,158 @@ settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
 ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
 
-if not CHAINS:
-    logger.warning(
-        "[CONFIG] no [chains.<name>] tables configured — the storefront will "
-        "fail when it needs to dispatch any on-chain call. Add at least one "
-        "chain entry to storefront.toml."
+def get_evm_wallet_address(source: Dynaconf | None = None) -> str:
+    """Return the explicitly configured EVM mechanism address, if any."""
+
+    active = settings if source is None else source
+    return str(active.get("wallet.address", "") or "").strip()
+
+
+def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
+    """Return the explicitly configured EVM mechanism credential, if any."""
+
+    active = settings if source is None else source
+    return str(active.get("wallet.private_key", "") or "").strip()
+
+
+def _trusted_identity_set(raw: Any, *, field: str) -> TrustedIdentitySet:
+    """Parse one ordered old/new authority overlap from public config."""
+    if hasattr(raw, "to_dict"):
+        raw = raw.to_dict()
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(f"{field}.principals must be a list")
+    try:
+        identities = tuple(Identity.model_validate(value) for value in raw)
+        return TrustedIdentitySet(identities=identities)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field}.principals must contain 1-2 unique identities") from exc
+
+def get_administrator_configs(
+    source: Dynaconf | None = None,
+) -> dict[str, TrustedIdentitySet]:
+    """Resolve stable administrator subjects and bounded rotation trust sets."""
+
+    active = settings if source is None else source
+    raw = active.get("identity.administrators", {}) or {}
+    if not hasattr(raw, "items"):
+        raise ValueError("identity.administrators must be a mapping")
+    administrators: dict[str, TrustedIdentitySet] = {}
+    for subject, value in raw.items():
+        if not hasattr(value, "get"):
+            raise ValueError(f"identity.administrators.{subject} must be a mapping")
+        administrators[str(subject)] = _trusted_identity_set(
+            value.get("principals"),
+            field=f"identity.administrators.{subject}",
+        )
+    return administrators
+
+def get_registry_authorities(
+    source: Dynaconf | None = None,
+) -> dict[str, RegistryAuthorityTrust]:
+    """Resolve stable authority names and old/new signer pins per registry."""
+
+    active = settings if source is None else source
+    urls = [str(url) for url in (active.get("registry.urls") or [])]
+    raw = active.get("registry.authorities") or {}
+    authorities: dict[str, RegistryAuthorityTrust] = {}
+    for raw_url, authority_raw in dict(raw).items():
+        url = normalize_registry_url(str(raw_url))
+        if url in authorities:
+            raise ValueError(f"duplicate registry authority pin for {url!r}")
+        value = dict(authority_raw)
+        authority = str(value.get("authority") or "").strip()
+        if not authority:
+            raise ValueError(
+                f"registry.authorities.{raw_url}.authority must be non-empty"
+            )
+        authorities[url] = RegistryAuthorityTrust(
+            authority=authority,
+            principals=_trusted_identity_set(
+                value.get("principals"),
+                field=f"registry.authorities.{raw_url}",
+            ),
+        )
+    normalized_urls = [normalize_registry_url(url) for url in urls]
+    if len(normalized_urls) != len(set(normalized_urls)):
+        raise ValueError("configured registry URLs are duplicated after normalization")
+    if set(authorities) != set(normalized_urls):
+        missing = sorted(set(normalized_urls) - set(authorities))
+        unexpected = sorted(set(authorities) - set(normalized_urls))
+        raise ValueError(
+            "registry authority pins must exactly match registry.urls "
+            f"(missing={missing}, unexpected={unexpected})"
+        )
+    return authorities
+
+
+def get_provisioning_authorities(
+    source: Dynaconf | None = None,
+) -> TrustedIdentitySet:
+    """Return the ordered public trust pins for the provisioning service."""
+
+    active = settings if source is None else source
+    return _trusted_identity_set(
+        active.get("provisioning.identity.principals"),
+        field="provisioning.identity",
     )
+
+
+def get_service_peer_configs(
+    source: Dynaconf | None = None,
+) -> dict[str, tuple[str, str, TrustedIdentitySet]]:
+    """Resolve peer role/site bindings and bounded principal rotation sets."""
+
+    active = settings if source is None else source
+    raw = active.get("identity.service_peers", {}) or {}
+    if not hasattr(raw, "items"):
+        raise ValueError("identity.service_peers must be a mapping")
+    peers: dict[str, tuple[str, str, TrustedIdentitySet]] = {}
+    for peer_id, value in raw.items():
+        if not hasattr(value, "get"):
+            raise ValueError(f"identity.service_peers.{peer_id} must be a mapping")
+        role = str(value.get("role", "") or "").strip()
+        site_id = str(value.get("site_id", "") or "").strip()
+        if role != "service" or not site_id:
+            raise ValueError(
+                f"identity.service_peers.{peer_id} requires role='service' and site_id"
+            )
+        principals = _trusted_identity_set(
+            value.get("principals"),
+            field=f"identity.service_peers.{peer_id}",
+        )
+        peers[str(peer_id)] = (role, site_id, principals)
+    return peers
+
+
+def get_identity_config(source: Dynaconf | None = None) -> IdentityConfig:
+    """Resolve the current public marketplace principal without its credential."""
+
+    active = settings if source is None else source
+    principal_raw = active.get("identity.principal") or {}
+    if hasattr(principal_raw, "to_dict"):
+        principal_raw = principal_raw.to_dict()
+    try:
+        principal = Identity.model_validate(principal_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("identity.principal is required and must be canonical") from exc
+    return IdentityConfig(
+        scheme=IdentityScheme(principal.scheme),
+        identifier=principal.identifier,
+    )
+
+
+def resolve_marketplace_signer(
+    source: Dynaconf | None = None,
+    *,
+    credential: bytes | str | None = None,
+) -> Signer:
+    """Build the configured signer from the dedicated Secret boundary."""
+
+    secret = os.environ.get(IDENTITY_CREDENTIAL_ENV) if credential is None else credential
+    if secret is None or secret == "" or secret == b"":
+        raise ValueError(f"{IDENTITY_CREDENTIAL_ENV} is required")
+    return resolve_storefront_signer(get_identity_config(source), secret)
+
 
 
 # ---------------------------------------------------------------------------

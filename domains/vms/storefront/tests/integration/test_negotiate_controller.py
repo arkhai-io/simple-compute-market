@@ -1,30 +1,31 @@
 """Integration tests for the Negotiate controller.
 
 Uses ``StorefrontClient.negotiate_new()`` and ``negotiate_continue()``
-via ``httpx.ASGITransport`` — following the canonical client pattern
-documented in ARCHITECTURE.md.
-
-These protocol endpoints use EIP-191 buyer signatures. Auth is bypassed
-in tests via ``unittest.mock.patch.object(buyer_auth, "_verify", return_value=None)``.
-Tests focus on Pydantic validation, routing correctness, and DB interaction.
+via ``httpx.ASGITransport`` with canonical Ed25519 buyer authentication,
+pinned seller trust, and signed seller responses.
 """
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 import market_storefront.container as _container
 from market_storefront.controllers.negotiate_controller import router as negotiate_router
-from market_storefront.middleware import buyer_auth
+from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from tests._settings_overrides import settings_overrides
 from storefront_client import StorefrontClient, StorefrontClientError
 
-_BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
+
+_BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
+_SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
+_EXPECTED_PUBLISHERS = TrustedIdentitySet(
+    identities=(_SELLER_SIGNER.identity,)
+)
 _TOKEN = "0x0000000000000000000000000000000000000001"
 
 
@@ -37,6 +38,11 @@ def _vm_provision(duration_seconds: int = 3600) -> dict:
             "ssh_public_key": "",
         },
     }
+
+
+def _assert_canonical_owners(result: dict) -> None:
+    assert result["buyer_principal"] == _BUYER_SIGNER.identity.model_dump(mode="json")
+    assert result["seller_principal"] == _SELLER_SIGNER.identity.model_dump(mode="json")
 
 
 @pytest_asyncio.fixture
@@ -69,7 +75,8 @@ async def _seed_listing(
         }],
         fulfillment_resource=None,
         max_duration_seconds=max_duration_seconds,
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER_SIGNER.identity,
     )
     # Seed at least one matching available compute resource so the
     # seller's pre-thread guard composite (default
@@ -103,17 +110,13 @@ async def client(db):
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-    config = MagicMock()
-    config.base_url_override = "http://test-seller:8001"
-    config.base_url_override_raw = "http://test-seller:8001"
-    config.agent_id = "test-agent"
-    config.agent_priv_key = ""
-    config.chain_rpc_url = ""
 
     _container.resolved_sqlite_client = db
 
+    _container.resolved_marketplace_signer = _SELLER_SIGNER
     app = FastAPI()
     app.include_router(negotiate_router)
+    app.middleware("http")(listing_lifecycle_middleware)
 
     # The seller's round-start availability snapshot and acceptance-time
     # capacity holds run against the site authority; route them at an
@@ -131,16 +134,17 @@ async def client(db):
     )
 
     transport = httpx.ASGITransport(app=app)
-    with patch.object(buyer_auth, "_verify", return_value=None), \
-            site_capacity(fake_site):
+    with site_capacity(fake_site):
         async with StorefrontClient(
             "http://test",
+            signer=_BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=_EXPECTED_PUBLISHERS,
             transport=transport,
-            private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-            ) as c:
+        ) as c:
             yield c, db
-
     _container.resolved_sqlite_client = None
+    _container.resolved_marketplace_signer = None
 
 
 class TestNegotiateNew:
@@ -150,36 +154,25 @@ class TestNegotiateNew:
         """listing_id is required — Pydantic rejects the request."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="",
-                buyer_address=_BUYER,
-                initial_amount=8000,
-                provision_terms=_vm_provision(),
-            )
+            await c.negotiate_new(listing_id="", initial_amount=8000,
+            provision_terms=_vm_provision(),)
         # missing listing_id can't be tested via client (required param);
         # test that a nonexistent listing returns 404 below.
 
     async def test_unknown_listing_returns_404(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="ghost-listing",
-                buyer_address=_BUYER,
-                initial_amount=8000,
-                provision_terms=_vm_provision(),
-            )
+            await c.negotiate_new(listing_id="ghost-listing", initial_amount=8000,
+            provision_terms=_vm_provision(),)
         assert "404" in str(exc_info.value)
 
     async def test_valid_request_starts_negotiation(self, client, db):
         c, db = client
         await _seed_listing(db, "neg-listing-1", demand_amount=5000)
-        result = await c.negotiate_new(
-            listing_id="neg-listing-1",
-            buyer_address=_BUYER,
-            initial_amount=5000,
-            provision_terms=_vm_provision(),
-            token=_TOKEN,
-        )
+        result = await c.negotiate_new(listing_id="neg-listing-1", initial_amount=5000,
+        provision_terms=_vm_provision(),
+        token=_TOKEN,)
+        _assert_canonical_owners(result)
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
 
@@ -191,13 +184,10 @@ class TestNegotiateNew:
             demand_amount=5000,
             max_duration_seconds=0,
         )
-        result = await c.negotiate_new(
-            listing_id="neg-listing-unlimited",
-            buyer_address=_BUYER,
-            initial_amount=5000,
-            provision_terms=_vm_provision(),
-            token=_TOKEN,
-        )
+        result = await c.negotiate_new(listing_id="neg-listing-unlimited", initial_amount=5000,
+        provision_terms=_vm_provision(),
+        token=_TOKEN,)
+        _assert_canonical_owners(result)
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
 
@@ -208,11 +198,12 @@ class TestNegotiateNew:
         await _seed_listing(db, "neg-listing-large", demand_amount=large_amount)
         result = await c.negotiate_new(
             listing_id="neg-listing-large",
-            buyer_address=_BUYER,
             initial_amount=large_amount,
+            proposal_fields={"amount": str(large_amount)},
             provision_terms=_vm_provision(),
             token=_TOKEN,
         )
+        _assert_canonical_owners(result)
 
         neg_id = result["negotiation_id"]
         messages = await db.load_negotiation_thread(negotiation_id=neg_id)
@@ -225,12 +216,8 @@ class TestNegotiateNew:
         c, db = client
         await _seed_listing(db, "neg-listing-zero-duration")
         with pytest.raises((StorefrontClientError, Exception)) as exc_info:
-            await c.negotiate_new(
-                listing_id="neg-listing-zero-duration",
-                buyer_address=_BUYER,
-                initial_amount=8000,
-                provision_terms=_vm_provision(0),
-            )
+            await c.negotiate_new(listing_id="neg-listing-zero-duration", initial_amount=8000,
+            provision_terms=_vm_provision(0),)
         assert "400" in str(exc_info.value)
         assert "incompatible_provision_terms" in str(exc_info.value)
 
@@ -244,12 +231,8 @@ class TestNegotiateNew:
             status="closed",
         )
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="neg-listing-closed",
-                buyer_address=_BUYER,
-                initial_amount=5000,
-                provision_terms=_vm_provision(),
-            )
+            await c.negotiate_new(listing_id="neg-listing-closed", initial_amount=5000,
+            provision_terms=_vm_provision(),)
         msg = str(exc_info.value)
         assert "409" in msg
         assert "listing_not_open" in msg
@@ -279,15 +262,12 @@ class TestNegotiateNew:
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_SIGNER.identity,
         )
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="neg-listing-empty",
-                buyer_address=_BUYER,
-                initial_amount=5000,
-                provision_terms=_vm_provision(),
-            )
+            await c.negotiate_new(listing_id="neg-listing-empty", initial_amount=5000,
+            provision_terms=_vm_provision(),)
         msg = str(exc_info.value)
         assert "409" in msg
         assert "no_matching_inventory" in msg
@@ -315,7 +295,8 @@ class TestNegotiateNew:
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_SIGNER.identity,
         )
         # Seed a matching available resource so the inventory check passes
         # and we test the price-less guard specifically.
@@ -330,13 +311,9 @@ class TestNegotiateNew:
         )
         # default_min_price is None in the test config — falls through.
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="neg-listing-priceless",
-                buyer_address=_BUYER,
-                initial_amount=5000,
-                provision_terms=_vm_provision(),
-                token=_TOKEN,
-            )
+            await c.negotiate_new(listing_id="neg-listing-priceless", initial_amount=5000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,)
         msg = str(exc_info.value)
         assert "409" in msg
         assert "no_floor_price" in msg
@@ -370,7 +347,8 @@ class TestNegotiateNew:
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_SIGNER.identity,
         )
         await db.upsert_resource(
             resource_id="res-attestation",
@@ -389,20 +367,18 @@ class TestNegotiateNew:
                 "accept_exact_listing",
             ],
         }):
-            result = await c._post("/api/v1/negotiate/new", {
-                "listing_id": "neg-listing-attestation",
-                "buyer_address": _BUYER,
-                "provision_terms": _vm_provision(),
-                "proposal": {
-                    "chain_name": "anvil",
-                    "escrow_address": escrow_address,
-                    "fields": {},
-                    "literal_fields": literals,
-                    "rates": [],
-                    "expiration_unix": 1_800_000_000,
-                },
-                "buyer_agent_url": "",
-            })
+            result = await c.negotiate_new(
+                listing_id="neg-listing-attestation",
+                initial_amount=None,
+                provision_terms=_vm_provision(),
+                chain_name="anvil",
+                escrow_address=escrow_address,
+                proposal_fields={},
+                literal_fields=literals,
+                rates=[],
+                escrow_expiration_unix=1_800_000_000,
+            )
+        _assert_canonical_owners(result)
 
         assert result["action"] == "accept"
         assert "amount" not in result["proposal"]["fields"]
@@ -449,17 +425,14 @@ class TestNegotiateNew:
             }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
-            seller="http://seller:8001",
+            storefront_url="http://seller:8001",
+            seller_principal=_SELLER_SIGNER.identity,
         )
         # The H200 resource seeded by _seed_listing doesn't match the
         # RTX 4090 offer; the seller should refuse.
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(
-                listing_id="neg-listing-rtx",
-                buyer_address=_BUYER,
-                initial_amount=5000,
-                provision_terms=_vm_provision(),
-            )
+            await c.negotiate_new(listing_id="neg-listing-rtx", initial_amount=5000,
+            provision_terms=_vm_provision(),)
         assert "409" in str(exc_info.value)
         assert "no_matching_inventory" in str(exc_info.value)
 
@@ -470,43 +443,28 @@ class TestNegotiateContinue:
     async def test_unknown_neg_id_returns_404(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_continue(
-                "ghost-neg-id",
-                action="exit",
-                buyer_address=_BUYER,
-            )
+            await c.negotiate_continue("ghost-neg-id",
+            action="exit", )
         assert "404" in str(exc_info.value)
 
     async def test_invalid_action_returns_422(self, client):
-        """'invalid_action' is not a valid Literal — Pydantic rejects it."""
+        """The client exposes FastAPI's Literal schema rejection as 422."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_continue(
                 "neg-123",
                 action="invalid_action",
-                buyer_address=_BUYER,
             )
-        assert any(code in str(exc_info.value) for code in ("422", "400"))
 
-    async def test_counter_without_price_returns_400(self, client, db):
-        c, db = client
-        await _seed_listing(db, "neg-listing-continue")
-        result = await c.negotiate_new(
-            listing_id="neg-listing-continue",
-            buyer_address=_BUYER,
-            initial_amount=5000,
-            provision_terms=_vm_provision(),
-            token=_TOKEN,
-        )
-        if "negotiation_id" not in result:
-            pytest.skip("Could not start negotiation")
-        neg_id = result["negotiation_id"]
+        assert exc_info.value.status_code == 422
 
+    async def test_counter_without_price_returns_400(self, client):
+        """A counter without a proposal fails the route schema contract."""
+        c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.negotiate_continue(
-                neg_id,
+                "neg-123",
                 action="counter",
-                buyer_address=_BUYER,
-                # price intentionally omitted
             )
-        assert any(code in str(exc_info.value) for code in ("400", "422"))
+
+        assert exc_info.value.status_code == 400

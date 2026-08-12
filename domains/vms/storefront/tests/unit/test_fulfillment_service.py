@@ -4,13 +4,40 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_identity import Ed25519Signer
 
 from market_fulfillment import VersionedEnvelope
+import market_storefront.container as container
 from market_storefront.services import publication_service
 from market_storefront.services import fulfillment_service
 from domains.vms.listings.reconciler import record_derived_listing
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import FakeSite, pump_events, site_capacity
+from tests.fake_site import (
+    FakeSite,
+    TEST_MARKETPLACE_SIGNER,
+    TEST_SITE_AUTHORITIES,
+    pump_events,
+    site_capacity,
+)
+
+_TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
+_TEST_PROVISIONING_AUTHORITIES = TEST_SITE_AUTHORITIES
+_TEST_SELLER_PRINCIPAL = _TEST_STOREFRONT_SIGNER.identity
+_TEST_BUYER_PRINCIPAL = Ed25519Signer(b"\x23" * 32).identity
+
+
+@pytest.fixture(autouse=True)
+def _identity_wiring(monkeypatch):
+    monkeypatch.setattr(
+        container,
+        "resolved_marketplace_signer",
+        _TEST_STOREFRONT_SIGNER,
+    )
+    monkeypatch.setattr(
+        fulfillment_service,
+        "get_provisioning_authorities",
+        lambda: _TEST_PROVISIONING_AUTHORITIES,
+    )
 
 
 @pytest.fixture
@@ -53,7 +80,8 @@ async def _seed_compute_listings(client: SQLiteClient, *, max_gpu_count: int) ->
             demands=[],
             fulfillment_resource=None,
             max_duration_seconds=3600,
-            seller="http://seller",
+            storefront_url="http://seller",
+            seller_principal=_TEST_SELLER_PRINCIPAL,
         )
         record_derived_listing(
             client.db_path,
@@ -67,6 +95,8 @@ async def _seed_compute_listings(client: SQLiteClient, *, max_gpu_count: int) ->
 def _compute_listing(*, gpu_count: int = 1) -> dict:
     return {
         "listing_id": f"listing-{gpu_count}x",
+        "seller_principal": _TEST_SELLER_PRINCIPAL.model_dump(mode="json"),
+        "buyer_principal": _TEST_BUYER_PRINCIPAL.model_dump(mode="json"),
         "offer_resource": {
             "resource_id": "pool-h200-1",
             "gpu_model": "H200",
@@ -240,7 +270,8 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
 
     class FakeComputeClient:
         def __init__(self, *args, **kwargs):
-            pass
+            captured["client_args"] = args
+            captured["client_kwargs"] = kwargs
 
         async def __aenter__(self):
             return self
@@ -279,6 +310,12 @@ async def test_vm_lease_registration_uses_common_compute_model(monkeypatch):
     assert registration.deal_ref == {"escrow_uid": "escrow-1"}
     assert registration.executor_kind == "vm"
     assert registration.executor_target == "tenant-1"
+    assert captured["client_kwargs"]["caller_role"] == "seller"
+    assert captured["client_kwargs"]["signer"] is _TEST_STOREFRONT_SIGNER
+    assert (
+        captured["client_kwargs"]["expected_authorities"]
+        == _TEST_PROVISIONING_AUTHORITIES
+    )
 
 
 @pytest.mark.asyncio

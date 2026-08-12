@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from domains.vms.listings.listing_mode import resolve_vm_listing_mode
 from domains.vms.listings.pool_descriptors import resolve_region, resolve_sla
 from domains.vms.listings.pricing_resolution import GpuPricingFields, resolve_gpu_pricing
+from market_identity import Identity
 
 
 HELD_ALLOCATION_STATES = {
@@ -1292,7 +1293,8 @@ def reopen_local_derived_listing(
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
-    seller: str,
+    storefront_url: str,
+    seller_principal: Identity,
     resource_id: str | None,
     pool_id: str | None = None,
 ) -> None:
@@ -1314,7 +1316,9 @@ def reopen_local_derived_listing(
             "accepted_escrows": json.dumps(accepted_escrows),
             "demands": json.dumps(demands),
             "max_duration_seconds": max_duration_seconds,
-            "seller": seller,
+            "storefront_url": storefront_url,
+            "seller_scheme": seller_principal.scheme.value,
+            "seller_identifier": seller_principal.identifier,
         }
         for column, value in column_values.items():
             if column in listing_cols:

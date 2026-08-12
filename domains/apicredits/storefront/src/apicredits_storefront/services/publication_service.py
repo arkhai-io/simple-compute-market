@@ -24,7 +24,11 @@ from domains.apicredits.listings.reconciler import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
-from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from apicredits_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    resolve_registry_authorities,
+    settings,
+)
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -32,16 +36,21 @@ logger = logging.getLogger(__name__)
 
 def _make_registry_client():
     from core_storefront.multi_registry_client import MultiRegistryClient
+    import apicredits_storefront.container as container
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("storefront marketplace signer is not initialized")
 
-    urls = (
-        list(settings.registry.urls)
-        if settings.registry.urls
-        else ["http://localhost:8080"]
-    )
+    urls = list(settings.registry.urls) if settings.registry.urls else []
+    if not urls:
+        raise RuntimeError("registry.urls must not be empty")
     return MultiRegistryClient(
         urls,
+        caller_role="seller",
+        expected_registries=resolve_registry_authorities(),
         timeout=settings.registry.discovery_timeout,
         auth=settings.registry.auth,
+        signer=signer,
     )
 
 
@@ -52,7 +61,6 @@ async def publish_order_to_registry(order: dict[str, Any]) -> dict[str, Any]:
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         listing_request_factory=ListingRequest,
-        private_key=settings.wallet.private_key,
         storefront_url=BASE_URL_OVERRIDE,
         record_publications=_record_publications,
         on_published=_record_listing_published_stage_event,
@@ -83,7 +91,6 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         enabled=settings.enable_registry_discovery,
         registry_client_factory=_make_registry_client,
         update_listing_request_factory=UpdateListingRequest,
-        private_key=settings.wallet.private_key,
         select_target_registries=_registries_to_target,
         record_publications=_record_publications,
     )

@@ -109,6 +109,14 @@ The fulfillment distribution is `arkhai-kit-fulfillment`, imported as `market_fu
 
 Within `market_fulfillment`, carrier modules such as identifiers, envelopes, requests, resources, and provider protocols must not import concrete services. Scheduler implementations may depend on the site and resource-pool authorities explicitly permitted by this layer.
 
+### Marketplace identity
+
+`kit/identity` is the foundation owner for canonical scheme-tagged principals, Ed25519 and EIP-191 signer/verifier dispatch, version 2 authenticated request and response envelopes, replay reservation, and dual-proof rotation. Composition roots resolve public principal configuration and secret credential material separately, construct signers, and inject them into roles and typed clients. Core, domain, settlement, and service-peer code handles only the signer interface and complete public principals; it does not receive raw private-key fields or infer identity from an address.
+
+The same scheme-neutral role lifecycle supports wallet-free Ed25519 discovery, negotiation, hosted settlement, status, reclaim, and recovery. Wallet and chain inputs are optional adapter-owned configuration required only after selection of an explicit EVM effect. The independently released hosted client owns its own canonical wire, response verification, and provider-facing identity models; the marketplace adapter passes an injected signer through that exact client rather than copying the protocol.
+
+See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
+
 ## Runtime service map
 
 ```text
@@ -152,6 +160,7 @@ Within a service, controllers stay thin: HTTP routing, request/response schemas,
 | State or decision | Authority | Notes |
 |---|---|---|
 | Listing schema and discovery filters | Registry operator | Published through `filter-spec.yaml`; storefronts and buyers consume the schema |
+| Marketplace principal normalization, proof dispatch, and canonical envelopes | Identity kit | Scheme-neutral foundation capability; roles inject signers and authorities own subject/role bindings |
 | Listing, negotiation, deal, and seller policy state | Storefront | Market-facing state, not physical inventory |
 | Capacity admission and reservation | Site authority | Serialization point for competing reservations |
 | Resource-pool metadata and provider configuration | Resource-pool service | Provisioning routing metadata; disabled pools remain resolvable |
@@ -174,7 +183,7 @@ Storefront capacity pools and provisioning resource pools are separate concepts.
 
 A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
 
-The reverse relationship is currently one-to-one: a compute provisioner binds to a single storefront through a global `storefront_url`, and one shared `storefront_admin_key` both gates every inbound request and signs the outbound lifecycle callback, so there is no per-storefront identity or isolation at that boundary. The lifecycle event sink accepts a per-deal storefront URL override, but no storefront populates it, so delivery always resolves to the configured global. Serving several storefronts from one site authority requires a trusted per-storefront identity that does not exist yet.
+Each provisioning connection is bound to an operator-configured `site_id` and an exact service-peer principal. Marketplace version 2 proofs authenticate requests and signed responses or callbacks against those public trust pins; matching an address-like body value, administrator key, private-key field, or identifier under another scheme never substitutes for the configured principal and role. The trusted connection binding, not a counterparty assertion, selects the site.
 
 Capacity events are anonymous availability deltas broadcast through a pull feed. Deal-scoped fulfillment events are point-to-point to the owning storefront and retain deal context. A storefront reconciles listings in response to capacity deltas regardless of which seller action caused the change.
 
@@ -185,6 +194,14 @@ A site authority's client-facing surface splits into two separately typed client
 Resource pools group physical settlement candidates and identify the provider plus provider-specific configuration used after selection. Pool disablement prevents new assignment but does not erase existing host membership or lifecycle records. Pool administration is distinct from scheduling policy.
 
 ## Shared vocabulary and identities
+
+### Marketplace principals
+
+A marketplace principal is the complete canonical `{scheme, identifier}` credential identity. The scheme is part of the authorization namespace, so equal identifier text under different schemes does not imply equal authority. Stable publishers, storefronts, negotiations, settlements, accounts, and service peers remain separate subjects whose owning authority binds active principals to explicit roles. Public principals and trust pins may cross configuration and protocol boundaries; private signing material remains inside Secret-backed signer construction and never enters public carriers or durable state.
+
+### Authenticated service boundaries
+
+Authenticated service-to-service calls use the scheme-neutral version 2 request and response proofs in both directions. The caller binds its role, complete principal, semantic operation and resource, request identity, timestamp, and canonical body digest; the authority reserves the replay identity before dispatch. The response or callback is likewise signed and verified against the exact public service principal and role pinned for that connection before its payload is trusted. Trust therefore comes from operator-configured public principals and authority bindings, never from an address or principal asserted inside the payload, an administrator token, or access to either side's signer credential.
 
 ### Terms
 

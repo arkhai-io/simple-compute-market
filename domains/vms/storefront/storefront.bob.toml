@@ -1,16 +1,13 @@
-# Bob (seller) — local docker-compose stack.
-# Anvil default account #2; deterministic vanity contract addresses.
-# DO NOT use these keys on any public network.
-#
-# Mounted into the bob-storefront container at /etc/arkhai/storefront.toml.
-# XDG_CONFIG_HOME=/etc tells dynaconf to look here.
+# Bob (seller) local Compose profile. Public marketplace identity and EVM
+# mechanism address are configuration; signing credentials are injected by
+# Compose Secrets through ARKHAI_IDENTITY_CREDENTIAL and
+# STOREFRONT_WALLET__PRIVATE_KEY.
 
 agent_id            = "bob"
 port                = 8001
 base_url            = "http://bob-storefront:8001/"
 db_path             = "./src/market_storefront/data/storefront/agent.db"
 log_file_path       = "./logs/bob.log"
-admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
 # The bundled kvm1-machine.csv is the local dev inventory. Bind-mounted into
 # the container at /app/resources.csv by `make deploy-storefront`.
@@ -18,9 +15,20 @@ admin_api_key       = "test-api-key"
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"
 
+[identity.principal]
+scheme = "eip191"
+identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+[identity.administrators.operator]
+principal = { scheme = "eip191", identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc" }
+
+[identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
+
 [wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
 
 [chains.anvil]
@@ -37,11 +45,20 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 # fall back to single-public-registry behaviour.
 urls                      = ["http://registry:8080", "http://registry-b:8080"]
 
-# Per-registry bearer token. The matching key was seeded into
-# registry-b at startup via REGISTRY_BOOTSTRAP_API_KEY in compose.
-# Public registries (no entry here) get no Authorization header.
-[registry.auth]
-"http://registry-b:8080"  = "test-buyer-token"
+[registry.authorities."http://registry:8080"]
+authority = "registry"
+principals = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [
+  { scheme = "eip191", identifier = "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65" },
+]
+
+# The private registry bearer token belongs in the mounted
+# storefront.secrets.toml under [registry.auth].
 
 # The site authority is hosted by the provisioning service
 # (authority_url defaults to provisioning.service_url). Poll fast —
@@ -64,6 +81,11 @@ mode        = "http"
 # Mock provisioning responds in milliseconds; poll frequently so the
 # storefront sees job completion quickly without waiting the 15s production default.
 poll_interval = 1
+
+[provisioning.identity]
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
 
 [negotiation]
 # Ordered policies run per round. Guards short-circuit with

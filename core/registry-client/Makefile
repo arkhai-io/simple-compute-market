@@ -1,12 +1,15 @@
 DIST_DIR ?= ../../.dist
 
-.PHONY: build test typecheck
+.PHONY: build reinit test typecheck
 
 build: ## Build the wheel into the shared .dist/
 	uv build --wheel --out-dir $(DIST_DIR)
 
-test: ## Run the test suite
+reinit: ## Refresh released identity and registry-client packages
+	uv sync --dev --find-links $(DIST_DIR) --upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity --reinstall-package arkhai-core-registry-client
+
+test: reinit ## Run the test suite
 	uv run --find-links $(DIST_DIR) pytest tests -q
 
-typecheck: ## Run static type checks
+typecheck: reinit ## Run static type checks
 	uv run mypy src

@@ -16,6 +16,7 @@ from arkhai_bare_metal import (
     BareMetalTerms,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from market_identity import Ed25519Signer
 
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -78,7 +79,8 @@ async def test_all_domain_payloads_round_trip_after_restart(tmp_path) -> None:
         status="open",
         created_at=NOW.isoformat(),
         updated_at=NOW.isoformat(),
-        seller="seller-1",
+        seller_principal=Ed25519Signer(bytes.fromhex("22" * 32)).identity,
+        storefront_url="http://seller:8000",
         listing=listing,
         accepted_escrows=[],
     )

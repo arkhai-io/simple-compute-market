@@ -24,7 +24,11 @@ init: verify-hosted-release ## Create or update the environment
 reinit: verify-hosted-release ## Reinstall the local package environment
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-hosted-settlement-client \
-		--reinstall-package arkhai-hosted-settlement-client
+		--reinstall-package arkhai-hosted-settlement-client \
+		--upgrade-package arkhai-kit-identity \
+		--reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-kit-settlement-runtime \
+		--reinstall-package arkhai-kit-settlement-runtime
 
 test: reinit ## Run the focused unit suite
 	uv run pytest tests/unit -q

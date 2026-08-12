@@ -16,7 +16,7 @@ from market_storefront.publication_wiring import (
 def _vm_callbacks() -> VmPublicationSourceCallbacks:
     return VmPublicationSourceCallbacks(
         open_keys=lambda _db: {"open"},
-        close_stale=lambda _db, _url, _key: ["closed"],
+        close_stale=lambda _db, _url: ["closed"],
         available_candidates=lambda _db: [{"resource_id": "vm-1"}],
         offer_resource=lambda candidate: {"resource_id": candidate["resource_id"]},
         record_published=lambda *_args: None,
@@ -29,7 +29,7 @@ def _bare_metal_callbacks(
 ) -> BareMetalPublicationSourceCallbacks:
     return BareMetalPublicationSourceCallbacks(
         capacity_snapshot=lambda: snapshot,
-        close_listing=lambda _url, listing_id, _key: {
+        close_listing=lambda _url, listing_id: {
             "status": "closed",
             "listing_id": listing_id,
         },
@@ -46,7 +46,7 @@ def test_build_vm_publication_source_kwargs_maps_callbacks() -> None:
     kwargs = build_vm_publication_source_kwargs(callbacks)
 
     assert kwargs["open_keys"]("db") == {"open"}
-    assert kwargs["close_stale"]("db", "url", None) == ["closed"]
+    assert kwargs["close_stale"]("db", "url") == ["closed"]
     assert kwargs["available_candidates"]("db") == [{"resource_id": "vm-1"}]
     assert kwargs["offer_resource"]({"resource_id": "vm-1"}) == {
         "resource_id": "vm-1",
@@ -59,7 +59,7 @@ def test_build_bare_metal_publication_source_kwargs_normalizes_missing_snapshot(
     )
 
     assert kwargs["capacity_snapshot"]() == []
-    assert kwargs["close_listing"]("url", "listing-1", None)["status"] == "closed"
+    assert kwargs["close_listing"]("url", "listing-1")["status"] == "closed"
     assert kwargs["publish_existing_listing"](listing_id="listing-1")["status"] == "published"
 
 

@@ -30,7 +30,7 @@ from domains.vms.listings.resource_csv_importer import (
 )
 from market_settlement_runtime import settlement_migrations
 
-from .config import settings
+from .config import BASE_URL_OVERRIDE, resolve_marketplace_signer, settings
 from .migrations import (  # noqa: F401 — re-exported (tests import via here)
     VM_MIGRATIONS,
     synthesize_accepted_escrows_from_demand,
@@ -1233,5 +1233,10 @@ _sqlite_client: SQLiteClient | None = None
 def get_sqlite_client() -> SQLiteClient:
     global _sqlite_client
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(db_path=settings.db_path)
+        signer = resolve_marketplace_signer()
+        _sqlite_client = SQLiteClient(
+            db_path=settings.db_path,
+            local_listing_principal=signer.identity,
+            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
+        )
     return _sqlite_client

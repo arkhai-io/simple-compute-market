@@ -53,10 +53,10 @@ class SystemService:
             "checks": checks,
         }
         if include_registry:
-            from apicredits_storefront.utils.config import settings
-
-            wallet = (settings.wallet.address or "").lower() or None
-            result["agent_id"] = wallet
+            signer = _container.resolved_marketplace_signer
+            result["principal"] = (
+                signer.identity.model_dump(mode="json") if signer else None
+            )
         return result
 
     async def _registry_check(self) -> str:

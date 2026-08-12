@@ -66,7 +66,11 @@ def test_runnable_http_contract_excludes_fulfillment_claims() -> None:
         for fragment in ("fulfillment", "provision", "claim", "collect")
     )
     settle_schema = app.openapi()["components"]["schemas"]["BareMetalSettleRequest"]
-    assert set(settle_schema["properties"]) == {"negotiation_id", "buyer_address"}
+    assert set(settle_schema["properties"]) == {
+        "negotiation_id",
+        "buyer_principal",
+        "buyer_evm_address",
+    }
 
 
 def test_importing_app_does_not_construct_publication_source() -> None:

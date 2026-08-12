@@ -32,7 +32,12 @@ from market_storefront.services.vm_fulfillment_service import (
 from market_storefront.services.vm_job_spec_service import (
     build_provisioning_job_spec as _vm_build_provisioning_job_spec,
 )
-from market_storefront.utils.config import BASE_URL_OVERRIDE, CHAINS, settings
+from market_storefront.utils.config import (
+    BASE_URL_OVERRIDE,
+    CHAINS,
+    get_provisioning_authorities,
+    settings,
+)
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -300,6 +305,21 @@ async def _apply_fulfillment_failure_policy_adapter(
     )
 
 
+def _provisioning_client(*, timeout: float) -> ComputeProvisioningClient:
+    from market_storefront import container
+
+    signer = container.resolved_marketplace_signer
+    if signer is None:
+        raise RuntimeError("storefront marketplace signer is unavailable")
+    return ComputeProvisioningClient(
+        settings.provisioning.service_url,
+        signer=signer,
+        caller_role="seller",
+        expected_authorities=get_provisioning_authorities(),
+        timeout=timeout,
+    )
+
+
 async def _register_vm_lease_with_settings(
     *,
     resource_id: str | None = None,
@@ -321,11 +341,7 @@ async def _register_vm_lease_with_settings(
     lease_end_dt = datetime.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
         tzinfo=timezone.utc,
     )
-    async with ComputeProvisioningClient(
-        settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
-        timeout=10,
-    ) as client:
+    async with _provisioning_client(timeout=10) as client:
         await client.register_lease(
             LeaseRegistration(
                 capacity_reservation_id=capacity_reservation_id or resource_id,
@@ -361,11 +377,7 @@ async def terminate_vm_lease(
     rather than needing to add provisioning-service surface area for it
     later. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
     """
-    async with ComputeProvisioningClient(
-        settings.provisioning.service_url,
-        admin_key=settings.admin_api_key,
-        timeout=10,
-    ) as client:
+    async with _provisioning_client(timeout=10) as client:
         await client.terminate_lease(
             capacity_reservation_id,
             LeaseTermination(reason=reason),

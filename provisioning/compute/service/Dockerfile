@@ -85,6 +85,12 @@ COPY --chown=appuser:appuser .dist/ /dist/
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
     uv venv /app/.venv && \
     uv pip install --python /app/.venv/bin/python --find-links /dist \
+        --refresh-package arkhai-compute-provisioning-service \
+        --refresh-package arkhai-vms-provisioning-adapter \
+        --refresh-package arkhai-bare-metal-provisioning-adapter \
+        --refresh-package arkhai-core-storefront-client \
+        --refresh-package arkhai-kit-identity \
+        --refresh-package arkhai-kit-site-client \
         'arkhai-compute-provisioning-service[adapters]==0.1.0'
 
 # Stage 2: Runtime

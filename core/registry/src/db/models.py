@@ -9,6 +9,8 @@ from sqlalchemy import (
     Enum as SQLEnum,
     ForeignKey,
     Index,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -19,14 +21,7 @@ Base = declarative_base()
 
 
 class Publisher(Base):
-    """A principal that owns listings.
-
-    Identified by one or more :class:`PublisherIdentity` rows — today a
-    single ``eip191`` wallet. Created lazily on the first signed publish;
-    nothing is registered ahead of time. ``publisher_id`` is local to this
-    indexer — correlating a publisher across registries goes through the
-    shared ``(scheme, identifier)`` claims, not this surrogate id.
-    """
+    """A stable subject that owns listings through principal bindings."""
 
     __tablename__ = "publishers"
 
@@ -50,15 +45,15 @@ class Publisher(Base):
     listings = relationship(
         "Listing", back_populates="publisher", cascade="all, delete-orphan"
     )
+    rotations = relationship(
+        "PublisherIdentityRotation",
+        back_populates="publisher",
+        cascade="all, delete-orphan",
+    )
 
 
 class PublisherIdentity(Base):
-    """A verified signing identity belonging to a publisher.
-
-    ``(scheme, identifier)`` is globally unique; ``eip191`` identifiers are
-    lowercased wallet addresses. One row per publisher today; the seam for
-    linking additional identities (other chains/schemes) later.
-    """
+    """A canonical principal binding retained through its full lifecycle."""
 
     __tablename__ = "identities"
 
@@ -70,6 +65,10 @@ class PublisherIdentity(Base):
     )
     scheme = Column(String, nullable=False)
     identifier = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="primary", server_default="primary")
+    active_until = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+    disabled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
@@ -79,6 +78,82 @@ class PublisherIdentity(Base):
     __table_args__ = (
         Index("ux_identities_scheme_identifier", "scheme", "identifier", unique=True),
         Index("idx_identities_publisher_id", "publisher_id"),
+        Index(
+            "ux_identities_one_primary_per_publisher",
+            "publisher_id",
+            unique=True,
+            sqlite_where=text("status = 'primary'"),
+            postgresql_where=text("status = 'primary'"),
+        ),
+    )
+
+
+class PublisherReplayReservation(Base):
+    """A durable principal-scoped request reservation and cached outcome."""
+
+    __tablename__ = "publisher_replay_reservations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    principal_scheme = Column(String, nullable=False)
+    principal_identifier = Column(String, nullable=False)
+    request_id = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+    response_status = Column(Integer, nullable=True)
+    response_body = Column(JSON, nullable=True)
+    lease_owner = Column(String, nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_scheme",
+            "principal_identifier",
+            "request_id",
+            name="uq_publisher_replay_principal_request",
+        ),
+        Index("idx_publisher_replay_created_at", "created_at"),
+        Index("idx_publisher_replay_lease_expires_at", "lease_expires_at"),
+    )
+
+
+class PublisherIdentityRotation(Base):
+    """Idempotent two-proof transition between publisher principals."""
+
+    __tablename__ = "publisher_identity_rotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    publisher_id = Column(
+        Integer,
+        ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    nonce = Column(String, nullable=False)
+    intent_hash = Column(String, nullable=False)
+    current_scheme = Column(String, nullable=False)
+    current_identifier = Column(String, nullable=False)
+    replacement_scheme = Column(String, nullable=False)
+    replacement_identifier = Column(String, nullable=False)
+    overlap_seconds = Column(Integer, nullable=False)
+    expires_at = Column(Integer, nullable=False)
+    status = Column(String, nullable=False)
+    applied_at = Column(
+        DateTime(timezone=True), nullable=False, default=datetime.utcnow
+    )
+    retire_at = Column(DateTime(timezone=True), nullable=True)
+    retired_at = Column(DateTime(timezone=True), nullable=True)
+
+    publisher = relationship("Publisher", back_populates="rotations")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "publisher_id",
+            "nonce",
+            name="uq_publisher_rotation_nonce",
+        ),
+        Index("idx_publisher_rotations_publisher_id", "publisher_id"),
     )
 
 

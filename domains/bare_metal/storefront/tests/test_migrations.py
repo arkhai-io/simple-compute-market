@@ -5,6 +5,7 @@ import sqlite3
 import pytest
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from market_settlement_runtime import settlement_migrations
+from market_identity import Ed25519Signer
 
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 
@@ -30,7 +31,8 @@ async def test_bare_metal_migration_upgrades_existing_core_database(tmp_path) ->
         offer_resource={"kind": "legacy"},
         fulfillment_resource=None,
         max_duration_seconds=None,
-        seller="seller",
+        storefront_url="http://seller:8000",
+        seller_principal=Ed25519Signer(bytes.fromhex("22" * 32)).identity,
     )
     del core
 

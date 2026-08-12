@@ -34,7 +34,9 @@ from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
 from hosted_settlement_client import ConditionDescriptor
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
+from market_identity import Identity, Signer
 from market_hosted_settlement import MECHANISM
+from market_storefront.models.listing_models import HostedFiatSettlementConfig
 
 logger = logging.getLogger(__name__)
 _CURRENCY = re.compile(r"^[a-z]{3}$")
@@ -46,6 +48,7 @@ def _build_hosted_settlement_option(
     currency: str,
     rate_minor_units: int,
     condition: ConditionDescriptor,
+    claimant_principal: Identity,
 ) -> SettlementOption:
     if not account_ref or account_ref != account_ref.strip():
         raise ValueError("hosted settlement account_ref must be non-empty and trimmed")
@@ -60,6 +63,7 @@ def _build_hosted_settlement_option(
     rates = [RateValue(field="amount", per="hour", value=rate_minor_units)]
     params = {
         "account_ref": account_ref,
+        "claimant_principal": claimant_principal.model_dump(mode="json"),
         "funds_flow": "separate_charges_transfers",
         "payment_method_types": ["card"],
         "condition": condition.model_dump(mode="json"),
@@ -83,31 +87,26 @@ class ListingService:
         self,
         *,
         sqlite_client: Any,
+        marketplace_signer: Signer,
         alkahest_clients: dict[str, Any] | None = None,
         settlement_composition_provider: Callable[[], Any] | None = None,
     ) -> None:
-        from market_storefront.utils.config import CHAINS, settings
+        from market_storefront.utils.config import (
+            CHAINS,
+            get_evm_wallet_private_key,
+        )
 
         self._db = sqlite_client
+        self._marketplace_signer = marketplace_signer
         self._alkahest_clients: dict[str, Any] = alkahest_clients or {}
         self._settlement_composition_provider = settlement_composition_provider or (
             lambda: None
         )
 
-        priv_key = (settings.wallet.private_key or "").strip()
-        self._token_transfers_available: bool = bool(priv_key and CHAINS)
-        self._alkahest_available: bool = bool(self._alkahest_clients)
-
-        if not self._token_transfers_available:
-            logger.warning(
-                "[STOREFRONT] Token transfer operations (refund) unavailable — "
-                "wallet.private_key and at least one [chains.<name>] entry must be set."
-            )
-        if not self._alkahest_available:
-            logger.warning(
-                "[STOREFRONT] On-chain escrow operations (claim, reclaim, arbitrate) unavailable — "
-                "wallet.private_key and at least one [chains.<name>] entry must be set."
-            )
+        self._token_transfers_available = bool(
+            CHAINS and get_evm_wallet_private_key()
+        )
+        self._alkahest_available = bool(self._alkahest_clients)
 
     async def _resolve_chain_for_escrow(
         self, escrow_uid: str
@@ -272,12 +271,18 @@ class ListingService:
         self,
         request: CreateListingRequest,
     ) -> dict[str, Any] | None:
-        spec = request.hosted_settlement
-        if spec is None:
+        raw_config = request.settlement_config
+        if raw_config is None:
             return None
+        spec = (
+            raw_config
+            if isinstance(raw_config, HostedFiatSettlementConfig)
+            else HostedFiatSettlementConfig.model_validate(raw_config)
+        )
         from market_storefront.utils.config import settings
 
-        hosted_config = getattr(settings, "hosted_settlement", None)
+        settlement_config = getattr(settings, "settlement", None)
+        hosted_config = getattr(settlement_config, "hosted", None)
         if not hosted_config or not bool(getattr(hosted_config, "enabled", False)):
             logger.warning(
                 "[LISTINGS] Hosted settlement option suppressed: integration disabled"
@@ -315,7 +320,7 @@ class ListingService:
             expected_schema = int(
                 getattr(hosted_config, "expected_schema_version", 0) or 0
             )
-            if not expected_manifest or not expected_contract or expected_schema != 3:
+            if not expected_manifest or not expected_contract or expected_schema != 4:
                 raise ValueError("hosted release pin is incomplete")
             required = {
                 "conditional-escrow.v1",
@@ -350,6 +355,7 @@ class ListingService:
                 currency=spec.currency,
                 rate_minor_units=spec.rate_minor_units,
                 condition=condition,
+                claimant_principal=self._marketplace_signer.identity,
             )
         except Exception:
             logger.warning(
@@ -384,7 +390,7 @@ class ListingService:
                 "token-offer shape was removed with the demand_resource cutover)."
             )
         if not request.accepted_escrows and not (
-            request.settlement_options or request.hosted_settlement
+            request.settlement_options or request.settlement_config
         ):
             raise ValueError(
                 "at least one accepted escrow or settlement input is required"
@@ -398,7 +404,7 @@ class ListingService:
             option = SettlementOption.model_validate(raw_option)
             if option.mechanism == "fiat.stripe.v1":
                 raise ValueError(
-                    "fiat.stripe.v1 options require hosted_settlement preflight input"
+                    "fiat.stripe.v1 options require settlement_config preflight input"
                 )
             settlement_options.append(option.model_dump(mode="json"))
         return (
@@ -437,7 +443,8 @@ class ListingService:
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),
-            seller=BASE_URL_OVERRIDE,
+            storefront_url=BASE_URL_OVERRIDE,
+            seller_principal=self._marketplace_signer.identity,
             offer_resource=offer,
             accepted_escrows=accepted_escrows,
             settlement_options=settlement_options,
@@ -461,7 +468,8 @@ class ListingService:
                 demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
-                seller=listing_dict.get("seller") or BASE_URL_OVERRIDE,
+                storefront_url=listing.storefront_url,
+                seller_principal=listing.seller_principal,
                 oracle_address=listing_dict.get("oracle_address"),
                 paused=bool(request.paused),
             )
@@ -595,7 +603,8 @@ class ListingService:
             order=order,
             payload={
                 "listing_id": listing_id,
-                "buyer_address": payload.buyer_address,
+                "buyer_principal": payload.buyer_principal.model_dump(mode="json"),
+                "buyer_evm_address": payload.buyer_evm_address,
                 "amount": payload.amount,
                 "token": payload.token,
             },
@@ -605,7 +614,10 @@ class ListingService:
             _, status, body = outcome
             return status, body
         params = outcome[1]
-        from market_storefront.utils.config import CHAINS, settings
+        from market_storefront.utils.config import (
+            CHAINS,
+            get_evm_wallet_private_key,
+        )
         from market_storefront.utils.token_transfer import transfer_erc20
 
         chain_name = self._resolve_chain_for_listing(order or {})
@@ -620,7 +632,7 @@ class ListingService:
             }
         try:
             result = await transfer_erc20(
-                private_key=settings.wallet.private_key.strip(),
+                private_key=get_evm_wallet_private_key(),
                 rpc_url=chain_cfg.rpc_url,
                 token_address=params["token_address"],
                 to_address=params["buyer_address"],
@@ -793,7 +805,7 @@ class ListingService:
         try:
             reclaimed = await composition.runtime.reclaim(
                 obligation_ref=str(obligation_ref),
-                local_role="seller",
+                local_role="buyer",
                 worker_id=f"manual-reclaim:{listing_id}",
             )
         except Exception as exc:

@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 import main  # noqa: E402  (env must be set first)
 
 AUTH = {"X-Admin-Key": "test-admin-key"}
+BUYER_1 = "0xabcdef0000000000000000000000000000000001"
+BUYER_2 = "0xabcdef0000000000000000000000000000000002"
+MALLORY = "0x9999000000000000000000000000000000000003"
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +51,7 @@ def test_full_deal_flow(client):
             "escrow_uid": "0xdeal1",
             "quantity": 3,
             "key": {"mode": "new"},
-            "buyer": {"scheme": "wallet", "id": "0xBuyer1"},
+            "buyer": {"scheme": "eip191", "identifier": BUYER_1.upper().replace("0X", "0x")},
         },
         headers=AUTH,
     )
@@ -87,7 +90,7 @@ def test_full_deal_flow(client):
             "escrow_uid": "0xdeal2",
             "quantity": 2,
             "key": {"mode": "existing", "key_id": key_id},
-            "buyer": {"scheme": "wallet", "id": "0xbuyer1"},  # case-insensitive
+            "buyer": {"scheme": "eip191", "identifier": BUYER_1},
         },
         headers=AUTH,
     )
@@ -99,14 +102,14 @@ def test_full_deal_flow(client):
     )
     assert r.status_code == 200 and r.json()["balance"] == 1
 
-    # A stranger cannot top up the wallet-bound key.
+    # A stranger cannot top up the principal-bound key.
     r = client.post(
         "/api/v1/issuance",
         json={
             "escrow_uid": "0xdeal3",
             "quantity": 1,
             "key": {"mode": "existing", "key_id": key_id},
-            "buyer": {"scheme": "wallet", "id": "0xMallory"},
+            "buyer": {"scheme": "eip191", "identifier": MALLORY},
         },
         headers=AUTH,
     )
@@ -116,7 +119,7 @@ def test_full_deal_flow(client):
     # Guard lookup: ownership claim, no secrets anywhere.
     r = client.get(f"/api/v1/keys/{key_id}", headers=AUTH)
     detail = r.json()
-    assert detail["owner_scheme"] == "wallet"
+    assert detail["owner_scheme"] == "eip191"
     assert "secret" not in detail and "secret_hash" not in detail
 
 
@@ -127,7 +130,7 @@ def test_batch_consume_and_admin_surface(client):
             "escrow_uid": "0xdeal4",
             "quantity": 5,
             "key": {"mode": "new"},
-            "buyer": {"scheme": "wallet", "id": "0xBuyer2"},
+            "buyer": {"scheme": "eip191", "identifier": BUYER_2},
         },
         headers=AUTH,
     )

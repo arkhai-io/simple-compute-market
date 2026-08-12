@@ -39,6 +39,11 @@ from domains.vms.buyer.buyer_client import (
     ResumeState,
     negotiate_with_seller,
 )
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 
 
 _BUYER_PK = "0x" + "11" * 32
@@ -54,6 +59,7 @@ _BUYER_ADDR = "0x" + "cc" * 20
 class _MockResponse:
     status: int
     text: str
+    headers: dict[str, str] | None = None
 
     def read(self):
         return self.text.encode("utf-8")
@@ -83,7 +89,11 @@ def _urlopen_capture(responses):
             "body": json.loads(req.data.decode("utf-8")) if req.data else None,
         })
         body = next(it)
-        return _MockResponse(status=200, text=json.dumps(body))
+        return _MockResponse(
+            status=200,
+            text=json.dumps(body),
+            headers=signed_response_headers(req, body),
+        )
 
     return _fn, seen
 
@@ -123,26 +133,21 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
     ])
     mock_urlopen.side_effect = fake
 
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,           # ignored in resume mode
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="accept", proposal={"fields": {"amount": 90}}),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-resumed",
-            transcript=[
-                NegotiationRound(round_number=0, sender="us", action="initial", proposal={"fields": {"amount": 50}}),
-                NegotiationRound(round_number=0, sender="them", action="counter", proposal={"fields": {"amount": 90}}),
-            ],
-            last_seller_proposal={"fields": {"amount": 90}},
-            rounds_completed=1,
-        ),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,           # ignored in resume mode
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="accept", proposal={"fields": {"amount": 90}}),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-resumed",
+        transcript=[
+            NegotiationRound(round_number=0, sender="us", action="initial", proposal={"fields": {"amount": 50}}),
+            NegotiationRound(round_number=0, sender="them", action="counter", proposal={"fields": {"amount": 90}}),
+        ],
+        last_seller_proposal={"fields": {"amount": 90}},
+        rounds_completed=1,
+    ),)
 
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 90
@@ -155,42 +160,35 @@ def test_resume_buyer_accepts_recovered_seller_price(mock_urlopen):
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
 def test_resume_signed_message_uses_continue_not_new(mock_urlopen):
-    """The EIP-191 message must be `negotiate_continue:{neg_id}:...`,
-    proving the resume path skipped /negotiate/new entirely."""
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
+    """Resume uses the v2 Ed25519 request contract on the existing thread."""
 
     fake, seen = _urlopen_capture([
         {"action": "accept", "proposal": {"fields": {"amount": 80}}},
     ])
     mock_urlopen.side_effect = fake
 
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="accept", proposal={"fields": {"amount": 80}}),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-xyz",
-            transcript=[],
-            last_seller_proposal={"fields": {"amount": 80}},
-            rounds_completed=1,
-        ),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="accept", proposal={"fields": {"amount": 80}}),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-xyz",
+        transcript=[],
+        last_seller_proposal={"fields": {"amount": 80}},
+        rounds_completed=1,
+    ),)
 
     hdrs = {k.lower(): v for k, v in seen[0]["headers"].items()}
-    sig = hdrs["x-signature"]
-    ts = hdrs["x-timestamp"]
-    msg_continue = encode_defunct(text=f"negotiate_continue:neg-xyz:{ts}")
-    recovered = Account.recover_message(msg_continue, signature=sig)
-    # Recovered must match the buyer's wallet derived from _BUYER_PK.
-    expected = Account.from_key(_BUYER_PK).address
-    assert recovered.lower() == expected.lower()
+    assert hdrs["x-market-signature-version"] == "arkhai.market-request-signature.v2"
+    assert hdrs["x-market-identity-scheme"] == "ed25519"
+    assert (
+        hdrs["x-market-identity-identifier"]
+        == BUYER_SIGNER.identity.identifier
+    )
+    assert hdrs["x-market-signature"]
+    assert seen[0]["url"].endswith("/api/v1/negotiate/neg-xyz")
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
@@ -201,23 +199,18 @@ def test_resume_buyer_counters_then_seller_accepts(mock_urlopen):
     ])
     mock_urlopen.side_effect = fake
 
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-2",
-            transcript=[],
-            last_seller_proposal={"fields": {"amount": 80}},
-            rounds_completed=1,
-        ),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-2",
+        transcript=[],
+        last_seller_proposal={"fields": {"amount": 80}},
+        rounds_completed=1,
+    ),)
 
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 70
@@ -236,23 +229,18 @@ def test_resume_buyer_exits(mock_urlopen):
     ])
     mock_urlopen.side_effect = fake
 
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="exit", reason="ceiling_breached"),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-3",
-            transcript=[],
-            last_seller_proposal={"fields": {"amount": 500}},
-            rounds_completed=2,
-        ),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="exit", reason="ceiling_breached"),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-3",
+        transcript=[],
+        last_seller_proposal={"fields": {"amount": 500}},
+        rounds_completed=2,
+    ),)
 
     assert outcome.status == "exited"
     assert outcome.reason == "ceiling_breached"
@@ -270,21 +258,16 @@ def test_resume_without_last_seller_price_raises(mock_urlopen):
     mock_urlopen.side_effect = AssertionError("must not be called")
 
     with pytest.raises(RuntimeError, match="no seller counter proposal"):
-        negotiate_with_seller(
-            seller_url="http://seller:8001",
-            buyer_address=_BUYER_ADDR,
-            buyer_private_key=_BUYER_PK,
-            listing_id="L-1",
-            initial_price=0,
-            max_price=100,
-            chain=_fixed_chain([]),
-            resume=ResumeState(
-                negotiation_id="neg-x",
-                transcript=[],
-                last_seller_proposal=None,
-                rounds_completed=0,
-            ),
-        )
+        negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+        initial_price=0,
+        max_price=100,
+        chain=_fixed_chain([]),
+        resume=ResumeState(
+            negotiation_id="neg-x",
+            transcript=[],
+            last_seller_proposal=None,
+            rounds_completed=0,
+        ),)
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
@@ -296,23 +279,18 @@ def test_resume_carries_rounds_completed_into_outcome(mock_urlopen):
     ])
     mock_urlopen.side_effect = fake
 
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="accept", proposal={"fields": {"amount": 60}}),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-late",
-            transcript=[],
-            last_seller_proposal={"fields": {"amount": 60}},
-            rounds_completed=3,
-        ),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="accept", proposal={"fields": {"amount": 60}}),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-late",
+        transcript=[],
+        last_seller_proposal={"fields": {"amount": 60}},
+        rounds_completed=3,
+    ),)
 
     assert outcome.rounds == 3
 
@@ -327,24 +305,19 @@ def test_resume_skips_negotiate_new_endpoint_entirely(mock_urlopen):
     ])
     mock_urlopen.side_effect = fake
 
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="L-1",
-        initial_price=0,
-        max_price=100,
-        chain=_fixed_chain([
-            NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
-            NegotiationDecision(action="accept", proposal={"fields": {"amount": 70}}),
-        ]),
-        resume=ResumeState(
-            negotiation_id="neg-multi",
-            transcript=[],
-            last_seller_proposal={"fields": {"amount": 85}},
-            rounds_completed=1,
-        ),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="L-1",
+    initial_price=0,
+    max_price=100,
+    chain=_fixed_chain([
+        NegotiationDecision(action="counter", proposal={"fields": {"amount": 70}}),
+        NegotiationDecision(action="accept", proposal={"fields": {"amount": 70}}),
+    ]),
+    resume=ResumeState(
+        negotiation_id="neg-multi",
+        transcript=[],
+        last_seller_proposal={"fields": {"amount": 85}},
+        rounds_completed=1,
+    ),)
 
     assert len(seen) == 2
     for call in seen:

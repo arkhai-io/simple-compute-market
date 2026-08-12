@@ -4,12 +4,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_identity import Ed25519Signer
 
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
 from market_storefront.utils.sqlite_client import SQLiteClient
+
+BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
+BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 
 
 @pytest.mark.asyncio
@@ -88,7 +92,11 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         async def load_negotiation_thread_row(self, *, negotiation_id):
             return {
                 "negotiation_id": negotiation_id,
-                "buyer": "0x" + "bb" * 20,
+                "buyer_principal": BUYER_PRINCIPAL.model_dump(mode="json"),
+                "buyer_evm_address": BUYER_EVM_ADDRESS,
+                "seller_principal": Ed25519Signer(b"\x52" * 32).identity.model_dump(
+                    mode="json"
+                ),
                 "buyer_escrow_proposal": {
                     "chain_name": "anvil",
                     "escrow_address": "0x" + "aa" * 20,
@@ -118,10 +126,12 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         lambda: ["refund"],
     )
     monkeypatch.setattr(
-        "market_storefront.failure_actions.settings",
-        SimpleNamespace(
-            wallet=SimpleNamespace(private_key="seller-pk", address="0xseller")
-        ),
+        "market_storefront.failure_actions.get_evm_wallet_private_key",
+        lambda: "seller-pk",
+    )
+    monkeypatch.setattr(
+        "market_storefront.failure_actions.get_evm_wallet_address",
+        lambda: "0x" + "dd" * 20,
     )
     monkeypatch.setattr(
         "market_storefront.failure_actions.stage_event",
@@ -166,7 +176,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         private_key="seller-pk",
         rpc_url="http://rpc",
         obligation_data={"token": "0x" + "cc" * 20, "amount": 42},
-        to_address="0x" + "bb" * 20,
+        to_address=BUYER_EVM_ADDRESS,
     )
     assert db.listing_updates == [{"listing_id": "listing-1", "status": "refunded"}]
     assert db.escrow_updates == [{"escrow_uid": "escrow-1", "status": "refunded"}]

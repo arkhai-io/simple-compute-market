@@ -86,6 +86,29 @@ configuration: the shared non-secret values merge through one profile,
 and a pod needing secret material mounts an additional Secret-backed
 profile on top.
 
+## Marketplace identity configuration
+
+Every authenticated role configures a canonical public marketplace principal
+(`scheme` plus `identifier`) and any service-peer trust pins in ordinary
+profile data. Its matching private credential is supplied through a separately
+mounted Secret-backed profile and is consumed only by the composition root
+that constructs the signer. Startup fails before authenticated routes,
+publication, negotiation, or settlement become available when the scheme is
+unsupported, the secret is absent, or the derived public principal does not
+match configuration.
+
+Ed25519 is the wallet-free default. EIP-191 is an explicit marketplace
+identity choice. Wallet, RPC, chain ID, deployed address, and gas settings are
+separate optional configuration rendered only for a selected EVM effect; a
+non-EVM storefront or buyer profile does not require or infer them.
+
+ConfigMaps, rendered command arguments, image layers, release artifacts, logs,
+probes, and examples contain no private signing material. Public principals
+and trust pins may appear in those public carriers. Provisioning and other
+service-peer connections pin the exact expected principal and role alongside
+their operator-configured site binding; there is no administrator-key,
+address-body, or private-key fallback.
+
 ## Stateful service persistence
 
 Each service owns its own database; there is no shared database between
@@ -117,28 +140,58 @@ deployment topology:
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
 
+Identity-bearing database migrations validate the complete service-owned
+population and commit canonical principals, replay state, and ownership
+history transactionally while preserving public cross-service and operation
+identifiers. Malformed or conflicting owners, partial relationships, schema
+drift, and old signature versions fail closed. Versioned buyer run logs have
+their own explicit migration before recovery.
+
+For an identity-contract cutover, authenticated mutations remain quiesced
+until every participating registry, storefront, service peer, hosted
+authority, and exact client reports the pinned version and capabilities.
+Rollback is limited to the boundary before the identity schema cutover and
+before provider or settlement mutations resume. After version 2 effects run
+against migrated state, operators recover by rolling forward from current
+identity history and operation journals rather than restoring stale state.
+
+
 ## Hosted settlement consumer configuration
 
 Hosted fiat settlement is disabled by default. Enabling
 `[hosted_settlement]` requires an HTTPS service URL (loopback HTTP is
 development-only), authority/environment identity, exact manifest digest and
-contract version, required capability list, request-signing credential, and
-operator-owned resolver IDs. Resolver entries may select a configured
-marketplace chain and evidence mode; negotiated data never supplies an RPC
-URL, service URL, or signing key.
+contract version, required identity capabilities, a public storefront
+principal with its Secret-backed signer credential, and operator-owned
+resolver IDs. Resolver entries may select a configured marketplace chain and
+evidence mode; negotiated data never supplies an RPC URL, service URL, or
+signing key.
 
 The marketplace Helm chart renders only these storefront consumer settings.
 It does not deploy the hosted API/worker, migrations, database, ingress, EAS
 signer, Stripe credentials, or provider state. Those belong to the hosted
-service's independent release and chart. Enabled storefront startup verifies
-the exact health manifest/API/capabilities before accepting traffic.
+service's independent release and chart. The marketplace package and
+storefront consume the exact hosted client wheel and identity interface bound
+by that release manifest; editable sibling sources, copied hosted signing
+logic, and compatible-major substitution are rejected. Enabled storefront
+startup verifies the exact health manifest, API version, principal scheme, and
+identity capabilities before accepting traffic or publishing a fiat option.
 
-Local cross-repository E2E runs the normal VM stack with
-`compose.hosted-settlement.yml`. The overlay accepts only an image reference
-plus verified `sha256:` digest, a staged signed-release directory, and
-operator-generated service/storefront configuration files. It runs the
-service-owned migration, API, and single reconciliation worker against one
-shared volume; it never builds or imports the sibling service source.
+Local cross-repository Compose uses one verified supply-chain path. After the
+signed hosted release is staged, `make prepare-hosted-compose` verifies the
+configured trust policy, signed manifest, manifest-bound artifacts, and exact
+client wheel, then atomically generates
+`.dist/hosted-settlement-compose.env`. That file supplies the immutable
+`HOSTED_SETTLEMENT_VERIFIED_IMAGE=<trusted-repository>@sha256:<digest>` and
+verified manifest digest; it is generated input, not an operator selector.
+
+`make hosted-compose-up` depends on that preparation step and gives the
+generated env file to `compose.vms-fiat.yml`. Arbitrary or mismatched
+`HOSTED_SETTLEMENT_VERIFIED_IMAGE` values and legacy split image-reference or
+digest environment overrides fail during preparation, before Compose starts.
+The stack runs the service-owned migration, API, and single reconciliation
+worker from the exact trusted image against one shared volume; it never builds
+or imports the sibling service source.
 
 ## Current limits
 

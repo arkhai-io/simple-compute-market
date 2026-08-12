@@ -12,9 +12,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from market_identity import Identity, IdentityScheme
+
 from .models import canonical_json, derive_obligation_ref, obligation_payload_hash
 
 SETTLEMENT_MIGRATION_ID = "20260810_001_settlement_obligation_lifecycle"
+SETTLEMENT_PRINCIPAL_MIGRATION_ID = (
+    "20260811_003_settlement_principal_authorization"
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,8 @@ def _create_schema(conn: sqlite3.Connection) -> None:
           obligation_index INTEGER NOT NULL CHECK (obligation_index >= 0),
           obligation_hash TEXT NOT NULL,
           obligation TEXT NOT NULL,
+          payer_principal TEXT NOT NULL,
+          claimant_principal TEXT NOT NULL,
           mechanism_ref TEXT,
           mechanism_status TEXT,
           mechanism_state TEXT NOT NULL DEFAULT '{}',
@@ -145,6 +152,115 @@ def _extend_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _principal_from_legacy(
+    stored: str | None,
+    obligation: dict[str, Any],
+    field: str,
+) -> Identity:
+    candidates: list[Identity] = []
+    if stored is not None:
+        try:
+            candidates.append(Identity.model_validate(json.loads(stored)))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"settlement obligation has malformed {field} column"
+            ) from exc
+    nested = obligation.get(f"{field}_principal")
+    if nested is not None:
+        try:
+            candidates.append(Identity.model_validate(nested))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"settlement obligation has malformed {field}_principal"
+            ) from exc
+    legacy = obligation.get(field)
+    if not isinstance(legacy, str) or legacy not in ("buyer", "seller"):
+        try:
+            candidates.append(
+                Identity(
+                    scheme=IdentityScheme.EIP191,
+                    identifier=legacy,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"settlement obligation has malformed legacy {field}"
+            ) from exc
+    if not candidates:
+        raise ValueError(
+            f"settlement obligation cannot resolve {field}_principal"
+        )
+    principal = candidates[0]
+    if any(candidate != principal for candidate in candidates[1:]):
+        raise ValueError(
+            f"settlement obligation has ambiguous {field} identities"
+        )
+    return principal
+
+
+def _extend_principal_schema(conn: sqlite3.Connection) -> None:
+    known = _columns(conn, "settlement_obligations")
+    for name in ("payer_principal", "claimant_principal"):
+        if name not in known:
+            conn.execute(
+                f"ALTER TABLE settlement_obligations ADD COLUMN {name} "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+    rows = conn.execute(
+        "SELECT obligation_ref, obligation, payer_principal, claimant_principal "
+        "FROM settlement_obligations ORDER BY obligation_ref"
+    ).fetchall()
+    converted: list[tuple[str, str, str]] = []
+    for obligation_ref, raw, payer_raw, claimant_raw in rows:
+        try:
+            obligation = json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"settlement obligation {obligation_ref!r} has invalid JSON"
+            ) from exc
+        if not isinstance(obligation, dict):
+            raise ValueError(
+                f"settlement obligation {obligation_ref!r} is not an object"
+            )
+        payer = _principal_from_legacy(
+            payer_raw or None,
+            obligation,
+            "payer",
+        )
+        claimant = _principal_from_legacy(
+            claimant_raw or None,
+            obligation,
+            "claimant",
+        )
+        converted.append(
+            (
+                canonical_json(payer.model_dump(mode="json")),
+                canonical_json(claimant.model_dump(mode="json")),
+                str(obligation_ref),
+            )
+        )
+    conn.executemany(
+        "UPDATE settlement_obligations SET payer_principal=?, "
+        "claimant_principal=? WHERE obligation_ref=?",
+        converted,
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS settlement_principals_insert_required "
+        "BEFORE INSERT ON settlement_obligations "
+        "WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' "
+        "OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' "
+        "BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
+    )
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS settlement_principals_update_required "
+        "BEFORE UPDATE OF payer_principal, claimant_principal "
+        "ON settlement_obligations "
+        "WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' "
+        "OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' "
+        "BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
+    )
+
+
 def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
     if not _table_exists(conn, "settlement_claims"):
         return
@@ -218,6 +334,8 @@ def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
             raise ValueError(
                 "legacy settlement claim conflicts with an immutable obligation"
             )
+        payer = _principal_from_legacy(None, obligation, "payer")
+        claimant = _principal_from_legacy(None, obligation, "claimant")
         candidates.append(
             {
                 "claim_ref": str(claim_ref),
@@ -227,6 +345,12 @@ def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
                 "obligation_ref": obligation_ref,
                 "obligation_hash": obligation_hash,
                 "obligation": obligation,
+                "payer_principal": canonical_json(
+                    payer.model_dump(mode="json")
+                ),
+                "claimant_principal": canonical_json(
+                    claimant.model_dump(mode="json")
+                ),
                 "fulfillment_ref": fulfillment_ref,
                 "attempts": int(attempts or 0),
                 "next_attempt": next_attempt,
@@ -259,11 +383,12 @@ def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
             """
             INSERT OR IGNORE INTO settlement_obligations
               (obligation_ref, agreement_ref, obligation_index, obligation_hash,
-               obligation, mechanism_ref, mechanism_status, mechanism_state,
-               fulfillment_ref, materialization_state, condition_state,
+               obligation, payer_principal, claimant_principal, mechanism_ref,
+               mechanism_status, mechanism_state, fulfillment_ref,
+               materialization_state, condition_state,
                collection_state, reclaim_state, collection_receipt, last_error,
                version, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'ready', ?, ?, 'materialized', ?, ?,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, 'materialized', ?, ?,
                     'pending', ?, ?, 0, ?, ?)
             """,
             (
@@ -272,6 +397,8 @@ def _migrate_legacy_claims(conn: sqlite3.Connection) -> None:
                 item["index"],
                 item["obligation_hash"],
                 canonical_json(item["obligation"]),
+                item["payer_principal"],
+                item["claimant_principal"],
                 item["claim_ref"],
                 canonical_json(item["mechanism_state"]),
                 item["fulfillment_ref"],
@@ -345,6 +472,10 @@ def settlement_migrations() -> tuple[SettlementMigration, ...]:
         SettlementMigration(
             "20260810_002_settlement_servicing_runtime", _extend_schema
         ),
+        SettlementMigration(
+            SETTLEMENT_PRINCIPAL_MIGRATION_ID,
+            _extend_principal_schema,
+        ),
     )
 
 
@@ -353,6 +484,8 @@ class SettlementSQLiteRepository:
 
     _OBLIGATION_JSON_FIELDS = {
         "obligation",
+        "payer_principal",
+        "claimant_principal",
         "mechanism_state",
         "buyer_action",
         "materialization_receipt",
@@ -366,6 +499,8 @@ class SettlementSQLiteRepository:
         "obligation_index",
         "obligation_hash",
         "obligation",
+        "payer_principal",
+        "claimant_principal",
         "mechanism_ref",
         "mechanism_status",
         "mechanism_state",
@@ -441,6 +576,24 @@ class SettlementSQLiteRepository:
         value = dict(zip(self._OBLIGATION_COLUMNS, row))
         for field in self._OBLIGATION_JSON_FIELDS:
             raw = value.get(field)
+            if field in {"payer_principal", "claimant_principal"}:
+                if not raw:
+                    raise ValueError(
+                        f"settlement obligation has no canonical {field}"
+                    )
+                try:
+                    principal = Identity.model_validate(json.loads(raw))
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"settlement obligation has malformed {field}"
+                    ) from exc
+                canonical = canonical_json(principal.model_dump(mode="json"))
+                if raw != canonical:
+                    raise ValueError(
+                        f"settlement obligation has non-canonical {field}"
+                    )
+                value[field] = principal.model_dump(mode="json")
+                continue
             value[field] = (
                 json.loads(raw)
                 if raw
@@ -467,19 +620,27 @@ class SettlementSQLiteRepository:
                     value = obligation.get(name, default)
                     return canonical_json(value) if value is not None else None
 
+                payer_principal = json_value("payer_principal")
+                claimant_principal = json_value("claimant_principal")
+                if payer_principal is None or claimant_principal is None:
+                    raise ValueError(
+                        "settlement obligation requires canonical principals"
+                    )
+
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO settlement_obligations
                       (obligation_ref, agreement_ref, obligation_index,
-                       obligation_hash, obligation, mechanism_ref,
-                       mechanism_status, mechanism_state, buyer_action,
+                       obligation_hash, obligation, payer_principal,
+                       claimant_principal, mechanism_ref, mechanism_status,
+                       mechanism_state, buyer_action,
                        condition_anchor, fulfillment_ref, materialization_state,
                        condition_state, collection_state, reclaim_state,
                        materialization_receipt, status_receipt,
                        collection_receipt, reclaim_receipt, last_error,
                        version, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         obligation["obligation_ref"],
@@ -487,6 +648,8 @@ class SettlementSQLiteRepository:
                         int(obligation["obligation_index"]),
                         obligation["obligation_hash"],
                         canonical_json(obligation["obligation"]),
+                        payer_principal,
+                        claimant_principal,
                         obligation.get("mechanism_ref"),
                         obligation.get("mechanism_status"),
                         canonical_json(obligation.get("mechanism_state") or {}),
@@ -507,6 +670,37 @@ class SettlementSQLiteRepository:
                         now,
                     ),
                 )
+                stored_binding = conn.execute(
+                    "SELECT obligation_ref, obligation_hash, "
+                    "payer_principal, claimant_principal "
+                    "FROM settlement_obligations WHERE agreement_ref=? "
+                    "AND obligation_index=?",
+                    (
+                        obligation["agreement_ref"],
+                        int(obligation["obligation_index"]),
+                    ),
+                ).fetchone()
+                if stored_binding is None:
+                    raise RuntimeError("settlement obligation insert was lost")
+                if (
+                    stored_binding[0] != obligation["obligation_ref"]
+                    or stored_binding[1] != obligation["obligation_hash"]
+                ):
+                    raise ValueError(
+                        "agreement obligation index was reused with different terms"
+                    )
+                for stored_principal, supplied_principal in zip(
+                    stored_binding[2:],
+                    (payer_principal, claimant_principal),
+                    strict=True,
+                ):
+                    if (
+                        stored_principal is not None
+                        and stored_principal != supplied_principal
+                    ):
+                        raise ValueError(
+                            "settlement obligation principal binding changed"
+                        )
                 row = conn.execute(
                     f"SELECT {', '.join(self._OBLIGATION_COLUMNS)} FROM settlement_obligations WHERE agreement_ref=? AND obligation_index=?",
                     (obligation["agreement_ref"], int(obligation["obligation_index"])),

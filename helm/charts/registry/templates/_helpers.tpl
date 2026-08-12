@@ -42,10 +42,14 @@ Supports an optional global.imageRepository passed down from the parent.
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
 {{- end -}}
+{{- $name := .Values.image.name -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.image.name .Values.image.tag -}}
+  {{- $name = printf "%s/%s" $repo $name -}}
+{{- end -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" $name .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.name .Values.image.tag -}}
+{{- printf "%s:%s" $name .Values.image.tag -}}
 {{- end -}}
 {{- end }}
 

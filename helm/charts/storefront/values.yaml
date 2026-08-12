@@ -1,3 +1,13 @@
+global:
+  registryIdentity:
+    authority: registry-a
+    principal:
+      scheme: eip191
+      identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+
 # Default values for the storefront subchart.
 # Overridden by the parent chart's storefront: block in helm/values.yaml.
 # Values sourced from global (rpc, registry addresses) are injected in
@@ -7,6 +17,8 @@ image:
   repository: ""
   name: arkhai
   tag: storefront
+  # Production/release profiles pin sha256:<digest>; local development may use tag.
+  digest: ""
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
@@ -17,9 +29,9 @@ image:
 # appear here at all: the buyer-side surface is the `market` CLI, run
 # as a one-shot client process (or a Job for E2E tests).
 #
-# Each entry renders one Deployment + Service + Secret. The Secret holds
-# the rendered storefront.toml mounted at /etc/arkhai/storefront.toml.
-# ---------------------------------------------------------------------------
+# Each entry renders one Deployment and Service. Public identity configuration
+# is rendered into a ConfigMap; signer material is read only from the referenced
+# Kubernetes Secret.
 agents:
   - name: bob
     port: 8001
@@ -36,11 +48,31 @@ agents:
     #           has been registered to prevent a misconfigured deploy from
     #           silently minting a new on-chain identity.
     autoRegister: true
+    identity:
+      principal:
+        scheme: eip191
+        identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+      credentialSecret:
+        name: arkhai-bob-identity
+        key: credential
+      servicePeers:
+        provisioning_default:
+          role: service
+          siteId: default
+          principals:
+            - scheme: eip191
+              identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+      administrators:
+        operator:
+          principals:
+            - scheme: eip191
+              identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    # Non-identity runtime secrets remain in a separately managed overlay.
+    # The chart never accepts or renders private signing material.
     secret:
-      createSecret: true
-      secretName: ""   # auto-generated as {fullname}-{name} when empty
-      privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-      walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      createSecret: false
+      secretName: arkhai-bob-runtime
+      configKey: storefront.secrets.toml
       # Compute resource inventory as raw CSV content. Injected at startup
       # when the resources table is empty (idempotent — skipped on restart
       # if resources are already present). Use make deploy with
@@ -52,12 +84,16 @@ agents:
       # Required when the registry sets requireWriteApiKey. Never commit a
       # real token; inject via --set at render/deploy time.
       registryAuthToken: ""
-      # Optional distinct account-owner signing credential. Defaults to privKey.
-      hostedSettlementRequestCredential: ""
+      # Hosted requests use the marketplace signer supplied by
+      # identity.credentialSecret; no second credential is accepted here.
     # config.* lands in the rendered storefront.toml. Keys map 1:1 to the
     # storefront schema in market_storefront.utils.config (which reads top-level
     # keys + [provisioning] / [negotiation] / [pricing] sections — no [seller] prefix).
     config:
+      registryAuthority:
+        principals:
+          - scheme: eip191
+            identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
       seller:
         agentId: bob
         # base_url, provisioning.serviceUrl: composed by the chart from
@@ -78,6 +114,10 @@ agents:
         enableEventQueue: false
         provisioning:
           mode: "mock"
+          identity:
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
         negotiation:
           # Ordered list of policies. Terminal policy is "bisection" (no
           # ML deps) or "rl" (torch + checkpoint). The legacy `policyMode`
@@ -90,6 +130,7 @@ agents:
         # Runtime credentials the agent reads. Empty = absent in TOML.
         integrations:
           geminiApiKey: ""
+      # Omit this block entirely for hosted-only, non-EVM deployments.
       chain:
         name: "anvil"
       hostedSettlement:
@@ -97,10 +138,9 @@ agents:
         baseUrl: ""
         authorityId: ""
         environment: ""
-        expectedAuthority: ""
         expectedManifestDigest: ""
         contractVersion: "0.1.0"
-        expectedSchemaVersion: 3
+        expectedSchemaVersion: 4
         requestTimeoutSeconds: 10
         preflightTimeoutSeconds: 5
         allowInsecureLoopback: false
@@ -109,6 +149,12 @@ agents:
           - "stripe-connect-separate-charges-transfers.v1"
           - "portable-attestation.v1"
           - "eas-arbiter.v1"
+          - "scheme-tagged-identities.v1"
+          - "account-owner-admission.v1"
+          - "account-owner-rotation.v1"
+          - "account-owner-retirement.v1"
+          - "signer-injected-client.v1"
+          - "provider-neutral-seller-onboarding.v1"
         # Resolver IDs are operator-owned keys; no RPC URL or signing key
         # belongs in this marketplace chart.
         resolvers: {}

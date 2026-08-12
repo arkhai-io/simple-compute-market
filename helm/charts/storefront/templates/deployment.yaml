@@ -59,12 +59,12 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
+        {{- $chain := (($agent.config | default dict).chain | default dict) }}
+        {{- if $chain.name }}
         - name: wait-for-rpc
           image: busybox:1.36
-          {{- /* Probe the agent's full chain rpcUrl when set (external
-               providers need the scheme + key path, e.g. infura /v3/<key>);
-               fall back to the in-cluster rpc.url composition. */}}
-          {{- $rpcProbeUrl := default (include "rpc.url" $) ((($agent.config | default dict).chain | default dict).rpcUrl) }}
+          {{- /* Probe the explicit chain endpoint when one is configured. */}}
+          {{- $rpcProbeUrl := default (include "rpc.url" $) $chain.rpcUrl }}
           command:
             - sh
             - -c
@@ -76,14 +76,15 @@ spec:
                 echo "RPC not ready, retrying in 5s..."; sleep 5
               done
               echo "RPC ready."
+        {{- end }}
         - name: wait-for-registry
           image: busybox:1.36
           command:
             - sh
             - -c
             - |
-              echo "Waiting for registry at {{ include "registry.url" $ }}/health..."
-              until wget -qO- {{ include "registry.url" $ }}/health > /dev/null 2>&1; do
+              echo "Waiting for registry at {{ include "storefront.registryUrl" $ }}/health..."
+              until wget -qO- {{ include "storefront.registryUrl" $ }}/health > /dev/null 2>&1; do
                 echo "Registry not ready, retrying in 5s..."; sleep 5
               done
               echo "Registry ready."
@@ -110,15 +111,16 @@ spec:
                 - SYS_MODULE
           {{- end }}
           env:
-            # Sole env var: tell dynaconf where to find the mounted TOML
-            # files. The storefront config loader resolves this to
-            # $XDG_CONFIG_HOME/arkhai, so this maps to
-            # /etc/arkhai/{storefront.toml,storefront.secrets.toml}. The
-            # dynaconf instance merges both files at startup; the ConfigMap
-            # renders storefront.toml and the Secret renders
-            # storefront.secrets.toml.
+            # Public identity stays in storefront.toml. The credential is
+            # injected from a dedicated Secret and is never rendered into a
+            # ConfigMap, command argument, or chart-generated Secret.
             - name: XDG_CONFIG_HOME
               value: /etc
+            - name: ARKHAI_IDENTITY_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "storefront agent identity.credentialSecret.name is required" $agent.identity.credentialSecret.name | quote }}
+                  key: {{ required "storefront agent identity.credentialSecret.key is required" $agent.identity.credentialSecret.key | quote }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device
@@ -128,10 +130,12 @@ spec:
               mountPath: /etc/arkhai/storefront.toml
               subPath: storefront.toml
               readOnly: true
+            {{- if $agent.secret.secretName }}
             - name: arkhai-secrets
               mountPath: /etc/arkhai/storefront.secrets.toml
-              subPath: storefront.secrets.toml
+              subPath: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
               readOnly: true
+            {{- end }}
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
@@ -164,12 +168,14 @@ spec:
             items:
               - key: storefront.toml
                 path: storefront.toml
+        {{- if $agent.secret.secretName }}
         - name: arkhai-secrets
           secret:
-            secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+            secretName: {{ $agent.secret.secretName | quote }}
             items:
-              - key: storefront.secrets.toml
+              - key: {{ $agent.secret.configKey | default "storefront.secrets.toml" }}
                 path: storefront.secrets.toml
+        {{- end }}
         # SQLite agent.db storage. Three modes:
         #   existingClaim set → mount a Terraform-managed PVC by name
         #   persistence.enabled → chart creates and owns the PVC

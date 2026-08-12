@@ -21,6 +21,7 @@ import os
 import tempfile
 
 import pytest
+from market_identity import Identity
 
 from market_storefront.utils.sqlite_client import (
     SQLiteClient,
@@ -188,7 +189,11 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 0.99, "region": "California, US"},
         fulfillment_resource=None,
         max_duration_seconds=3600,
-        seller="seller_url",
+        storefront_url="http://seller.test",
+        seller_principal=Identity(
+            scheme="ed25519",
+            identifier="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ),
         accepted_escrows=explicit,
     ))
     row = asyncio.run(db.load_listing(listing_id="lst2"))
@@ -246,7 +251,7 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
                     "token": {"symbol": "USDC", "contract_address": _TOKEN_ADDR, "decimals": 6},
                     "amount": 1000,
                 }),
-                3600, "seller_url",
+                3600, "http://seller.test",
             ),
         )
         conn.commit()
@@ -254,7 +259,14 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
         conn.close()
 
     # Open via SQLiteClient → schema init runs the backfill + DROP COLUMN.
-    db = SQLiteClient(tmp_db_path)
+    db = SQLiteClient(
+        tmp_db_path,
+        local_listing_principal=Identity(
+            scheme="ed25519",
+            identifier="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ),
+        expected_legacy_sellers=("http://seller.test",),
+    )
     row = asyncio.run(db.load_listing(listing_id="lst_legacy"))
     assert row is not None
     accepted = row["accepted_escrows"]

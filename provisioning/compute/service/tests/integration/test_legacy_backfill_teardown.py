@@ -23,9 +23,6 @@ from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_backfill
-from compute_provisioning_service.services.deal_event_sink import (
-    notify_storefront_capacity_released,
-)
 from market_fulfillment import (
     FulfillmentOrchestrator,
     ProviderRegistry,
@@ -91,10 +88,13 @@ def _settings(**overrides):
     s = MagicMock()
     s.lease_watchdog_grace_period_seconds = 300
     s.storefront_url = "http://storefront:8001"
-    s.storefront_admin_key = "admin-key"
+    s.storefront_site_id = "default"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
+
+async def _successful_notification(_reservation):
+    return True
 
 
 def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
@@ -176,9 +176,7 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
         site_authority=LedgerSiteAuthority(ledger),
         executor_release=executor_release,
         release_jobs=release_jobs,
-        capacity_released_notifier=(
-            lambda reservation: notify_storefront_capacity_released(settings, reservation)
-        ),
+        capacity_released_notifier=_successful_notification,
     )
 
     # Give the reservation a lease_end_utc in the past so the watchdog

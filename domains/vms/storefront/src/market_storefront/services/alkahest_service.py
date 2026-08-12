@@ -11,7 +11,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from market_storefront.utils.config import CHAINS, settings
+from market_storefront.utils.config import (
+    CHAINS,
+    get_evm_wallet_address,
+    get_evm_wallet_private_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +28,19 @@ def build_clients() -> dict[str, Any]:
     are omitted with a warning — the storefront keeps serving the
     chains it can.
     """
-    priv_key = (settings.wallet.private_key or "").strip()
-    if not priv_key:
-        logger.warning(
-            "[ALKAHEST] wallet.private_key not set; no chain clients will be "
-            "initialised."
-        )
-        return {}
     if not CHAINS:
-        logger.warning(
-            "[ALKAHEST] no [chains.<name>] tables configured; nothing to build."
-        )
         return {}
+    missing = []
+    if not get_evm_wallet_address():
+        missing.append("wallet.address")
+    priv_key = get_evm_wallet_private_key()
+    if not priv_key:
+        missing.append("wallet.private_key")
+    if missing:
+        raise RuntimeError(
+            "Alkahest chains are configured but required EVM settings are missing: "
+            + ", ".join(missing)
+        )
 
     from alkahest_py import AlkahestClient
     from market_alkahest.alkahest import (

@@ -22,7 +22,7 @@ class VmPublicationSourceCallbacks:
     """Storefront infrastructure callbacks required by the VM adapter."""
 
     open_keys: Callable[[str], set[str]]
-    close_stale: Callable[[str, str, str | None], list[str]]
+    close_stale: Callable[[str, str], list[str]]
     available_candidates: Callable[[str], list[dict[str, Any]]]
     offer_resource: Callable[[dict[str, Any]], dict[str, Any]]
     record_published: Callable[[str, dict[str, Any], str], None]
@@ -35,7 +35,6 @@ class VmPublicationSourceCallbacks:
             list[dict],
             list[dict],
             int | None,
-            str | None,
         ],
         dict[str, Any] | None,
     ]
@@ -46,7 +45,7 @@ class BareMetalPublicationSourceCallbacks:
     """Storefront infrastructure callbacks required by bare-metal publication."""
 
     capacity_snapshot: Callable[[], list[dict[str, Any]] | None]
-    close_listing: Callable[[str, str, str | None], dict[str, Any]]
+    close_listing: Callable[[str, str], dict[str, Any]]
     publish_existing_listing: Callable[..., dict[str, Any]]
 
 

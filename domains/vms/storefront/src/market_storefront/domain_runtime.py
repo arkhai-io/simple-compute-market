@@ -56,8 +56,8 @@ def get_market_domain_contract() -> MarketDomainContract:
     )
 
 
-def build_settlement_runtime(*, sqlite_client, alkahest_clients):
-    """Compose VM policy and Alkahest over the shared settlement foundation."""
+def build_settlement_runtime(*, sqlite_client, alkahest_clients, marketplace_signer):
+    """Compose VM policy and explicit settlement mechanisms."""
     from market_storefront.settlement_composition import (
         build_vm_settlement_composition,
     )
@@ -65,4 +65,5 @@ def build_settlement_runtime(*, sqlite_client, alkahest_clients):
     return build_vm_settlement_composition(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
+        marketplace_signer=marketplace_signer,
     )

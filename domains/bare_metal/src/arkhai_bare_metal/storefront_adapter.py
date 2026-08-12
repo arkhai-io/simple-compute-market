@@ -20,7 +20,7 @@ ProjectionSnapshot = Callable[
     [],
     Iterable[TrustedBareMetalProjection] | None,
 ]
-CloseListing = Callable[[str, str, str | None], dict[str, Any]]
+CloseListing = Callable[[str, str], dict[str, Any]]
 PublishExistingListing = Callable[..., dict[str, Any]]
 
 
@@ -49,7 +49,6 @@ def close_stale_bare_metal_publications(
     *,
     db_path: str,
     base_url: str,
-    private_key: str | None,
     projection_snapshot: ProjectionSnapshot,
     close_listing: CloseListing,
 ) -> list[str]:
@@ -60,7 +59,6 @@ def close_stale_bare_metal_publications(
         close_listing=lambda listing_id: close_listing(
             base_url,
             listing_id,
-            private_key,
         ),
     )
 
@@ -91,7 +89,6 @@ def reopen_bare_metal_listing_adapter(
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
-    private_key: str | None,
     *,
     publish_existing_listing: PublishExistingListing,
 ) -> dict[str, Any] | None:
@@ -104,7 +101,6 @@ def reopen_bare_metal_listing_adapter(
         accepted_escrows=accepted_escrows,
         demands=demands,
         max_duration_seconds=max_duration_seconds,
-        private_key=private_key,
         publish_existing_listing=publish_existing_listing,
     )
 
@@ -125,7 +121,6 @@ def bare_metal_publication_adapter(
         accepted_escrows: list[dict[str, Any]],
         demands: list[dict[str, Any]],
         max_duration_seconds: int | None,
-        private_key: str | None,
     ) -> dict[str, Any] | None:
         return reopen_bare_metal_listing_adapter(
             db_path,
@@ -135,18 +130,16 @@ def bare_metal_publication_adapter(
             accepted_escrows,
             demands,
             max_duration_seconds,
-            private_key,
             publish_existing_listing=publish_existing_listing,
         )
 
     return PublicationSource(
         name="bare_metal",
         open_keys=open_bare_metal_listing_keys,
-        close_stale=lambda db_path, base_url, private_key: (
+        close_stale=lambda db_path, base_url: (
             close_stale_bare_metal_publications(
                 db_path=db_path,
                 base_url=base_url,
-                private_key=private_key,
                 projection_snapshot=projection_snapshot,
                 close_listing=close_listing,
             )

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from market_identity import Identity
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProjectionFamilyStatus(BaseModel):
@@ -50,3 +51,39 @@ class AdminPauseResponse(BaseModel):
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
+
+
+
+class IdentityRetirementRequest(BaseModel):
+    """Complete one already-applied two-proof identity rotation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    authority: str = Field(min_length=1, max_length=256)
+    subject: str = Field(min_length=1, max_length=256)
+    rotation_nonce: str = Field(min_length=1, max_length=128)
+    principal: Identity
+
+
+class IdentityBindingResponse(BaseModel):
+    """One durable principal binding at the instant status was observed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    principal: Identity
+    status: Literal["primary", "overlap", "retired", "disabled"]
+    overlap_until: int | None
+    active: bool
+
+
+class IdentityStatusResponse(BaseModel):
+    """Operator-visible identity authority state."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    authority: str
+    subject: str
+    role: str
+    bindings: tuple[IdentityBindingResponse, ...]
+    primary: Identity
+    observed_at: int

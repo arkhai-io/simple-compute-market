@@ -5,8 +5,8 @@ description = "Thin settlement-runtime adapter for the hosted conditional escrow
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-  "arkhai-core==0.2.0",
   "arkhai-hosted-settlement-client==0.1.0",
+  "arkhai-kit-identity==0.2.0",
   "arkhai-kit-settlement-runtime==0.1.0",
   "pydantic>=2.7",
 ]
@@ -19,7 +19,7 @@ build-backend = "hatchling.build"
 packages = ["src/market_hosted_settlement"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "../settlement-runtime/src", "../../core/src"]
+pythonpath = ["src"]
 testpaths = ["tests/unit"]
 asyncio_mode = "auto"
 

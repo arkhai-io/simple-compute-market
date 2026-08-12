@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Callable
+from market_identity import Identity, IdentityScheme
 
 from sqlalchemy import Engine, inspect, text
 
@@ -135,10 +136,58 @@ def _adopt_baseline_schema(engine: Engine) -> None:
             f"API-credits baseline schema is missing tables: {sorted(missing)}"
         )
 
+def _migrate_owner_principals(engine: Engine) -> None:
+    """Normalize legacy wallet owners to canonical marketplace principals."""
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text("SELECT key_id, owner_scheme, owner_id FROM api_keys"),
+        ).mappings()
+        for row in rows:
+            scheme = row["owner_scheme"]
+            identifier = row["owner_id"]
+            if scheme is None and identifier is None:
+                continue
+            if scheme is None or identifier is None:
+                raise SchemaDriftError(
+                    f"API key {row['key_id']!r} has an incomplete owner principal",
+                )
+            if scheme == "wallet":
+                scheme = IdentityScheme.EIP191
+            else:
+                try:
+                    scheme = IdentityScheme(str(scheme))
+                except ValueError as exc:
+                    raise SchemaDriftError(
+                        f"API key {row['key_id']!r} has unknown owner scheme "
+                        f"{row['owner_scheme']!r}",
+                    ) from exc
+            try:
+                principal = Identity(scheme=scheme, identifier=str(identifier))
+            except ValueError as exc:
+                raise SchemaDriftError(
+                    f"API key {row['key_id']!r} has a malformed owner principal",
+                ) from exc
+            connection.execute(
+                text(
+                    "UPDATE api_keys SET owner_scheme = :scheme, owner_id = :identifier "
+                    "WHERE key_id = :key_id",
+                ),
+                {
+                    "key_id": row["key_id"],
+                    "scheme": principal.scheme.value,
+                    "identifier": principal.identifier,
+                },
+            )
+
+
 
 _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260731_001_apicredits_schema_baseline",
         _adopt_baseline_schema,
+    ),
+    Migration(
+        "20260811_002_canonical_owner_principals",
+        _migrate_owner_principals,
     ),
 )

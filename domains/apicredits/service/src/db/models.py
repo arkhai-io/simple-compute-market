@@ -10,8 +10,8 @@ log with per-key idempotency so middleware batch flushes never
 double-count.
 
 Bearer secrets are hashed at rest (`secret_hash`); ``owner_scheme`` /
-``owner_id`` is the scheme-tagged ownership claim ("wallet" in v1) that
-the negotiation guards consult and issuance re-checks authoritatively.
+``owner_id`` store the canonical marketplace principal that issuance
+re-checks authoritatively.
 
 The site-authority quota ledger tables ride ``market_site``'s own
 metadata — ``run_migrations`` creates both.
@@ -43,7 +43,7 @@ class ApiKey(Base):
 
     key_id = Column(String, primary_key=True)
     secret_hash = Column(String, nullable=False)
-    owner_scheme = Column(String, nullable=True)   # "wallet" | "ed25519" | None (open top-up)
+    owner_scheme = Column(String, nullable=True)  # "eip191" | "ed25519" | None
     owner_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="active")  # active | revoked
     balance = Column(Integer, nullable=False, default=0)

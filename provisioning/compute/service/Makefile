@@ -28,6 +28,8 @@ reinit: ## Refresh local internal packages and adapters
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
 		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment \
 		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
+		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
 		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client
 
 serve: ## Start the compute provisioning API and in-process workers

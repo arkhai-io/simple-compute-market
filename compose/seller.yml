@@ -13,10 +13,6 @@
 #
 # Operator-provided files (paths overridable via env):
 #   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
-#                              The provisioning service reads `admin_api_key`
-#                              from this same file via the mount on
-#                              seller-provisioning, so the secret lives in
-#                              one place.
 #   ./resources.csv          — inventory CSV. Starter:
 #                              domains/vms/storefront/src/market_storefront/data/resources.sample.csv
 #
@@ -84,6 +80,8 @@ services:
     depends_on:
       seller-storefront-data-init:
         condition: service_completed_successfully
+    env_file:
+      - ${SELLER_IDENTITY_ENV_FILE:?set marketplace signer credential environment file}
     volumes:
       - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - ${SELLER_RESOURCES_CSV:-../resources.csv}:/app/resources.csv:ro
@@ -99,13 +97,16 @@ services:
     depends_on:
       seller-provisioning-data-init:
         condition: service_completed_successfully
+    env_file:
+      - ${SELLER_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning signer credential environment file}
     environment:
       - ACTIVE_PROFILES=seller
+      - PROVISIONING_IDENTITY__PRINCIPAL__SCHEME=${SELLER_PROVISIONING_IDENTITY_SCHEME:?set provisioning public identity scheme}
+      - PROVISIONING_IDENTITY__PRINCIPAL__IDENTIFIER=${SELLER_PROVISIONING_IDENTITY_IDENTIFIER:?set provisioning public identity identifier}
+      - 'PROVISIONING_STOREFRONT_IDENTITY__PRINCIPALS=[{"scheme":"${SELLER_IDENTITY_SCHEME:?set storefront public identity scheme}","identifier":"${SELLER_IDENTITY_IDENTIFIER:?set storefront public identity identifier}"}]'
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - 'PROVISIONING_ADMIN_IDENTITY__PRINCIPALS=[{"scheme":"${SELLER_PROVISIONING_ADMIN_IDENTITY_SCHEME:?set provisioning admin public identity scheme}","identifier":"${SELLER_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER:?set provisioning admin public identity identifier}"}]'
     volumes:
-      # Same storefront TOML the seller-storefront reads. The provisioning
-      # service reads `admin_api_key` from it so the operator writes the
-      # admin key in exactly one file.
-      - ${SELLER_CONFIG_PATH:-../config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - seller-provisioning-data:/app/data
     restart: unless-stopped
 

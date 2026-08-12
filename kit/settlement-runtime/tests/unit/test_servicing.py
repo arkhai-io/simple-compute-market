@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from market_identity import Identity, IdentityScheme
+
 from market_settlement_runtime import (
     ConditionOutcome,
     EffectOutcome,
@@ -8,6 +10,15 @@ from market_settlement_runtime import (
     SettlementSQLiteRepository,
     SettlementServicingWorker,
     StatusOutcome,
+)
+
+BUYER = Identity(
+    scheme=IdentityScheme.ED25519,
+    identifier="ERERERERERERERERERERERERERERERERERERERERERE",
+)
+SELLER = Identity(
+    scheme=IdentityScheme.ED25519,
+    identifier="IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
 )
 
 
@@ -80,6 +91,8 @@ async def test_worker_restarts_from_durable_backoff_and_operation_state(
                 {
                     "payer": "buyer",
                     "claimant": "seller",
+                    "payer_principal": BUYER.model_dump(mode="json"),
+                    "claimant_principal": SELLER.model_dump(mode="json"),
                     "mechanism": "test.v1",
                     "expiration_unix": 4_102_444_800,
                 }
@@ -88,13 +101,13 @@ async def test_worker_restarts_from_durable_backoff_and_operation_state(
     )[0]
     await runtime.adopt(
         record.obligation_ref,
-        local_role="seller",
+        local_principal=SELLER,
         mechanism_ref="escrow",
     )
     await runtime.bind_fulfillment(
         record.obligation_ref,
         "fulfillment",
-        local_role="seller",
+        local_principal=SELLER,
     )
     events: list[tuple[str, dict]] = []
     terminals: list[str] = []
@@ -151,6 +164,8 @@ async def test_expired_obligation_dispatches_terminal_outcome(tmp_path) -> None:
                 {
                     "payer": "buyer",
                     "claimant": "seller",
+                    "payer_principal": BUYER.model_dump(mode="json"),
+                    "claimant_principal": SELLER.model_dump(mode="json"),
                     "mechanism": "test.v1",
                     "expiration_unix": 1,
                 }
@@ -159,13 +174,13 @@ async def test_expired_obligation_dispatches_terminal_outcome(tmp_path) -> None:
     )[0]
     await runtime.adopt(
         record.obligation_ref,
-        local_role="seller",
+        local_principal=SELLER,
         mechanism_ref="expired-escrow",
     )
     await runtime.bind_fulfillment(
         record.obligation_ref,
         "fulfillment",
-        local_role="seller",
+        local_principal=SELLER,
     )
     terminals: list[str] = []
     worker = SettlementServicingWorker(

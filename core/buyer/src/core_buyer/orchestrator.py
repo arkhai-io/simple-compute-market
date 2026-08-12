@@ -11,13 +11,13 @@ the generic registry discovery helpers.
 
 from __future__ import annotations
 
-import json
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
+
+from market_identity import Identity, Signer
+from core_buyer.registry_config import RegistryAuthority
+from registry_client import RegistryClientError, SyncRegistryClient
 
 
 DEFAULT_HTTP_TIMEOUT = 30.0
@@ -28,11 +28,31 @@ class BuyConfig:
     """Buyer identity and discovery configuration for one buy attempt."""
 
     registry_urls: list[str]
-    buyer_address: str
-    buyer_private_key: str
+    registry_authorities: dict[str, RegistryAuthority]
+    principal: Identity
+    signer: Signer = field(repr=False)
     discovery_timeout: Optional[float] = None
-    indexer_auth: dict[str, str] = field(default_factory=dict)
+    registry_api_keys: dict[str, str] = field(default_factory=dict, repr=False)
     aggregation_policy: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.signer.identity != self.principal:
+            raise ValueError(
+                "buyer signer identity does not match configured principal"
+            )
+        self.registry_urls = [url.rstrip("/") for url in self.registry_urls]
+        if len(set(self.registry_urls)) != len(self.registry_urls):
+            raise ValueError("buyer registry URLs contain normalized duplicates")
+        if set(self.registry_authorities) != set(self.registry_urls):
+            raise ValueError(
+                "buyer registry authorities must exactly match registry URLs"
+            )
+        unknown_api_keys = set(self.registry_api_keys) - set(self.registry_urls)
+        if unknown_api_keys:
+            raise ValueError(
+                f"buyer registry API keys contain unknown URLs: "
+                f"{sorted(unknown_api_keys)}"
+            )
 
 
 @dataclass
@@ -105,68 +125,78 @@ def query_registry_for_matches(
     registry_url: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
+    signer: Signer,
+    registry_authority: RegistryAuthority,
     filters: Optional[dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Ask one registry for open seller listings, optionally pre-filtered."""
-    base_params: dict[str, Any] = {"status": "open"}
-    if filters:
-        for key, val in filters.items():
-            if val is None:
-                continue
-            base_params[key] = "true" if val is True else "false" if val is False else val
-    url = registry_url.rstrip("/") + "/listings?" + urllib.parse.urlencode(base_params)
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(url, headers=headers)
+    """Read open listings through a signed, authority-pinned registry client."""
+
+    params = dict(filters or {})
+    status = params.pop("status", "open")
+    limit = int(params.pop("limit", 100))
+    offset = int(params.pop("offset", 0))
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"Registry GET {url} -> HTTP {exc.code}: {detail[:200]}") from exc
+        with SyncRegistryClient(
+            registry_url,
+            signer=signer,
+            caller_role="buyer",
+            expected_registries=registry_authority.principals,
+            registry_authority=registry_authority.authority,
+            timeout=timeout,
+            api_key=api_key,
+        ) as client:
+            response = client.list_listings(
+                status=status,
+                limit=limit,
+                offset=offset,
+                **params,
+            )
     except Exception as exc:
-        raise RuntimeError(f"Registry GET {url} failed: {exc}") from exc
-
-    try:
-        payload = json.loads(text) if text else []
-    except ValueError as exc:
-        raise RuntimeError(f"Registry returned non-JSON: {text[:200]!r}") from exc
-
-    if isinstance(payload, dict):
-        items = payload.get("items") or payload.get("listings") or payload.get("data") or []
-    else:
-        items = payload
-    if not isinstance(items, list):
-        return []
-
-    return items
+        raise RuntimeError(
+            f"Authenticated registry read failed for {registry_url.rstrip('/')}: {exc}"
+        ) from exc
+    return [listing.to_dict() for listing in response.listings]
 
 
 def query_registry_for_matches_multi(
     registry_urls: list[str],
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
+    signer: Signer,
+    registry_authorities: dict[str, RegistryAuthority],
     filters: Optional[dict[str, Any]] = None,
-    auth: Optional[dict[str, str]] = None,
+    api_keys: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
-    """Fan in registry listings and dedupe by listing id."""
-    merged: dict[str, dict[str, Any]] = {}
-    auth = auth or {}
-    for url in registry_urls:
+    """Fan in signed registry listings and deduplicate by listing identity."""
+
+    urls = [url.rstrip("/") for url in registry_urls]
+    if set(registry_authorities) != set(urls):
+        raise ValueError("registry authority sets must exactly match registry URLs")
+    api_keys = api_keys or {}
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for url in urls:
         try:
             items = query_registry_for_matches(
-                url, timeout=timeout, filters=filters, api_key=auth.get(url),
+                url,
+                timeout=timeout,
+                signer=signer,
+                registry_authority=registry_authorities[url],
+                filters=filters,
+                api_key=api_keys.get(url),
             )
         except RuntimeError as exc:
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             continue
         for item in items:
-            lid = item.get("listing_id") or item.get("id")
-            if lid is None:
+            listing_id = item.get("listing_id")
+            if listing_id is None:
                 continue
-            merged.setdefault(str(lid), item)
+            source = dict(item)
+            source["source_registry_url"] = url
+            source["source_registry_authority"] = registry_authorities[url].authority
+            key = (registry_authorities[url].authority, str(listing_id))
+            merged.setdefault(key, source)
     return list(merged.values())
 
 
@@ -175,32 +205,31 @@ def fetch_listing_dict(
     listing_id: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
+    signer: Signer,
+    registry_authority: RegistryAuthority,
     api_key: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Fetch one registry listing by id as a raw dict."""
-    url = registry_url.rstrip("/") + "/listings/" + urllib.parse.quote(listing_id, safe="")
-    headers: dict[str, str] = {"Accept": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            text = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"Registry GET {url} -> HTTP {exc.code}: {detail[:200]}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Registry GET {url} failed: {exc}") from exc
+    """Fetch one authority-authenticated listing as a schema-opaque dict."""
 
     try:
-        payload = json.loads(text) if text else None
-    except ValueError:
-        return None
-    if isinstance(payload, dict):
-        return payload.get("listing") if "listing" in payload else payload
-    return None
+        with SyncRegistryClient(
+            registry_url,
+            signer=signer,
+            caller_role="buyer",
+            expected_registries=registry_authority.principals,
+            registry_authority=registry_authority.authority,
+            timeout=timeout,
+            api_key=api_key,
+        ) as client:
+            return client.get_listing(listing_id).to_dict()
+    except RegistryClientError as exc:
+        if exc.status_code == 404:
+            return None
+        raise RuntimeError(str(exc)) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"Authenticated registry read failed for {registry_url.rstrip('/')}: {exc}"
+        ) from exc
 
 
 def fetch_listing_dict_multi(
@@ -208,14 +237,27 @@ def fetch_listing_dict_multi(
     listing_id: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
-    auth: Optional[dict[str, str]] = None,
+    signer: Signer,
+    registry_authorities: dict[str, RegistryAuthority],
+    api_keys: Optional[dict[str, str]] = None,
 ) -> Optional[dict[str, Any]]:
-    """Try each registry in order and return the first listing hit."""
-    auth = auth or {}
+    """Try each pinned registry in order and return the first listing hit."""
+
+    urls = [url.rstrip("/") for url in registry_urls]
+    if set(registry_authorities) != set(urls):
+        raise ValueError("registry authority sets must exactly match registry URLs")
+    api_keys = api_keys or {}
     last_error: Optional[Exception] = None
-    for url in registry_urls:
+    for url in urls:
         try:
-            result = fetch_listing_dict(url, listing_id, timeout=timeout, api_key=auth.get(url))
+            result = fetch_listing_dict(
+                url,
+                listing_id,
+                timeout=timeout,
+                signer=signer,
+                registry_authority=registry_authorities[url],
+                api_key=api_keys.get(url),
+            )
         except RuntimeError as exc:
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             last_error = exc
@@ -248,9 +290,13 @@ def run_buy(
         kwargs: dict[str, Any] = {}
         if config.discovery_timeout is not None:
             kwargs["timeout"] = config.discovery_timeout
-        if config.indexer_auth:
-            kwargs["auth"] = config.indexer_auth
-        matches = query_registry_for_matches_multi(config.registry_urls, **kwargs)
+        matches = query_registry_for_matches_multi(
+            config.registry_urls,
+            signer=config.signer,
+            registry_authorities=config.registry_authorities,
+            api_keys=config.registry_api_keys,
+            **kwargs,
+        )
     _event("discover", {"match_count": len(matches)})
 
     if not matches:
@@ -259,10 +305,13 @@ def run_buy(
     capped = matches[:max_matches_to_try]
     from core_buyer.aggregation import DEFAULT_POLICY_NAME
 
-    _event("aggregated", {
-        "policy": config.aggregation_policy or DEFAULT_POLICY_NAME,
-        "match_count_after_cap": len(capped),
-    })
+    _event(
+        "aggregated",
+        {
+            "policy": config.aggregation_policy or DEFAULT_POLICY_NAME,
+            "match_count_after_cap": len(capped),
+        },
+    )
 
     try:
         negotiation = negotiate(capped, _event)

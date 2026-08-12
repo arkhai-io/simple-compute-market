@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_identity import Identity
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
+from core_storefront.auth import AuthenticatedPrincipal
 from core_storefront.services.negotiation_service import NegotiationServiceError
 from core_storefront.models.negotiation_models import (
     AdvanceRequest,
@@ -24,6 +26,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/listings", tags=["negotiations"])
 
+async def require_administrator_identity(
+    request: Request,
+    _authenticated: None = Depends(require_admin_key),
+) -> Identity:
+    """Return the exact administrator principal authenticated by middleware."""
+    authenticated = getattr(request.state, "marketplace_authenticated", None)
+    if not isinstance(authenticated, AuthenticatedPrincipal):
+        raise HTTPException(
+            status_code=403,
+            detail="Administrator principal authentication is required",
+        )
+    return authenticated.principal
+
 
 @cbv(router)
 class NegotiationsController:
@@ -37,23 +52,37 @@ class NegotiationsController:
         "/{listing_id}/negotiations",
         response_model=NegotiationListResponse,
         summary="List negotiations for a listing",
+        dependencies=[Depends(require_admin_key)],
     )
     async def list_negotiations(
         self,
         listing_id: str,
         terminal_state: Annotated[str | None, Query()] = None,
-        buyer_address: Annotated[str | None, Query()] = None,
+        buyer_scheme: Annotated[str | None, Query()] = None,
+        buyer_identifier: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> NegotiationListResponse:
+        if (buyer_scheme is None) != (buyer_identifier is None):
+            raise HTTPException(
+                status_code=422,
+                detail="buyer_scheme and buyer_identifier must be supplied together",
+            )
         try:
+            buyer_principal = (
+                Identity(scheme=buyer_scheme, identifier=buyer_identifier)
+                if buyer_scheme is not None and buyer_identifier is not None
+                else None
+            )
             threads = await self._svc.list_for_order(
                 listing_id=listing_id,
                 terminal_state=terminal_state or None,
-                buyer_address=buyer_address or None,
+                buyer_principal=buyer_principal,
                 limit=limit,
                 offset=offset,
             )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
         return NegotiationListResponse(
@@ -68,6 +97,7 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}",
         response_model=NegotiationDetailResponse,
         summary="Get negotiation detail",
+        dependencies=[Depends(require_admin_key)],
     )
     async def get_negotiation(
         self, listing_id: str, neg_id: str
@@ -82,10 +112,15 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/advance",
         response_model=AdvanceResponse,
         summary="Drive one negotiation round (admin)",
-        dependencies=[Depends(require_admin_key)],
     )
     async def advance_negotiation(
-        self, listing_id: str, neg_id: str, body: AdvanceRequest
+        self,
+        listing_id: str,
+        neg_id: str,
+        body: AdvanceRequest,
+        actor_principal: Annotated[
+            Identity, Depends(require_administrator_identity)
+        ],
     ) -> AdvanceResponse:
         try:
             result = await self._svc.advance(
@@ -94,6 +129,7 @@ class NegotiationsController:
                 action=body.action,
                 proposal=body.proposal,
                 reason=body.reason,
+                actor_principal=actor_principal,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -106,14 +142,22 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/force-accept",
         response_model=ForceAcceptResponse,
         summary="Force-accept a negotiation (admin)",
-        dependencies=[Depends(require_admin_key)],
     )
     async def force_accept_negotiation(
-        self, listing_id: str, neg_id: str, body: ForceAcceptRequest
+        self,
+        listing_id: str,
+        neg_id: str,
+        body: ForceAcceptRequest,
+        actor_principal: Annotated[
+            Identity, Depends(require_administrator_identity)
+        ],
     ) -> ForceAcceptResponse:
         try:
             result = await self._svc.force_accept(
-                listing_id=listing_id, neg_id=neg_id, amount=body.amount
+                listing_id=listing_id,
+                neg_id=neg_id,
+                amount=body.amount,
+                actor_principal=actor_principal,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))

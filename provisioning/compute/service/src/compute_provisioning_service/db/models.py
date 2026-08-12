@@ -21,6 +21,93 @@ class CredentialRole(str, enum.Enum):
     root = "root"
     tenant = "tenant"
 
+class ProvisioningReplayReservation(Base):
+    """Durable principal-scoped request reservation and recorded outcome."""
+
+    __tablename__ = "provisioning_replay_reservations"
+
+    principal_scheme = Column(String, primary_key=True)
+    principal_identifier = Column(String, primary_key=True)
+    request_id = Column(String, primary_key=True)
+    request_hash = Column(String, nullable=False)
+    dispatch_lease_expires_at = Column(DateTime(timezone=True), nullable=False)
+    dispatch_attempt_count = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    response_status = Column(Integer, nullable=True)
+    response_body = Column(JSON, nullable=True)
+    response_body_empty = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    response_media_type = Column(String, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+class CapacityReleaseCallbackOutbox(Base):
+    """Durable acknowledgement state for one released reservation callback."""
+
+    __tablename__ = "capacity_release_callback_outbox"
+
+    capacity_reservation_id = Column(String, primary_key=True)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    last_attempted_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+
+
+
+class ProvisioningTrustedPrincipal(Base):
+    """Versioned role binding retained through bounded rotation overlap."""
+
+    __tablename__ = "provisioning_trusted_principals"
+
+    role = Column(String, primary_key=True)
+    principal_scheme = Column(String, primary_key=True)
+    principal_identifier = Column(String, primary_key=True)
+    generation = Column(Integer, nullable=False)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ProvisioningIdentityRotationAudit(Base):
+    """Immutable accepted rotation intent for audit and nonce replay rejection."""
+
+    __tablename__ = "provisioning_identity_rotation_audit"
+
+    nonce = Column(String, primary_key=True)
+    role = Column(String, nullable=False)
+    current_scheme = Column(String, nullable=False)
+    current_identifier = Column(String, nullable=False)
+    replacement_scheme = Column(String, nullable=False)
+    replacement_identifier = Column(String, nullable=False)
+    overlap_seconds = Column(Integer, nullable=False)
+    intent_expires_at = Column(Integer, nullable=False)
+    applied_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 
 class AnsibleJob(Base):
     __tablename__ = "ansible_jobs"

@@ -13,6 +13,7 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from domains.apicredits.settlement import fulfill_api_credits_obligation
 from market_settlement_runtime import FailurePolicy
+from market_identity import Identity
 
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
@@ -152,7 +153,7 @@ async def fulfill_credit_obligation(
     quantity: int,
     key_mode: str = "new",
     key_id: str | None = None,
-    buyer_wallet: str | None = None,
+    buyer_principal: Identity,
     listing_id: str | None = None,
     negotiation_id: str | None = None,
 ) -> dict[str, Any]:
@@ -187,7 +188,7 @@ async def fulfill_credit_obligation(
         quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,
-        buyer_wallet=buyer_wallet,
+        buyer_principal=buyer_principal,
         listing_id=listing_id,
         credits_client=get_credits_service_client(),
         stage_event=stage_event,

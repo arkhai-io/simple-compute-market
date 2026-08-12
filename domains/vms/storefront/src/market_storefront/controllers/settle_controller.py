@@ -11,9 +11,6 @@ from typing import Any
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
-    SettlementPublicResponse,
-    SettlementStartRequest,
-    SettleRequest,
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
@@ -23,11 +20,17 @@ from core_storefront.models.settle_models import (
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
+from market_identity import Identity
 from market_settlement_runtime import SettlementObligationRecord
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
 from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.models.hosted_settlement_models import (
+    SettlementPublicResponse,
+    SettlementStartRequest,
+)
+from market_storefront.models.settle_models import VmSettleRequest
 from market_storefront.services.admin_settle_service import AdminSettleService
 from market_storefront.settlement_composition import (
     ensure_hosted_fulfillment,
@@ -56,16 +59,27 @@ class SettleController:
         "/{escrow_uid}",
         response_model=SettleResponse,
         summary="Submit settlement / kick off provisioning",
-        description="Buyer-facing. Requires EIP-191 signed `X-Signature` + `X-Timestamp` headers.",
+        description="Buyer-facing. Requires marketplace v2 request authentication.",
     )
     async def settle_escrow(
         self,
         escrow_uid: str,
-        body: SettleRequest,
+        body: VmSettleRequest,
         request: Request,
     ) -> Any:
 
-        buyer_auth._verify(request, "settle_escrow", escrow_uid, body.buyer_address)
+        auth = await buyer_auth._verify(
+            request,
+            "settle_escrow",
+            escrow_uid,
+            body.buyer_principal,
+            body.model_dump(mode="json"),
+        )
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, payload = auth.recorded_outcome
+            return JSONResponse(content=payload, status_code=status_code)
 
         composition = _container.resolved_settlement_composition
         if composition is None:
@@ -128,6 +142,10 @@ class SettleController:
                 "status": result.get("status"),
             }
         )
+        serialized["buyer_principal"] = body.buyer_principal.model_dump(mode="json")
+        serialized["seller_principal"] = composition.local_principal.model_dump(
+            mode="json"
+        )
         status_code = 200 if result.get("status") in ("ready", "failed") else 202
         return JSONResponse(content=serialized, status_code=status_code)
 
@@ -135,25 +153,40 @@ class SettleController:
         "/{escrow_uid}/status",
         response_model=SettleStatusResponse,
         summary="Poll settlement status",
-        description="Buyer-facing. Requires EIP-191 signed `X-Signature` + `X-Timestamp` headers.",
+        description="Buyer-facing. Requires marketplace v2 request authentication.",
     )
     async def settle_status(
         self,
         escrow_uid: str,
         request: Request,
-        buyer_address: str = Query(
-            description="Buyer wallet address for EIP-191 verification"
-        ),
     ) -> SettleStatusResponse:
-
-        buyer_auth._verify(request, "settle_status", escrow_uid, buyer_address)
-
         job = await self._db.load_escrow(escrow_uid=escrow_uid)
         if not job:
             raise HTTPException(
                 status_code=404, detail=f"No settlement job for escrow {escrow_uid}"
             )
-        return SettleStatusResponse(**serialize_settlement_job(job))
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=job.get("negotiation_id")
+        )
+        buyer_principal = Identity.model_validate((thread or {}).get("buyer_principal"))
+        auth = await buyer_auth._verify(
+            request,
+            "settle_status",
+            escrow_uid,
+            buyer_principal,
+        )
+        if auth.exact_retry and auth.recorded_outcome is not None:
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return SettleStatusResponse.model_validate(payload)
+
+        serialized = serialize_settlement_job(job)
+        serialized["buyer_principal"] = buyer_principal.model_dump(mode="json")
+        serialized["seller_principal"] = (
+            _container.resolved_marketplace_signer.identity.model_dump(mode="json")
+        )
+        return SettleStatusResponse(**serialized)
 
 
 @cbv(settlements_router)
@@ -199,12 +232,15 @@ class SettlementsController:
             negotiation_id=record.agreement_ref,
             obligation_ref=record.obligation_ref,
         )
-        buyer_auth._verify(
+        auth = await buyer_auth._verify(
             request,
             operation,
             resource_id,
-            agreement.buyer_address,
+            agreement.buyer_principal,
         )
+        if auth.exact_retry and auth.recorded_outcome is None:
+            raise HTTPException(status_code=409, detail="request retry is pending")
+        return auth
 
     @settlements_router.post(
         "/settlements",
@@ -225,12 +261,25 @@ class SettlementsController:
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        buyer_auth._verify(
+        if (
+            body.payer_principal != agreement.buyer_principal
+            or body.claimant_principal != composition.local_principal
+        ):
+            raise HTTPException(status_code=403, detail="settlement parties mismatch")
+        auth = await buyer_auth._verify(
             request,
             "settlement_start",
             body.obligation_ref,
-            agreement.buyer_address,
+            body.payer_principal,
+            body.model_dump(mode="json"),
         )
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return SettlementPublicResponse.model_validate(payload)
         records = await composition.runtime.register_plan(
             agreement_ref=agreement.negotiation_id,
             obligations=[agreement.obligation],
@@ -240,7 +289,7 @@ class SettlementsController:
         try:
             await composition.runtime.materialize(
                 obligation_ref=record.obligation_ref,
-                local_role="buyer",
+                local_principal=body.payer_principal,
                 worker_id=worker_id,
             )
             row = await composition.repository.load_settlement_obligation(
@@ -290,7 +339,7 @@ class SettlementsController:
         try:
             await composition.runtime.reconcile_status(
                 obligation_ref=record.obligation_ref,
-                local_role="buyer",
+                local_principal=record.payer_principal,
                 worker_id=f"settlement-status:{uuid.uuid4().hex}",
             )
             row = await composition.repository.load_settlement_obligation(
@@ -340,7 +389,7 @@ class SettlementsController:
         try:
             outcome = await composition.runtime.reclaim(
                 obligation_ref=record.obligation_ref,
-                local_role="buyer",
+                local_principal=record.payer_principal,
                 worker_id=f"settlement-reclaim:{uuid.uuid4().hex}",
             )
             if outcome.status == "busy":

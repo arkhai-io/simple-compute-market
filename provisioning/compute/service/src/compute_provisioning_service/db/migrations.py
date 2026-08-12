@@ -52,7 +52,7 @@ def apply_schema_migrations(
     _ensure_schema_migrations_table(engine)
     applied = _applied_migration_ids(engine)
 
-    for migration in _MIGRATIONS:
+    for migration in MIGRATIONS:
         if migration.id in applied:
             continue
         if migration.id == "20260713_002_resource_pools_and_hosts_pool_id":
@@ -76,7 +76,7 @@ def check_schema_version(engine: Engine) -> None:
     migration id — meaning migrations were never run, or the code shipped
     in this image is ahead of what's been applied to this database.
     """
-    expected = _MIGRATIONS[-1].id if _MIGRATIONS else None
+    expected = MIGRATIONS[-1].id if MIGRATIONS else None
     if expected is None:
         return
 
@@ -1068,9 +1068,78 @@ def _migrate_hosts_gpu_model(engine: Engine) -> None:
     "no GPU", which is what ``gpu_count`` already reports independently.
     """
     _add_column_if_missing(engine, "hosts", "gpu_model", "VARCHAR")
+def _migrate_provisioning_replay_reservations(engine: Engine) -> None:
+    """Create the durable request reservation and exact-outcome store."""
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS provisioning_replay_reservations (
+                principal_scheme VARCHAR NOT NULL,
+                principal_identifier VARCHAR NOT NULL,
+                request_id VARCHAR NOT NULL,
+                request_hash VARCHAR NOT NULL,
+                dispatch_lease_expires_at TIMESTAMP NOT NULL,
+                dispatch_attempt_count INTEGER NOT NULL DEFAULT 1,
+                response_status INTEGER,
+                response_body JSON,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                response_body_empty BOOLEAN NOT NULL DEFAULT 0,
+                response_media_type VARCHAR,
+                completed_at TIMESTAMP,
+                PRIMARY KEY (
+                    principal_scheme,
+                    principal_identifier,
+                    request_id
+                )
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS capacity_release_callback_outbox (
+                capacity_reservation_id VARCHAR NOT NULL PRIMARY KEY,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_attempted_at TIMESTAMP,
+                delivered_at TIMESTAMP
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS provisioning_trusted_principals (
+                role VARCHAR NOT NULL,
+                principal_scheme VARCHAR NOT NULL,
+                principal_identifier VARCHAR NOT NULL,
+                generation INTEGER NOT NULL,
+                valid_until TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (role, principal_scheme, principal_identifier)
+            )
+            """
+        ))
+        connection.execute(text(
+            """
+            CREATE TABLE IF NOT EXISTS provisioning_identity_rotation_audit (
+                nonce VARCHAR NOT NULL PRIMARY KEY,
+                role VARCHAR NOT NULL,
+                current_scheme VARCHAR NOT NULL,
+                current_identifier VARCHAR NOT NULL,
+                replacement_scheme VARCHAR NOT NULL,
+                replacement_identifier VARCHAR NOT NULL,
+                overlap_seconds INTEGER NOT NULL,
+                intent_expires_at INTEGER NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        ))
 
 
-_MIGRATIONS: tuple[Migration, ...] = (
+
+
+MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
     Migration("20260603_003_vm_leases_table", _migrate_vm_leases_table),
@@ -1110,5 +1179,9 @@ _MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260804_001_hosts_gpu_model",
         _migrate_hosts_gpu_model,
+    ),
+    Migration(
+        "20260811_001_provisioning_replay_reservations",
+        _migrate_provisioning_replay_reservations,
     ),
 )

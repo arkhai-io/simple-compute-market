@@ -29,12 +29,29 @@ from domains.vms.buyer.deal_helpers import (
     load_deal_context,
     load_negotiation_resume_point,
 )
+from identity_helpers import BUYER_SIGNER, seller_principals
+
+
+def _start_log(**fields):
+    trust = seller_principals()
+    fields.setdefault("publisher_id", "publisher-1")
+    fields.setdefault(
+        "publisher_principals",
+        trust.model_dump(mode="json"),
+    )
+    fields.setdefault("source_registry_url", "http://registry:8080")
+    fields.setdefault("source_registry_authority", "registry")
+    return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
 
 
 @pytest.fixture(autouse=True)
 def _isolated_runs_dir(tmp_path, monkeypatch):
     """Pin the run-log directory at tmp_path for every test."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "domains.vms.buyer.deal_helpers._publisher_trust_refresh",
+        lambda signer: lambda *_: seller_principals(),
+    )
     yield
 
 
@@ -44,7 +61,7 @@ def _isolated_runs_dir(tmp_path, monkeypatch):
 
 
 def test_load_resume_point_recovers_neg_id_and_seller_price():
-    log = RunLog.start(seller_url="http://seller:8001", listing_id="L-1")
+    log = _start_log(seller_url="http://seller:8001", listing_id="L-1")
     log.event(
         "negotiation_round",
         round=0,
@@ -52,7 +69,7 @@ def test_load_resume_point_recovers_neg_id_and_seller_price():
         their_reply={"negotiation_id": "neg-9", "action": "counter", "proposal": {"fields": {"amount": 90}}},
     )
 
-    point = load_negotiation_resume_point(log.run_id)
+    point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
     assert point.seller_url == "http://seller:8001"
     assert point.listing_id == "L-1"
@@ -69,7 +86,7 @@ def test_load_resume_point_recovers_neg_id_and_seller_price():
 def test_load_resume_point_uses_latest_seller_counter_across_rounds():
     """When the log has multiple counter rounds, last_seller_proposal
     is the most recent counter (not the first)."""
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "proposal": {"fields": {"amount": 30}}},
               their_reply={"negotiation_id": "neg-A", "action": "counter", "proposal": {"fields": {"amount": 95}}})
@@ -80,7 +97,7 @@ def test_load_resume_point_uses_latest_seller_counter_across_rounds():
               our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
               their_reply={"action": "counter", "proposal": {"fields": {"amount": 75}}})
 
-    point = load_negotiation_resume_point(log.run_id)
+    point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
     assert point.last_seller_proposal["fields"]["amount"] == 75
     assert point.rounds_completed == 3
@@ -92,7 +109,7 @@ def test_load_resume_point_terminal_seller_reply_does_not_overwrite_price():
     """When the seller's last reply was terminal (accept/exit),
     last_seller_proposal should reflect the previous counter — the
     round-loop needs a `their_proposed_price` to feed the strategy."""
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
               their_reply={"negotiation_id": "neg-T", "action": "counter", "proposal": {"fields": {"amount": 80}}})
@@ -102,7 +119,7 @@ def test_load_resume_point_terminal_seller_reply_does_not_overwrite_price():
               our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
               their_reply={"action": "accept", "proposal": {"fields": {"amount": 70}}})
 
-    point = load_negotiation_resume_point(log.run_id)
+    point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
     # The accept-reply has price=70 but action=accept, so we don't
     # treat it as a counter. last_seller_proposal stays at the prior 80.
@@ -114,40 +131,40 @@ def test_load_resume_point_picks_up_negotiation_id_from_run_ended():
     """When the run ended cleanly with negotiation_id but never had
     explicit negotiation_round events (rare; fast accept), the
     negotiation_id can still be recovered from run_ended."""
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     # No rounds, but run_ended carries the neg_id
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
               their_reply={"negotiation_id": "neg-from-end", "action": "counter", "proposal": {"fields": {"amount": 60}}})
     log.end("agreed", negotiation_id="neg-from-end", agreed_amount=60, rounds=0)
 
-    point = load_negotiation_resume_point(log.run_id)
+    point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
     assert point.negotiation_id == "neg-from-end"
     assert point.last_status == "agreed"
 
 
 def test_load_resume_point_missing_run_log_raises():
     with pytest.raises(typer.BadParameter, match="No run-log"):
-        load_negotiation_resume_point("does-not-exist")
+        load_negotiation_resume_point("does-not-exist", signer=BUYER_SIGNER)
 
 
 def test_load_resume_point_missing_negotiation_id_raises():
     """A log with no rounds and no neg_id can't be resumed."""
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     # No negotiation_round events written.
     with pytest.raises(typer.BadParameter, match="negotiation_id"):
-        load_negotiation_resume_point(log.run_id)
+        load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
 
 def test_load_resume_point_missing_seller_url_raises():
     """A log without seller_url in run_started can't be resumed (we
     don't know who to POST to)."""
-    log = RunLog.start(listing_id="L-1")  # no seller_url
+    log = _start_log(listing_id="L-1")  # no seller_url
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
               their_reply={"negotiation_id": "neg-1", "action": "counter", "proposal": {"fields": {"amount": 80}}})
     with pytest.raises(typer.BadParameter, match="seller_url"):
-        load_negotiation_resume_point(log.run_id)
+        load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
 
 # ---------------------------------------------------------------------------
@@ -156,39 +173,39 @@ def test_load_resume_point_missing_seller_url_raises():
 
 
 def test_is_negotiation_complete_false_for_mid_stream_run():
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     log.event("negotiation_round", round=0,
               our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
               their_reply={"negotiation_id": "neg-1", "action": "counter", "proposal": {"fields": {"amount": 90}}})
-    assert is_negotiation_complete(log.run_id) is False
+    assert is_negotiation_complete(log.run_id, signer=BUYER_SIGNER) is False
 
 
 def test_is_negotiation_complete_true_for_agreed_negotiation_completed():
     """`market buy`-style log ends with negotiation_completed agreed."""
-    log = RunLog.start()
+    log = _start_log()
     log.event("negotiation_completed", status="agreed", agreed_amount=80)
-    assert is_negotiation_complete(log.run_id) is True
+    assert is_negotiation_complete(log.run_id, signer=BUYER_SIGNER) is True
 
 
 def test_is_negotiation_complete_true_for_agreed_run_ended():
     """`market negotiate`-style log ends with run_ended status=agreed."""
-    log = RunLog.start()
+    log = _start_log()
     log.end("agreed", negotiation_id="neg-1", agreed_amount=70, rounds=2)
-    assert is_negotiation_complete(log.run_id) is True
+    assert is_negotiation_complete(log.run_id, signer=BUYER_SIGNER) is True
 
 
 def test_is_negotiation_complete_false_for_exited_negotiation():
-    log = RunLog.start()
+    log = _start_log()
     log.event("negotiation_completed", status="exited", reason="ceiling")
     log.end("exited")
-    assert is_negotiation_complete(log.run_id) is False
+    assert is_negotiation_complete(log.run_id, signer=BUYER_SIGNER) is False
 
 
 def test_is_negotiation_complete_false_for_missing_log():
     """Non-existent run-id is treated as 'not complete' rather than
     raising — the caller in `buy --from` then triggers the resume
     path which raises with a clearer error."""
-    assert is_negotiation_complete("ghost-run") is False
+    assert is_negotiation_complete("ghost-run", signer=BUYER_SIGNER) is False
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +229,7 @@ def test_load_deal_context_recovers_accepted_proposal_and_demands():
         "expiration_unix": 1_800_000_000,
     }
     provision = {"duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA"}
-    log = RunLog.start(seller_url="http://s", listing_id="L")
+    log = _start_log(seller_url="http://s", listing_id="L")
     log.event(
         "negotiation_completed",
         status="agreed",
@@ -223,7 +240,7 @@ def test_load_deal_context_recovers_accepted_proposal_and_demands():
         accepted_provision_terms=provision,
     )
 
-    deal = load_deal_context(log.run_id)
+    deal = load_deal_context(log.run_id, signer=BUYER_SIGNER)
 
     assert deal.accepted_escrow_proposal == proposal
     assert deal.accepted_provision_terms == provision

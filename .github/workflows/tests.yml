@@ -42,15 +42,17 @@ jobs:
           - { name: kit-alkahest,           dir: kit/alkahest, predist: true }
           - { name: kit-config,             dir: kit/config, predist: true }
           - { name: kit-identity,           dir: kit/identity }
-          - { name: kit-policy,             dir: kit/policy }
-          - { name: kit-settlement-runtime, dir: kit/settlement-runtime }
+          - { name: kit-policy,             dir: kit/policy, predist: true }
+          - { name: kit-settlement-runtime, dir: kit/settlement-runtime, predist: true }
           - { name: kit-hosted-settlement, dir: kit/hosted-settlement, predist: true, requires_hosted: true }
           - { name: core,                   dir: core }
           - { name: core-buyer,             dir: core/buyer, predist: true }
           - { name: core-storefront,        dir: core/storefront, predist: true }
-          - { name: core-storefront-client, dir: core/storefront-client }
+          - { name: core-storefront-client, dir: core/storefront-client, predist: true }
           - { name: core-registry,          dir: core/registry, predist: true }
+          - { name: core-registry-client,   dir: core/registry-client, predist: true }
           - { name: kit-site,              dir: kit/site }
+          - { name: kit-site-client,       dir: kit/site-client, predist: true }
           - { name: kit-resource-pools,     dir: kit/resource-pools }
           - { name: kit-fulfillment,        dir: kit/fulfillment, predist: true }
           - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
@@ -86,8 +88,14 @@ jobs:
           manifest="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["manifest_filename"])')"
           wheel="$(python -c 'import json; print(json.load(open("manifests/hosted-settlement-v0.1.0-trust.json"))["client_wheel"]["filename"])')"
           test -n "$repository"
-          gh release download "v$version" --repo "$repository" \
-            --pattern "$manifest" --pattern "$wheel" --dir .dist
+          gh release download "v$version" --repo "$repository" --dir .dist \
+            --pattern "$manifest" \
+            --pattern "$wheel" \
+            --pattern "openapi-v0.1.0.json" \
+            --pattern "conformance-v0.1.0.json" \
+            --pattern "migrations-v4.json" \
+            --pattern "sbom.spdx.json" \
+            --pattern "provenance.intoto.json"
       - name: Verify staged hosted release
         if: matrix.requires_hosted
         run: make verify-hosted-release
@@ -100,11 +108,14 @@ jobs:
           uv build --no-sources --out-dir .dist domains/vms/domain
           uv build --no-sources --out-dir .dist domains/bare_metal
           uv build --no-sources --out-dir .dist core
+          uv build --no-sources --out-dir .dist core/buyer
           uv build --no-sources --out-dir .dist core/storefront
           uv build --no-sources --out-dir .dist kit/site
+          uv build --no-sources --out-dir .dist kit/site-client
           uv build --no-sources --out-dir .dist kit/resource-pools
           uv build --no-sources --out-dir .dist kit/fulfillment
           uv build --no-sources --out-dir .dist kit/identity
+          uv build --no-sources --out-dir .dist domains/apicredits
           uv build --no-sources --out-dir .dist kit/alkahest
           uv build --no-sources --out-dir .dist kit/config
           uv build --no-sources --out-dir .dist kit/policy
@@ -120,6 +131,20 @@ jobs:
           PYTHONPATH: ${{ matrix.pythonpath }}
           PYTEST_ARGS: ${{ matrix.pytest_args }}
         run: uv run --find-links "$GITHUB_WORKSPACE/.dist" --with pytest --with pytest-asyncio pytest -q $PYTEST_ARGS
+
+  release-deployment:
+    name: release · deployment contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.17"
+      - uses: azure/setup-helm@v4
+      - name: Run release and package boundary tests
+        run: make test-release-tooling
+      - name: Run Helm schema and render contracts
+        run: make -C helm test-render
 
   ts-middleware:
     name: ts · apicredits-middleware

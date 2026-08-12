@@ -15,18 +15,17 @@ This module owns what is genuinely API-credits vocabulary:
   quantity ≤ the quota resource's available units in the captured
   capacity snapshot. Advisory, like every negotiation-time check —
   issuance re-reserves authoritatively.
-* ``key_owned_by_buyer_wallet`` — the seller-default ownership guard
-  (ARCHITECTURE.md, "API-credits market domain — Key ownership"): for an existing-key
-  claim, the captured key record's ``wallet`` owner must equal the
-  negotiation's signing wallet. Free — the wallet-signed negotiation is
-  the possession proof. The guard is the interface, not the
-  enforcement: issuance re-checks the claim at grant time.
+* ``key_owned_by_buyer_principal`` — the seller-default ownership guard:
+  for an existing-key claim, the captured key record's canonical owner
+  must equal the authenticated negotiation principal. The guard is
+  advisory; issuance repeats the exact-principal check authoritatively.
 """
 
 from __future__ import annotations
 
 import logging
 
+from market_identity import Identity, IdentityScheme
 from domains.apicredits.listings.models import coerce_resource_dict
 from market_policy.scalar_policies import (  # shared alkahest-scalar vocabulary
     _amount_from_proposal,
@@ -188,18 +187,12 @@ def credit_quota_guard(
     )
 
 
-@register_negotiation_middleware("key_owned_by_buyer_wallet")
-def key_owned_by_buyer_wallet(
+@register_negotiation_middleware("key_owned_by_buyer_principal")
+def key_owned_by_buyer_principal(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Reject an existing-key claim unless the buyer's wallet owns the key.
-
-    Consults the captured key record (the credits-service lookup the
-    round hook snapshots, exactly like the inventory snapshot) and the
-    negotiation's signing wallet. New-key deals pass untouched. A seller
-    who wants open top-up omits this guard from their chain.
-    """
+    """Reject an existing-key claim unless its canonical owner is the buyer."""
     if (context.intermediate.get("key_mode") or "new") != "existing":
         return None, context
 
@@ -223,33 +216,31 @@ def key_owned_by_buyer_wallet(
         )
 
     owner_scheme = record.get("owner_scheme")
-    if owner_scheme is None:
-        return None, context  # unowned key: anyone may top it up
-
-    buyer_wallet = str(context.intermediate.get("buyer_wallet") or "")
-    if owner_scheme == "wallet":
-        owner_id = str(record.get("owner_id") or "")
-        if buyer_wallet and owner_id and buyer_wallet.lower() == owner_id.lower():
-            return None, context
+    owner_identifier = record.get("owner_id")
+    if owner_scheme is None and owner_identifier is None:
+        return None, context
+    try:
+        owner = Identity(
+            scheme=IdentityScheme(str(owner_scheme)),
+            identifier=str(owner_identifier),
+        )
+        buyer = Identity.model_validate(context.intermediate.get("buyer_principal"))
+    except (TypeError, ValueError):
         return (
             NegotiationDecision(
                 action="reject",
-                reason=(
-                    f"{KEY_NOT_OWNED}: key {key_id!r} is bound to a different wallet"
-                ),
+                reason=f"{KEY_NOT_OWNED}: key {key_id!r} has no matching principal",
             ),
             context,
         )
-
-    # Non-wallet ownership (e.g. ed25519) needs the possession-challenge
-    # middleware, which is the planned second scheme — this guard cannot
-    # verify it and must not silently credit.
+    if owner == buyer:
+        return None, context
     return (
         NegotiationDecision(
             action="reject",
             reason=(
-                f"{KEY_NOT_OWNED}: key {key_id!r} ownership scheme "
-                f"{owner_scheme!r} is not verifiable by the wallet guard"
+                f"{KEY_NOT_OWNED}: key {key_id!r} is bound to a different "
+                "marketplace principal"
             ),
         ),
         context,
@@ -262,6 +253,6 @@ __all__ = [
     "KEY_REVOKED",
     "QUOTA_EXHAUSTED",
     "api_credits_round_zero_guard",
-    "key_owned_by_buyer_wallet",
+    "key_owned_by_buyer_principal",
     "credit_quota_guard",
 ]

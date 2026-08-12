@@ -45,7 +45,10 @@ class TestRunMigrationsFreshBootstrap:
 
         with engine.begin() as connection:
             rows = connection.execute(text("SELECT id FROM schema_migrations")).fetchall()
-        assert rows == [("20260731_001_apicredits_schema_baseline",)]
+        assert rows == [
+            ("20260731_001_apicredits_schema_baseline",),
+            ("20260811_002_canonical_owner_principals",),
+        ]
 
 
 class TestRunMigrationsIsIdempotent:
@@ -58,7 +61,7 @@ class TestRunMigrationsIsIdempotent:
             count = connection.execute(
                 text("SELECT COUNT(*) FROM schema_migrations")
             ).scalar()
-        assert count == 1
+        assert count == 2
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:
@@ -109,6 +112,65 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
         assert row is not None
         assert row[0] == 42
 
+
+    def test_migrates_wallet_owner_to_canonical_eip191_principal(self):
+        engine = _sqlite_memory_engine()
+        Base.metadata.create_all(bind=engine)
+        from market_site.db import Base as SiteBase
+        SiteBase.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO api_keys "
+                "(key_id, secret_hash, owner_scheme, owner_id, status, balance, "
+                "created_at, updated_at) VALUES "
+                "('k1', 'hash1', 'wallet', "
+                "'0xABCDEF0000000000000000000000000000000001', "
+                "'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ))
+
+        run_migrations(engine)
+
+        with engine.begin() as connection:
+            row = connection.execute(text(
+                "SELECT owner_scheme, owner_id FROM api_keys WHERE key_id = 'k1'"
+            )).one()
+        assert row == (
+            "eip191",
+            "0xabcdef0000000000000000000000000000000001",
+        )
+
+    def test_malformed_owner_rolls_back_principal_migration(self):
+        engine = _sqlite_memory_engine()
+        Base.metadata.create_all(bind=engine)
+        from market_site.db import Base as SiteBase
+        SiteBase.metadata.create_all(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(text(
+                "INSERT INTO api_keys "
+                "(key_id, secret_hash, owner_scheme, owner_id, status, balance, "
+                "created_at, updated_at) VALUES "
+                "('good', 'hash1', 'wallet', "
+                "'0xABCDEF0000000000000000000000000000000001', "
+                "'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), "
+                "('bad', 'hash2', 'wallet', 'not-an-address', "
+                "'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ))
+
+        with pytest.raises(SchemaDriftError):
+            run_migrations(engine)
+
+        with engine.begin() as connection:
+            rows = connection.execute(text(
+                "SELECT key_id, owner_scheme, owner_id FROM api_keys ORDER BY key_id"
+            )).fetchall()
+        assert rows == [
+            ("bad", "wallet", "not-an-address"),
+            (
+                "good",
+                "wallet",
+                "0xABCDEF0000000000000000000000000000000001",
+            ),
+        ]
 
 class TestCheckSchemaVersion:
     """Not called by this service's own startup today (see migrations.py's

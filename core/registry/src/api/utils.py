@@ -1,97 +1,134 @@
-"""Utility functions for API routes."""
+"""Utility functions for registry API routes."""
+
+from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, Optional
+
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from market_identity import Identity, TrustedIdentitySet
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from market_identity import Identity, get_identity_verifier
-from src.db.models import Publisher, PublisherIdentity, Listing, OrderStatusEnum
-
-try:
-    import eth_account  # noqa: F401
-    HAS_ETH_ACCOUNT = True
-except ImportError:
-    HAS_ETH_ACCOUNT = False
+from src.db.models import Listing, OrderStatusEnum, Publisher, PublisherIdentity
 
 logger = logging.getLogger(__name__)
 
 
-def _verify_identity_signature(identity: Identity, message: str, signature: str) -> bool:
-    """Dispatch signature verification by identity scheme."""
-    try:
-        verifier = get_identity_verifier(identity.scheme)
-    except KeyError:
-        logger.warning(f"[VERIFY] unknown identity scheme {identity.scheme!r}")
-        return False
-    try:
-        proof = bytes.fromhex(signature.removeprefix("0x"))
-    except ValueError:
-        logger.error("[VERIFY] malformed signature hex")
-        return False
-    return verifier.verify_signature(identity, message.encode("utf-8"), proof)
+def find_identity_binding(
+    db: Session,
+    identity: Identity,
+) -> Optional[PublisherIdentity]:
+    """Resolve an exact canonical principal to its retained binding row."""
 
-
-def verify_order_signature(
-    operation: str,
-    resource_id: str,
-    timestamp: int,
-    signature: str,
-    expected: "Identity | str",
-) -> bool:
-    """Verify a listing mutation signature.
-
-    Message format: '{operation}:{resource_id}:{timestamp}'
-    operation: 'create_listing', 'update_listing', or 'delete_listing'
-    resource_id: the signing identifier for create_listing, listing_id for
-    update/delete.
-
-    ``expected`` may be an :class:`Identity` (preferred) or a raw EIP-191
-    address string (coerced to ``eip191``).
-    """
-    if not HAS_ETH_ACCOUNT:
-        logger.warning("[Order] eth_account not available, signature verification disabled")
-        return False
-    identity = expected if isinstance(expected, Identity) else Identity(
-        scheme="eip191", identifier=expected
-    )
-    message = f"{operation}:{resource_id}:{timestamp}"
-    logger.info(
-        f"[Order] Verifying {operation} for resource={resource_id} "
-        f"scheme={identity.scheme} identifier={identity.identifier}"
-    )
-    is_valid = _verify_identity_signature(identity, message, signature)
-    logger.info(f"[Order] Signature valid: {is_valid}")
-    return is_valid
-
-
-# ---------------------------------------------------------------------------
-# Publisher / identity lookup
-# ---------------------------------------------------------------------------
-
-
-def find_publisher_by_identity(db: Session, identity: Identity) -> Optional[Publisher]:
-    """Resolve a publisher by one of its signing identities.
-
-    Returns ``None`` when no identity matches; callers handle 404 /
-    lazy-create themselves.
-    """
-    row = (
+    return (
         db.query(PublisherIdentity)
         .filter(
-            PublisherIdentity.scheme == identity.scheme,
+            PublisherIdentity.scheme == identity.scheme.value,
             PublisherIdentity.identifier == identity.identifier,
         )
         .first()
     )
-    return row.publisher if row is not None else None
+
+
+def effective_identity_status(
+    binding: PublisherIdentity,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """Return lifecycle status after applying the bounded-overlap deadline."""
+
+    if binding.disabled_at is not None or binding.status == "disabled":
+        return "disabled"
+    if binding.retired_at is not None or binding.status == "retired":
+        return "retired"
+    deadline = binding.active_until
+    instant = now or (
+        datetime.now(deadline.tzinfo)
+        if deadline is not None and deadline.tzinfo is not None
+        else datetime.utcnow()
+    )
+    if binding.status == "overlap" and deadline is not None and deadline <= instant:
+        return "retired"
+    return binding.status
+
+
+def identity_is_active(
+    binding: PublisherIdentity,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    return effective_identity_status(binding, now=now) in {"primary", "overlap"}
+
+
+def find_publisher_by_identity(
+    db: Session,
+    identity: Identity,
+    *,
+    active_only: bool = False,
+) -> Optional[Publisher]:
+    """Resolve an exact principal, optionally requiring an active binding."""
+
+    binding = find_identity_binding(db, identity)
+    if binding is None or (active_only and not identity_is_active(binding)):
+        return None
+    return binding.publisher
 
 
 def find_publisher_by_id(db: Session, publisher_id: int) -> Optional[Publisher]:
-    """Look up a publisher by its surrogate id."""
-    return db.query(Publisher).filter(Publisher.publisher_id == publisher_id).first()
+    return (
+        db.query(Publisher)
+        .filter(Publisher.publisher_id == publisher_id)
+        .first()
+    )
+
+
+def publisher_accepts_identity(
+    publisher: Publisher,
+    identity: Identity,
+    *,
+    primary_only: bool = False,
+) -> bool:
+    """Authorize one complete principal against a publisher's active bindings."""
+
+    for binding in publisher.identities:
+        if (
+            binding.scheme == identity.scheme.value
+            and binding.identifier == identity.identifier
+            and identity_is_active(binding)
+        ):
+            return not primary_only or binding.status == "primary"
+    return False
+
+
+def primary_identity(publisher: Publisher) -> Identity | None:
+    """Return the publisher's single active primary principal."""
+
+    for binding in publisher.identities:
+        if binding.status == "primary" and identity_is_active(binding):
+            return Identity(
+                scheme=binding.scheme,
+                identifier=binding.identifier,
+            )
+    return None
+
+def active_identities(publisher: Publisher) -> TrustedIdentitySet:
+    bindings = sorted(
+        (
+            binding
+            for binding in publisher.identities
+            if identity_is_active(binding)
+        ),
+        key=lambda binding: (binding.status != "primary", binding.created_at),
+    )
+    return TrustedIdentitySet(
+        identities=tuple(
+            Identity(scheme=binding.scheme, identifier=binding.identifier)
+            for binding in bindings
+        )
+    )
 
 
 def ensure_publisher_for_identity(
@@ -99,69 +136,91 @@ def ensure_publisher_for_identity(
     identity: Identity,
     storefront_url: Optional[str] = None,
 ) -> Publisher:
-    """Find or create the publisher owning ``identity``.
+    """Lazily bind a newly verified principal to one stable publisher."""
 
-    Used by the publish path: the signed request is the trust anchor —
-    successful signature recovery proves control of the identity, so the
-    publisher (and its identity row) is created on first sighting. No
-    pre-registration. When ``storefront_url`` is supplied it is recorded on
-    create and refreshed on later publishes if it changed.
-
-    Pre-condition: signature verification has already passed.
-    """
-    publisher = find_publisher_by_identity(db, identity)
-    if publisher is not None:
+    binding = find_identity_binding(db, identity)
+    if binding is not None:
+        if not identity_is_active(binding):
+            raise HTTPException(
+                status_code=403,
+                detail="Publisher principal is retired or disabled",
+            )
+        publisher = binding.publisher
         if storefront_url and publisher.storefront_url != storefront_url:
             publisher.storefront_url = storefront_url
-            db.commit()
-            db.refresh(publisher)
         return publisher
 
     publisher = Publisher(storefront_url=storefront_url)
     publisher.identities.append(
-        PublisherIdentity(scheme=identity.scheme, identifier=identity.identifier)
+        PublisherIdentity(
+            scheme=identity.scheme.value,
+            identifier=identity.identifier,
+            status="primary",
+        )
     )
     db.add(publisher)
     try:
-        db.commit()
-        db.refresh(publisher)
+        db.flush()
     except IntegrityError:
-        # Concurrent insert raced us on the unique (scheme, identifier) — re-query.
         db.rollback()
-        return find_publisher_by_identity(db, identity)  # type: ignore[return-value]
+        binding = find_identity_binding(db, identity)
+        if binding is None or not identity_is_active(binding):
+            raise HTTPException(
+                status_code=409,
+                detail="Publisher principal binding conflict",
+            )
+        return binding.publisher
 
     logger.info(
-        f"[Publisher] Created publisher id={publisher.publisher_id} "
-        f"identity={identity.scheme}:{identity.identifier}"
+        "[Publisher] Created publisher id=%s principal=%s:%s",
+        publisher.publisher_id,
+        identity.scheme.value,
+        identity.identifier,
     )
     return publisher
 
 
-def publisher_to_dict(publisher: Publisher) -> dict:
-    """Wire shape for a publisher entity."""
+def publisher_to_dict(publisher: Publisher) -> dict[str, Any]:
+    """Return a stable publisher with explicit principal lifecycle bindings."""
+
+    identities = []
+    for binding in publisher.identities:
+        status = effective_identity_status(binding)
+        identities.append(
+            {
+                "principal": {
+                    "scheme": binding.scheme,
+                    "identifier": binding.identifier,
+                },
+                "status": status,
+                "active_until": (
+                    binding.active_until.isoformat()
+                    if binding.active_until is not None
+                    else None
+                ),
+                "retired_at": (
+                    binding.retired_at.isoformat()
+                    if binding.retired_at is not None
+                    else None
+                ),
+                "disabled_at": (
+                    binding.disabled_at.isoformat()
+                    if binding.disabled_at is not None
+                    else None
+                ),
+            }
+        )
     return {
         "publisher_id": publisher.publisher_id,
         "storefront_url": publisher.storefront_url,
-        "identities": [
-            {"scheme": i.scheme, "identifier": i.identifier}
-            for i in publisher.identities
-        ],
+        "identities": identities,
         "created_at": publisher.created_at.isoformat(),
     }
 
 
 def _as_json_obj(value: Any, default: Any) -> Any:
-    """Decode a column that may hold a JSON string into a Python object.
+    """Decode a JSON column that may contain one already-encoded value."""
 
-    offer_resource / accepted_escrows are ``Column(JSON)``, so a well-formed
-    publisher stores (and we read) real objects. But a publisher that
-    forwards an already-stringified blob double-encodes it, leaving a JSON
-    *string* in the column. The discovery filters run JSONPath over these
-    fields (``$.offer_resource.gpu_model`` etc.), which only resolves
-    against an object — a string would silently match nothing. Decoding on
-    read keeps discovery (and the wire response) correct regardless of how
-    the value was stored.
-    """
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -170,16 +229,17 @@ def _as_json_obj(value: Any, default: Any) -> Any:
     return default if value is None else value
 
 
-def order_to_dict(listing: Listing) -> dict:
-    """Convert a Listing ORM row to its wire-shape dict.
+def order_to_dict(listing: Listing) -> dict[str, Any]:
+    """Convert a listing row to its principal-aware discovery wire shape."""
 
-    ``storefront_url`` (where a buyer negotiates) is joined from the
-    owning publisher — the same value and key the publisher entity uses.
-    """
     publisher = listing.publisher
+    owners = active_identities(publisher) if publisher is not None else None
     return {
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
+        "publisher_principals": (
+            owners.model_dump(mode="json") if owners is not None else None
+        ),
         "storefront_url": publisher.storefront_url if publisher else None,
         "offer_resource": _as_json_obj(listing.offer_resource, {}),
         "accepted_escrows": _as_json_obj(listing.accepted_escrows, []),
@@ -194,8 +254,9 @@ def order_to_dict(listing: Listing) -> dict:
 
 
 def validate_order_status(status: str) -> OrderStatusEnum:
-    """Validate and convert string status to OrderStatusEnum"""
+    """Validate and convert a listing lifecycle status."""
+
     try:
         return OrderStatusEnum(status)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status}") from exc

@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTFILE="${1:-${ROOT_DIR}/.snapshot/review-wheelhouse.tar.gz}"
 PROJECTS="${REVIEW_PROJECTS:-}"
 REVIEW_PYTHON="${REVIEW_PYTHON:-3.13}"
+IDENTITY_WHEEL="arkhai_kit_identity-0.2.0-py3-none-any.whl"
+HOSTED_CLIENT_WHEEL="arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl"
+HOSTED_MANIFEST="release-manifest.json"
+HOSTED_TRUST="${ROOT_DIR}/manifests/hosted-settlement-v0.1.0-trust.json"
 
 if [[ -z "${PROJECTS// }" ]]; then
   echo "REVIEW_PROJECTS must list one or more repository-relative Python projects" >&2
@@ -23,6 +27,78 @@ if [[ ! -d "${ROOT_DIR}/.dist" ]]; then
   exit 2
 fi
 cp -a "${ROOT_DIR}/.dist" "${BUNDLE_DIR}/wheelhouse"
+for required in "${IDENTITY_WHEEL}" "${HOSTED_CLIENT_WHEEL}" "${HOSTED_MANIFEST}"; do
+  if [[ ! -f "${BUNDLE_DIR}/wheelhouse/${required}" ]]; then
+    echo "required pinned release artifact is missing: ${required}" >&2
+    exit 2
+  fi
+done
+if [[ ! -f "${HOSTED_TRUST}" ]]; then
+  echo "hosted release trust input is missing: ${HOSTED_TRUST}" >&2
+  exit 2
+fi
+mkdir -p "${BUNDLE_DIR}/release"
+cp "${HOSTED_TRUST}" "${BUNDLE_DIR}/release/hosted-settlement-trust.json"
+cp "${BUNDLE_DIR}/wheelhouse/${HOSTED_MANIFEST}" "${BUNDLE_DIR}/release/"
+uv run --no-project --python "${REVIEW_PYTHON}" python - \
+  "${BUNDLE_DIR}" "${IDENTITY_WHEEL}" "${HOSTED_CLIENT_WHEEL}" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+bundle = Path(sys.argv[1])
+wheelhouse = bundle / "wheelhouse"
+trust = json.loads((bundle / "release" / "hosted-settlement-trust.json").read_text())
+manifest = json.loads((bundle / "release" / "release-manifest.json").read_text())
+
+expected_identity = {
+    "request_signature_protocol": "arkhai.hosted-request-signature.v2",
+    "response_signature_protocol": "arkhai.hosted-response-signature.v2",
+    "supported_identity_schemes": ["eip191", "ed25519"],
+    "capabilities": [
+        "scheme-tagged-identities.v1",
+        "account-owner-admission.v1",
+        "account-owner-rotation.v1",
+        "account-owner-retirement.v1",
+        "signer-injected-client.v1",
+        "provider-neutral-seller-onboarding.v1",
+    ],
+    "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
+    "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
+    "client_signer_api": "hosted_settlement_client.Signer",
+    "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
+}
+if trust["contract_version"] != "arkhai.hosted-settlement-release.v2":
+    raise SystemExit("hosted release trust does not pin identity-capable contract v2")
+if trust["schema_version"] != 4:
+    raise SystemExit("hosted release trust does not pin schema 4")
+if trust.get("identity_contract") != expected_identity:
+    raise SystemExit("hosted release trust does not pin the exact identity contract")
+if manifest["payload"].get("identity_contract") != expected_identity:
+    raise SystemExit("hosted release manifest does not provide the exact identity contract")
+
+pins = {
+    "schema_version": 1,
+    "identity_wheel": {
+        "filename": sys.argv[2],
+        "sha256": hashlib.sha256((wheelhouse / sys.argv[2]).read_bytes()).hexdigest(),
+    },
+    "hosted_client_wheel": {
+        "filename": sys.argv[3],
+        "sha256": hashlib.sha256((wheelhouse / sys.argv[3]).read_bytes()).hexdigest(),
+    },
+    "hosted_release_manifest": {
+        "filename": "release-manifest.json",
+        "sha256": hashlib.sha256(
+            (bundle / "release" / "release-manifest.json").read_bytes()
+        ).hexdigest(),
+    },
+}
+(bundle / "release" / "artifact-pins.json").write_text(
+    json.dumps(pins, indent=2, sort_keys=True) + "\n"
+)
+PY
 
 normalize_project_copy() {
   local project_copy_dir="$1"
@@ -89,6 +165,11 @@ def wheel_for(name: str, version: str) -> str:
         for path in wheelhouse.glob("*.whl")
         if path.name.lower().startswith(prefix)
     ]
+    if not matches:
+        # A non-root editable/directory record without a bundled release is
+        # repository leakage, not a missing external dependency. Report it
+        # before attempting to normalize the record into a wheel source.
+        raise SystemExit("portable review lock retains repository source paths")
     if len(matches) != 1:
         raise SystemExit(
             f"expected one bundled wheel for {name}=={version}, found {matches}"
@@ -128,6 +209,46 @@ text = package_pattern.sub(normalize_package, text)
 # Dependency metadata may also retain editable/directory hints. Once the package
 # records above are wheel-backed these hints are non-portable and unnecessary.
 text = re.sub(r', (?:editable|directory) = "[^"]+"', '', text)
+
+source_leaks = [
+    path
+    for path in re.findall(
+        r'^source = \{ (?:editable|directory) = "([^"]+)" \}$',
+        text,
+        re.MULTILINE,
+    )
+    if path != "."
+]
+if source_leaks:
+    raise SystemExit("portable review lock retains repository source paths")
+
+project_text = pyproject.read_text()
+project_name_match = re.search(r'(?m)^name = "([^"]+)"$', project_text)
+project_name = project_name_match.group(1) if project_name_match else None
+for name, version in (
+    ("arkhai-kit-identity", "0.2.0"),
+    ("arkhai-hosted-settlement-client", "0.1.0"),
+):
+    mentions = re.findall(rf'(?m)^\s*"{re.escape(name)}([^"]*)"', project_text)
+    if mentions and any(value != f"=={version}" for value in mentions):
+        raise SystemExit(f"{name} must be pinned exactly to {version}")
+
+for required_name, required_version in (
+    ("arkhai-kit-identity", "0.2.0"),
+    ("arkhai-hosted-settlement-client", "0.1.0"),
+):
+    if required_name == project_name:
+        continue
+    for match in package_pattern.finditer(text):
+        block = match.group(0)
+        name_match = re.search(r'^name = "([^"]+)"$', block, re.MULTILINE)
+        if name_match is None or name_match.group(1) != required_name:
+            continue
+        if f'version = "{required_version}"' not in block:
+            raise SystemExit(f"lock does not pin {required_name}=={required_version}")
+        if "editable =" in block or "directory =" in block:
+            raise SystemExit(f"lock resolves {required_name} from repository source")
+
 lockfile.write_text(text)
 PY
 }
@@ -146,25 +267,48 @@ for project in ${PROJECTS}; do
   cp "${project_dir}/pyproject.toml" "${project_dir}/uv.lock" "${project_copy_dir}/"
   normalize_project_copy "${project_copy_dir}"
 
-  # Populate an isolated cache for one explicit interpreter ABI. Reusing an
-  # existing .venv can hide missing artifacts, so each project gets a clean
-  # temporary environment. This step installs dependencies but runs no tests.
+  # Populate from the portable copy, not the source project. Installing only
+  # dependencies proves the rewritten lock is self-contained and cannot fall
+  # back to editable repository sources.
   safe_project="${project//\//_}"
   (
-    cd "${project_dir}"
+    cd "${project_copy_dir}"
     UV_CACHE_DIR="${CACHE_DIR}" \
     UV_PROJECT_ENVIRONMENT="${ENV_DIR}/${safe_project}" \
       uv sync \
         --python "${REVIEW_PYTHON}" \
         --frozen \
         --dev \
-        --find-links "${ROOT_DIR}/.dist"
+        --no-install-project \
+        --find-links "${BUNDLE_DIR}/wheelhouse"
   )
+  "${ENV_DIR}/${safe_project}/bin/python" - "${project_copy_dir}/pyproject.toml" <<'PY'
+import importlib
+import importlib.metadata
+from pathlib import Path
+import sys
+import tomllib
+
+project = tomllib.loads(Path(sys.argv[1]).read_text())
+requirements = tuple(project.get("project", {}).get("dependencies", ()))
+for distribution, version, module in (
+    ("arkhai-kit-identity", "0.2.0", "market_identity"),
+    ("arkhai-hosted-settlement-client", "0.1.0", "hosted_settlement_client"),
+):
+    if not any(value.startswith(distribution) for value in requirements):
+        continue
+    installed = importlib.metadata.version(distribution)
+    if installed != version:
+        raise SystemExit(f"{distribution} installed {installed}, expected {version}")
+    importlib.import_module(module)
+PY
 done
 
 cat > "${BUNDLE_DIR}/README.txt" <<EOF_README
 This archive contains:
-- wheelhouse/: clean repository-built wheels from 'make dist-clean dist'
+- wheelhouse/: clean repository-built wheels, including the exact identity kit
+  and manifest-pinned hosted client
+- release/: hosted trust/manifest plus SHA-256 pins for release inputs
 - uv-cache/: external artifacts for CPython ${REVIEW_PYTHON}
 - projects/: pyproject.toml and portable copied uv.lock files
 - projects.txt: selected project paths

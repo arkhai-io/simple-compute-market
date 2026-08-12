@@ -40,8 +40,7 @@ def portfolio_import_csv(
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
 
     if not db_path:
-        if settings.db_path:
-            db_path = settings.db_path
+        db_path = str(settings.get("db_path", "") or "").strip() or None
 
     script = STOREFRONT_ROOT / "scripts" / "import_resources_csv.py"
     if not script.exists():

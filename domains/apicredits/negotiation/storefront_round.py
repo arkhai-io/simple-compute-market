@@ -16,6 +16,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
+from market_identity import Identity
 import domains.apicredits.negotiation.policies  # noqa: F401 — registers the guards
 from domains.apicredits.listings.pricing import (
     determine_strategy_from_order,
@@ -46,7 +47,7 @@ _DEFAULT_GUARDS = [
     "api_credits_round_zero_guard",
     "buyer_counter_guard",
     "credit_quota_guard",
-    "key_owned_by_buyer_wallet",
+    "key_owned_by_buyer_principal",
     "escrow_shape_guard",
 ]
 _DEFAULT_TERMINAL = "listed_price"
@@ -58,10 +59,10 @@ class ApiCreditsSellerRoundHook(Protocol):
         *,
         listing: Mapping[str, Any],
         history: list[NegotiationRound],
+        buyer_principal: Identity,
         requested_quantity: int | None = None,
         key_mode: str | None = None,
         key_id: str | None = None,
-        buyer_wallet: str | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
         ...
@@ -130,7 +131,7 @@ async def _run_seller_round(
     requested_quantity: int | None,
     key_mode: str | None,
     key_id: str | None,
-    buyer_wallet: str | None,
+    buyer_principal: Identity,
     strategy_label: str | None,
     policy_inputs: dict[str, Any],
     negotiation_config: Any,
@@ -174,7 +175,7 @@ async def _run_seller_round(
             "key_mode": key_mode or "new",
             "key_id": key_id,
             "key_record": policy_inputs.get("key_record"),
-            "buyer_wallet": buyer_wallet,
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
             "seller_reference_amount": int(reference_amount),
             "uses_scalar_amount": uses_scalar_amount,
         },
@@ -216,10 +217,10 @@ class _DefaultSellerRoundHook:
         *,
         listing: Mapping[str, Any],
         history: list[NegotiationRound],
+        buyer_principal: Identity,
         requested_quantity: int | None = None,
         key_mode: str | None = None,
         key_id: str | None = None,
-        buyer_wallet: str | None = None,
         strategy_label: str | None = None,
     ) -> SellerRoundResult:
         policy_inputs: dict[str, Any] = {
@@ -244,7 +245,7 @@ class _DefaultSellerRoundHook:
             requested_quantity=requested_quantity,
             key_mode=key_mode,
             key_id=key_id,
-            buyer_wallet=buyer_wallet,
+            buyer_principal=buyer_principal,
             strategy_label=strategy_label,
             policy_inputs=policy_inputs,
             negotiation_config=self._negotiation_config,
@@ -265,7 +266,7 @@ def default_seller_round_hook(
 
     ``capacity`` provides the quota snapshot for ``credit_quota_guard``;
     ``key_lookup`` provides the key→owner record for
-    ``key_owned_by_buyer_wallet`` (both captured per round — the chain
+    ``key_owned_by_buyer_principal`` (both captured per round — the chain
     itself stays synchronous and side-effect free).
     """
     return _DefaultSellerRoundHook(

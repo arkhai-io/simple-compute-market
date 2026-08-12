@@ -16,11 +16,22 @@ test instead of shipping quietly again.
 
 from __future__ import annotations
 
+import json
+import time
+
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport
+from market_identity import (
+    EMPTY_BODY,
+    Ed25519Signer,
+    ResponseEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_response,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -29,6 +40,24 @@ from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
 from market_site.router import make_capacity_router
 from market_site_client import SiteCapacityClient
+from market_site_client.client import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+    resolve_capacity_route,
+)
+from starlette.responses import Response
+
+
+MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
+SITE_AUTHORITY_SIGNER = Ed25519Signer(b"\x42" * 32)
+SITE_AUTHORITIES = TrustedIdentitySet(
+    identities=(SITE_AUTHORITY_SIGNER.identity,)
+)
 
 
 @pytest.fixture
@@ -51,12 +80,66 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
 
     app = FastAPI()
     app.include_router(make_capacity_router(lambda: ledger), prefix="/api/v1")
+
+    @app.middleware("http")
+    async def sign_site_response(request: Request, call_next):
+        raw_request = await request.body()
+        request_body = json.loads(raw_request) if raw_request else EMPTY_BODY
+        operation, resource = resolve_capacity_route(
+            request.method,
+            request.url.path,
+            request_body,
+        )
+        response = await call_next(request)
+        raw_response = (
+            b"".join([chunk async for chunk in response.body_iterator])
+            if hasattr(response, "body_iterator")
+            else bytes(response.body)
+        )
+        response_body = json.loads(raw_response) if raw_response else EMPTY_BODY
+        signed = sign_response(
+            signer=SITE_AUTHORITY_SIGNER,
+            envelope=ResponseEnvelope(
+                role="service",
+                principal=SITE_AUTHORITY_SIGNER.identity,
+                method=request.method,
+                operation=operation,
+                resource=resource,
+                request_id=request.headers[REQUEST_ID_HEADER],
+                timestamp=int(time.time()),
+                status=response.status_code,
+                body_hash=canonical_body_hash(response_body),
+            ),
+        )
+        headers = dict(response.headers)
+        headers.update(
+            {
+                SIGNATURE_VERSION_HEADER: signed.protocol,
+                IDENTITY_SCHEME_HEADER: signed.principal.scheme.value,
+                IDENTITY_IDENTIFIER_HEADER: signed.principal.identifier,
+                ROLE_HEADER: signed.role,
+                REQUEST_ID_HEADER: signed.request_id,
+                TIMESTAMP_HEADER: str(signed.timestamp),
+                SIGNATURE_HEADER: signed.proof.value,
+            }
+        )
+        headers.pop("content-length", None)
+        return Response(
+            content=raw_response,
+            status_code=response.status_code,
+            headers=headers,
+            media_type=response.media_type,
+            background=response.background,
+        )
     return app, ledger
 
 
 def _client(app: FastAPI) -> SiteCapacityClient:
     return SiteCapacityClient(
-        "http://test", transport=ASGITransport(app=app),
+        "http://test",
+        signer=MARKETPLACE_SIGNER,
+        expected_authorities=SITE_AUTHORITIES,
+        transport=ASGITransport(app=app),
     )
 
 

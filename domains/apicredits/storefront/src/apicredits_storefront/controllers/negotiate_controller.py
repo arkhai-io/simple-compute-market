@@ -1,9 +1,4 @@
-"""Negotiate controller — buyer ↔ seller negotiation protocol.
-
-Buyer-facing protocol endpoints; auth is EIP-191 signed by the buyer.
-Same wire shape as the VM storefront — ``provision_terms`` carries the
-api_credits.v1 payload (quantity + key disposition).
-"""
+"""Buyer/seller negotiation authenticated by canonical marketplace principals."""
 
 from __future__ import annotations
 
@@ -26,6 +21,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
 
+def _seller_principal():
+    signer = _container.resolved_marketplace_signer
+    if signer is None:
+        raise HTTPException(status_code=503, detail="storefront is not initialized")
+    return signer.identity
+
 
 @cbv(router)
 class NegotiateController:
@@ -40,8 +41,7 @@ class NegotiateController:
         response_model=NegotiateNewResponse,
         summary="Start a new negotiation",
         description=(
-            "Buyer-facing protocol endpoint. Requires EIP-191 signed "
-            "`X-Signature` + `X-Timestamp` headers."
+            "Requires shared body-bound marketplace signature version 2 headers."
         ),
     )
     async def negotiate_new(
@@ -56,22 +56,25 @@ class NegotiateController:
             start_sync_negotiation,
         )
 
-        buyer_auth._verify(
+        seller_principal = _seller_principal()
+        await buyer_auth._verify(
             request,
             "negotiate_new",
             body.listing_id,
-            body.buyer_address,
+            expected_principal=body.buyer_principal,
+            body=body,
         )
 
         try:
             result = await start_sync_negotiation(
                 sqlite_client=self._db,
                 our_listing_id=body.listing_id,
-                buyer_address=body.buyer_address,
+                buyer_principal=body.buyer_principal,
+                seller_principal=seller_principal,
                 provision_terms=body.provision_terms,
                 proposal=body.proposal,
                 our_base_url=BASE_URL_OVERRIDE or "",
-                their_agent_url=body.buyer_agent_url or body.buyer_address,
+                their_agent_url=body.buyer_agent_url,
             )
         except StorefrontPausedError as exc:
             raise HTTPException(
@@ -109,6 +112,8 @@ class NegotiateController:
         except Exception as exc:
             logger.error("[NEGOTIATE/new] %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
+        result["buyer_principal"] = body.buyer_principal
+        result["seller_principal"] = seller_principal
         return NegotiateNewResponse(**result)
 
     @router.post(
@@ -116,8 +121,7 @@ class NegotiateController:
         response_model=NegotiateContinueResponse,
         summary="Advance an existing negotiation",
         description=(
-            "Buyer-facing protocol endpoint. Requires EIP-191 signed "
-            "`X-Signature` + `X-Timestamp` headers."
+            "Requires shared body-bound marketplace signature version 2 headers."
         ),
     )
     async def negotiate_continue(
@@ -130,7 +134,14 @@ class NegotiateController:
             continue_sync_negotiation,
         )
 
-        buyer_auth._verify(request, "negotiate_continue", neg_id, body.buyer_address)
+        seller_principal = _seller_principal()
+        await buyer_auth._verify(
+            request,
+            "negotiate_continue",
+            neg_id,
+            expected_principal=body.buyer_principal,
+            body=body,
+        )
 
         if body.action == "counter" and body.proposal is None:
             raise HTTPException(
@@ -145,11 +156,14 @@ class NegotiateController:
                 buyer_action=body.action,
                 buyer_proposal=body.proposal,
                 buyer_reason=body.reason,
-                buyer_address=body.buyer_address,
+                buyer_principal=body.buyer_principal,
+                seller_principal=seller_principal,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
             logger.error("[NEGOTIATE/%s] %s", neg_id, exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
+        result["buyer_principal"] = body.buyer_principal
+        result["seller_principal"] = seller_principal
         return NegotiateContinueResponse(**result)

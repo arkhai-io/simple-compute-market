@@ -17,11 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 import domains.apicredits.negotiation.buyer_policies as buyer_policies  # registers answer_key_challenge
-from core_buyer.negotiation_client import (
-    ResumeState,
-    _load_buyer_chain,
-    negotiate_with_seller,
-)
+from .buyer_client import ResumeState, load_buyer_chain, negotiate_with_seller
 from core_buyer.deal_helpers import load_negotiation_resume_point
 from core_buyer.run_log import RunLog
 from domains.apicredits.negotiation import make_api_credits_provision_terms
@@ -70,14 +66,14 @@ def register(credits_app: typer.Typer) -> None:
             False,
             "--new-key",
             help="Issue a fresh API key for this purchase (the default "
-            "disposition; the seller binds it to your wallet).",
+            "disposition; the seller binds it to your marketplace principal).",
         ),
         key_id: Optional[str] = typer.Option(
             None,
             "--key-id",
             help="Top up an existing key instead of issuing a new one. "
-            "v1 sellers reject unless the key is bound to the "
-            "purchasing wallet (or carries no ownership claim).",
+            "The key must be bound to the authenticated marketplace principal "
+            "or carry no ownership claim.",
         ),
         registry_urls: Optional[str] = typer.Option(
             None,
@@ -106,15 +102,25 @@ def register(credits_app: typer.Typer) -> None:
             "/negotiate/new; replays the seller's last counter into "
             "the strategy and continues.",
         ),
-        buyer_address: Optional[str] = typer.Option(
+        identity_scheme: Optional[str] = typer.Option(
             None,
-            "--buyer-address",
-            help="Override buyer wallet address (default: derived from wallet.private_key).",
+            "--identity-scheme",
+            help="Marketplace signer scheme (default: identity.scheme).",
         ),
-        buyer_private_key: Optional[str] = typer.Option(
+        identity_identifier: Optional[str] = typer.Option(
             None,
-            "--buyer-priv-key",
-            help="Override buyer private key (default: wallet.private_key).",
+            "--identity-identifier",
+            help="Public marketplace signer identifier (default: identity.identifier).",
+        ),
+        evm_address: Optional[str] = typer.Option(
+            None,
+            "--evm-address",
+            help="EVM address used only for chain selection and balance checks.",
+        ),
+        evm_private_key: Optional[str] = typer.Option(
+            None,
+            "--evm-private-key",
+            help="Optional EVM key used only to derive the chain address.",
         ),
         token_contract: Optional[str] = typer.Option(
             None,
@@ -165,17 +171,32 @@ def register(credits_app: typer.Typer) -> None:
         _initial_explicit = initial_price is not None
         _max_explicit = max_price is not None
 
-        from .common import resolve_buyer_wallet, resolve_key_disposition
-
-        addr, pk = resolve_buyer_wallet(
-            override_addr=buyer_address,
-            override_pk=buyer_private_key,
+        from .common import (
+            resolve_buyer_signer,
+            resolve_buyer_wallet,
+            resolve_identity_config,
+            resolve_identity_credential,
+            resolve_key_disposition,
+            make_run_publisher_principals_refresh,
         )
-        if not addr or not pk:
+
+        identity_config = resolve_identity_config(
+            override_scheme=identity_scheme,
+            override_identifier=identity_identifier,
+        )
+        signer = resolve_buyer_signer(
+            identity_config,
+            resolve_identity_credential(),
+        )
+        principal = identity_config.principal
+        evm_addr, _evm_key = resolve_buyer_wallet(
+            override_addr=evm_address,
+            override_pk=evm_private_key,
+        )
+        if not evm_addr:
             typer.secho(
-                "Missing buyer wallet config. Pass --buyer-priv-key or set "
-                "wallet.private_key in config.toml; the address is derived "
-                "from the key.",
+                "Missing EVM address required to select and inspect the Alkahest "
+                "escrow. Pass --evm-address or configure wallet.address.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -189,7 +210,14 @@ def register(credits_app: typer.Typer) -> None:
         resume_state = None
         resume_point = None
         if from_run:
-            resume_point = load_negotiation_resume_point(from_run)
+            resume_point = load_negotiation_resume_point(
+                from_run,
+                signer=signer,
+                refresh_publisher_principals=make_run_publisher_principals_refresh(
+                    from_run,
+                    signer=signer,
+                ),
+            )
             seller_url = seller_url or resume_point.seller_url
             listing_id = listing_id or resume_point.listing_id
             if max_price is None:
@@ -209,33 +237,60 @@ def register(credits_app: typer.Typer) -> None:
 
         from .common import (
             APICREDITS_SCHEMA_ID,
-            resolve_indexer_urls_for_schema,
             resolve_discovery_timeout,
-            resolve_indexer_auth,
+            resolve_indexer_urls,
+            resolve_indexer_urls_for_schema,
+            resolve_registry_api_keys,
+            resolve_registry_authorities,
         )
 
-        reg_urls = resolve_indexer_urls_for_schema(
-            APICREDITS_SCHEMA_ID, override=registry_urls
-        )
         deadline = resolve_discovery_timeout(override=discovery_timeout)
-        reg_auth = resolve_indexer_auth()
+        candidate_urls = resolve_indexer_urls(override=registry_urls)
+        registry_authorities = resolve_registry_authorities(candidate_urls)
+        reg_urls = resolve_indexer_urls_for_schema(
+            APICREDITS_SCHEMA_ID,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            override=registry_urls,
+            timeout=deadline,
+        )
+        registry_authorities = {url: registry_authorities[url] for url in reg_urls}
+        all_registry_api_keys = resolve_registry_api_keys()
+        registry_api_keys = {
+            url: all_registry_api_keys[url]
+            for url in reg_urls
+            if url in all_registry_api_keys
+        }
 
         # Fetch the listing — needed for both --seller auto-resolution
         # and picking an accepted_escrows entry. Skipped in resume mode.
         listing_dict: Optional[dict] = None
         if listing_id and resume_state is None:
-            from core_buyer.orchestrator import fetch_listing_dict_multi
+            from core_buyer.orchestrator import fetch_listing_dict
 
-            try:
-                listing_dict = fetch_listing_dict_multi(
-                    reg_urls,
-                    listing_id,
-                    timeout=deadline,
-                    auth=reg_auth,
-                )
-            except RuntimeError as exc:
+            last_error: RuntimeError | None = None
+            for registry_url in reg_urls:
+                try:
+                    listing_dict = fetch_listing_dict(
+                        registry_url,
+                        listing_id,
+                        timeout=deadline,
+                        signer=signer,
+                        registry_authority=registry_authorities[registry_url],
+                        api_key=registry_api_keys.get(registry_url),
+                    )
+                except RuntimeError as exc:
+                    last_error = exc
+                    continue
+                if listing_dict is not None:
+                    listing_dict["source_registry_url"] = registry_url
+                    listing_dict["source_registry_authority"] = registry_authorities[
+                        registry_url
+                    ].authority
+                    break
+            if listing_dict is None and last_error is not None:
                 typer.secho(
-                    f"Could not fetch listing {listing_id}: {exc}",
+                    f"Could not fetch listing {listing_id}: {last_error}",
                     err=True,
                     fg=typer.colors.RED,
                 )
@@ -297,7 +352,7 @@ def register(credits_app: typer.Typer) -> None:
         # Pick one accepted_escrows entry — token, escrow contract, and
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
-        from core_buyer.escrow_selection import select_escrow_entry
+        from .escrow_selection import select_escrow_entry
         from .common import select_chain_for_listing
 
         picked_entry: Optional[dict] = None
@@ -315,7 +370,7 @@ def register(credits_app: typer.Typer) -> None:
                 token_contract_filter=token_contract,
                 assume_yes=assume_yes,
                 rpc_url=chain_cfg.rpc_url,
-                buyer_address=addr,
+                buyer_address=evm_addr,
                 console=console,
                 compatible=_policy.compatible,
                 preference=_policy.prefer_settlement,
@@ -374,11 +429,57 @@ def register(credits_app: typer.Typer) -> None:
             if _max_explicit and max_price is not None:
                 max_price = max_price * scale
 
+        from market_identity import TrustedIdentitySet
+
+        expected_seller_principals = (
+            resume_point.publisher_principals
+            if resume_point is not None
+            else TrustedIdentitySet.model_validate(
+                (listing_dict or {}).get("publisher_principals"),
+            )
+        )
+        publisher_id = (
+            resume_point.publisher_id
+            if resume_point is not None
+            else (listing_dict or {}).get("publisher_id")
+        )
+        source_registry_url = (
+            resume_point.source_registry_url
+            if resume_point is not None
+            else (listing_dict or {}).get("source_registry_url")
+        )
+        source_registry_authority = (
+            resume_point.source_registry_authority
+            if resume_point is not None
+            else (listing_dict or {}).get("source_registry_authority")
+        )
+        if (
+            publisher_id is None
+            or not source_registry_url
+            or not source_registry_authority
+            or not seller_url
+            or not listing_id
+        ):
+            raise RuntimeError(
+                "negotiation requires exact publisher and registry source bindings"
+            )
+        trust_listing = {
+            "listing_id": listing_id,
+            "publisher_id": publisher_id,
+            "publisher_principals": expected_seller_principals.model_dump(mode="json"),
+            "storefront_url": seller_url,
+            "source_registry_url": source_registry_url,
+            "source_registry_authority": source_registry_authority,
+        }
         run_log = RunLog.start(
+            principal=principal,
             command="market credits negotiate",
             seller_url=seller_url,
             listing_id=listing_id,
-            buyer_address=addr,
+            publisher_principals=expected_seller_principals.model_dump(mode="json"),
+            publisher_id=publisher_id,
+            source_registry_url=source_registry_url,
+            source_registry_authority=source_registry_authority,
             policy=_policy.name,
             policy_params=policy_params_all,
             initial_price=initial_price,
@@ -391,6 +492,21 @@ def register(credits_app: typer.Typer) -> None:
             token_decimals=token_decimals,
             resumed_from=from_run,
             chain_name=(chain_cfg.name if chain_cfg is not None else None),
+        )
+        from core_buyer.orchestration import make_publisher_trust_resolver
+        from core_buyer.orchestrator import BuyConfig
+
+        resolve_seller_principals = make_publisher_trust_resolver(
+            config=BuyConfig(
+                registry_urls=reg_urls,
+                registry_authorities=registry_authorities,
+                principal=principal,
+                signer=signer,
+                discovery_timeout=deadline,
+                registry_api_keys=registry_api_keys,
+            ),
+            listing=trust_listing,
+            on_update=lambda event, fields: run_log.event(event, **fields),
         )
 
         header = Table.grid(padding=(0, 2))
@@ -467,7 +583,7 @@ def register(credits_app: typer.Typer) -> None:
             policy_mode_from_log = getattr(resume_point, "policy", None)
             if policy_mode_from_log:
                 policy_mode = str(policy_mode_from_log)
-        chain = _load_buyer_chain(
+        chain = load_buyer_chain(
             policies=policies,
             policy_mode=policy_mode,
             default_guards=buyer_policies.APICREDITS_BUYER_GUARDS,
@@ -476,8 +592,8 @@ def register(credits_app: typer.Typer) -> None:
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
-                buyer_address=addr,
-                buyer_private_key=pk,
+                principal=principal,
+                signer=signer,
                 listing_id=listing_id,
                 initial_price=initial_price or 0,
                 max_price=max_price,
@@ -489,6 +605,7 @@ def register(credits_app: typer.Typer) -> None:
                 resume=resume_state,
                 chain=chain,
                 policy_params=policy_params_all,
+                resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

@@ -13,8 +13,13 @@ from domains.vms.listings.reconciler import (
     mark_derived_listings_open,
 )
 from market_settlement_runtime import FailurePolicy
+from market_identity import Identity
 
-from market_storefront.utils.config import settings
+from market_storefront.utils.config import (
+    get_evm_wallet_address,
+    get_evm_wallet_private_key,
+    settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +140,7 @@ async def _refund_from_escrow_proposal(
     *,
     ctx: FulfillmentFailureContext,
     listing_id: str,
-    buyer: str,
+    buyer_evm_address: str,
     thread: dict[str, Any],
 ) -> dict[str, Any] | None:
     proposal_raw = thread.get("buyer_escrow_proposal")
@@ -173,7 +178,7 @@ async def _refund_from_escrow_proposal(
             "chain_name": chain_name,
         }
 
-    private_key = str(settings.wallet.private_key or "").strip()
+    private_key = get_evm_wallet_private_key()
     if not private_key:
         return {
             "action": "refund",
@@ -185,7 +190,7 @@ async def _refund_from_escrow_proposal(
         proposal = EscrowProposal.model_validate(proposal_raw)
         terms = materialize_escrow_terms_from_proposal(
             proposal=proposal,
-            seller_wallet_address=settings.wallet.address or None,
+            seller_wallet_address=get_evm_wallet_address() or None,
             agreed_amount=(
                 int(thread["agreed_price"])
                 if thread.get("agreed_price") is not None
@@ -212,7 +217,7 @@ async def _refund_from_escrow_proposal(
             private_key=private_key,
             rpc_url=chain_cfg.rpc_url,
             obligation_data=terms.obligation_data,
-            to_address=buyer,
+            to_address=buyer_evm_address,
         )
     except NotImplementedError as exc:
         return {
@@ -349,17 +354,29 @@ async def _refund(
     if not listing_id:
         return {"action": "refund", "status": "skipped", "reason": "listing_id_unknown"}
 
-    thread = await _load_thread_for_escrow(db, ctx.escrow_uid)
-    buyer = (thread or {}).get("buyer")
-    if not buyer:
-        return {"action": "refund", "status": "skipped", "reason": "buyer_unknown"}
+    thread = await _load_thread_for_escrow(db, ctx.escrow_uid) or {}
+    try:
+        Identity.model_validate(thread.get("buyer_principal"))
+    except (TypeError, ValueError):
+        return {
+            "action": "refund",
+            "status": "skipped",
+            "reason": "buyer_principal_unknown",
+        }
+    buyer_evm_address = thread.get("buyer_evm_address")
+    if not buyer_evm_address:
+        return {
+            "action": "refund",
+            "status": "skipped",
+            "reason": "buyer_evm_address_unknown",
+        }
 
     result = await _refund_from_escrow_proposal(
         db,
         ctx=ctx,
         listing_id=listing_id,
-        buyer=buyer,
-        thread=thread or {},
+        buyer_evm_address=buyer_evm_address,
+        thread=thread,
     )
     if result is None:
         return {"action": "refund", "status": "skipped", "reason": "proposal_unknown"}

@@ -50,6 +50,7 @@ from .servicing import (
 )
 from .sqlite_repository import (
     SETTLEMENT_MIGRATION_ID,
+    SETTLEMENT_PRINCIPAL_MIGRATION_ID,
     SettlementMigration,
     SettlementSQLiteRepository,
     settlement_migrations,
@@ -75,6 +76,7 @@ __all__ = [
     "Party",
     "PreparedSettlement",
     "SETTLEMENT_MIGRATION_ID",
+    "SETTLEMENT_PRINCIPAL_MIGRATION_ID",
     "SettlementJobCoordinator",
     "SettlementManualRequired",
     "SettlementMigration",

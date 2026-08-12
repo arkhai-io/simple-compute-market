@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from market_identity import Identity
+
 
 
 class NegotiationThreadPersistencePort(Protocol):
@@ -14,6 +16,8 @@ class NegotiationThreadPersistencePort(Protocol):
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        buyer_principal: Identity,
+        seller_principal: Identity,
         owner_id: str,
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
@@ -41,7 +45,8 @@ class NegotiationThreadPersistencePort(Protocol):
         *,
         negotiation_id: str,
         round: int | None,
-        sender: str,
+        sender_principal: Identity,
+        sender_role: str,
         our_price: int | str | float | None,
         their_price: int | str | float | None,
         proposed_price: int | str | float | None,

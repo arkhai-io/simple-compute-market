@@ -13,10 +13,14 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from market_identity import create_signer
 
 from market_storefront.negotiation_watchdog import _watchdog_tick
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
+
+_BUYER_PRINCIPAL = create_signer("ed25519", b"\x31" * 32).identity
+_SELLER_PRINCIPAL = create_signer("ed25519", b"\x32" * 32).identity
 
 
 def _init_threads_table(db_path: str) -> None:
@@ -39,9 +43,21 @@ def _insert_thread(
             """INSERT OR REPLACE INTO negotiation_threads
                (negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status,
+                buyer_scheme, buyer_identifier,
+                seller_scheme, seller_identifier,
                 created_at, updated_at, terminal_state)
-               VALUES (?, 'o1', 'o2', 'a1', 'a2', 'active', ?, ?, ?)""",
-            (negotiation_id, updated_at, updated_at, terminal_state),
+               VALUES (?, 'o1', 'o2', 'a1', 'a2', 'active',
+                       ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                negotiation_id,
+                _BUYER_PRINCIPAL.scheme,
+                _BUYER_PRINCIPAL.identifier,
+                _SELLER_PRINCIPAL.scheme,
+                _SELLER_PRINCIPAL.identifier,
+                updated_at,
+                updated_at,
+                terminal_state,
+            ),
         )
         conn.commit()
     finally:

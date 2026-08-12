@@ -26,12 +26,36 @@ import time
 import uuid
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any
+from market_identity import Identity, ReplayIdentity, ReplayReservation
+from core_storefront.auth import ReplayClaim
+
 
 from .sqlite_migrations import MigrationLike, apply_schema_migrations
 
 logger = logging.getLogger(__name__)
+def _principal_columns(principal: Identity) -> tuple[str, str]:
+    return principal.scheme.value, principal.identifier
+
+
+def _principal_value(
+    scheme: Any,
+    identifier: Any,
+    *,
+    field: str,
+) -> dict[str, str] | None:
+    if scheme is None and identifier is None:
+        return None
+    if not isinstance(scheme, str) or not isinstance(identifier, str):
+        raise RuntimeError(f"durable {field} principal is incomplete")
+    try:
+        principal = Identity(scheme=scheme, identifier=identifier)
+    except ValueError as exc:
+        raise RuntimeError(f"durable {field} principal is malformed") from exc
+    return principal.model_dump(mode="json")
+
+
 
 
 def _amount_to_db_text(value: Any) -> str | None:
@@ -118,9 +142,13 @@ class SQLiteClient:
         self,
         db_path: str,
         *,
+        local_listing_principal: Identity | None = None,
+        expected_legacy_sellers: Collection[str] = (),
         extra_migrations: Sequence[MigrationLike] = (),
     ):
         self.db_path = db_path
+        self._local_listing_principal = local_listing_principal
+        self._expected_legacy_sellers = tuple(expected_legacy_sellers)
         self._extra_migrations = tuple(extra_migrations)
         self._ensure_parent_dir()
         self._ensure_tables_sync()
@@ -302,9 +330,13 @@ class SQLiteClient:
                   agreed_price TEXT,
                   agreed_duration_seconds INTEGER,
                   agreed_at TEXT,
-                  -- Buyer↔listing pairing (moved off listings for multi-escrow).
-                  buyer TEXT,
-                  matched_offer_id TEXT
+                  buyer_scheme TEXT,
+                  buyer_identifier TEXT,
+                  seller_scheme TEXT,
+                  seller_identifier TEXT,
+                  matched_offer_id TEXT,
+                  CHECK ((buyer_scheme IS NULL) = (buyer_identifier IS NULL)),
+                  CHECK ((seller_scheme IS NULL) = (seller_identifier IS NULL))
                 )
                 """
             )
@@ -463,7 +495,9 @@ class SQLiteClient:
                   message_id INTEGER PRIMARY KEY AUTOINCREMENT,
                   negotiation_id TEXT NOT NULL,
                   round INTEGER NOT NULL,
-                  sender TEXT NOT NULL,
+                  sender_role TEXT NOT NULL,
+                  sender_scheme TEXT NOT NULL,
+                  sender_identifier TEXT NOT NULL,
                   our_price TEXT,
                   their_price TEXT,
                   proposed_price TEXT,
@@ -501,6 +535,8 @@ class SQLiteClient:
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
+                  seller_scheme TEXT NOT NULL,
+                  seller_identifier TEXT NOT NULL,
                   oracle_address TEXT,
                   paused INTEGER NOT NULL DEFAULT 0,
                   accepted_escrows TEXT,
@@ -565,7 +601,11 @@ class SQLiteClient:
             self._ensure_domain_tables(cur)
             # Core migrations run before fallback table creation so legacy
             # tables can be renamed without colliding with fresh schemas.
-            apply_schema_migrations(conn)
+            apply_schema_migrations(
+                conn,
+                local_listing_principal=self._local_listing_principal,
+                expected_legacy_sellers=self._expected_legacy_sellers,
+            )
             # Credentials table (off-chain only, never exposed on-chain)
             cur.execute(
                 """
@@ -724,7 +764,10 @@ class SQLiteClient:
                 CREATE TABLE IF NOT EXISTS deal_heartbeats (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   deal_ref TEXT NOT NULL,
-                  signer TEXT,
+                  buyer_scheme TEXT NOT NULL,
+                  buyer_identifier TEXT NOT NULL,
+                  seller_scheme TEXT NOT NULL,
+                  seller_identifier TEXT NOT NULL,
                   sent_at_unix REAL NOT NULL,
                   payload TEXT,
                   received_at_unix REAL NOT NULL
@@ -734,6 +777,129 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_heartbeats_deal "
                 "ON deal_heartbeats(deal_ref, sent_at_unix)"
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auth_replay_reservations (
+                  principal_scheme TEXT NOT NULL,
+                  principal_identifier TEXT NOT NULL,
+                  request_id TEXT NOT NULL,
+                  request_hash TEXT NOT NULL,
+                  response_status INTEGER,
+                  response_body TEXT,
+                  attempt_token TEXT,
+                  lease_until INTEGER,
+                  created_at TEXT NOT NULL,
+                  PRIMARY KEY (principal_scheme, principal_identifier, request_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS service_peers (
+                  peer_id TEXT PRIMARY KEY,
+                  role TEXT NOT NULL,
+                  site_id TEXT NOT NULL,
+                  principal_scheme TEXT NOT NULL,
+                  principal_identifier TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'retired')),
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  UNIQUE (role, site_id),
+                  UNIQUE (role, principal_scheme, principal_identifier)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_subjects (
+                  authority TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  PRIMARY KEY (authority, subject)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_bindings (
+                  authority TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  principal_scheme TEXT NOT NULL,
+                  principal_identifier TEXT NOT NULL,
+                  status TEXT NOT NULL CHECK (
+                    status IN ('primary', 'overlap', 'disabled', 'retired')
+                  ),
+                  overlap_until INTEGER,
+                  created_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL,
+                  PRIMARY KEY (
+                    authority, subject, principal_scheme, principal_identifier
+                  ),
+                  FOREIGN KEY (authority, subject)
+                    REFERENCES identity_subjects(authority, subject)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_binding_active_owner
+                ON identity_bindings (
+                  authority, principal_scheme, principal_identifier
+                )
+                WHERE status IN ('primary', 'overlap')
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_rotations (
+                  authority TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  nonce TEXT NOT NULL,
+                  intent_hash TEXT NOT NULL,
+                  current_scheme TEXT NOT NULL,
+                  current_identifier TEXT NOT NULL,
+                  replacement_scheme TEXT NOT NULL,
+                  replacement_identifier TEXT NOT NULL,
+                  overlap_until INTEGER NOT NULL,
+                  applied_at INTEGER NOT NULL,
+                  PRIMARY KEY (authority, subject, nonce)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_claims (
+                  claim_id TEXT PRIMARY KEY,
+                  resource_id TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  principal_scheme TEXT NOT NULL,
+                  principal_identifier TEXT NOT NULL,
+                  operation_id TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  UNIQUE (resource_id, role, operation_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS identity_audit (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  authority TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  action TEXT NOT NULL,
+                  actor_scheme TEXT NOT NULL,
+                  actor_identifier TEXT NOT NULL,
+                  target_scheme TEXT,
+                  target_identifier TEXT,
+                  operation_id TEXT NOT NULL,
+                  created_at INTEGER NOT NULL,
+                  UNIQUE (authority, operation_id)
+                )
+                """
             )
             # Publications — record of which registries received which
             # payload for which listing. Updates and deletes consult this
@@ -767,6 +933,8 @@ class SQLiteClient:
                     *self._domain_migrations(),
                     *self._extra_migrations,
                 ),
+                local_listing_principal=self._local_listing_principal,
+                expected_legacy_sellers=self._expected_legacy_sellers,
             )
             # Domain-owned indexes may depend on migrated columns.
             self._ensure_domain_indexes(cur)
@@ -948,13 +1116,15 @@ class SQLiteClient:
         offer_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
-        seller: str,
+        storefront_url: str,
+        seller_principal: Identity,
         oracle_address: str | None = None,
         paused: bool = False,
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
         demands: Any | None = None,
     ) -> None:
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -969,21 +1139,25 @@ class SQLiteClient:
                       offer_resource,
                       fulfillment_resource,
                       max_duration_seconds,
-                      seller,
+                      storefront_url,
+                      seller_scheme,
+                      seller_identifier,
                       oracle_address,
                       paused,
                       accepted_escrows,
                       settlement_options,
                       demands
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
                       offer_resource=excluded.offer_resource,
                       fulfillment_resource=excluded.fulfillment_resource,
                       max_duration_seconds=excluded.max_duration_seconds,
-                      seller=excluded.seller,
+                      storefront_url=excluded.storefront_url,
+                      seller_scheme=excluded.seller_scheme,
+                      seller_identifier=excluded.seller_identifier,
                       oracle_address=excluded.oracle_address,
                       paused=excluded.paused,
                       accepted_escrows=excluded.accepted_escrows,
@@ -998,7 +1172,9 @@ class SQLiteClient:
                         self._serialize_resource(offer_resource),
                         self._serialize_resource(fulfillment_resource),
                         max_duration_seconds,
-                        seller,
+                        storefront_url,
+                        seller_scheme,
+                        seller_identifier,
                         oracle_address,
                         1 if paused else 0,
                         self._serialize_resource(accepted_escrows),
@@ -1021,7 +1197,8 @@ class SQLiteClient:
         offer_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
-        seller: str | None = None,
+        storefront_url: str | None = None,
+        seller_principal: Identity | None = None,
         oracle_address: str | None = None,
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
@@ -1041,7 +1218,11 @@ class SQLiteClient:
             add("offer_resource", offer_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("max_duration_seconds", max_duration_seconds)
-            add("seller", seller)
+            add("storefront_url", storefront_url)
+            if seller_principal is not None:
+                seller_scheme, seller_identifier = _principal_columns(seller_principal)
+                add("seller_scheme", seller_scheme)
+                add("seller_identifier", seller_identifier)
             add("oracle_address", oracle_address)
             add("accepted_escrows", accepted_escrows, serialize=True)
             add("settlement_options", settlement_options, serialize=True)
@@ -1073,7 +1254,8 @@ class SQLiteClient:
                     """
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, fulfillment_resource,
-                           max_duration_seconds, seller, oracle_address,
+                           max_duration_seconds, storefront_url,
+                           seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
@@ -1093,7 +1275,9 @@ class SQLiteClient:
                     "offer_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
-                    "seller",
+                    "storefront_url",
+                    "seller_scheme",
+                    "seller_identifier",
                     "oracle_address",
                     "paused",
                     "accepted_escrows",
@@ -1102,6 +1286,11 @@ class SQLiteClient:
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
+                d["seller_principal"] = _principal_value(
+                    d.pop("seller_scheme"),
+                    d.pop("seller_identifier"),
+                    field="listing seller",
+                )
                 d["accepted_escrows"] = self._deserialize_accepted_escrows(
                     d.get("accepted_escrows"),
                 )
@@ -1122,7 +1311,8 @@ class SQLiteClient:
         *,
         negotiation_id: str,
         round: int | None = None,
-        sender: str,
+        sender_principal: Identity,
+        sender_role: str,
         our_price: int | str | float | None,
         their_price: int | str | float | None,
         proposed_price: int | str | float | None,
@@ -1135,7 +1325,7 @@ class SQLiteClient:
         Args:
             negotiation_id: Unique negotiation identifier
             round: Round number (if None, computed atomically as max(round) + 1)
-            sender: Agent ID or card URL of the sender
+            sender_principal: Exact authenticated message author
             our_price: Our price in base units
             their_price: Their price in base units
             proposed_price: Proposed counter price
@@ -1147,6 +1337,7 @@ class SQLiteClient:
             The actual round number that was assigned
         """
 
+        sender_scheme, sender_identifier = _principal_columns(sender_principal)
         def _save() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1154,14 +1345,29 @@ class SQLiteClient:
                 our_price_text = _amount_to_db_text(our_price)
                 their_price_text = _amount_to_db_text(their_price)
                 proposed_price_text = _amount_to_db_text(proposed_price)
-                # Ensure thread exists
-                cur.execute(
+                thread = cur.execute(
                     """
-                    INSERT OR IGNORE INTO negotiation_threads(negotiation_id, created_at, updated_at)
-                    VALUES (?, ?, ?)
+                    SELECT buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier
+                    FROM negotiation_threads
+                    WHERE negotiation_id = ?
                     """,
-                    (negotiation_id, timestamp, timestamp),
-                )
+                    (negotiation_id,),
+                ).fetchone()
+                if thread is None:
+                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                if sender_role == "buyer" and thread[:2] != (
+                    sender_scheme,
+                    sender_identifier,
+                ):
+                    raise ValueError("buyer message author does not match negotiation")
+                if sender_role == "seller" and thread[2:] != (
+                    sender_scheme,
+                    sender_identifier,
+                ):
+                    raise ValueError("seller message author does not match negotiation")
+                if sender_role not in {"buyer", "seller", "admin", "service"}:
+                    raise ValueError("unsupported negotiation message sender role")
 
                 if round is None:
                     # Compute next round atomically to avoid race conditions
@@ -1188,12 +1394,15 @@ class SQLiteClient:
                 cur.execute(
                     """
                     INSERT INTO negotiation_messages(
-                        negotiation_id, round, sender, our_price, their_price,
+                        negotiation_id, round, sender_role,
+                        sender_scheme, sender_identifier, our_price, their_price,
                         proposed_price, action_taken, message_type, timestamp
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(negotiation_id, round) DO UPDATE SET
-                        sender = excluded.sender,
+                        sender_role = excluded.sender_role,
+                        sender_scheme = excluded.sender_scheme,
+                        sender_identifier = excluded.sender_identifier,
                         our_price = excluded.our_price,
                         their_price = excluded.their_price,
                         proposed_price = excluded.proposed_price,
@@ -1204,7 +1413,9 @@ class SQLiteClient:
                     (
                         negotiation_id,
                         actual_round,
-                        sender,
+                        sender_role,
+                        sender_scheme,
+                        sender_identifier,
                         our_price_text,
                         their_price_text,
                         proposed_price_text,
@@ -1233,7 +1444,8 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT round, sender, our_price, their_price, proposed_price,
+                    SELECT round, sender_role, sender_scheme, sender_identifier,
+                           our_price, their_price, proposed_price,
                            action_taken, message_type, timestamp
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
@@ -1247,13 +1459,16 @@ class SQLiteClient:
                     result.append(
                         {
                             "round": row[0],
-                            "sender": row[1],
-                            "our_price": _amount_from_db_text(row[2]),
-                            "their_price": _amount_from_db_text(row[3]),
-                            "proposed_price": _amount_from_db_text(row[4]),
-                            "action_taken": row[5],
-                            "message_type": row[6],
-                            "timestamp": row[7],
+                            "sender_role": row[1],
+                            "sender_principal": _principal_value(
+                                row[2], row[3], field="negotiation message sender"
+                            ),
+                            "our_price": _amount_from_db_text(row[4]),
+                            "their_price": _amount_from_db_text(row[5]),
+                            "proposed_price": _amount_from_db_text(row[6]),
+                            "action_taken": row[7],
+                            "message_type": row[8],
+                            "timestamp": row[9],
                         }
                     )
                 return result
@@ -1346,8 +1561,16 @@ class SQLiteClient:
         *,
         negotiation_id: str,
         settlement_plan: dict[str, Any],
+        buyer_principal: Identity,
+        seller_principal: Identity,
     ) -> None:
-        """Persist the immutable accepted plan used by hosted start/restart."""
+        """Persist an immutable accepted plan bound to the exact negotiation parties."""
+        buyer_value = buyer_principal.model_dump(mode="json")
+        seller_value = seller_principal.model_dump(mode="json")
+        if settlement_plan.get("buyer_principal") != buyer_value:
+            raise ValueError("settlement plan buyer principal does not match negotiation")
+        if settlement_plan.get("seller_principal") != seller_value:
+            raise ValueError("settlement plan seller principal does not match negotiation")
         encoded = json.dumps(
             settlement_plan,
             ensure_ascii=False,
@@ -1360,12 +1583,17 @@ class SQLiteClient:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT settlement_plan FROM negotiation_threads "
+                    "SELECT settlement_plan, buyer_scheme, buyer_identifier, "
+                    "seller_scheme, seller_identifier FROM negotiation_threads "
                     "WHERE negotiation_id = ?",
                     (negotiation_id,),
                 ).fetchone()
                 if row is None:
                     raise KeyError(f"unknown negotiation {negotiation_id!r}")
+                if _principal_value(row[1], row[2], field="negotiation buyer") != buyer_value:
+                    raise ValueError("settlement plan buyer principal does not match durable thread")
+                if _principal_value(row[3], row[4], field="negotiation seller") != seller_value:
+                    raise ValueError("settlement plan seller principal does not match durable thread")
                 if row[0] is not None and row[0] != encoded:
                     raise ValueError("accepted settlement plan is immutable")
                 conn.execute(
@@ -1410,7 +1638,8 @@ class SQLiteClient:
                            provision_terms,
                            settlement_plan,
                            agreed_price, agreed_duration_seconds, agreed_at,
-                           buyer, matched_offer_id
+                           buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
                     (negotiation_id,),
@@ -1436,10 +1665,23 @@ class SQLiteClient:
                     "agreed_price",
                     "agreed_duration_seconds",
                     "agreed_at",
-                    "buyer",
+                    "buyer_scheme",
+                    "buyer_identifier",
+                    "seller_scheme",
+                    "seller_identifier",
                     "matched_offer_id",
                 ]
                 result = dict(zip(keys, row))
+                result["buyer_principal"] = _principal_value(
+                    result.pop("buyer_scheme"),
+                    result.pop("buyer_identifier"),
+                    field="negotiation buyer",
+                )
+                result["seller_principal"] = _principal_value(
+                    result.pop("seller_scheme"),
+                    result.pop("seller_identifier"),
+                    field="negotiation seller",
+                )
                 # Deserialize the JSON blob back to a dict for the caller.
                 raw_proposal = result.get("buyer_escrow_proposal")
                 if isinstance(raw_proposal, str) and raw_proposal:
@@ -1471,25 +1713,27 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_load)
 
-    async def set_negotiation_thread_buyer_match(
+    async def set_negotiation_thread_parties(
         self,
         *,
         negotiation_id: str,
-        buyer: str | None = None,
+        buyer_principal: Identity | None = None,
+        seller_principal: Identity | None = None,
         matched_offer_id: str | None = None,
     ) -> None:
-        """Write the buyer↔offer association onto the thread.
-
-        Both fields are independent — pass only the ones you want to update.
-        Called as the deal moves from negotiation into settlement.
-        """
+        """Bind exact negotiation parties and the selected offer."""
 
         def _save() -> None:
             updates: list[str] = []
             values: list[Any] = []
-            if buyer is not None:
-                updates.append("buyer = ?")
-                values.append(buyer)
+            if buyer_principal is not None:
+                buyer_scheme, buyer_identifier = _principal_columns(buyer_principal)
+                updates.extend(("buyer_scheme = ?", "buyer_identifier = ?"))
+                values.extend((buyer_scheme, buyer_identifier))
+            if seller_principal is not None:
+                seller_scheme, seller_identifier = _principal_columns(seller_principal)
+                updates.extend(("seller_scheme = ?", "seller_identifier = ?"))
+                values.extend((seller_scheme, seller_identifier))
             if matched_offer_id is not None:
                 updates.append("matched_offer_id = ?")
                 values.append(matched_offer_id)
@@ -1553,7 +1797,9 @@ class SQLiteClient:
             try:
                 cur = conn.execute(
                     """
-                    SELECT deal_ref, signer, sent_at_unix, payload, received_at_unix
+                    SELECT deal_ref, buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier,
+                           sent_at_unix, payload, received_at_unix
                     FROM deal_heartbeats WHERE deal_ref = ?
                     ORDER BY sent_at_unix DESC LIMIT 1
                     """,
@@ -1564,10 +1810,15 @@ class SQLiteClient:
                     return None
                 return {
                     "deal_ref": row[0],
-                    "signer": row[1],
-                    "sent_at_unix": row[2],
-                    "payload": json.loads(row[3]) if row[3] else {},
-                    "received_at_unix": row[4],
+                    "buyer_principal": _principal_value(
+                        row[1], row[2], field="heartbeat buyer"
+                    ),
+                    "seller_principal": _principal_value(
+                        row[3], row[4], field="heartbeat seller"
+                    ),
+                    "sent_at_unix": row[5],
+                    "payload": json.loads(row[6]) if row[6] else {},
+                    "received_at_unix": row[7],
                 }
             finally:
                 conn.close()
@@ -1575,18 +1826,28 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
     async def insert_heartbeat(self, record: dict) -> None:
+        buyer = Identity.model_validate(record.get("buyer_principal"))
+        seller = Identity.model_validate(record.get("seller_principal"))
+        buyer_scheme, buyer_identifier = _principal_columns(buyer)
+        seller_scheme, seller_identifier = _principal_columns(seller)
         def _insert() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
                     """
-                    INSERT INTO deal_heartbeats
-                      (deal_ref, signer, sent_at_unix, payload, received_at_unix)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO deal_heartbeats (
+                      deal_ref, buyer_scheme, buyer_identifier,
+                      seller_scheme, seller_identifier,
+                      sent_at_unix, payload, received_at_unix
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record["deal_ref"],
-                        record.get("signer"),
+                        buyer_scheme,
+                        buyer_identifier,
+                        seller_scheme,
+                        seller_identifier,
                         float(record["sent_at_unix"]),
                         json.dumps(record.get("payload") or {}),
                         float(record["received_at_unix"]),
@@ -1611,6 +1872,224 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_count)
+    async def get_replay_reservation(
+        self,
+        principal: Identity,
+        request_id: str,
+    ) -> ReplayReservation | None:
+        scheme, identifier = _principal_columns(principal)
+
+        def _load() -> ReplayReservation | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT request_hash
+                    FROM auth_replay_reservations
+                    WHERE principal_scheme = ?
+                      AND principal_identifier = ?
+                      AND request_id = ?
+                    """,
+                    (scheme, identifier, request_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                return ReplayReservation(
+                    identity=ReplayIdentity(
+                        principal=principal,
+                        request_id=request_id,
+                    ),
+                    request_hash=row[0],
+                )
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def claim_replay(
+        self,
+        reservation: ReplayReservation,
+        *,
+        now: int,
+        lease_seconds: int,
+    ) -> ReplayClaim:
+        principal = reservation.identity.principal
+        scheme, identifier = _principal_columns(principal)
+        attempt_token = uuid.uuid4().hex
+
+        def _claim() -> ReplayClaim:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT request_hash, response_status, response_body,
+                           attempt_token, lease_until
+                    FROM auth_replay_reservations
+                    WHERE principal_scheme = ?
+                      AND principal_identifier = ?
+                      AND request_id = ?
+                    """,
+                    (scheme, identifier, reservation.identity.request_id),
+                ).fetchone()
+                if row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO auth_replay_reservations (
+                          principal_scheme, principal_identifier, request_id,
+                          request_hash, response_status, response_body,
+                          attempt_token, lease_until, created_at
+                        ) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+                        """,
+                        (
+                            scheme,
+                            identifier,
+                            reservation.identity.request_id,
+                            reservation.request_hash,
+                            attempt_token,
+                            now + lease_seconds,
+                            datetime.now().isoformat(),
+                        ),
+                    )
+                    conn.commit()
+                    return ReplayClaim(
+                        state="dispatch",
+                        reservation=reservation,
+                        attempt_token=attempt_token,
+                    )
+                if row[0] != reservation.request_hash:
+                    conn.commit()
+                    return ReplayClaim(state="changed", reservation=reservation)
+                if row[1] is not None and row[2] is not None:
+                    outcome = (int(row[1]), json.loads(row[2]))
+                    conn.commit()
+                    return ReplayClaim(
+                        state="completed",
+                        reservation=reservation,
+                        recorded_outcome=outcome,
+                    )
+                lease_until = int(row[4]) if row[4] is not None else 0
+                if lease_until > now:
+                    conn.commit()
+                    return ReplayClaim(state="pending", reservation=reservation)
+                cursor = conn.execute(
+                    """
+                    UPDATE auth_replay_reservations
+                    SET attempt_token=?, lease_until=?
+                    WHERE principal_scheme=?
+                      AND principal_identifier=?
+                      AND request_id=?
+                      AND request_hash=?
+                      AND response_status IS NULL
+                      AND response_body IS NULL
+                      AND (lease_until IS NULL OR lease_until <= ?)
+                    """,
+                    (
+                        attempt_token,
+                        now + lease_seconds,
+                        scheme,
+                        identifier,
+                        reservation.identity.request_id,
+                        reservation.request_hash,
+                        now,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("replay reservation claim changed unexpectedly")
+                conn.commit()
+                return ReplayClaim(
+                    state="dispatch",
+                    reservation=reservation,
+                    attempt_token=attempt_token,
+                )
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_claim)
+
+    async def record_replay_outcome(
+        self,
+        reservation: ReplayReservation,
+        *,
+        status: int,
+        body: Any,
+        attempt_token: str,
+    ) -> None:
+        principal = reservation.identity.principal
+        scheme, identifier = _principal_columns(principal)
+        encoded = json.dumps(
+            body,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+        def _record() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cursor = conn.execute(
+                    """
+                    UPDATE auth_replay_reservations
+                    SET response_status = ?, response_body = ?, lease_until = NULL
+                    WHERE principal_scheme = ?
+                      AND principal_identifier = ?
+                      AND request_id = ?
+                      AND request_hash = ?
+                      AND attempt_token = ?
+                      AND response_status IS NULL
+                      AND response_body IS NULL
+                    """,
+                    (
+                        status,
+                        encoded,
+                        scheme,
+                        identifier,
+                        reservation.identity.request_id,
+                        reservation.request_hash,
+                        attempt_token,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError(
+                        "replay attempt is unknown, completed, or superseded"
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_record)
+
+    async def load_replay_outcome(
+        self,
+        principal: Identity,
+        request_id: str,
+    ) -> tuple[int, Any] | None:
+        scheme, identifier = _principal_columns(principal)
+
+        def _load() -> tuple[int, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT response_status, response_body
+                    FROM auth_replay_reservations
+                    WHERE principal_scheme = ?
+                      AND principal_identifier = ?
+                      AND request_id = ?
+                    """,
+                    (scheme, identifier, request_id),
+                ).fetchone()
+                if row is None or row[0] is None or row[1] is None:
+                    return None
+                return int(row[0]), json.loads(row[1])
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
 
     async def insert_escrow(
         self,
@@ -2084,6 +2563,8 @@ class SQLiteClient:
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        buyer_principal: Identity,
+        seller_principal: Identity,
         owner_id: str,  # The agent creating this record
         status: str = "active",
         our_initial_price: int | str | float | None = None,
@@ -2108,17 +2589,17 @@ class SQLiteClient:
             requested_duration_seconds: Buyer's duration ask from /negotiate/new.
                 Validated against the listing's max_duration_seconds upstream.
             requested_start_utc: Buyer's requested lease start. None means now.
-            buyer_escrow_proposal: The buyer's accepted escrow proposal,
-                persisted as a JSON blob. Settlement reads this back to
-                reconstruct the expected on-chain obligation_data. None
-                for legacy clients that didn't send a proposal.
+            buyer_escrow_proposal: The buyer's accepted mechanism proposal.
             provision_terms: Accepted schema-owned delivery terms persisted
                 for server-authoritative settlement start and restart.
         """
+        buyer_scheme, buyer_identifier = _principal_columns(buyer_principal)
+        seller_scheme, seller_identifier = _principal_columns(seller_principal)
 
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
+                conn.execute("BEGIN IMMEDIATE")
                 cur = conn.cursor()
                 timestamp = datetime.now().isoformat()
                 proposal_blob = (
@@ -2141,9 +2622,11 @@ class SQLiteClient:
                         requested_start_utc,
                         buyer_escrow_proposal,
                         provision_terms,
+                        buyer_scheme, buyer_identifier,
+                        seller_scheme, seller_identifier,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id,
@@ -2156,10 +2639,32 @@ class SQLiteClient:
                         requested_start_utc,
                         proposal_blob,
                         provision_blob,
+                        buyer_scheme,
+                        buyer_identifier,
+                        seller_scheme,
+                        seller_identifier,
                         timestamp,
                         timestamp,
                     ),
                 )
+                durable = cur.execute(
+                    """
+                    SELECT buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier
+                    FROM negotiation_threads
+                    WHERE negotiation_id = ?
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                if durable != (
+                    buyer_scheme,
+                    buyer_identifier,
+                    seller_scheme,
+                    seller_identifier,
+                ):
+                    raise ValueError(
+                        "negotiation identifier is already bound to different principals"
+                    )
 
                 # Insert private local state (upsert if needed)
                 cur.execute(
@@ -2181,6 +2686,9 @@ class SQLiteClient:
                 )
 
                 conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
@@ -2210,6 +2718,8 @@ class SQLiteClient:
                     """
                     SELECT t.negotiation_id, t.our_listing_id, t.their_listing_id,
                            t.our_agent_id, t.their_agent_id, t.status,
+                           t.buyer_scheme, t.buyer_identifier,
+                           t.seller_scheme, t.seller_identifier,
                            l.our_initial_price, l.our_strategy
                     FROM negotiation_threads t
                     LEFT JOIN negotiation_local_state l 
@@ -2227,9 +2737,15 @@ class SQLiteClient:
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
+                        "buyer_principal": _principal_value(
+                            row[6], row[7], field="negotiation buyer"
+                        ),
+                        "seller_principal": _principal_value(
+                            row[8], row[9], field="negotiation seller"
+                        ),
                         # Default to None if no local state found for this owner
-                        "our_initial_price": _amount_from_db_text(row[6]),
-                        "our_strategy": row[7],
+                        "our_initial_price": _amount_from_db_text(row[10]),
+                        "our_strategy": row[11],
                     }
                 return None
             finally:
@@ -2532,7 +3048,8 @@ class SQLiteClient:
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, fulfillment_resource,
-                           max_duration_seconds, seller, oracle_address,
+                           max_duration_seconds, storefront_url,
+                           seller_scheme, seller_identifier, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
@@ -2551,7 +3068,9 @@ class SQLiteClient:
                     "offer_resource",
                     "fulfillment_resource",
                     "max_duration_seconds",
-                    "seller",
+                    "storefront_url",
+                    "seller_scheme",
+                    "seller_identifier",
                     "oracle_address",
                     "paused",
                     "accepted_escrows",
@@ -2563,6 +3082,11 @@ class SQLiteClient:
                 for row in rows:
                     d = dict(zip(keys, row))
                     d["paused"] = bool(d["paused"])
+                    d["seller_principal"] = _principal_value(
+                        d.pop("seller_scheme"),
+                        d.pop("seller_identifier"),
+                        field="listing seller",
+                    )
                     d["accepted_escrows"] = self._deserialize_accepted_escrows(
                         d.get("accepted_escrows"),
                     )
@@ -2623,7 +3147,7 @@ class SQLiteClient:
         *,
         listing_id: str,
         terminal_state: str | None = None,
-        buyer_address: str | None = None,
+        buyer_principal: Identity | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -2638,14 +3162,15 @@ class SQLiteClient:
                 if terminal_state is not None:
                     clauses.append("terminal_state = ?")
                     params.append(terminal_state)
-                if buyer_address is not None:
-                    # their_agent_id holds the buyer's address or URL
-                    clauses.append("their_agent_id LIKE ?")
-                    params.append(f"%{buyer_address}%")
+                if buyer_principal is not None:
+                    clauses.extend(("buyer_scheme = ?", "buyer_identifier = ?"))
+                    params.extend(_principal_columns(buyer_principal))
                 where = "WHERE " + " AND ".join(clauses)
                 cur.execute(
                     f"""
-                    SELECT negotiation_id, our_listing_id, their_agent_id,
+                    SELECT negotiation_id, our_listing_id,
+                           buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier,
                            status, terminal_state,
                            requested_duration_seconds,
                            requested_start_utc,
@@ -2661,7 +3186,10 @@ class SQLiteClient:
                 keys = [
                     "negotiation_id",
                     "our_listing_id",
-                    "buyer_address",
+                    "buyer_scheme",
+                    "buyer_identifier",
+                    "seller_scheme",
+                    "seller_identifier",
                     "status",
                     "terminal_state",
                     "requested_duration_seconds",
@@ -2676,6 +3204,16 @@ class SQLiteClient:
                 ]
                 result = [dict(zip(keys, row)) for row in cur.fetchall()]
                 for item in result:
+                    item["buyer_principal"] = _principal_value(
+                        item.pop("buyer_scheme"),
+                        item.pop("buyer_identifier"),
+                        field="negotiation buyer",
+                    )
+                    item["seller_principal"] = _principal_value(
+                        item.pop("seller_scheme"),
+                        item.pop("seller_identifier"),
+                        field="negotiation seller",
+                    )
                     item["agreed_amount"] = _amount_from_db_text(
                         item.get("agreed_amount"),
                     )
@@ -2707,6 +3245,8 @@ class SQLiteClient:
                     """
                     SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status, terminal_state,
+                           buyer_scheme, buyer_identifier,
+                           seller_scheme, seller_identifier,
                            requested_duration_seconds,
                            requested_start_utc,
                            agreed_price, agreed_duration_seconds, agreed_at,
@@ -2728,6 +3268,10 @@ class SQLiteClient:
                     "their_agent_id",
                     "status",
                     "terminal_state",
+                    "buyer_scheme",
+                    "buyer_identifier",
+                    "seller_scheme",
+                    "seller_identifier",
                     "requested_duration_seconds",
                     "requested_start_utc",
                     # Column is named ``agreed_price`` (kept from before the
@@ -2740,6 +3284,16 @@ class SQLiteClient:
                     "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))
+                thread["buyer_principal"] = _principal_value(
+                    thread.pop("buyer_scheme"),
+                    thread.pop("buyer_identifier"),
+                    field="negotiation buyer",
+                )
+                thread["seller_principal"] = _principal_value(
+                    thread.pop("seller_scheme"),
+                    thread.pop("seller_identifier"),
+                    field="negotiation seller",
+                )
                 thread["agreed_amount"] = _amount_from_db_text(
                     thread.get("agreed_amount"),
                 )
@@ -2747,7 +3301,8 @@ class SQLiteClient:
                 # Message log
                 cur.execute(
                     """
-                    SELECT round, sender, our_price, their_price, proposed_price,
+                    SELECT round, sender_role, sender_scheme, sender_identifier,
+                           our_price, their_price, proposed_price,
                            action_taken, message_type, timestamp
                     FROM negotiation_messages
                     WHERE negotiation_id = ?
@@ -2757,7 +3312,9 @@ class SQLiteClient:
                 )
                 msg_keys = [
                     "round",
-                    "sender",
+                    "sender_role",
+                    "sender_scheme",
+                    "sender_identifier",
                     "our_price",
                     "their_price",
                     "proposed_price",
@@ -2767,6 +3324,11 @@ class SQLiteClient:
                 ]
                 messages = [dict(zip(msg_keys, row)) for row in cur.fetchall()]
                 for message in messages:
+                    message["sender_principal"] = _principal_value(
+                        message.pop("sender_scheme"),
+                        message.pop("sender_identifier"),
+                        field="negotiation message sender",
+                    )
                     message["our_price"] = _amount_from_db_text(
                         message.get("our_price"),
                     )

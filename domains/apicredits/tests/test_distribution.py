@@ -149,10 +149,10 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     assert "Requires-Dist: arkhai-core>=0.2.0" in domain_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in buyer_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in buyer_metadata
-    assert "Requires-Dist: arkhai-core-buyer>=0.2.0" in buyer_metadata
+    assert "Requires-Dist: arkhai-core-buyer>=0.3.0" in buyer_metadata
     assert "Requires-Dist: arkhai-apicredits-domain>=0.1.0" in storefront_metadata
     assert "Requires-Dist: arkhai-core>=0.2.0" in storefront_metadata
-    assert "Requires-Dist: arkhai-core-storefront>=0.2.0" in storefront_metadata
+    assert "Requires-Dist: arkhai-core-storefront>=0.3.0" in storefront_metadata
 
 
 def test_storefront_wheels_require_settlement_runtime(

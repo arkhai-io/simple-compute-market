@@ -36,14 +36,12 @@ from pydantic import ValidationError
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from market_storefront.middleware.seller_auth import make_seller_auth_dep
 from core_storefront.models.listing_models import (
     ArbitrateRequest,
     ArbitrateResponse,
     ClaimRequest,
     ClaimResponse,
     CloseListingResponse,
-    CreateListingRequest,
     CreateListingResponse,
     EvaluateNegotiateRequest,
     EvaluateNegotiateResponse,
@@ -55,6 +53,7 @@ from core_storefront.models.listing_models import (
     RefundRequest,
     RefundResponse,
 )
+from market_storefront.models.listing_models import VmCreateListingRequest
 
 logger = logging.getLogger(__name__)
 
@@ -191,9 +190,8 @@ class ListingsController:
         "/listings/create",
         response_model=CreateListingResponse,
         summary="Create a new listing (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("create_listing"))],
     )
-    async def create_listing(self, body: CreateListingRequest) -> CreateListingResponse:
+    async def create_listing(self, body: VmCreateListingRequest) -> CreateListingResponse:
         try:
             result = await self._listing_svc.create_listing(body)
         except ValueError as exc:
@@ -207,7 +205,6 @@ class ListingsController:
         "/listings/{listing_id}/close",
         response_model=CloseListingResponse,
         summary="Close a listing (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("close_listing"))],
     )
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         try:
@@ -223,7 +220,6 @@ class ListingsController:
         "/listings/{listing_id}/refund",
         response_model=RefundResponse,
         summary="Direct token refund to buyer (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("refund_listing"))],
     )
     async def refund(self, listing_id: str, body: RefundRequest) -> RefundResponse:
         status_code, result = await self._listing_svc.refund(
@@ -239,7 +235,6 @@ class ListingsController:
         "/listings/{listing_id}/claim",
         response_model=ClaimResponse,
         summary="Seller claims on-chain escrow (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("claim_listing"))],
     )
     async def claim(self, listing_id: str, body: ClaimRequest) -> ClaimResponse:
         status_code, result = await self._listing_svc.claim(
@@ -254,8 +249,7 @@ class ListingsController:
     @router.post(
         "/listings/{listing_id}/reclaim",
         response_model=ReclaimResponse,
-        summary="Buyer reclaims expired escrow (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("reclaim_listing"))],
+        summary="Buyer reclaims expired escrow (buyer auth)",
     )
     async def reclaim(self, listing_id: str, body: ReclaimRequest) -> ReclaimResponse:
         status_code, result = await self._listing_svc.reclaim(
@@ -271,7 +265,6 @@ class ListingsController:
         "/listings/{listing_id}/arbitrate",
         response_model=ArbitrateResponse,
         summary="Oracle arbitration (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("arbitrate_listing"))],
     )
     async def arbitrate(
         self, listing_id: str, body: ArbitrateRequest

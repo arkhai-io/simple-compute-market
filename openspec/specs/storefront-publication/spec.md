@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Define seller storefront ownership, listing publication/reconciliation, and domain-runtime composition.
+Define seller storefront ownership, canonical market identity and service trust, listing publication/reconciliation, and domain-runtime composition.
+
 ## Requirements
 ### Requirement: Seller protocol surface
 A storefront MUST expose authenticated listing, negotiation, settlement, identity, health, and operator control surfaces while keeping domain-specific behavior behind injected adapters.
@@ -28,6 +29,20 @@ A storefront MUST publish, update, close, and reconcile its listings against one
 #### Scenario: Derived capacity disappears
 - **WHEN** authoritative capacity no longer supports a derived listing
 - **THEN** reconciliation closes that listing in configured registries without treating stale local state as authority
+
+### Requirement: Canonical storefront market identities
+
+A storefront MUST represent listing ownership, negotiation parties and message senders, accepted terms and settlement plans, heartbeat parties, claim actors, settlement parties, administrator subjects, service-peer bindings, replay reservations, and identity-audit actors as complete canonical principals. Listing, negotiation, obligation, fulfillment, service-peer, and operation identifiers MUST remain stable subjects distinct from the principals authorized to act for them. An explicitly named EVM address inside a tagged chain-mechanism payload MAY identify a chain effect, but it MUST NOT authorize a marketplace action or replace a canonical principal.
+
+#### Scenario: A listing enters negotiation
+
+- **WHEN** a buyer negotiates against a storefront listing
+- **THEN** the listing retains its stable listing identity while the listing owner, buyer, seller, message senders, accepted terms, and resulting settlement parties carry their exact scheme-tagged principals
+
+#### Scenario: A chain transfer names an EVM recipient
+
+- **WHEN** an Alkahest or token-transfer payload contains an explicit EVM recipient beside the authenticated marketplace principal
+- **THEN** the storefront uses that address only for the selected chain effect and authorizes the request with the complete marketplace principal
 
 ### Requirement: Commercial mapping identity
 A storefront's derived-listing mapping (`derived_compute_listings`, `derived_bare_metal_listings`) is the commercial-mapping table between an authoritative physical or capacity identity and a published listing; it MUST NOT be duplicated as a separate schema. Pricing, settlement terms, and seller policy MUST continue to live on the generic `listings` table, addressed by `listing_id` — the mapping row carries no commercial fields of its own. Each mapping row's derivation key MUST include the owning `site_id`, since a pool or resource identifier is only unique within one site, never globally. A derivation key MUST be collision-resistant by construction against any values its constituent fields (`site_id`, `pool_id`, `resource_id`) may take — these are operator-chosen strings with no character restrictions, so a naive delimiter-joined encoding is not sufficient.
@@ -108,12 +123,60 @@ The shared storefront role MUST consume the selected market-domain contract for 
 - **WHEN** a domain codec or hook rejects a payload
 - **THEN** the storefront surfaces the domain validation failure without coercing it through a different domain or a generic fallback
 
-### Requirement: Trusted provisioning-site identity
-A storefront MUST bind each provisioning connection to an operator-configured `site_id`. It MUST derive routing and ownership from that trusted binding rather than accepting a counterparty-provided site identity.
+### Requirement: Storefronts hold an exact principal per site authority
+A storefront MUST resolve each site authority's site identifier, URL, and scheme-tagged principal through a registry interface. It MUST verify authority-originated version 2 requests and responses against the exact principal selected by site and route context. The registry MUST NOT use an address-only field, derive a principal from private material, or accept a caller-selected expected principal. Routing and ownership MUST come from the trusted registry binding rather than a counterparty-provided site identity.
+
+#### Scenario: An authority-originated request arrives
+
+- **WHEN** a site authority calls a storefront
+- **THEN** the storefront verifies the body-bound request against that site's registered role and principal before route dispatch
+
+#### Scenario: A storefront uses several sites
+
+- **WHEN** a storefront aggregates several site authorities
+- **THEN** each site has a separate principal and a principal registered for one site does not authenticate another
+
+#### Scenario: The registry source changes
+
+- **WHEN** site records move from configuration to durable storage
+- **THEN** consumers of the registry are unchanged
+
+#### Scenario: A wallet-free site is configured
+
+- **WHEN** a site authority uses an Ed25519 principal
+- **THEN** the storefront authenticates it without a wallet, RPC endpoint, chain ID, or EVM private key
 
 #### Scenario: Provisioner reports a conflicting site identity
 - **WHEN** a configured provisioning connection reports a `site_id` different from the storefront binding
 - **THEN** the storefront retains the configured identity and rejects or ignores the conflicting assertion
+
+### Requirement: Storefront clients verify signed authority responses
+
+A storefront client MUST verify the shared version 2 response signature, configured authority principal, request identity, status, timestamp, and body before accepting a mutation acknowledgement. Unsigned responses, signatures from another principal, body mutations, stale responses, and request-ID mismatches MUST fail closed.
+
+#### Scenario: An authority acknowledges a mutation
+
+- **WHEN** the configured authority returns a valid signed response
+- **THEN** the client accepts the response only after every bound field and the exact authority principal verify
+
+#### Scenario: A different authority signs the response
+
+- **WHEN** a valid signer that is not the configured authority signs the same response body
+- **THEN** the client rejects the response
+
+### Requirement: Site authority principals rotate with bounded overlap
+
+A storefront MUST require proofs from both the active and replacement principals over the same bounded rotation statement. It MUST accept both only during the recorded overlap and MUST reject the old principal after expiry or explicit retirement.
+
+#### Scenario: Rotation overlap is active
+
+- **WHEN** both principal proofs are valid and the overlap has not ended
+- **THEN** either principal authenticates that site authority
+
+#### Scenario: Rotation overlap has ended
+
+- **WHEN** the old principal signs after overlap expiry or retirement
+- **THEN** the storefront rejects it
 
 ### Requirement: Storefronts cache independent site projections
 Individual-resource publication consumes `site_resource_pools`, which carries the physical inventory facts required to create a listing for a specific resource. Capacity-oriented publication consumes vertically grouped `site_capacity_buckets`. Grouped capacity is advisory publication input only and is never an allocation target; authoritative reservation admission remains host-granular inside the provisioning site authority.
@@ -187,8 +250,93 @@ After authoritative funding, the shared obligation lifecycle MUST reserve `funde
 - **WHEN** hosted funding is authoritative but VM fulfillment fails
 - **THEN** no transfer occurs, one reclaim/refund is driven to terminal success, and capacity is released only under the existing failure dispatcher ordering
 
+
+### Requirement: Scheme-neutral storefront authorization
+
+A storefront MUST authenticate publisher, buyer, administrator, and configured service-peer requests through `arkhai.market-request-signature.v2` and MUST authorize complete principals against explicit roles and durable subject bindings selected by route, subject, and site context. Each state-changing proof MUST bind the caller role and principal, method, semantic operation, resource, request ID, timestamp, and canonical body hash. The storefront MUST reserve `(principal, request_id)` durably and atomically before route dispatch, reject changed reuse, and return or resume the recorded outcome for an exact retry without executing a conflicting mutation. It MUST NOT fall back from missing or invalid principal headers to an address in the body, configuration, query, listing, negotiation record, administrator key, or private-key field.
+
+#### Scenario: Body claims the expected buyer address
+
+- **WHEN** a request body names the expected buyer but its proof is missing or belongs to another principal
+- **THEN** the storefront rejects the request before negotiation, settlement, fulfillment, or operator state changes
+
+#### Scenario: Provisioning peer uses Ed25519
+
+- **WHEN** an allowlisted Ed25519 service principal submits a valid signed response or callback
+- **THEN** the storefront authenticates the configured peer and site binding without requiring an EVM identity
+
+#### Scenario: Exact administrator retry follows a lost acknowledgement
+
+- **WHEN** an administrator re-signs the same semantic mutation with the same principal and request ID after losing the response
+- **THEN** the storefront returns or resumes the reserved operation outcome without dispatching a conflicting mutation
+
+#### Scenario: A request ID is reused with changed content
+
+- **WHEN** an authenticated caller reuses its request ID with a different body, role, operation, or resource
+- **THEN** the storefront rejects the request before handler dispatch and preserves the first reservation
+
+#### Scenario: Storefront acknowledges an authenticated mutation
+
+- **WHEN** an administrator or configured service peer completes an authenticated mutation
+- **THEN** the storefront signs the response over its status, originating request identity, storefront principal, timestamp, and canonical body
+
+### Requirement: Storefront authorization bindings are durable
+
+Each administrator and service peer MUST be a stable storefront-owned subject with one explicit role and one primary canonical principal. A service-peer subject MUST additionally retain its operator-owned site binding. Public configuration MAY seed an uninitialized subject, but after initialization it MUST cover every durably active principal and MUST NOT replace the durable primary principal, change the subject's role or site, overwrite a rotation overlap, or make one principal active for two subjects under the same authority.
+
+#### Scenario: Startup configuration is stale during rotation
+
+- **WHEN** configuration omits a durably active overlap principal or names a different primary principal for an initialized administrator or service peer
+- **THEN** storefront startup fails closed instead of overwriting the durable authorization state
+
+#### Scenario: Service peer asserts another site
+
+- **WHEN** an authenticated service peer supplies a `site_id` that differs from its durable subject binding
+- **THEN** the storefront rejects the request without changing the peer, routing, capacity, fulfillment, or settlement state
+
+### Requirement: Storefront-owned principals rotate with bounded overlap
+
+A storefront MUST rotate administrator and service-peer subjects only from a registered primary principal through one canonical intent signed by both that principal and its replacement. It MUST apply an identical intent idempotently, bound the overlap duration, preserve primary, overlap, retired, disabled, and audit history, and accept both principals only during the recorded overlap. Retirement MUST name the applied rotation and old principal, and disablement MUST remain distinct from replacement.
+
+#### Scenario: Administrator or service peer begins rotation
+
+- **WHEN** the active and replacement principals provide valid proofs over the same unexpired subject, authority, nonce, and overlap intent
+- **THEN** the storefront records the replacement as primary and the old principal as active only for the bounded overlap without changing the stable subject, role, or site
+
+#### Scenario: Retirement names another rotation
+
+- **WHEN** an administrator attempts to retire an old principal with a nonce that does not identify its applied rotation
+- **THEN** the storefront rejects retirement and preserves the recorded authorization bindings
+
+### Requirement: Storefront principal is reused without exposing its key
+
+Publication, hosted account ownership, negotiation, and hosted settlement calls MAY use one configured seller principal, but each authority MUST receive only a signer operation or signed proof and MUST enforce its own role binding. Storefront persistence and projections MUST NOT contain the seller's private credential or a Stripe provider identity.
+
+#### Scenario: Storefront publishes a hosted option
+
+- **WHEN** the configured seller principal owns the ready hosted account and signs registry publication
+- **THEN** the option contains only the allowed opaque account reference and settlement fields while both authorities bind the same public principal
+
+### Requirement: Storefront identity state migrates atomically
+
+Storefront databases MUST validate and migrate buyer, seller, administrator, service-peer, negotiation-message, heartbeat, claim, settlement, replay, stage-event, and audit identities to canonical principal form in one service-local transaction. Migration MUST preserve listing, negotiation, obligation, fulfillment, service-peer, rotation, and operation identities; prove listing ownership and cross-record party consistency; and retire authoritative address-only identity columns. A malformed or partial principal, ownership conflict, duplicate active binding, missing party relation, or other unsafe population MUST roll back completely.
+
+#### Scenario: Active hosted obligation is migrated
+
+- **WHEN** a storefront with a funded nonterminal obligation upgrades from address-only identity rows
+- **THEN** the obligation retains its authoritative lifecycle and operation journal while its parties become canonical `eip191` principals
+
+#### Scenario: Persisted listing ownership conflicts with local identity
+
+- **WHEN** a populated listing cannot be proven to belong to the configured storefront principal and expected storefront URL
+- **THEN** the migration aborts without leaving any identity table or embedded event partially converted
+
 ## Evidence
 
+- Canonical listing, negotiation, settlement, fulfillment, and stage-log principals: `core/storefront/tests/unit/test_identity_migrations.py`, `test_settle_identity_models.py`, `test_sqlite_client_escrow_fulfillment_identity.py`, and `test_stage_log_identity.py`.
+- Version 2 body binding, durable replay classification, exact-retry outcome recovery, and signed responses: `core/storefront/tests/unit/test_auth.py`, `domains/vms/storefront/tests/unit/test_service_peer_identity.py`, and `domains/vms/storefront/tests/integration/test_admin_api.py`.
+- Durable administrator/service-peer ownership and two-proof rotation lifecycle: `core/storefront/tests/unit/test_identity_authority.py`, `test_identity_lifecycle.py`, and `domains/vms/storefront/tests/unit/test_identity_dispatch.py`.
+- Transactional storefront principal migration, conflict rejection, and legacy-column retirement: `core/storefront/tests/unit/test_identity_migrations.py`.
 - Projection-backed candidate derivation defaults on once at parity with a retained local-table path: `domains/vms/storefront/tests/unit/test_config_loader.py::test_settings_toml_provides_baseline_defaults` and `test_use_site_projection_for_listings_can_still_be_disabled_explicitly`.
 - Generic publication source, runner, and plugin discovery: `core/storefront/tests/unit/test_publication_sources.py`, `test_publication_runner.py`, and `test_publication_plugins.py`.
 - Registry fan-out and publication persistence: `core/storefront/tests/unit/test_registry_publication.py` and `domains/vms/storefront/tests/unit/test_publications_wiring.py`.

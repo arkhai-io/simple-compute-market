@@ -1,8 +1,8 @@
 """Integration tests for the Listings API.
 
-Uses the async ``StorefrontClient`` via ``httpx.ASGITransport`` —
-matching the provisioning-service integration test pattern.
-All assertions go through the canonical client; no raw HTTP calls.
+Authenticated flows use the async ``StorefrontClient`` through
+``httpx.ASGITransport``. Missing-authentication cases deliberately use the
+raw transport so the client cannot reject them before they reach middleware.
 
 Fixture pattern: build a minimal FastAPI app containing only the
 ListingsController router, backed by an in-memory
@@ -18,25 +18,43 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 import market_storefront.container as _container
-from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.middleware import admin_identity as _admin_identity
+from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
-ADMIN_KEY = "test-admin-key"
+_TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
+_TEST_ADMIN_SIGNER = Ed25519Signer(b"\x32" * 32)
+_TEST_BUYER_SIGNER = Ed25519Signer(b"\x33" * 32)
+_TEST_PROVISIONING_SIGNER = Ed25519Signer(b"\x34" * 32)
+_TEST_SELLER_PRINCIPAL = _TEST_MARKETPLACE_SIGNER.identity
+_TEST_PUBLISHERS = TrustedIdentitySet(
+    identities=(_TEST_MARKETPLACE_SIGNER.identity,)
+)
+_TEST_ADMINISTRATORS = TrustedIdentitySet(
+    identities=(_TEST_ADMIN_SIGNER.identity,)
+)
+_TEST_PROVISIONING_AUTHORITIES = TrustedIdentitySet(
+    identities=(_TEST_PROVISIONING_SIGNER.identity,)
+)
 
-def _key_enforcer(expected_key: str):
-    """Depends-compatible function that enforces a specific X-Admin-Key header.
-    Used in test fixtures to simulate production admin-key enforcement without
-    requiring a mutable CONFIG (which is a frozen dataclass).
-    """
-    from fastapi import Header, HTTPException
-    def _dep(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
-        if x_admin_key != expected_key:
-            raise HTTPException(status_code=403, detail="Valid X-Admin-Key header required")
-    return _dep
+
+def _configure_administrator_auth(
+    app: FastAPI,
+    db: SQLiteClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _admin_identity,
+        "get_administrator_configs",
+        lambda: {"operator": _TEST_ADMINISTRATORS},
+    )
+    _admin_identity.initialize_administrator_identities(db.db_path)
+    app.middleware("http")(_admin_identity.administrator_identity_middleware)
 
 
 
@@ -78,45 +96,62 @@ async def _seed_listing(
         }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=_TEST_SELLER_PRINCIPAL,
     )
 
 
 @pytest_asyncio.fixture
-async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+async def client(
+    db,
+    monkeypatch,
+) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    _configure_administrator_auth(app, db, monkeypatch)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
         "http://test",
+        signer=_TEST_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_TEST_PUBLISHERS,
         transport=transport,
-        admin_key=ADMIN_KEY,
     ) as c:
         yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 @pytest_asyncio.fixture
-async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
+async def unsigned_client(
+    db,
+    monkeypatch,
+) -> AsyncIterator[httpx.AsyncClient]:
     _container.resolved_sqlite_client = db
-    _container.resolved_listing_service = None  # not used by read/pause/resume
+    _container.resolved_listing_service = None  # auth rejects before dispatch
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    _configure_administrator_auth(app, db, monkeypatch)
 
     transport = httpx.ASGITransport(app=app)
-    async with StorefrontClient("http://test", transport=transport) as c:
+    async with httpx.AsyncClient(
+        base_url="http://test",
+        transport=transport,
+    ) as c:
         yield c
 
     _container.resolved_sqlite_client = None
+    _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +240,12 @@ class TestGetListing:
 # ---------------------------------------------------------------------------
 
 class TestPauseListing:
-    async def test_requires_admin_key(self, client_no_key):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.pause_listing("any-listing")
-        assert "403" in str(exc_info.value)
+    async def test_requires_authentication(self, unsigned_client):
+        response = await unsigned_client.post(
+            "/api/v1/listings/any-listing/pause",
+            json={},
+        )
+        assert response.status_code == 401
 
     async def test_pause_sets_flag(self, client):
         c, db = client
@@ -229,10 +266,12 @@ class TestPauseListing:
 # ---------------------------------------------------------------------------
 
 class TestResumeListing:
-    async def test_requires_admin_key(self, client_no_key):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.resume_listing("any-listing")
-        assert "403" in str(exc_info.value)
+    async def test_requires_authentication(self, unsigned_client):
+        response = await unsigned_client.post(
+            "/api/v1/listings/any-listing/resume",
+            json={},
+        )
+        assert response.status_code == 401
 
     async def test_resume_clears_flag(self, client):
         c, db = client
@@ -286,65 +325,85 @@ class TestResumeListing:
 # is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 
 @pytest_asyncio.fixture
-async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+async def admin_client(
+    db,
+    monkeypatch,
+) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_clients=None
+        sqlite_client=db,
+        alkahest_clients=None,
+        marketplace_signer=_TEST_MARKETPLACE_SIGNER,
+    )
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.get_provisioning_authorities",
+        lambda: _TEST_PROVISIONING_AUTHORITIES,
     )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
 
     app = FastAPI()
     app.include_router(listings_router)
     app.include_router(admin_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    _configure_administrator_auth(app, db, monkeypatch)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
-        "http://test", transport=transport, admin_key=ADMIN_KEY,
-        private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "http://test",
+        signer=_TEST_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_TEST_PUBLISHERS,
+        transport=transport,
     ) as c:
         yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 @pytest_asyncio.fixture
-async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
-    """Admin router wired without an admin key — for 403 tests on admin endpoints."""
+async def unsigned_admin_client(
+    db,
+    monkeypatch,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Admin router exposed to an unsigned raw transport."""
     from market_storefront.controllers.listings_controller import admin_router
     from market_storefront.services.listing_service import ListingService
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_clients=None
+        sqlite_client=db,
+        alkahest_clients=None,
+        marketplace_signer=_TEST_MARKETPLACE_SIGNER,
     )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
 
     app = FastAPI()
     app.include_router(listings_router)
     app.include_router(admin_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    _configure_administrator_auth(app, db, monkeypatch)
 
     transport = httpx.ASGITransport(app=app)
-    # No admin_key supplied → X-Admin-Key header absent → 403
-    async with StorefrontClient(
-        "http://test", transport=transport,
-        private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    async with httpx.AsyncClient(
+        base_url="http://test",
+        transport=transport,
     ) as c:
         yield c
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 _OFFER = {
@@ -377,7 +436,11 @@ class TestEvaluateNegotiate:
             "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-1", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            result = await c.evaluate_negotiate(
+                "neg-eval-1",
+                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
+            )
         assert isinstance(result.would_negotiate, bool)
 
     async def test_returns_decision_fields(self, admin_client):
@@ -388,7 +451,11 @@ class TestEvaluateNegotiate:
             "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            result = await c.evaluate_negotiate("neg-eval-2", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            result = await c.evaluate_negotiate(
+                "neg-eval-2",
+                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
+            )
         assert result.decision in ("accept", "counter", "exit")
         assert result.direction == "maximize"
         assert result.our_reference_amount > 0
@@ -403,7 +470,9 @@ class TestEvaluateNegotiate:
             return_value=_bisection_chain(),
         ):
             result = await c.evaluate_negotiate(
-                "neg-eval-floor", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 9000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000}
+                "neg-eval-floor",
+                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 9000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
         # At exactly the floor price, bisection should accept or counter, not exit
         assert result.would_negotiate is True, (
@@ -415,7 +484,11 @@ class TestEvaluateNegotiate:
         """Non-existent listing_id returns 404."""
         c, _ = admin_client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_negotiate("ghost-listing", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            await c.evaluate_negotiate(
+                "ghost-listing",
+                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
+            )
         assert "404" in str(exc_info.value)
 
     async def test_no_negotiation_thread_created(self, admin_client):
@@ -426,17 +499,35 @@ class TestEvaluateNegotiate:
             "domains.vms.negotiation.storefront_round._load_storefront_chain",
             return_value=_bisection_chain(),
         ):
-            await c.evaluate_negotiate("neg-eval-no-thread", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
+            await c.evaluate_negotiate(
+                "neg-eval-no-thread",
+                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                buyer_principal=_TEST_BUYER_SIGNER.identity,
+            )
         threads = await db.get_active_negotiations_for_listing(listing_id="neg-eval-no-thread")
         assert len(threads) == 0, (
             "evaluate-negotiate created a negotiation thread — it must be a pure dry-run"
         )
 
-    async def test_requires_admin_key(self, admin_no_key_client):
-        """Admin key required — missing key returns 403."""
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await admin_no_key_client.evaluate_negotiate("any", proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000})
-        assert "403" in str(exc_info.value)
+    async def test_requires_authentication(self, unsigned_admin_client):
+        response = await unsigned_admin_client.post(
+            "/api/v1/admin/listings/any/evaluate-negotiate",
+            json={
+                "proposal": {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {
+                        "amount": 1000,
+                        "token": "0x" + "a" * 40,
+                    },
+                    "expiration_unix": 2000000000,
+                },
+                "buyer_principal": _TEST_BUYER_SIGNER.identity.model_dump(
+                    mode="json"
+                ),
+            },
+        )
+        assert response.status_code == 401
 
 
 def _bisection_chain():
@@ -450,85 +541,68 @@ def _bisection_chain():
 
 
 # ---------------------------------------------------------------------------
-# Seller auth integration tests for POST /api/v1/listings/create
-#
-# These tests prove the EIP-191 auth contract between the client and the
-# seller_auth middleware for the create_listing endpoint:
-#   - client signs "create_listing:{agent_wallet_address}:{ts}"
-#   - server verifies the same message against settings.wallet.address
-#
-# This is a pure interface test — no policy pipeline needed, so the
-# listing_svc dependency is left as None (the 403 fires before it's called).
+# Seller identity integration tests for listing lifecycle mutations
 # ---------------------------------------------------------------------------
-
-# Hardhat/Anvil deterministic test key pair — safe for tests, never mainnet.
-_TEST_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-_TEST_WALLET     = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # address for above key
 
 
 @pytest_asyncio.fixture
 async def seller_auth_client(db):
-    """Fixture wiring listings router with seller auth enabled.
-
-    Sets settings.wallet.address to _TEST_WALLET so the middleware
-    enforces EIP-191 verification. The StorefrontClient is constructed with
-    _TEST_PRIVATE_KEY so signatures verify correctly.
-    """
-    from tests._settings_overrides import settings_overrides
-
+    """Listing router composed with an explicit Ed25519 seller signer."""
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
     _container.resolved_sqlite_client = db
-    _container.resolved_listing_service = None  # 403 fires before service is called
+    _container.resolved_listing_service = None  # auth rejects before dispatch
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    app.middleware("http")(listing_lifecycle_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
-        async with StorefrontClient(
-            "http://test",
-            transport=transport,
-            admin_key=ADMIN_KEY,
-            private_key=_TEST_PRIVATE_KEY,
-        ) as c:
-            yield c, db
+    async with StorefrontClient(
+        "http://test",
+        signer=_TEST_MARKETPLACE_SIGNER,
+        caller_role="seller",
+        expected_publishers=_TEST_PUBLISHERS,
+        transport=transport,
+    ) as c:
+        yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 @pytest_asyncio.fixture
 async def seller_auth_full_client(db):
-    """seller_auth_client variant with a real ListingService.
-
-    Used by TestCreateListing to exercise the full create round-trip:
-    auth → service → controller → response. Listing CRUD is procedural,
-    so no policy_svc wiring needed.
-    """
+    """Listing lifecycle app with a real signer-aware ListingService."""
     from market_storefront.services.listing_service import ListingService
-    from tests._settings_overrides import settings_overrides
 
-    listing_svc = ListingService(sqlite_client=db, alkahest_clients=None)
+    listing_svc = ListingService(
+        sqlite_client=db,
+        alkahest_clients=None,
+        marketplace_signer=_TEST_MARKETPLACE_SIGNER,
+    )
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
+    _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+    app.middleware("http")(listing_lifecycle_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
-        async with StorefrontClient(
-            "http://test",
-            transport=transport,
-            admin_key=ADMIN_KEY,
-            private_key=_TEST_PRIVATE_KEY,
-        ) as c:
-            yield c, db
+    async with StorefrontClient(
+        "http://test",
+        signer=_TEST_MARKETPLACE_SIGNER,
+        caller_role="seller",
+        expected_publishers=_TEST_PUBLISHERS,
+        transport=transport,
+    ) as c:
+        yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
+    _container.resolved_marketplace_signer = None
 
 
 class TestLegacyInvalidListingRemoval:
@@ -569,7 +643,6 @@ class TestCreateListing:
         """Valid request creates a listing and returns a listing_id."""
         c, db = seller_auth_full_client
         result = await c.create_listing(
-            agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -592,7 +665,6 @@ class TestCreateListing:
         }
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.create_listing(
-                agent_wallet_address=_TEST_WALLET,
                 offer=offer_without_identity,
                 accepted_escrows=_ACCEPTED_ESCROWS,
                 paused=True,
@@ -605,7 +677,6 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         assert "pool_id" not in _OFFER  # confirms this case is what's exercised
         result = await c.create_listing(
-            agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -623,7 +694,6 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -645,7 +715,6 @@ class TestCreateListing:
         """
         c, _ = seller_auth_full_client
         result = await c.create_listing(
-            agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -665,7 +734,6 @@ class TestCreateListing:
         c, _ = seller_auth_full_client
         # If the double-wrap bug is present this raises StorefrontClientError with '500'
         result = await c.create_listing(
-            agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
@@ -675,79 +743,3 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"Unexpected response shape: {result}"
-
-
-
-    """Proves the EIP-191 auth contract for POST /api/v1/listings/create.
-
-    The client signs ``create_listing:{agent_wallet_address}:{ts}`` and the
-    server verifies against settings.wallet.address. These tests confirm
-    that the middleware correctly accepts a valid signature and rejects
-    mismatched ones.
-
-    The tests exercise auth only — the listing_svc is None so the 200 path
-    is not tested here (see TestCreateListing for that).
-    """
-
-    async def test_valid_signature_passes_auth(self, seller_auth_client):
-        """Correct private key + matching wallet address → auth passes.
-
-        The request will fail after auth (listing_svc is None → 500 or
-        similar), but NOT with 403. A 403 means auth rejected the request.
-        """
-        c, _ = seller_auth_client
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.create_listing(
-                agent_wallet_address=_TEST_WALLET,
-                offer={"gpu_model": "H200", "gpu_count": 1,
-                       "sla": 99.0, "region": "California, US"},
-                accepted_escrows=_ACCEPTED_ESCROWS,
-            )
-        # Auth passed — error is from missing listing_svc (500), not auth (403)
-        assert "403" not in str(exc_info.value), (
-            f"Auth rejected a valid signature. Error: {exc_info.value}\n"
-            "Check that seller_auth middleware uses settings.wallet.address "
-            "as resource_id for create_listing (no listing_id path param)."
-        )
-
-    async def test_wrong_wallet_address_returns_403(self, seller_auth_client):
-        """Wrong agent_wallet_address in the call → signature doesn't verify → 403.
-
-        The client signs with _TEST_WALLET but we pass a different wallet as
-        the resource_id, so the signed message doesn't match what the server
-        reconstructs.
-        """
-        c, _ = seller_auth_client
-        wrong_wallet = "0x0000000000000000000000000000000000000001"
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await c.create_listing(
-                agent_wallet_address=wrong_wallet,  # client signs this, server checks _TEST_WALLET
-                offer={"gpu_model": "H200", "gpu_count": 1,
-                       "sla": 99.0, "region": "California, US"},
-                accepted_escrows=_ACCEPTED_ESCROWS,
-            )
-        assert "403" in str(exc_info.value), (
-            f"Expected 403 for wrong wallet address, got: {exc_info.value}"
-        )
-
-    async def test_missing_auth_headers_returns_403(self, seller_auth_client):
-        """Request with no X-Signature / X-Timestamp → 403 Missing auth headers."""
-        from tests._settings_overrides import settings_overrides
-
-        app = FastAPI()
-        app.include_router(listings_router)
-        app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
-
-        transport = httpx.ASGITransport(app=app)
-        with settings_overrides(**{"wallet.address": _TEST_WALLET}):
-            async with httpx.AsyncClient(
-                base_url="http://test", transport=transport
-            ) as raw:
-                resp = await raw.post(
-                    "/api/v1/listings/create",
-                    json={"offer": {}, "accepted_escrows": [], "paused": False},
-                    headers={"X-Admin-Key": ADMIN_KEY},
-                    # No X-Signature or X-Timestamp
-                )
-        assert resp.status_code == 403
-        assert "auth" in resp.json().get("detail", "").lower()

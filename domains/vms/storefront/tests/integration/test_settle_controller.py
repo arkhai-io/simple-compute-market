@@ -20,22 +20,32 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 
 import market_storefront.container as _container
 from market_storefront.controllers.settle_controller import admin_settle_router
-from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.middleware.admin_identity import (
+    administrator_identity_middleware,
+    initialize_administrator_identities,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
-ADMIN_KEY = "test-admin-key"
+_TEST_SELLER_PRINCIPAL = Identity(
+    scheme="eip191",
+    identifier="0x2222222222222222222222222222222222222222",
+)
 
-
-def _key_enforcer(expected_key: str):
-    def _dep(key: str = None):
-        from fastapi import Header, HTTPException
-        # Simplified — accept any non-empty key for tests; real auth tested elsewhere
-        pass
-    return lambda: None
+ADMIN_SIGNER = Ed25519Signer(b"\x51" * 32)
+STOREFRONT_SIGNER = Ed25519Signer(b"\x52" * 32)
+PROVISIONING_SIGNER = Ed25519Signer(b"\x53" * 32)
+ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
+STOREFRONT_AUTHORITIES = TrustedIdentitySet(
+    identities=(STOREFRONT_SIGNER.identity,)
+)
+PROVISIONING_AUTHORITIES = TrustedIdentitySet(
+    identities=(PROVISIONING_SIGNER.identity,)
+)
 
 
 @pytest_asyncio.fixture
@@ -71,29 +81,45 @@ async def _seed_listing(
         }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=_TEST_SELLER_PRINCIPAL,
     )
 
 
 @pytest_asyncio.fixture
-async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
-    """Admin settle controller wired with real SQLiteClient."""
+async def admin_client(
+    db,
+    monkeypatch,
+) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+    """Admin settle controller wired with real v2 identity authentication."""
+    monkeypatch.setattr(
+        "market_storefront.middleware.admin_identity.get_administrator_configs",
+        lambda: {"integration-admin": ADMINISTRATORS},
+    )
+    initialize_administrator_identities(db.db_path)
+    monkeypatch.setattr(
+        "market_storefront.services.capacity_client.get_provisioning_authorities",
+        lambda: PROVISIONING_AUTHORITIES,
+    )
     _container.resolved_sqlite_client = db
+    _container.resolved_marketplace_signer = STOREFRONT_SIGNER
 
     app = FastAPI()
     app.include_router(admin_settle_router)
-    app.dependency_overrides[require_admin_key] = lambda: None
+    app.middleware("http")(administrator_identity_middleware)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
         "http://test",
+        signer=ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=STOREFRONT_AUTHORITIES,
         transport=transport,
-        admin_key=ADMIN_KEY,
-        private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
     ) as c:
         yield c, db
 
     _container.resolved_sqlite_client = None
+    _container.resolved_marketplace_signer = None
 
 
 # ---------------------------------------------------------------------------

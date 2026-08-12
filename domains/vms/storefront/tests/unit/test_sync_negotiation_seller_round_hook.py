@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 from market_core.schemas import EscrowProposal, ProvisionTerms
+from market_identity import Ed25519Signer
 from market_policy.identity import Identity
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.negotiation_thread import get_thread_store
@@ -15,7 +16,10 @@ from market_storefront.utils.sync_negotiation import (
     start_sync_negotiation,
 )
 
-_BUYER = "0xBuyer00000000000000000000000000000000AB"
+_BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
+_SELLER_SIGNER = Ed25519Signer(b"\x42" * 32)
+_BUYER = _BUYER_SIGNER.identity
+_SELLER = _SELLER_SIGNER.identity
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _ESCROW = "0x" + "11" * 20
 
@@ -54,7 +58,8 @@ async def db(tmp_path):
         ],
         fulfillment_resource=None,
         max_duration_seconds=7200,
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER,
     )
     return client
 
@@ -97,7 +102,7 @@ def test_normalize_vm_message_terms_rejects_foreign_terms() -> None:
         payload={"invoice_id": "inv-1"},
     )
 
-    with pytest.raises(ValueError, match="compute.v1"):
+    with pytest.raises(ValueError, match=r"compute\.v1"):
         _normalize_vm_message_terms(terms)
 
 
@@ -137,7 +142,8 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
     response = await start_sync_negotiation(
         sqlite_client=db,
         our_listing_id="L-hook",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
         proposal=_proposal(50),
         provision_terms=ProvisionTerms(
             kind="compute.v1",
@@ -153,14 +159,14 @@ async def test_start_sync_negotiation_uses_injected_seller_round_hook(db):
     )
 
     assert response["action"] == "counter"
-    assert response["proposal"]["fields"]["amount"] == 123
+    assert response["proposal"]["fields"]["amount"] == "123"
     assert seen["history"][0].proposal["fields"]["amount"] == 50
     assert seen["has_policy_inputs"] is False
     assert seen["has_sqlite_client"] is False
 
 
 @pytest.mark.asyncio
-async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkeypatch):
+async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
     from market_core.schemas import (
         RateValue,
         SettlementOption,
@@ -168,11 +174,10 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkey
         derive_settlement_option_id,
     )
 
-    from market_storefront.utils.config import settings
-
     rates = [RateValue(field="amount", value=42)]
     params = {
         "account_ref": "acct-seller",
+        "claimant_principal": _SELLER.model_dump(mode="json"),
         "condition": {"kind": "builtin", "arbiter": "trusted_oracle"},
     }
     option = SettlementOption(
@@ -208,13 +213,8 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkey
         settlement_options=[option.model_dump(mode="json")],
         fulfillment_resource=None,
         max_duration_seconds=7200,
-        seller="http://seller:8001",
-    )
-    monkeypatch.setattr(
-        settings.wallet,
-        "address",
-        "0x" + "33" * 20,
-        raising=False,
+        storefront_url="http://seller:8001",
+        seller_principal=_SELLER,
     )
 
     async def hook(**_kwargs):
@@ -236,7 +236,8 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkey
     response = await start_sync_negotiation(
         sqlite_client=db,
         our_listing_id="L-hosted",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
         proposal={"settlement_selection": selection.model_dump()},
         provision_terms=ProvisionTerms(
             kind="compute.v1",
@@ -256,6 +257,9 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db, monkey
     assert response["settlement_plan"]["obligations"][0]["mechanism"] == (
         "fiat.stripe.v1"
     )
+    obligation = response["settlement_plan"]["obligations"][0]
+    assert obligation["payer_principal"] == _BUYER.model_dump(mode="json")
+    assert obligation["claimant_principal"] == _SELLER.model_dump(mode="json")
     thread = await db.load_negotiation_thread_row(
         negotiation_id=response["negotiation_id"]
     )
@@ -282,7 +286,8 @@ async def test_start_sync_negotiation_rejects_mismatched_resource_shape(db):
         await start_sync_negotiation(
             sqlite_client=db,
             our_listing_id="L-hook",
-            buyer_address=_BUYER,
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
             proposal=_proposal(50),
             provision_terms=ProvisionTerms(
                 kind="compute.v1",
@@ -322,7 +327,8 @@ async def test_start_sync_negotiation_permits_resource_shape_matching_listing(db
     response = await start_sync_negotiation(
         sqlite_client=db,
         our_listing_id="L-hook",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
         proposal=_proposal(50),
         provision_terms=ProvisionTerms(
             kind="compute.v1",
@@ -358,7 +364,8 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
     opened = await start_sync_negotiation(
         sqlite_client=db,
         our_listing_id="L-hook",
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
         proposal=_proposal(50),
         provision_terms=ProvisionTerms(
             kind="compute.v1",
@@ -397,12 +404,13 @@ async def test_continue_sync_negotiation_uses_injected_seller_round_hook(db):
         buyer_action="counter",
         buyer_proposal=_proposal(100).model_dump(),
         buyer_reason=None,
-        buyer_address=_BUYER,
+        buyer_principal=_BUYER,
+        actor_principal=_BUYER,
         seller_round_hook=continue_hook,
     )
 
     assert response["action"] == "accept"
-    assert response["accepted_escrow_proposal"]["fields"]["amount"] == 100
+    assert response["accepted_escrow_proposal"]["fields"]["amount"] == "100"
     assert seen["history"][-1].sender == "them"
     assert seen["history"][-1].proposal["fields"]["amount"] == 100
     assert seen["has_policy_inputs"] is False

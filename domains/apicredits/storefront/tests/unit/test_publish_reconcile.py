@@ -8,15 +8,20 @@ from datetime import datetime
 import httpx
 import pytest
 
+from core_storefront.auth import signed_response_headers
 from market_site_client import SiteCapacityClient
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
+_SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
+_AUTHORITY_SIGNER = Ed25519Signer(bytes.fromhex("33" * 32))
+SELLER_PRINCIPAL = _SELLER_SIGNER.identity
 
 def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
     """A SiteCapacityClient whose snapshot is served from a dict."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/capacity/snapshot":
-            return httpx.Response(200, json={
+            body = {
                 "resources": [
                     {
                         "resource_id": rid,
@@ -26,11 +31,27 @@ def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
                     }
                     for rid, available in available_by_resource.items()
                 ],
-            })
+            }
+            headers = signed_response_headers(
+                signer=_AUTHORITY_SIGNER,
+                role="service",
+                method=request.method,
+                operation="capacity_snapshot",
+                resource="",
+                request_id=request.headers["X-Market-Request-ID"],
+                status=200,
+                body=body,
+            )
+            return httpx.Response(200, json=body, headers=headers)
         return httpx.Response(404, json={})
 
     return SiteCapacityClient(
-        "http://tokens:8082", transport=httpx.MockTransport(handler),
+        "http://tokens:8082",
+        signer=_SELLER_SIGNER,
+        expected_authorities=TrustedIdentitySet(
+            identities=(_AUTHORITY_SIGNER.identity,),
+        ),
+        transport=httpx.MockTransport(handler),
     )
 
 
@@ -60,7 +81,8 @@ async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
         }],
         fulfillment_resource=None,
         max_duration_seconds=None,
-        seller="http://seller:8002",
+        storefront_url="http://seller:8002",
+        seller_principal=SELLER_PRINCIPAL,
     )
 
 
@@ -77,7 +99,7 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
         cc_module, "build_capacity_client", lambda factory: remote,
     )
 
-    svc = ListingService(sqlite_client=db)
+    svc = ListingService(sqlite_client=db, seller_principal=SELLER_PRINCIPAL)
     result = await svc.publish_from_quota(
         resource_id="svc-quota",
         service_name="Acme Inference",
@@ -128,7 +150,7 @@ async def test_publish_from_quota_validates_listing_through_domain_runtime(
         cc_module, "build_capacity_client", lambda factory: remote,
     )
 
-    svc = ListingService(sqlite_client=db)
+    svc = ListingService(sqlite_client=db, seller_principal=SELLER_PRINCIPAL)
     with pytest.raises(ValueError, match="service_name"):
         await svc.publish_from_quota(
             resource_id="svc-quota",

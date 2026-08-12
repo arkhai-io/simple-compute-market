@@ -1,17 +1,22 @@
 import os
+
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
 from src.config import settings
 from src.db.models import Base
-from alembic.config import Config
-from alembic import command
 
-# Create engine based on database type
 if settings.is_sqlite:
     engine = create_engine(
         settings.database_url,
-        connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+        connect_args={
+            "check_same_thread": False
+        }
+        if "sqlite" in settings.database_url
+        else {},
         poolclass=StaticPool if "sqlite" in settings.database_url else None,
     )
 else:
@@ -25,7 +30,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db() -> Session:
-    """Dependency for getting database session"""
+    """Yield one registry-owned database session."""
+
     db = SessionLocal()
     try:
         yield db
@@ -33,49 +39,76 @@ def get_db() -> Session:
         db.close()
 
 
-def _apply_migrations() -> None:
-    """Apply pending Alembic migrations to the current database.
-
-    Three cases are handled:
-
-    1. **Fresh database (no tables):** ``create_all`` has just created the
-       schema from the current SQLAlchemy models.  ``alembic_version`` does
-       not exist, so we *stamp* the database at head — recording that all
-       migrations have logically been applied — rather than replaying the
-       full migration chain against a schema that already matches.
-
-    2. **Legacy database (tables exist, no alembic_version):** The database
-       was created by a previous ``create_all``-only startup path and has
-       never been Alembic-managed.  We stamp it at head on the same logic as
-       case 1: the current models already represent head, so replaying the
-       chain would attempt to re-create tables and columns that are already
-       present.  Future schema additions will run as incremental migrations
-       from this point.
-
-    3. **Alembic-managed database (alembic_version present):** Standard
-       ``upgrade head``.  Only migrations not yet recorded in
-       ``alembic_version`` are applied.  This is the normal upgrade path.
-    """
-    # alembic/ lives two levels above this file (src/db/database.py -> /app/)
+def _alembic_config() -> Config:
     alembic_dir = os.path.normpath(
         os.path.join(os.path.dirname(__file__), "..", "..", "alembic")
     )
-    cfg = Config()
-    cfg.set_main_option("script_location", alembic_dir)
-    # Override the URL so alembic/env.py uses the live settings value
-    # rather than the placeholder in alembic.ini.
-    cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    config = Config()
+    config.set_main_option("script_location", alembic_dir)
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    return config
 
+
+def _legacy_revision(inspector) -> str:
+    """Infer only registry-owned unversioned schemas with unambiguous boundaries."""
+
+    tables = set(inspector.get_table_names())
+    if "agents" in tables and "listings" in tables:
+        columns = {column["name"] for column in inspector.get_columns("agents")}
+        if {"scheme", "identifier"}.issubset(columns):
+            return "013_api_key_scope"
+        if "owner" in columns:
+            return "011_listing_accepted_escrows"
+        raise RuntimeError("unversioned agent registry lacks publisher ownership")
+
+    if {"publishers", "identities", "listings"}.issubset(tables):
+        identity_columns = {
+            column["name"] for column in inspector.get_columns("identities")
+        }
+        if "status" in identity_columns:
+            replay_columns = (
+                {
+                    column["name"]
+                    for column in inspector.get_columns(
+                        "publisher_replay_reservations"
+                    )
+                }
+                if "publisher_replay_reservations" in tables
+                else set()
+            )
+            if {"lease_owner", "lease_expires_at"}.issubset(replay_columns):
+                return "017_publisher_replay_leases"
+            return "016_marketplace_principal_auth"
+        listing_columns = {
+            column["name"] for column in inspector.get_columns("listings")
+        }
+        if "settlement_options" in listing_columns:
+            return "015_listing_settlement_options"
+        return "014_agent_to_publisher"
+
+    raise RuntimeError("unversioned registry schema cannot be migrated safely")
+
+
+def _apply_migrations() -> None:
+    """Create a fresh schema or migrate one explicitly recognized schema boundary."""
+
+    config = _alembic_config()
     inspector = inspect(engine)
-    if "alembic_version" not in inspector.get_table_names():
-        # No version tracking yet: stamp rather than replay.
-        command.stamp(cfg, "head")
-    else:
-        command.upgrade(cfg, "head")
+    tables = set(inspector.get_table_names())
+    if not tables:
+        Base.metadata.create_all(bind=engine)
+        command.stamp(config, "head")
+        return
+    if "alembic_version" in tables:
+        command.upgrade(config, "head")
+        return
+
+    revision = _legacy_revision(inspector)
+    command.stamp(config, revision)
+    command.upgrade(config, "head")
 
 
-def init_db():
-    """Initialize database tables and apply all pending Alembic migrations."""
-    Base.metadata.create_all(bind=engine)
+def init_db() -> None:
+    """Initialize or transactionally migrate the registry-owned schema."""
+
     _apply_migrations()
-

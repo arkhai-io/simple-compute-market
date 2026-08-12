@@ -23,6 +23,11 @@ from market_policy.negotiation_middleware import load_negotiation_chain
 from market_core.schemas import EscrowProposal, SettlementSelection
 from domains.vms.buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
+from identity_helpers import (
+    BUYER_SIGNER,
+    seller_principals,
+    signed_response_headers,
+)
 
 
 # Canonical provision / escrow proposals used by every negotiate test —
@@ -68,6 +73,7 @@ def _seller_proposal(amount: int) -> dict:
 class _MockResponse:
     status: int
     text: str
+    headers: dict[str, str] | None = None
 
     def read(self):
         return self.text.encode("utf-8")
@@ -78,6 +84,13 @@ class _MockResponse:
     def __exit__(self, *_):
         pass
 
+def _signed_mock_response(req, body):
+    return _MockResponse(
+        status=200,
+        text=json.dumps(body),
+        headers=signed_response_headers(req, body),
+    )
+
 
 def _urlopen_fake(responses):
     """Return a urlopen replacement that yields the given responses in order."""
@@ -85,8 +98,11 @@ def _urlopen_fake(responses):
 
     def _fn(req, timeout=None):
         body = next(it)
-        return _MockResponse(status=200, text=json.dumps(body))
-
+        return _MockResponse(
+            status=200,
+            text=json.dumps(body),
+            headers=signed_response_headers(req, body),
+        )
     return _fn
 
 
@@ -105,16 +121,11 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
             },
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 50
     assert outcome.rounds == 0
@@ -132,47 +143,37 @@ def test_round_0_hosted_selection_is_pinned_and_returned(mock_urlopen):
 
     def _capture(req, timeout=None):
         seen_body.update(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(
-            status=200,
-            text=json.dumps(
-                {
-                    "negotiation_id": "neg-hosted",
-                    "action": "accept",
-                    "proposal": {
-                        "settlement_selection": selection.model_dump(),
-                        "fields": {"amount": 50},
-                    },
-                    "settlement_selection": selection.model_dump(),
-                    "settlement_plan": {
-                        "obligations": [
-                            {
-                                "obligation_id": "neg-hosted:hosted-usd",
-                                "payer": "buyer",
-                                "claimant": "seller",
-                                "amount": 50,
-                                "asset": "usd",
-                                "expiration_unix": 1_800_000_000,
-                                "mechanism": "fiat.stripe.v1",
-                                "params": {},
-                            }
-                        ],
-                        "service_terms": {},
-                    },
-                }
-            ),
-        )
+        return _signed_mock_response(req, {
+            "negotiation_id": "neg-hosted",
+            "action": "accept",
+            "proposal": {
+                "settlement_selection": selection.model_dump(),
+                "fields": {"amount": 50},
+            },
+            "settlement_selection": selection.model_dump(),
+            "settlement_plan": {
+                "obligations": [
+                    {
+                        "obligation_id": "neg-hosted:hosted-usd",
+                        "payer": "buyer",
+                        "claimant": "seller",
+                        "amount": 50,
+                        "asset": "usd",
+                        "expiration_unix": 1_800_000_000,
+                        "mechanism": "fiat.stripe.v1",
+                        "params": {},
+                    }
+                ],
+                "service_terms": {},
+            },
+        })
 
     mock_urlopen.side_effect = _capture
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        settlement_selection=selection,
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    settlement_selection=selection,)
 
     assert seen_body["proposal"]["settlement_selection"] == selection.model_dump()
     assert outcome.settlement_selection == selection
@@ -186,36 +187,26 @@ def test_round_0_request_preserves_literal_fields(mock_urlopen):
 
     def _capture(req, timeout=None):
         seen_body.update(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(
-            status=200,
-            text=json.dumps(
-                {
-                    "negotiation_id": "neg-1",
-                    "action": "accept",
-                    "proposal": _seller_proposal(50),
-                }
-            ),
-        )
+        return _signed_mock_response(req, {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": _seller_proposal(50),
+        })
 
     mock_urlopen.side_effect = _capture
     token = "0x" + "ef" * 20
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=EscrowProposal(
-            chain_name="anvil",
-            escrow_address="0x" + "cd" * 20,
-            fields={},
-            literal_fields={"token": token},
-            rates=[{"field": "amount", "per": "hour", "value": "50"}],
-            expiration_unix=1_800_000_000,
-        ),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "cd" * 20,
+        fields={},
+        literal_fields={"token": token},
+        rates=[{"field": "amount", "per": "hour", "value": "50"}],
+        expiration_unix=1_800_000_000,
+    ),)
 
     proposal = seen_body["proposal"]
     assert proposal["fields"] == {"amount": 50}
@@ -236,43 +227,33 @@ def test_round_0_request_omits_amount_for_amountless_escrow(mock_urlopen):
 
     def _capture(req, timeout=None):
         seen_body.update(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(
-            status=200,
-            text=json.dumps(
-                {
-                    "negotiation_id": "neg-1",
-                    "action": "accept",
-                    "proposal": {
-                        "chain_name": "anvil",
-                        "escrow_address": "0x" + "cd" * 20,
-                        "fields": {},
-                        "literal_fields": {"attestationUid": "0x" + "aa" * 32},
-                        "rates": [],
-                        "expiration_unix": 1_800_000_000,
-                    },
-                }
-            ),
-        )
+        return _signed_mock_response(req, {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "cd" * 20,
+                "fields": {},
+                "literal_fields": {"attestationUid": "0x" + "aa" * 32},
+                "rates": [],
+                "expiration_unix": 1_800_000_000,
+            },
+        })
 
     mock_urlopen.side_effect = _capture
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=0,
-        max_price=0,
-        provision_terms=_provision(3600),
-        escrow_proposal=EscrowProposal(
-            chain_name="anvil",
-            escrow_address="0x" + "cd" * 20,
-            fields={},
-            literal_fields={"attestationUid": "0x" + "aa" * 32},
-            rates=[],
-            expiration_unix=1_800_000_000,
-        ),
-        chain=load_negotiation_chain(["accept_exact_listing"]),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=0,
+    max_price=0,
+    provision_terms=_provision(3600),
+    escrow_proposal=EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "cd" * 20,
+        fields={},
+        literal_fields={"attestationUid": "0x" + "aa" * 32},
+        rates=[],
+        expiration_unix=1_800_000_000,
+    ),
+    chain=load_negotiation_chain(["accept_exact_listing"]),)
 
     proposal = seen_body["proposal"]
     assert proposal["fields"] == {}
@@ -285,36 +266,26 @@ def test_round_0_request_preserves_rates(mock_urlopen):
 
     def _capture(req, timeout=None):
         seen_body.update(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(
-            status=200,
-            text=json.dumps(
-                {
-                    "negotiation_id": "neg-1",
-                    "action": "accept",
-                    "proposal": _seller_proposal(50),
-                }
-            ),
-        )
+        return _signed_mock_response(req, {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": _seller_proposal(50),
+        })
 
     mock_urlopen.side_effect = _capture
     rates = [{"field": "amount", "per": "hour", "value": "50"}]
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=EscrowProposal(
-            chain_name="anvil",
-            escrow_address="0x" + "cd" * 20,
-            fields={"token": "0x" + "ab" * 20},
-            literal_fields={"token": "0x" + "ab" * 20},
-            rates=rates,
-            expiration_unix=1_800_000_000,
-        ),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "cd" * 20,
+        fields={"token": "0x" + "ab" * 20},
+        literal_fields={"token": "0x" + "ab" * 20},
+        rates=rates,
+        expiration_unix=1_800_000_000,
+    ),)
 
     assert seen_body["proposal"]["rates"] == rates
 
@@ -330,16 +301,11 @@ def test_round_0_seller_exits(mock_urlopen):
             },
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=10,
-        max_price=20,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=10,
+    max_price=20,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "exited"
     assert outcome.reason == "price_unreasonable"
 
@@ -359,16 +325,11 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
             {"action": "accept", "proposal": _seller_proposal(90)},
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 90
     assert outcome.rounds == 1
@@ -390,16 +351,11 @@ def test_default_listed_price_buyer_exits_above_bound(mock_urlopen):
             {"action": "exit", "reason": "buyer_exit"},
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "exited"
     assert outcome.reason == "price_above_bound"
 
@@ -417,16 +373,11 @@ def test_default_listed_price_accepts_counter_within_bound(mock_urlopen):
             {"action": "accept", "proposal": _seller_proposal(90)},
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 90
 
@@ -446,17 +397,12 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
             {"action": "exit", "reason": "price_unreasonable"},
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-        chain=load_negotiation_chain(["buyer_escrow_shape_guard", "bisection"]),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),
+    chain=load_negotiation_chain(["buyer_escrow_shape_guard", "bisection"]),)
     assert outcome.status == "exited"
     assert outcome.reason == "price_unreasonable"
     assert outcome.rounds == 1
@@ -476,16 +422,11 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
             {"action": "exit", "reason": "buyer_exit"},
         ]
     )
-    outcome = negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     assert outcome.status == "exited"
     # Exit was buyer-initiated (seller priced above the buyer's bound).
     assert outcome.reason == "price_above_bound"
@@ -497,35 +438,32 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
 
     def _capture(req, timeout=None):
         seen_headers.append(dict(req.header_items()))
-        return _MockResponse(
-            status=200,
-            text=json.dumps(
-                {
-                    "negotiation_id": "neg-1",
-                    "action": "accept",
-                    "proposal": _seller_proposal(50),
-                }
-            ),
-        )
+        return _signed_mock_response(req, {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "proposal": _seller_proposal(50),
+        })
 
     mock_urlopen.side_effect = _capture
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),)
     # One round, one request.
     assert len(seen_headers) == 1
     hdrs = seen_headers[0]
     # urllib capitalizes — normalize.
     hdrs_lower = {k.lower(): v for k, v in hdrs.items()}
-    assert hdrs_lower.get("x-signature", "").startswith("0x")
-    assert hdrs_lower.get("x-timestamp", "").isdigit()
+    assert hdrs_lower["x-market-signature-version"] == (
+        "arkhai.market-request-signature.v2"
+    )
+    assert hdrs_lower["x-market-identity-scheme"] == "ed25519"
+    assert hdrs_lower["x-market-identity-identifier"] == (
+        BUYER_SIGNER.identity.identifier
+    )
+    assert hdrs_lower["x-market-signature"]
+    assert hdrs_lower["x-market-timestamp"].isdigit()
 
 
 @patch("core_buyer.negotiation_client.urllib.request.urlopen")
@@ -541,17 +479,12 @@ def test_on_round_hook_receives_each_round(mock_urlopen):
         ]
     )
     seen = []
-    negotiate_with_seller(
-        seller_url="http://seller:8001",
-        buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,
-        listing_id="seller-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-        on_round=lambda i, msg, reply: seen.append((i, msg, reply)),
-    )
+    negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="seller-1",
+    initial_price=50,
+    max_price=100,
+    provision_terms=_provision(3600),
+    escrow_proposal=_escrow_proposal(),
+    on_round=lambda i, msg, reply: seen.append((i, msg, reply)),)
     assert len(seen) == 2
     assert seen[0][0] == 0  # round index
     assert seen[1][0] == 1

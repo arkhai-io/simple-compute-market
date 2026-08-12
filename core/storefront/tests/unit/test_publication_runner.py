@@ -25,7 +25,7 @@ def _source(
     return PublicationSource(
         name="test",
         open_keys=lambda _db: open_keys or set(),
-        close_stale=lambda _db, _url, _key: ["stale-1"],
+        close_stale=lambda _db, _url: ["stale-1"],
         available_candidates=lambda _db: [candidate],
         skip_keys=lambda c: {str(c["resource_id"])},
         offer_resource=lambda c: {"resource_id": c["resource_id"]},
@@ -40,29 +40,22 @@ def test_lifecycle_helpers_union_sources() -> None:
     second = _source(open_keys={"b"})
 
     assert open_publication_keys([first, second], "db.sqlite") == {"a", "b"}
-    assert close_stale_publication_listings(
-        [first],
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-    ) == {"test": ["stale-1"]}
+    assert close_stale_publication_listings([first],
+    db_path="db.sqlite",
+    base_url="http://seller", ) == {"test": ["stale-1"]}
 
 
 def test_publish_round_is_schema_opaque() -> None:
     candidate = {"resource_id": "r1", "price": "1"}
     source = _source(candidate=candidate)
 
-    published, failed, skipped = publish_round(
-        [source],
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda _source, _candidate, _offer: ([{"escrow": "e"}], [{"demand": "d"}], 60),
-        publish_offer=lambda offer, _escrows, _demands, _duration: {
-            "status": "published",
-            "listing_id": f"listing-{offer['resource_id']}",
-        },
-    )
+    published, failed, skipped = publish_round([source],
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda _source, _candidate, _offer: ([{"escrow": "e"}], [{"demand": "d"}], 60),
+    publish_offer=lambda offer, _escrows, _demands, _duration: {
+        "status": "published",
+        "listing_id": f"listing-{offer['resource_id']}",
+    },)
 
     assert failed == []
     assert skipped == []
@@ -71,15 +64,11 @@ def test_publish_round_is_schema_opaque() -> None:
 
 
 def test_publish_round_skips_covered_candidate() -> None:
-    published, failed, skipped = publish_round(
-        [_source()],
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda *_args: {"status": "published"},
-        skip_ids={"r1"},
-    )
+    published, failed, skipped = publish_round([_source()],
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda *_args: {"status": "published"},
+    skip_ids={"r1"},)
 
     assert published == []
     assert failed == []
@@ -89,14 +78,10 @@ def test_publish_round_skips_covered_candidate() -> None:
 def test_run_publication_cycle_closes_stale_and_skips_open_keys() -> None:
     source = _source(open_keys={"r1"})
 
-    result = run_publication_cycle(
-        [source],
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda *_args: {"status": "published"},
-    )
+    result = run_publication_cycle([source],
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda *_args: {"status": "published"},)
 
     assert result.closed == {"test": ["stale-1"]}
     assert result.published == []
@@ -113,18 +98,14 @@ def test_run_publication_cycle_by_name_builds_selected_sources(monkeypatch) -> N
         lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
     )
 
-    result = run_publication_cycle_by_name(
-        ["vms"],
-        source_kwargs_by_name={"vms": {"price": "2"}},
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
-            "status": "published",
-            "listing_id": offer["resource_id"],
-        },
-    )
+    result = run_publication_cycle_by_name(["vms"],
+    source_kwargs_by_name={"vms": {"price": "2"}},
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda offer, *_args: {
+        "status": "published",
+        "listing_id": offer["resource_id"],
+    },)
 
     assert result.failed == []
     assert result.skipped == []
@@ -151,16 +132,12 @@ def test_publication_source_selection_wraps_command_cycle(monkeypatch) -> None:
     assert [source.name for source in selection.build_sources()] == ["test"]
     assert selection.open_keys("db.sqlite") == {"already-open"}
 
-    result = selection.run_cycle(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
-            "status": "published",
-            "listing_id": offer["resource_id"],
-        },
-    )
+    result = selection.run_cycle(db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda offer, *_args: {
+        "status": "published",
+        "listing_id": offer["resource_id"],
+    },)
 
     assert result.closed == {"test": ["stale-1"]}
     assert result.failed == []
@@ -189,18 +166,14 @@ def test_build_publication_source_selection_composes_named_sources(monkeypatch) 
                 "bare_metal": {"price": "bm-price"},
             },
         )
-        result = selection.run_command(
-            db_path="db.sqlite",
-            base_url="http://seller",
-            private_key=None,
-            build_payload=lambda *_args: ([{}], [], None),
-            publish_offer=lambda offer, *_args: {
-                "status": "published",
-                "listing_id": offer["resource_id"],
-            },
-            close_stale=False,
-            skip_open=False,
-        )
+        result = selection.run_command(db_path="db.sqlite",
+        base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+        publish_offer=lambda offer, *_args: {
+            "status": "published",
+            "listing_id": offer["resource_id"],
+        },
+        close_stale=False,
+        skip_open=False,)
         return [item["response"]["listing_id"] for item in result.published]
 
     assert run(("vms",)) == ["vms"]
@@ -217,18 +190,14 @@ def test_publication_command_result_exposes_summary_counts(monkeypatch) -> None:
         lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
     )
 
-    result = run_publication_command_by_name(
-        ["vms"],
-        source_kwargs_by_name={"vms": {"price": "4"}},
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
-            "status": "published",
-            "listing_id": offer["resource_id"],
-        },
-    )
+    result = run_publication_command_by_name(["vms"],
+    source_kwargs_by_name={"vms": {"price": "4"}},
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda offer, *_args: {
+        "status": "published",
+        "listing_id": offer["resource_id"],
+    },)
 
     assert result.published_count == 1
     assert result.failed_count == 0
@@ -242,13 +211,9 @@ def test_publication_command_result_exposes_summary_counts(monkeypatch) -> None:
 
 def test_publication_command_no_new_when_only_skipped() -> None:
     selection = PublicationSourceSelection(source_names=())
-    command = selection.command(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda *_args: {"status": "published"},
-    )
+    command = selection.command(db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda *_args: {"status": "published"},)
 
     result = command.run()
 
@@ -267,18 +232,14 @@ def test_publish_source_by_name_loads_source(monkeypatch) -> None:
         lambda name, **kwargs: _source(candidate={"resource_id": name, **kwargs}),
     )
 
-    published, failed, skipped = publish_source_by_name(
-        "loaded",
-        source_kwargs={"price": "2"},
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        build_payload=lambda *_args: ([{}], [], None),
-        publish_offer=lambda offer, *_args: {
-            "status": "published",
-            "listing_id": offer["resource_id"],
-        },
-    )
+    published, failed, skipped = publish_source_by_name("loaded",
+    source_kwargs={"price": "2"},
+    db_path="db.sqlite",
+    base_url="http://seller", build_payload=lambda *_args: ([{}], [], None),
+    publish_offer=lambda offer, *_args: {
+        "status": "published",
+        "listing_id": offer["resource_id"],
+    },)
 
     assert failed == []
     assert skipped == []

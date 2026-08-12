@@ -29,11 +29,8 @@ def _source(candidate: dict[str, Any] | None = None) -> PublicationSource:
 
 def test_build_storefront_publication_command_wraps_selection() -> None:
     selection = PublicationSourceSelection(source_names=())
-    config = StorefrontPublicationCommandConfig(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-    )
+    config = StorefrontPublicationCommandConfig(db_path="db.sqlite",
+    base_url="http://seller", )
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
         publish_offer=lambda *_args: {"status": "published"},
@@ -62,13 +59,9 @@ def test_run_storefront_publication_command_uses_config_flags(monkeypatch) -> No
         source_names=("vms",),
         source_kwargs_by_name={"vms": {"price": "2"}},
     )
-    config = StorefrontPublicationCommandConfig(
-        db_path="db.sqlite",
-        base_url="http://seller",
-        private_key=None,
-        close_stale=False,
-        skip_open=False,
-    )
+    config = StorefrontPublicationCommandConfig(db_path="db.sqlite",
+    base_url="http://seller", close_stale=False,
+    skip_open=False,)
     callbacks = StorefrontPublicationCommandCallbacks(
         build_payload=lambda *_args: ([{}], [], None),
         publish_offer=lambda offer, *_args: {
@@ -104,13 +97,9 @@ def test_run_storefront_publication_command_honors_skip_ids(monkeypatch) -> None
     )
     result = run_storefront_publication_command(
         PublicationSourceSelection(source_names=("vms",)),
-        config=StorefrontPublicationCommandConfig(
-            db_path="db.sqlite",
-            base_url="http://seller",
-            private_key=None,
-            close_stale=False,
-            skip_open=False,
-        ),
+        config=StorefrontPublicationCommandConfig(db_path="db.sqlite",
+        base_url="http://seller", close_stale=False,
+        skip_open=False,),
         callbacks=StorefrontPublicationCommandCallbacks(
             build_payload=lambda *_args: ([{}], [], None),
             publish_offer=lambda *_args: {"status": "published"},

@@ -38,17 +38,30 @@ class VmOperationsService:
         host: str,
         body: CreateVmRequest,
         contract: ExecutorActionEnvelope | None = None,
+        operation_id: str | None = None,
     ) -> JobSubmitResponse:
         """Submit a VM creation job for ``host``."""
         return await self._job_service.submit(
             build_create_params(host, body),
             self._job_queue_provider(),
             contract=contract,
+            operation_id=operation_id,
         )
 
-    async def list_vms(self, *, host: str, body: VmActionRequest) -> JobSubmitResponse:
+    async def list_vms(
+        self,
+        *,
+        host: str,
+        body: VmActionRequest,
+        operation_id: str | None = None,
+    ) -> JobSubmitResponse:
         """Submit a host-scoped VM list job."""
-        return await self._submit_simple(action="list", host=host, body=body)
+        return await self._submit_simple(
+            action="list",
+            host=host,
+            body=body,
+            operation_id=operation_id,
+        )
 
     async def submit_action(
         self,
@@ -57,6 +70,7 @@ class VmOperationsService:
         host: str,
         body: VmActionRequest,
         vm_name: Optional[str] = None,
+        operation_id: str | None = None,
     ) -> JobSubmitResponse:
         """Submit a single-VM lifecycle/diagnostic action job."""
         return await self._submit_simple(
@@ -64,6 +78,7 @@ class VmOperationsService:
             host=host,
             body=body,
             vm_name=vm_name,
+            operation_id=operation_id,
         )
 
     async def _submit_simple(
@@ -73,6 +88,11 @@ class VmOperationsService:
         host: str,
         body: VmActionRequest,
         vm_name: Optional[str] = None,
+        operation_id: str | None = None,
     ) -> JobSubmitResponse:
         params = build_simple_params(action, host, body, vm_name)
-        return await self._job_service.submit(params, self._job_queue_provider())
+        return await self._job_service.submit(
+            params,
+            self._job_queue_provider(),
+            operation_id=operation_id,
+        )

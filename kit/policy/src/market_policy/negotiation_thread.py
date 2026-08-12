@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from market_policy.ports.persistence import NegotiationThreadPersistencePort
 from market_policy.identity import Identity
+from market_identity import Identity as MarketIdentity
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,8 @@ class NegotiationMessage:
     """A single message in a negotiation thread."""
 
     round: int
-    sender: str
+    sender_principal: MarketIdentity
+    sender_role: str
     our_price: int | str | float | None
     their_price: int | str | float | None
     proposed_price: int | str | float | None
@@ -198,6 +201,8 @@ class NegotiationThreadTransaction:
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        buyer_principal: MarketIdentity,
+        seller_principal: MarketIdentity,
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
@@ -213,6 +218,8 @@ class NegotiationThreadTransaction:
             their_listing_id: Their order ID
             our_agent_id: Our agent ID
             their_agent_id: Their agent ID
+            buyer_principal: Exact buyer marketplace principal
+            seller_principal: Exact seller marketplace principal
             our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
             our_strategy: Our strategy ('minimize' or 'maximize')
             requested_duration_seconds: Buyer's lease ask, recorded on thread creation.
@@ -239,6 +246,8 @@ class NegotiationThreadTransaction:
                 their_listing_id=their_listing_id,
                 our_agent_id=our_agent_id,
                 their_agent_id=their_agent_id,
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
                 owner_id=owner_id,
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
@@ -252,7 +261,8 @@ class NegotiationThreadTransaction:
     async def add_message(
         self,
         negotiation_id: str,
-        sender: str,
+        sender_principal: MarketIdentity,
+        sender_role: str,
         our_price: int | str | float | None = None,
         their_price: int | str | float | None = None,
         proposed_price: int | str | float | None = None,
@@ -263,7 +273,8 @@ class NegotiationThreadTransaction:
 
         Args:
             negotiation_id: The negotiation thread ID
-            sender: Agent ID of sender
+            sender_principal: Exact authenticated message author
+            sender_role: Explicit authorized author role
             our_price: Our price in this message
             their_price: Their price in this message
             proposed_price: Proposed counter price
@@ -276,7 +287,8 @@ class NegotiationThreadTransaction:
 
         await self.thread_store.add_message(
             negotiation_id=negotiation_id,
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role=sender_role,
             our_price=our_price,
             their_price=their_price,
             proposed_price=proposed_price,
@@ -318,6 +330,8 @@ class NegotiationThreadStore:
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        buyer_principal: MarketIdentity,
+        seller_principal: MarketIdentity,
         owner_id: str,
         our_initial_price: int | str | float | None = None,
         our_strategy: str | None = None,
@@ -334,6 +348,8 @@ class NegotiationThreadStore:
             their_listing_id: Their order ID
             our_agent_id: Our agent ID
             their_agent_id: Their agent ID
+            buyer_principal: Exact buyer marketplace principal
+            seller_principal: Exact seller marketplace principal
             owner_id: ID of the agent owning this private state
             our_initial_price: Private initial price
             our_strategy: Private strategy
@@ -348,6 +364,8 @@ class NegotiationThreadStore:
             their_listing_id=their_listing_id,
             our_agent_id=our_agent_id,
             their_agent_id=their_agent_id,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
             owner_id=owner_id,
             our_initial_price=our_initial_price,
             our_strategy=our_strategy,
@@ -395,7 +413,8 @@ class NegotiationThreadStore:
     async def add_message(
         self,
         negotiation_id: str,
-        sender: str,
+        sender_principal: MarketIdentity,
+        sender_role: str,
         our_price: int | str | float | None,
         their_price: int | str | float | None,
         proposed_price: int | str | float | None,
@@ -406,7 +425,8 @@ class NegotiationThreadStore:
 
         Args:
             negotiation_id: Unique negotiation identifier
-            sender: Agent ID or card URL of the sender
+            sender_principal: Exact authenticated message author
+            sender_role: Explicit authorized author role
             our_price: Our price in base units
             their_price: Their price in base units
             proposed_price: Proposed counter price (if action is COUNTER_OFFER)
@@ -422,7 +442,8 @@ class NegotiationThreadStore:
         round_num = await self._sqlite.save_negotiation_message(
             negotiation_id=negotiation_id,
             round=None,  # Computed atomically in SQLite
-            sender=sender,
+            sender_principal=sender_principal,
+            sender_role=sender_role,
             our_price=our_price,
             their_price=their_price,
             proposed_price=proposed_price,

@@ -20,6 +20,16 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import json
+import time
+
+from market_identity import (
+    Ed25519Signer,
+    ResponseEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_response,
+)
 import pytest
 
 from compute_provisioning.client import ComputeProvisioningClient
@@ -33,6 +43,43 @@ from compute_provisioning.contracts import (
 _CAPACITY_RESERVATION_ID = "resv-mock-001"
 _SETTLEMENT_RESOURCE_ID = "settlement-resource-mock-001"
 _FULFILLMENT_ID = "fulfillment-mock-001"
+_CALLER = Ed25519Signer(b"\x11" * 32)
+_AUTHORITY = Ed25519Signer(b"\x12" * 32)
+
+
+def _signed_response(
+    request: httpx.Request,
+    payload: dict[str, Any],
+    operation: str,
+) -> httpx.Response:
+    request_body = json.loads(request.content)
+    authenticated = sign_response(
+        signer=_AUTHORITY,
+        envelope=ResponseEnvelope(
+            role="service",
+            principal=_AUTHORITY.identity,
+            method=request.method,
+            operation=operation,
+            resource=request_body["capacity_reservation_id"],
+            request_id=request.headers["X-Market-Request-ID"],
+            timestamp=int(time.time()),
+            status=200,
+            body_hash=canonical_body_hash(payload),
+        ),
+    )
+    return httpx.Response(
+        200,
+        json=payload,
+        headers={
+            "X-Market-Signature-Version": authenticated.protocol,
+            "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
+            "X-Market-Identity-Identifier": authenticated.principal.identifier,
+            "X-Market-Role": authenticated.role,
+            "X-Market-Request-ID": authenticated.request_id,
+            "X-Market-Timestamp": str(authenticated.timestamp),
+            "X-Market-Signature": authenticated.proof.value,
+        },
+    )
 
 
 class _RecordingHandler:
@@ -58,7 +105,11 @@ class _RecordingHandler:
                 resource_kind="compute.gpu",
                 provider="ansible",
             )
-            return httpx.Response(200, json=response.model_dump(mode="json"))
+            return _signed_response(
+                request,
+                response.model_dump(mode="json"),
+                "provisioning_fulfillment_schedule",
+            )
 
         if path == "/api/v1/fulfillment/begin" and request.method == "POST":
             response = FulfillmentAcceptanceResponse(
@@ -66,7 +117,11 @@ class _RecordingHandler:
                 capacity_reservation_id=_CAPACITY_RESERVATION_ID,
                 state="dispatching",
             )
-            return httpx.Response(200, json=response.model_dump(mode="json"))
+            return _signed_response(
+                request,
+                response.model_dump(mode="json"),
+                "provisioning_fulfillment_begin",
+            )
 
         return httpx.Response(404, json={"detail": f"unhandled mock path {path!r}"})
 
@@ -93,7 +148,15 @@ async def test_schedule_begin_send_no_placement_fields() -> None:
     handler = _RecordingHandler()
     transport = httpx.MockTransport(handler)
 
-    provisioning = ComputeProvisioningClient("http://provisioning.test", transport=transport)
+    provisioning = ComputeProvisioningClient(
+        "http://provisioning.test",
+        signer=_CALLER,
+        caller_role="seller",
+        expected_authorities=TrustedIdentitySet(
+            identities=(_AUTHORITY.identity,)
+        ),
+        transport=transport,
+    )
     scheduled = await provisioning.schedule_resource(
         FulfillmentScheduleRequest(
             capacity_reservation_id=_CAPACITY_RESERVATION_ID,

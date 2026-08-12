@@ -1,5 +1,5 @@
 from arkhai_vms import make_vm_provision_terms
-from core_buyer.escrow_selection import select_escrow_entry
+from domains.vms.buyer.escrow_selection import select_escrow_entry
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 
 

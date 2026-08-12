@@ -13,6 +13,7 @@ init: ## Install dependencies using uv
 
 reinit: ## Force-reinstall all internal wheel dependencies. Run make dist-* from the monorepo root first.
 	uv sync --dev --find-links $(DIST_DIR) \
+		--reinstall-package arkhai-apicredits-storefront \
 		--upgrade-package arkhai-core                 --reinstall-package arkhai-core \
 		--upgrade-package arkhai-apicredits-domain    --reinstall-package arkhai-apicredits-domain \
 		--upgrade-package arkhai-core-storefront      --reinstall-package arkhai-core-storefront \

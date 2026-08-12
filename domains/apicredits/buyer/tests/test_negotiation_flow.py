@@ -15,17 +15,25 @@ from unittest.mock import patch
 
 from market_policy.negotiation_middleware import load_negotiation_chain
 
-from core_buyer.negotiation_client import negotiate_with_seller
+from domains.apicredits.buyer.buyer_client import negotiate_with_seller
 from domains.apicredits.negotiation import make_api_credits_provision_terms
 from domains.apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
     APICREDITS_BUYER_GUARDS,
     answer_key_challenge,
 )
 from market_alkahest.schemas import EscrowProposal
+from market_identity import (
+    Eip191Signer,
+    ResponseEnvelope,
+    TrustedIdentitySet,
+    canonical_body_hash,
+    sign_response,
+)
 
 
-_BUYER_PK = "0x" + "11" * 32
-_BUYER_ADDR = "0x" + "cc" * 20
+_BUYER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
+_BUYER_ADDR = _BUYER_SIGNER.identity.identifier
+_SELLER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 _TOKEN = "0x" + "ab" * 20
 _ESCROW = "0x" + "cd" * 20
 
@@ -33,7 +41,7 @@ _ESCROW = "0x" + "cd" * 20
 def _chain():
     """The credits CLI's deterministic default chain (listed_price terminal).
 
-    Built explicitly instead of through ``_load_buyer_chain`` so the
+    Built explicitly instead of through ``load_buyer_chain`` so the
     test never reads the developer's buyer.toml.
     """
     return load_negotiation_chain([*APICREDITS_BUYER_GUARDS, "listed_price"])
@@ -62,6 +70,7 @@ def _seller_proposal(amount: int, **extra) -> dict:
 class _MockResponse:
     status: int
     text: str
+    headers: dict[str, str]
 
     def read(self):
         return self.text.encode("utf-8")
@@ -73,13 +82,62 @@ class _MockResponse:
         pass
 
 
+
+def _request_header(req, name: str) -> str:
+    lowered = name.lower()
+    return next(
+        value
+        for key, value in req.header_items()
+        if key.lower() == lowered
+    )
+
 def _urlopen_fake(responses, captured=None):
     it = iter(responses)
 
     def _fn(req, timeout=None):
+        request_body = json.loads(req.data.decode("utf-8")) if req.data else {}
         if captured is not None and req.data:
-            captured.append(json.loads(req.data.decode("utf-8")))
-        return _MockResponse(status=200, text=json.dumps(next(it)))
+            captured.append(request_body)
+        payload = dict(next(it))
+        payload.setdefault(
+            "buyer_principal",
+            _BUYER_SIGNER.identity.model_dump(mode="json"),
+        )
+        payload.setdefault(
+            "seller_principal",
+            _SELLER_SIGNER.identity.model_dump(mode="json"),
+        )
+        is_opening = req.full_url.endswith("/api/v1/negotiate/new")
+        operation = "negotiate_new" if is_opening else "negotiate_continue"
+        resource = (
+            request_body["listing_id"]
+            if is_opening
+            else req.full_url.rsplit("/", 1)[-1]
+        )
+        signed = sign_response(
+            signer=_SELLER_SIGNER,
+            envelope=ResponseEnvelope(
+                role="seller",
+                principal=_SELLER_SIGNER.identity,
+                method=req.get_method(),
+                operation=operation,
+                resource=resource,
+                request_id=_request_header(req, "X-Market-Request-ID"),
+                timestamp=int(_request_header(req, "X-Market-Timestamp")),
+                status=200,
+                body_hash=canonical_body_hash(payload),
+            ),
+        )
+        headers = {
+            "X-Market-Signature-Version": signed.protocol,
+            "X-Market-Identity-Scheme": signed.principal.scheme.value,
+            "X-Market-Identity-Identifier": signed.principal.identifier,
+            "X-Market-Role": signed.role,
+            "X-Market-Request-ID": signed.request_id,
+            "X-Market-Timestamp": str(signed.timestamp),
+            "X-Market-Signature": signed.proof.value,
+        }
+        return _MockResponse(status=200, text=json.dumps(payload), headers=headers)
 
     return _fn
 
@@ -90,8 +148,8 @@ def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
         mock_urlopen.side_effect = _urlopen_fake(responses, captured)
         return negotiate_with_seller(
             seller_url="http://seller:8002",
-            buyer_address=_BUYER_ADDR,
-            buyer_private_key=_BUYER_PK,
+            principal=_BUYER_SIGNER.identity,
+            signer=_BUYER_SIGNER,
             listing_id="lst-credits-1",
             initial_price=initial,
             max_price=ceiling,
@@ -102,6 +160,9 @@ def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
             escrow_proposal=_escrow_proposal(),
             max_rounds=max_rounds,
             chain=_chain(),
+            resolve_seller_principals=lambda: TrustedIdentitySet(
+                identities=(_SELLER_SIGNER.identity,),
+            ),
         )
 
 

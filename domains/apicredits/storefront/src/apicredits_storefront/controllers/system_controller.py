@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.middleware.admin_auth import require_admin_key
+from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.server import is_globally_paused
 from core_storefront.models.system_models import (
     HealthResponse,
@@ -59,7 +59,7 @@ class SystemController:
     @router.get(
         "/api/v1/system/events",
         summary="Stage event log",
-        dependencies=[Depends(require_admin_key)],
+        dependencies=[Depends(require_admin_principal)],
     )
     async def stream_events(
         self,

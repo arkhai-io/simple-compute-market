@@ -13,6 +13,7 @@ import json
 import sqlite3
 
 import pytest
+from market_identity import Identity
 
 from domains.vms.listings.pricing_resolution import GpuPricingFields
 from domains.vms.listings.reconciler import (
@@ -798,7 +799,11 @@ class TestReopenLocalDerivedListing:
             accepted_escrows=[],
             demands=[],
             max_duration_seconds=3600,
-            seller="seller-1",
+            storefront_url="http://seller.test",
+            seller_principal=Identity(
+                scheme="eip191",
+                identifier="0x2222222222222222222222222222222222222222",
+            ),
             resource_id=None,
             pool_id="gpu-pool",
         )

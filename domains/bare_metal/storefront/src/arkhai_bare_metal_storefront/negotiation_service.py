@@ -20,6 +20,7 @@ from market_core.schemas import (
     compute_rate_total,
 )
 from market_policy.negotiation_middleware import NegotiationRound
+from market_identity import Identity
 
 from .negotiation import BareMetalSellerRoundHook
 from .sqlite_client import SQLiteClient
@@ -87,7 +88,7 @@ def _seller_reference_amount(
 class BareMetalNegotiationService:
     db: SQLiteClient
     domain: MarketDomainContract
-    seller_id: str
+    seller_principal: Identity
     round_hook: BareMetalSellerRoundHook
     build_plan: PlanBuilder
 
@@ -95,7 +96,7 @@ class BareMetalNegotiationService:
         self,
         *,
         request: NegotiateNewRequest,
-        buyer_identity: str,
+        buyer_principal: Identity,
     ) -> NegotiateNewResponse:
         if await self.db.is_global_paused():
             raise NegotiationRequestError("storefront paused", status_code=503)
@@ -174,15 +175,17 @@ class BareMetalNegotiationService:
                 agreed_amount=agreed_amount or 0,
                 duration_seconds=terms.duration_seconds,
                 uses_scalar_amount=bool(intermediate.get("uses_scalar_amount", True)),
+                buyer_principal=buyer_principal,
+                seller_principal=self.seller_principal,
             )
 
         negotiation_id = f"neg_{uuid.uuid4().hex}"
         await self.db.persist_bare_metal_opening(
             negotiation_id=negotiation_id,
             listing_id=request.listing_id,
-            seller_id=self.seller_id,
-            buyer_agent_id=request.buyer_agent_url or buyer_identity,
-            buyer_identity=buyer_identity,
+            seller_principal=self.seller_principal,
+            buyer_agent_id=request.buyer_agent_url,
+            buyer_principal=buyer_principal,
             seller_reference_amount=reference_amount,
             strategy=result.strategy_label,
             message=message,
@@ -197,6 +200,8 @@ class BareMetalNegotiationService:
         legacy_terms = artifacts.get("accepted_escrow_terms")
         return NegotiateNewResponse(
             negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+            seller_principal=self.seller_principal,
             action=decision.action,
             proposal=decision_payload,
             reason=decision.reason,

@@ -193,7 +193,11 @@ def test_claim_survives_listing_model_validation():
     row = {
         "listing_id": "lst-1",
         "status": "open",
-        "seller": "http://seller:8001",
+        "storefront_url": "http://seller:8001",
+        "seller_principal": {
+            "scheme": "eip191",
+            "identifier": "0x2222222222222222222222222222222222222222",
+        },
         "offer_resource": {
             "resource_id": "res-pin", "gpu_model": "H200", "gpu_count": 2,
             "sla": 99.0, "region": "California, US",

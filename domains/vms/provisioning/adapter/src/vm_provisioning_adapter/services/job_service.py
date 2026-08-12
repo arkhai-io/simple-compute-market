@@ -92,18 +92,27 @@ class AnsibleJobService:
         job_queue,
         *,
         contract: ExecutorActionEnvelope | None = None,
+        operation_id: str | None = None,
     ) -> JobSubmitResponse:
-        """Persist and enqueue a job, deduplicating versioned contract commands."""
+        """Persist and enqueue a job, deduplicating contracts and request operations."""
         max_retries = (
             params.max_retries
             if params.max_retries is not None
             else self._settings.default_max_retries
         )
         raw_params = dataclasses.asdict(params)
-        job_id = str(uuid.uuid4())
+        job_id = operation_id or str(uuid.uuid4())
         created = False
 
         with self._session_factory() as db:
+            if operation_id is not None:
+                existing = db.get(AnsibleJob, operation_id)
+                if existing is not None:
+                    if existing.params != raw_params:
+                        raise ValueError(
+                            "operation_id is already bound to different job parameters"
+                        )
+                    return JobSubmitResponse(job_id=existing.id, status=existing.status)
             if contract is not None:
                 existing = self._contract_job(
                     db,
@@ -134,8 +143,16 @@ class AnsibleJobService:
                 created = True
             except IntegrityError:
                 db.rollback()
-                if contract is None:
+                if contract is None and operation_id is None:
                     raise
+                if operation_id is not None:
+                    existing = db.get(AnsibleJob, operation_id)
+                    if existing is None or existing.params != raw_params:
+                        raise
+                    return JobSubmitResponse(
+                        job_id=existing.id,
+                        status=existing.status,
+                    )
                 existing = self._contract_job(
                     db,
                     capacity_reservation_id=contract.capacity_reservation_id,

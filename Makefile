@@ -7,9 +7,18 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
+IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.2.0-py3-none-any.whl
 HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.1.0-trust.json
-HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+# Immutable hosted assets may be staged independently of disposable build
+# output. The ordinary local default remains .dist for direct verification.
+HOSTED_RELEASE_DIR ?= $(DIST_DIR)
+HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
+HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
+HOSTED_RELEASE_FILES := release-manifest.json \
+	arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl \
+	openapi-v0.1.0.json conformance-v0.1.0.json migrations-v4.json \
+	sbom.spdx.json provenance.intoto.json
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python scripts/verify-hosted-release.py \
 	--trust $(HOSTED_RELEASE_TRUST) \
@@ -17,6 +26,8 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	--wheel $(HOSTED_CLIENT_WHEEL)
 
 .PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheelhouse
+.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-compose-up
+.PHONY: dist-arkhai-core-registry
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -31,7 +42,7 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-hosted-client dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
+dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-hosted-client dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning dist-domains dist-compute-provisioning-service dist-registry-client
 
 dist-domains: dist-kits dist-compute-provisioning ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
@@ -66,13 +77,19 @@ dist-registry-client: ## Build arkhai-core-registry-client wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_registry_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-arkhai-core-registry: dist-registry-client ## Build arkhai-core-registry wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd core/registry && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_core_registry-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-core-registry produced a platform-specific wheel — must build inside Docker" && exit 1)
+
 dist-registry: dist-registry-client ## Compatibility alias for dist-registry-client.
 
-dist-identity: ## Build arkhai-kit-identity wheel into .dist/
+dist-identity: ## Build the exact identity-kit release wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd kit/identity && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_kit_identity-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-kit-identity produced a platform-specific wheel — must build inside Docker" && exit 1)
+	@test -f $(IDENTITY_WHEEL) || \
+		(echo "ERROR: expected exact identity wheel $(IDENTITY_WHEEL)" && exit 1)
 
 dist-core: ## Build arkhai-core wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -92,11 +109,28 @@ dist-arkhai-core-storefront: ## Build arkhai-core-storefront wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core-storefront produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-verify-hosted-release: ## Verify the staged signed 0.1.0 release and exact client wheel.
+verify-hosted-release: ## Verify the staged signed identity-capable release and exact client wheel.
 	$(VERIFY_HOSTED_RELEASE)
 
-dist-hosted-client: verify-hosted-release ## Consume only the verified staged client wheel.
+prepare-hosted-compose: ## Verify signed release and generate immutable Compose image input.
+	uv run --no-project --with 'eth-account>=0.13,<0.14' \
+		python scripts/prepare-hosted-compose.py \
+		--trust $(HOSTED_RELEASE_TRUST) \
+		--manifest $(HOSTED_RELEASE_MANIFEST) \
+		--wheel $(HOSTED_CLIENT_WHEEL) \
+		--output $(HOSTED_COMPOSE_ENV)
 
+hosted-compose-up: prepare-hosted-compose ## Start hosted-fiat VM only from the verified image input.
+	HOSTED_SETTLEMENT_RELEASE_DIR=$(abspath $(HOSTED_RELEASE_DIR)) \
+		docker compose --env-file $(HOSTED_COMPOSE_ENV) -f compose.vms-fiat.yml up
+
+dist-hosted-client: verify-hosted-release ## Copy only verified immutable release inputs into .dist.
+	@if [ "$(abspath $(HOSTED_RELEASE_DIR))" != "$(abspath $(DIST_DIR))" ]; then \
+		mkdir -p "$(DIST_DIR)"; \
+		for file in $(HOSTED_RELEASE_FILES); do \
+			cp "$(HOSTED_RELEASE_DIR)/$$file" "$(DIST_DIR)/$$file"; \
+		done; \
+	fi
 dist-kits: dist-hosted-client ## Build kit-owned wheels into .dist/
 	$(MAKE) -C kit dist DIST_DIR=$(DIST_DIR)
 
@@ -114,6 +148,13 @@ dist-config: ## Build arkhai-kit-config wheel into .dist/
 
 dist-helm: ## Package helm chart so it's ready for pushing into .dist/
 	helm package helm/ --destination $(DIST_DIR)
+
+test-release-tooling: ## Run release verifier and portable wheelhouse contract tests.
+	uv run --no-project --with pytest --with 'eth-account>=0.13,<0.14' \
+		pytest -q scripts/tests
+
+test-deployment-packaging: test-release-tooling ## Run release tooling plus Helm schema/render contracts.
+	$(MAKE) -C helm test-render
 
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
@@ -242,22 +283,12 @@ deploy-compose:
 	docker compose up
 	docker compose ps
 
-# Top-level deploy: runs both Helm and docker-run deployments.
-# Override SSH_KEY_FILE and HOSTS_INI as needed:
-#   make deploy SSH_KEY_FILE=/path/to/key HOSTS_INI=/path/to/hosts
+# Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
+# credential files and inventory content never pass through Helm values.
 deploy: deploy-helm
 
-IAC_DIR      ?= $(CURDIR)/domains/vms/provisioning/iac
-HOSTS_INI    ?= $(IAC_DIR)/ansible/inventory/hosts
-SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
-
-## Install or upgrade the Helm release.
-## Requires a reachable cluster context (kubectl) and SSH_KEY_FILE.
-## HOSTS_INI defaults to the IAC inventory.
 deploy-helm:
-	$(MAKE) -C helm deploy \
-		SSH_KEY_FILE=$(SSH_KEY_FILE) \
-		EXTRA_SET_FILE_ARGS="--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)"
+	$(MAKE) -C helm deploy
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
 deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning
@@ -430,7 +461,7 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 		'POOLS-[0-9]+|[Ss]ection [0-9]+\.[0-9]+|[Ss]ection [0-9]+(\s|:|$$)|[Tt]ask [0-9]+\.[0-9]+|\btasks\.md\b|\bdesign\.md\b|\bproposal\.md\b' \
 		--include="*.py" --include="*.yml" --include="*.yaml" \
 		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
-		--exclude-dir=".venv" --exclude-dir="node_modules" --exclude-dir="build" \
+		--exclude-dir=".venv" --exclude-dir=".dist" --exclude-dir="node_modules" --exclude-dir="build" \
 		. 2>/dev/null || true); \
 	if [ -n "$$matches" ]; then \
 		echo "$$matches"; \
@@ -473,8 +504,14 @@ last-diff: ## Write a binary-safe diff for the most recent commit.
 	git diff --binary HEAD^ HEAD > "$$OUTFILE"; \
 	echo "Done: $$OUTFILE"
 
-review-wheelhouse-prepare: dist-clean ## Rebuild wheels and refresh selected lockfiles before packaging.
-	@$(MAKE) dist
+review-wheelhouse-prepare: ## Preserve verified release inputs across the disposable wheel rebuild.
+	@release_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$release_dir"' EXIT; \
+	for file in $(HOSTED_RELEASE_FILES); do \
+		cp "$(HOSTED_RELEASE_DIR)/$$file" "$$release_dir/$$file"; \
+	done; \
+	$(MAKE) dist-clean; \
+	$(MAKE) dist HOSTED_RELEASE_DIR="$$release_dir"
 	@$(MAKE) review-locks
 
 review-locks: ## Refresh selected project lockfiles against current repository wheels.
@@ -484,8 +521,16 @@ review-locks: ## Refresh selected project lockfiles against current repository w
 		--python "$${REVIEW_PYTHON:-3.13}" \
 		--projects $${REVIEW_PROJECTS}
 
-review-wheelhouse: review-wheelhouse-prepare ## Bundle scoped locked development dependencies without running tests.
-	@bash ./scripts/package-review-wheelhouse.sh "$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.tar.gz"
+review-wheelhouse: ## Resolve scope, rebuild wheels, refresh locks, and bundle dependencies.
+	@projects="$${REVIEW_PROJECTS:-}"; \
+	if [ -z "$${projects// }" ]; then \
+		args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^} --format lines"; \
+		if [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
+		projects="$$($(CURDIR)/scripts/resolve-review-scope.py $$args | tr '\n' ' ')"; \
+	fi; \
+	$(MAKE) review-wheelhouse-prepare REVIEW_PROJECTS="$$projects"; \
+	REVIEW_PROJECTS="$$projects" bash ./scripts/package-review-wheelhouse.sh \
+		"$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX)-wheelhouse.tar.gz"
 
 review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJECTS, REVIEW_SCOPE_FILE, or BASE_REF.
 	@args="--root $(CURDIR) --base-ref $${BASE_REF:-HEAD^}"; \

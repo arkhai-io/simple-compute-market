@@ -1,0 +1,76 @@
+agent_id = "bob"
+port = 8001
+base_url = "http://bob-storefront:8001/"
+db_path = "/var/lib/arkhai/agent.db"
+log_file_path = "./logs/bob.log"
+resources_csv_path = "/app/resources.csv"
+
+[identity.principal]
+scheme = "ed25519"
+identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+
+[identity.administrators.operator]
+principals = [{ scheme = "ed25519", identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc" }]
+
+[identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principals = [{ scheme = "ed25519", identifier = "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI" }]
+
+[registry]
+urls = ["http://registry:8080", "http://registry-b:8080"]
+# Private registry bearer authorization belongs in storefront.secrets.toml,
+# never in this public identity profile.
+
+
+[registry.authorities."http://registry:8080"]
+authority = "registry-a"
+principals = [{ scheme = "ed25519", identifier = "NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y" }]
+
+[registry.authorities."http://registry-b:8080"]
+authority = "registry-b"
+principals = [{ scheme = "ed25519", identifier = "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc" }]
+
+[capacity]
+poll_interval = 1
+hold_ttl_seconds = 900
+
+[provisioning]
+service_url = "http://provisioning:8081"
+mode = "mock"
+poll_interval = 1
+
+[provisioning.identity]
+principals = [{ scheme = "ed25519", identifier = "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI" }]
+
+[negotiation]
+policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
+
+[pricing]
+default_min_price = "100"
+default_token_address = ""
+default_max_duration_seconds = 0
+
+[hosted_settlement]
+enabled = true
+base_url = "http://hosted-settlement-api:8080"
+authority_id = "local-hosted-authority"
+environment = "e2e"
+expected_manifest_digest = "sha256:a699fb8812aeaf76538a95cecad286eb5f8fff0491c17269ac5cb805f2da2a22"
+contract_version = "0.1.0"
+expected_schema_version = 4
+required_capabilities = [
+  "conditional-escrow.v1",
+  "stripe-connect-separate-charges-transfers.v1",
+  "portable-attestation.v1",
+  "eas-arbiter.v1",
+  "scheme-tagged-identities.v1",
+  "account-owner-admission.v1",
+  "account-owner-rotation.v1",
+  "account-owner-retirement.v1",
+  "signer-injected-client.v1",
+  "provider-neutral-seller-onboarding.v1",
+]
+
+[settlement.hosted.authority]
+principals = [{ scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }]

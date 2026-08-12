@@ -16,10 +16,14 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from market_identity import TrustedIdentitySet
 
 from .buyer_client import ResumeState, negotiate_with_seller
 from .cli_helpers import resolve_prices_from_matches
-from .deal_helpers import load_negotiation_resume_point
+from .deal_helpers import (
+    load_negotiation_resume_point,
+    make_publisher_trust_resolver,
+)
 from .run_log import RunLog
 
 
@@ -169,18 +173,25 @@ def register(app: typer.Typer) -> None:
         _initial_explicit = initial_price is not None
         _max_explicit = max_price is not None
 
-        # Resolution: CLI flag > config.toml > derivation.
-        from .common import resolve_buyer_wallet
+        from .common import (
+            resolve_buyer_signer,
+            resolve_buyer_wallet,
+            resolve_identity_config,
+            resolve_identity_credential,
+        )
 
+        identity_config = resolve_identity_config()
+        signer = resolve_buyer_signer(
+            identity_config,
+            resolve_identity_credential(),
+        )
         addr, pk = resolve_buyer_wallet(
             override_addr=buyer_address,
             override_pk=buyer_private_key,
         )
         if not addr or not pk:
             typer.secho(
-                "Missing buyer wallet config. Pass --buyer-priv-key or set "
-                "wallet.private_key in config.toml; the address is derived "
-                "from the key.",
+                "Missing explicit EVM wallet config for standalone Alkahest negotiation.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -188,7 +199,7 @@ def register(app: typer.Typer) -> None:
 
         resume_state = None
         if from_run:
-            resume_point = load_negotiation_resume_point(from_run)
+            resume_point = load_negotiation_resume_point(from_run, signer=signer)
             seller_url = seller_url or resume_point.seller_url
             listing_id = listing_id or resume_point.listing_id
             if max_price is None:
@@ -206,53 +217,78 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
-        # Resolve registry URLs + per-registry deadline + auth once.
+        # Resolve and authenticate registry discovery separately from the
+        # standalone negotiation's explicit Alkahest wallet.
         from .common import (
             VMS_SCHEMA_ID,
-            resolve_indexer_urls_for_schema,
             resolve_discovery_timeout,
-            resolve_indexer_auth,
+            resolve_indexer_urls,
+            resolve_indexer_urls_for_schema,
+            resolve_registry_api_keys,
+            resolve_registry_authorities,
         )
 
-        reg_urls = resolve_indexer_urls_for_schema(
-            VMS_SCHEMA_ID, override=registry_urls
-        )
+        configured_reg_urls = resolve_indexer_urls(override=registry_urls)
+        registry_authorities = resolve_registry_authorities(configured_reg_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
-        reg_auth = resolve_indexer_auth()
+        reg_urls = resolve_indexer_urls_for_schema(
+            VMS_SCHEMA_ID,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            override=registry_urls,
+            timeout=deadline,
+        )
+        registry_authorities = {url: registry_authorities[url] for url in reg_urls}
+        registry_api_keys = {
+            url: key
+            for url, key in resolve_registry_api_keys().items()
+            if url in registry_authorities
+        }
 
         # Fetch the listing — needed for both --seller auto-resolution
         # and picking an accepted_escrows entry. Skipped in resume mode
         # (the saved run-log carries the prior commitments).
         listing_dict: Optional[dict] = None
         if listing_id and resume_state is None:
-            from .buy_orchestrator import fetch_listing_dict_multi
+            from .buy_orchestrator import fetch_listing_dict
 
-            try:
-                listing_dict = fetch_listing_dict_multi(
-                    reg_urls,
-                    listing_id,
-                    timeout=deadline,
-                    auth=reg_auth,
-                )
-            except RuntimeError as exc:
+            source_registry_url: str | None = None
+            last_error: RuntimeError | None = None
+            for registry_url in reg_urls:
+                try:
+                    listing_dict = fetch_listing_dict(
+                        registry_url,
+                        listing_id,
+                        timeout=deadline,
+                        signer=signer,
+                        registry_authority=registry_authorities[registry_url],
+                        api_key=registry_api_keys.get(registry_url),
+                    )
+                except RuntimeError as exc:
+                    last_error = exc
+                    continue
+                if listing_dict is not None:
+                    source_registry_url = registry_url
+                    break
+            if not listing_dict or source_registry_url is None:
+                detail = f": {last_error}" if last_error is not None else ""
                 typer.secho(
-                    f"Could not fetch listing {listing_id}: {exc}",
+                    f"No listing {listing_id!r} in any of "
+                    f"{len(reg_urls)} registries{detail}.",
                     err=True,
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
-            if not listing_dict:
-                typer.secho(
-                    f"No listing {listing_id!r} in any of {len(reg_urls)} registries.",
-                    err=True,
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
+            listing_dict["source_registry_url"] = source_registry_url
+            listing_dict["source_registry_authority"] = registry_authorities[
+                source_registry_url
+            ].authority
             if not seller_url:
-                seller_url = listing_dict.get("seller")
+                seller_url = listing_dict.get("storefront_url")
                 if not seller_url:
                     typer.secho(
-                        f"Listing {listing_id} has no `seller` field; pass --seller explicitly.",
+                        f"Listing {listing_id} has no `storefront_url` field; "
+                        "pass --seller explicitly.",
                         err=True,
                         fg=typer.colors.RED,
                     )
@@ -303,7 +339,7 @@ def register(app: typer.Typer) -> None:
         # Pick one accepted_escrows entry — token, escrow contract, and
         # chain all come from the listing. ``--token-contract`` (when
         # set) filters entries to one ERC-20.
-        from core_buyer.escrow_selection import select_escrow_entry
+        from .escrow_selection import select_escrow_entry
         from .common import select_chain_for_listing
 
         picked_entry: Optional[dict] = None
@@ -386,11 +422,33 @@ def register(app: typer.Typer) -> None:
 
         seller_wallet: Optional[str] = None
 
+        if listing_dict is not None:
+            expected_seller_principals = TrustedIdentitySet.model_validate(
+                listing_dict.get("publisher_principals")
+            )
+            publisher_id = str(listing_dict.get("publisher_id") or "").strip()
+            source_registry_url = str(
+                listing_dict.get("source_registry_url") or ""
+            ).strip()
+            source_registry_authority = str(
+                listing_dict.get("source_registry_authority") or ""
+            ).strip()
+        else:
+            expected_seller_principals = resume_point.publisher_principals
+            publisher_id = resume_point.publisher_id
+            source_registry_url = resume_point.source_registry_url
+            source_registry_authority = resume_point.source_registry_authority
+        if not publisher_id or not source_registry_url or not source_registry_authority:
+            raise typer.BadParameter("listing publisher provenance is incomplete")
         run_log = RunLog.start(
             command="market negotiate",
+            principal=identity_config.principal,
             seller_url=seller_url,
             listing_id=listing_id,
-            buyer_address=addr,
+            publisher_principals=expected_seller_principals.model_dump(mode="json"),
+            publisher_id=publisher_id,
+            source_registry_url=source_registry_url,
+            source_registry_authority=source_registry_authority,
             policy=_policy.name,
             policy_params=policy_params_all,
             initial_price=initial_price,
@@ -487,15 +545,25 @@ def register(app: typer.Typer) -> None:
             if policy_mode_from_log:
                 policy_mode = str(policy_mode_from_log)
         if policies or policy_mode:
-            from .buyer_client import _load_buyer_chain
+            from .buyer_client import load_buyer_chain
 
-            chain = _load_buyer_chain(policies=policies, policy_mode=policy_mode)
+            chain = load_buyer_chain(policies=policies, policy_mode=policy_mode)
+
+        resolve_seller_principals = make_publisher_trust_resolver(
+            run_id=run_log.run_id,
+            listing_id=listing_id,
+            publisher_id=publisher_id,
+            source_registry_url=source_registry_url,
+            source_registry_authority=source_registry_authority,
+            current=expected_seller_principals,
+            signer=signer,
+        )
 
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
-                buyer_address=addr,
-                buyer_private_key=pk,
+                principal=identity_config.principal,
+                signer=signer,
                 listing_id=listing_id,
                 initial_price=initial_price or 0,
                 max_price=max_price,
@@ -505,6 +573,7 @@ def register(app: typer.Typer) -> None:
                 on_round=_observe,
                 resume=resume_state,
                 chain=chain,
+                resolve_seller_principals=resolve_seller_principals,
                 policy_params=policy_params_all,
             )
         except RuntimeError as exc:

@@ -12,8 +12,18 @@ from market_site.ledger import CapacityLedgerService
 from db.models import Base
 from services.keys_service import IssuanceError, KeysService, derive_key_id
 
-BUYER = {"buyer_scheme": "wallet", "buyer_id": "0xAbCd000000000000000000000000000000000001"}
-OTHER = {"buyer_scheme": "wallet", "buyer_id": "0x9999000000000000000000000000000000000002"}
+BUYER = {
+    "buyer_scheme": "eip191",
+    "buyer_id": "0xabcd000000000000000000000000000000000001",
+}
+OTHER = {
+    "buyer_scheme": "eip191",
+    "buyer_id": "0x9999000000000000000000000000000000000002",
+}
+ED25519_BUYER = {
+    "buyer_scheme": "ed25519",
+    "buyer_id": "ERERERERERERERERERERERERERERERERERERERERERE",
+}
 
 
 @pytest.fixture
@@ -53,9 +63,9 @@ def test_issue_new_key_grants_and_commits_quota(service, ledger):
     assert result["secret"].startswith(result["key_id"] + ".")
     assert result["key_id"] == derive_key_id("0xe1")
 
-    # New keys auto-bind owner = purchasing wallet.
+    # New keys auto-bind to the purchasing marketplace principal.
     key = service.get_key(result["key_id"])
-    assert (key["owner_scheme"], key["owner_id"]) == ("wallet", BUYER["buyer_id"])
+    assert (key["owner_scheme"], key["owner_id"]) == ("eip191", BUYER["buyer_id"])
 
     # Quota consumed and committed open-ended (credits don't expire).
     assert ledger.snapshot()[0]["available_units"] == 900
@@ -90,10 +100,10 @@ def test_existing_key_top_up_rechecks_ownership(service):
     new = service.issue(escrow_uid="0xe3", quantity=10, key_mode="new", **BUYER)
     key_id = new["key_id"]
 
-    # Same wallet, different case: admitted (addresses compare lowered).
+    # The same EIP-191 address is normalized before exact-principal comparison.
     topped = service.issue(
         escrow_uid="0xe4", quantity=5, key_mode="existing", key_id=key_id,
-        buyer_scheme="wallet", buyer_id=BUYER["buyer_id"].upper().replace("0X", "0x"),
+        buyer_scheme="eip191", buyer_id=BUYER["buyer_id"].upper().replace("0X", "0x"),
     )
     assert topped["balance"] == 15
     assert topped["secret"] is None  # top-ups never carry a secret
@@ -101,6 +111,16 @@ def test_existing_key_top_up_rechecks_ownership(service):
     with pytest.raises(IssuanceError) as exc:
         service.issue(
             escrow_uid="0xe5", quantity=5, key_mode="existing", key_id=key_id, **OTHER,
+        )
+    assert exc.value.reason == "key_not_owned"
+
+    with pytest.raises(IssuanceError) as exc:
+        service.issue(
+            escrow_uid="0xe5-ed25519",
+            quantity=5,
+            key_mode="existing",
+            key_id=key_id,
+            **ED25519_BUYER,
         )
     assert exc.value.reason == "key_not_owned"
 

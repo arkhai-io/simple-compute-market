@@ -20,7 +20,12 @@ from hosted_settlement_client import (
 )
 from market_alkahest import AlkahestConditionalEscrowClient
 from market_core.schemas import EscrowProposal, SettlementPlan
-from market_hosted_settlement import HostedConditionalEscrowClient
+from market_identity import Identity, Signer, TrustedIdentitySet
+from market_hosted_settlement import (
+    HostedConditionalEscrowClient,
+    MarketplaceSignerAdapter,
+    adapt_expected_authorities,
+)
 from market_settlement_runtime import (
     FulfillmentOutcome,
     PreparedSettlement,
@@ -75,6 +80,7 @@ class VmSettlementComposition:
     runtime: SettlementRuntime
     coordinator: SettlementJobCoordinator
     worker: SettlementServicingWorker
+    local_principal: Identity
     mechanism_clients: Mapping[str, Any]
     evidence_clients: Mapping[str, Any]
 
@@ -133,6 +139,7 @@ async def _prepare_hosted_settlement(
     *,
     settlement_ref: str,
     negotiation_id: str,
+    local_principal: Identity,
     selection_payload: dict[str, Any],
     order: Mapping[str, Any],
     thread: Mapping[str, Any],
@@ -163,7 +170,8 @@ async def _prepare_hosted_settlement(
         selection=selection,
         option=option,
         agreed_amount=int(thread["agreed_price"]),
-        buyer_address=str(thread.get("buyer") or thread.get("their_agent_id") or ""),
+        buyer_principal=Identity.model_validate(thread.get("buyer_principal")),
+        seller_principal=local_principal,
     )
     plan = artifacts["settlement_plan"]
     obligations = tuple(
@@ -187,7 +195,7 @@ async def _prepare_hosted_settlement(
         obligations=obligations,
         selected_obligation_index=0,
         mechanism_ref=settlement_ref,
-        local_role="seller",
+        local_principal=local_principal,
         mechanism_receipt=status.receipt,
         fulfillment_input=VmFulfillmentInput(
             provision=provision,
@@ -214,6 +222,7 @@ async def prepare_vm_settlement(
     *,
     escrow_uid: str,
     negotiation_id: str,
+    local_principal: Identity,
     mechanism_client: Any,
     chain_name: str,
     request: Any = None,
@@ -261,6 +270,7 @@ async def prepare_vm_settlement(
     ):
         return await _prepare_hosted_settlement(
             settlement_ref=escrow_uid,
+            local_principal=local_principal,
             negotiation_id=negotiation_id,
             selection_payload=proposal_raw,
             order=order,
@@ -280,7 +290,7 @@ async def prepare_vm_settlement(
     proposal = EscrowProposal.model_validate(proposal_raw)
     obligation_index = await escrow_verification.verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
-        seller_wallet=storefront_config.settings.wallet.address or "",
+        seller_wallet=storefront_config.get_evm_wallet_address(),
         agreed_price=int(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=order,
@@ -319,7 +329,7 @@ async def prepare_vm_settlement(
         obligations=obligations,
         selected_obligation_index=obligation_index,
         mechanism_ref=escrow_uid,
-        local_role="seller",
+        local_principal=local_principal,
         mechanism_receipt={"verified": True},
         fulfillment_input=VmFulfillmentInput(
             provision=provision,
@@ -585,7 +595,7 @@ async def truncate_lease_for_terminal_settlement(
 class HostedAgreement:
     negotiation_id: str
     listing_id: str
-    buyer_address: str
+    buyer_principal: Identity
     obligation: dict[str, Any]
     obligation_ref: str
     provision: VmProvisionTerms
@@ -596,6 +606,10 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
     if hasattr(value, "to_dict"):
         value = value.to_dict()
     return dict(value) if isinstance(value, Mapping) else {}
+
+def _hosted_config() -> Any:
+    settlement = getattr(storefront_config.settings, "settlement", None)
+    return getattr(settlement, "hosted", None)
 
 
 async def load_hosted_agreement(
@@ -610,9 +624,7 @@ async def load_hosted_agreement(
     )
     if not thread or thread.get("terminal_state") != "success":
         raise ValueError("hosted settlement negotiation is not accepted")
-    buyer_address = str(thread.get("buyer") or "")
-    if not buyer_address:
-        raise ValueError("accepted hosted negotiation has no buyer identity")
+    buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     listing_id = str(thread.get("our_listing_id") or "")
     order = await sqlite_client.load_listing(listing_id=listing_id)
     if not order:
@@ -633,7 +645,7 @@ async def load_hosted_agreement(
     return HostedAgreement(
         negotiation_id=negotiation_id,
         listing_id=listing_id,
-        buyer_address=buyer_address,
+        buyer_principal=buyer_principal,
         obligation=obligation,
         obligation_ref=derived_ref,
         provision=provision,
@@ -650,7 +662,7 @@ def _hosted_evidence_input(
     resolver_id = condition.evaluator.resolver_id
     if not resolver_id:
         raise ValueError("hosted condition has no configured evidence resolver")
-    hosted_config = getattr(storefront_config.settings, "hosted_settlement", None)
+    hosted_config = _hosted_config()
     resolvers = _plain_mapping(getattr(hosted_config, "resolvers", {}))
     resolver = _plain_mapping(resolvers.get(resolver_id))
     chain_name = str(resolver.get("chain_name") or "")
@@ -678,7 +690,7 @@ async def ensure_hosted_fulfillment(
         return record
     reserved = await composition.runtime.reserve_fulfillment(
         record.obligation_ref,
-        local_role="seller",
+        local_principal=composition.local_principal,
         worker_id=worker_id,
     )
     if reserved.status in {"busy", "succeeded"}:
@@ -703,7 +715,7 @@ async def ensure_hosted_fulfillment(
         await composition.runtime.retry_fulfillment(
             record.obligation_ref,
             error,
-            local_role="seller",
+            local_principal=composition.local_principal,
             worker_id=worker_id,
         )
         raise error
@@ -711,7 +723,7 @@ async def ensure_hosted_fulfillment(
         agreement_ref=agreement.negotiation_id,
         obligations=(agreement.obligation,),
         selected_obligation_index=0,
-        local_role="seller",
+        local_principal=composition.local_principal,
         mechanism_ref=str(record.mechanism_ref),
         mechanism_receipt=record.status_receipt,
         fulfillment_input=VmFulfillmentInput(
@@ -736,14 +748,14 @@ async def ensure_hosted_fulfillment(
         completed = await composition.runtime.complete_fulfillment(
             record.obligation_ref,
             outcome.fulfillment_ref,
-            local_role="seller",
+            local_principal=composition.local_principal,
             worker_id=worker_id,
         )
     except Exception as exc:
         await composition.runtime.retry_fulfillment(
             record.obligation_ref,
             exc,
-            local_role="seller",
+            local_principal=composition.local_principal,
             worker_id=worker_id,
         )
         raise
@@ -806,7 +818,7 @@ async def verify_hosted_contract_ready(
     composition: VmSettlementComposition,
 ) -> None:
 
-    hosted_config = getattr(storefront_config.settings, "hosted_settlement", None)
+    hosted_config = _hosted_config()
     if not hosted_config or not bool(getattr(hosted_config, "enabled", False)):
         return
     adapter = composition.mechanism_clients.get("fiat.stripe.v1")
@@ -817,7 +829,7 @@ async def verify_hosted_contract_ready(
     )
     expected_contract = str(getattr(hosted_config, "contract_version", "") or "")
     expected_schema = int(getattr(hosted_config, "expected_schema_version", 0) or 0)
-    if not expected_manifest or expected_contract != "0.1.0" or expected_schema != 3:
+    if not expected_manifest or expected_contract != "0.1.0" or expected_schema != 4:
         raise RuntimeError("hosted settlement release pin is incomplete")
     required = tuple(
         sorted(
@@ -845,9 +857,12 @@ async def verify_hosted_contract_ready(
 
 
 def build_vm_settlement_composition(
-    *, sqlite_client: Any, alkahest_clients: Mapping[str, Any]
+    *,
+    sqlite_client: Any,
+    alkahest_clients: Mapping[str, Any],
+    marketplace_signer: Signer,
 ) -> VmSettlementComposition:
-    """Construct the one VM repository, runtime, coordinator, and worker."""
+    """Construct the VM runtime from explicit settlement mechanisms."""
 
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path,
@@ -861,25 +876,21 @@ def build_vm_settlement_composition(
         },
         default_chain=getattr(storefront_config.settings, "chain_name", None),
     )
-    mechanism_clients: dict[str, Any] = {"alkahest.v1": alkahest}
-    hosted_config = getattr(storefront_config.settings, "hosted_settlement", None)
+    mechanism_clients: dict[str, Any] = {}
+    if storefront_config.CHAINS:
+        mechanism_clients["alkahest.v1"] = alkahest
+
+    hosted_config = _hosted_config()
     hosted_enabled = bool(hosted_config and getattr(hosted_config, "enabled", False))
-    hosted_base_url = (
-        str(getattr(hosted_config, "base_url", "") or "") if hosted_config else ""
-    )
-    hosted_credential = (
-        str(getattr(hosted_config, "request_credential", "") or "")
-        if hosted_config
-        else ""
-    )
     if hosted_enabled:
+        hosted_base_url = str(getattr(hosted_config, "base_url", "") or "")
+        authority_raw = _plain_mapping(getattr(hosted_config, "authority", {}))
+        authority_principals_raw = authority_raw.get("principals")
         required_fields = {
             "base_url": hosted_base_url,
             "authority_id": str(getattr(hosted_config, "authority_id", "") or ""),
             "environment": str(getattr(hosted_config, "environment", "") or ""),
-            "expected_authority": str(
-                getattr(hosted_config, "expected_authority", "") or ""
-            ),
+            "authority.principals": authority_principals_raw,
             "expected_manifest_digest": str(
                 getattr(hosted_config, "expected_manifest_digest", "") or ""
             ),
@@ -888,10 +899,9 @@ def build_vm_settlement_composition(
             ),
             "expected_schema_version": (
                 int(getattr(hosted_config, "expected_schema_version", 0) or 0)
-                if int(getattr(hosted_config, "expected_schema_version", 0) or 0) == 3
+                if int(getattr(hosted_config, "expected_schema_version", 0) or 0) == 4
                 else 0
             ),
-            "private_key": hosted_credential,
         }
         missing = sorted(name for name, value in required_fields.items() if not value)
         if missing:
@@ -900,17 +910,28 @@ def build_vm_settlement_composition(
                 + ", ".join(missing)
             )
 
+        try:
+            marketplace_authorities = TrustedIdentitySet(
+                identities=tuple(
+                    Identity.model_validate(value)
+                    for value in authority_principals_raw
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "settlement.hosted.authority.principals must contain "
+                "1-2 unique canonical principals"
+            ) from exc
+        expected_authorities = adapt_expected_authorities(marketplace_authorities)
         hosted = HostedConditionalEscrowClient(
             HostedSettlementAsyncClient(
                 ClientConfig(
                     base_url=hosted_base_url,
-                    private_key=hosted_credential,
+                    signer=MarketplaceSignerAdapter(marketplace_signer),
                     caller_role="seller",
-                    authority_id=str(getattr(hosted_config, "authority_id", "") or ""),
-                    environment=str(getattr(hosted_config, "environment", "") or ""),
-                    expected_authority=str(
-                        getattr(hosted_config, "expected_authority", "") or ""
-                    ),
+                    authority_id=required_fields["authority_id"],
+                    environment=required_fields["environment"],
+                    expected_authorities=expected_authorities,
                     timeout_seconds=float(
                         getattr(hosted_config, "timeout_seconds", 10.0)
                     ),
@@ -986,14 +1007,18 @@ def build_vm_settlement_composition(
             await runtime.bind_fulfillment(
                 context.obligation_ref,
                 str(existing["fulfillment_uid"]),
-                local_role=prepared.local_role,
+                local_principal=prepared.local_principal,
             )
             await worker.wake(context.obligation_ref)
         return existing
 
     coordinator = SettlementJobCoordinator(
         runtime,
-        prepare=partial(prepare_vm_settlement, sqlite_client=sqlite_client),
+        prepare=partial(
+            prepare_vm_settlement,
+            sqlite_client=sqlite_client,
+            local_principal=marketplace_signer.identity,
+        ),
         reserve_start=reserve_start,
         fulfill=fulfill_vm_settlement,
         persist_outcome=persist_vm_settlement_outcome,
@@ -1006,6 +1031,7 @@ def build_vm_settlement_composition(
         worker=worker,
         mechanism_clients=mechanism_clients,
         evidence_clients=dict(alkahest_clients),
+        local_principal=marketplace_signer.identity,
     )
     composition_holder["value"] = composition
     return composition

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core_storefront.services.negotiation_service import NegotiationService
+    from market_identity import Signer
 
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.system_service import SystemService
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 resolved_sqlite_client: SQLiteClient | None = None
+resolved_marketplace_signer: Signer | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are

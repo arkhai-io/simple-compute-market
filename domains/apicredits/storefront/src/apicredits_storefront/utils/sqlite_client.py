@@ -16,6 +16,7 @@ from typing import Any
 
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
+from market_identity import Identity
 from market_settlement_runtime import settlement_migrations
 
 from .config import settings
@@ -160,8 +161,22 @@ class SQLiteClient(CoreSQLiteClient):
 _sqlite_client: SQLiteClient | None = None
 
 
-def get_sqlite_client() -> SQLiteClient:
+def get_sqlite_client(
+    *,
+    local_listing_principal: Identity | None = None,
+    expected_legacy_sellers: tuple[str, ...] | None = None,
+) -> SQLiteClient:
     global _sqlite_client
+    if _sqlite_client is None and (
+        local_listing_principal is None or expected_legacy_sellers is None
+    ):
+        raise RuntimeError(
+            "initial SQLite composition requires local listing migration context",
+        )
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(db_path=settings.db_path)
+        _sqlite_client = SQLiteClient(
+            db_path=settings.db_path,
+            local_listing_principal=local_listing_principal,
+            expected_legacy_sellers=expected_legacy_sellers,
+        )
     return _sqlite_client

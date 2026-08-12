@@ -1,0 +1,35 @@
+# Hosted-fiat VM profile. No Anvil/RPC service or EVM wallet environment is
+# included. Public Ed25519 principals live in the mounted storefront profile;
+# signer material comes only from the referenced identity env file.
+include:
+  - domains/vms/compose.yml
+  - compose.hosted-settlement.yml
+
+services:
+  registry:
+    environment:
+      - REGISTRY_AUTHORITY_ID=registry-a
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_IDENTIFIER=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE:?set registry Ed25519 signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  registry-b:
+    environment:
+      - REGISTRY_AUTHORITY_SCHEME=ed25519
+      - REGISTRY_AUTHORITY_ID=registry-b
+      - REGISTRY_AUTHORITY_IDENTIFIER=yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc
+      - REGISTRY_AUTHORITY_CREDENTIAL_FILE=/run/secrets/arkhai/registry-identity/credential
+    volumes:
+      - ${VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE:?set private registry Ed25519 signer credential file}:/run/secrets/arkhai/registry-identity/credential:ro
+  alice-storefront:
+    profiles: [evm-multi-seller]
+  provisioning:
+    env_file:
+      - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning Ed25519 signer credential environment file}
+    environment:
+      - PROVISIONING_IDENTITY__PRINCIPAL__SCHEME=ed25519
+      - PROVISIONING_IDENTITY__PRINCIPAL__IDENTIFIER=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+      - 'PROVISIONING_STOREFRONT_IDENTITY__PRINCIPALS=[{"scheme":"ed25519","identifier":"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"}]'
+      - PROVISIONING_STOREFRONT_SITE_ID=default
+      - 'PROVISIONING_ADMIN_IDENTITY__PRINCIPALS=[{"scheme":"ed25519","identifier":"5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g"}]'

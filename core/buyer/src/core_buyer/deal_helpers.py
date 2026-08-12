@@ -1,34 +1,36 @@
-"""Shared helpers for deal-recovery commands (`settle`, `escrow create`).
+"""Shared run-log recovery helpers for buyer deal commands.
 
-Both pull deal context (seller_url, agreed_amount, …) from a buyer
-run-log JSONL, then feed the orchestration stage helpers and
-`escrow_client.make_create_escrow_fn` to advance the deal.
-
-Putting this in one place avoids duplicating run-log scraping +
-chain-config resolution between the two commands.
+The core records and recovers settlement proposal and term payloads as
+mechanism-opaque dictionaries. Domain composition is responsible for
+decoding those payloads and deriving mechanism-specific enrichments.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional
 
 import typer
 
 from .run_log import RunLog, read_run
-
-if TYPE_CHECKING:
-    from market_config.config_loader import ChainConfig
+from market_identity import Identity, Signer, TrustedIdentitySet
 
 
 @dataclass
 class DealContext:
     """What we need to drive stages 3-5 of a deal post-negotiation."""
+
+    buyer_principal: Identity
+    publisher_principals: TrustedIdentitySet
+    publisher_id: str
+    source_registry_url: str
+    source_registry_authority: str
     seller_url: str
     listing_id: str
     negotiation_id: str
     agreed_amount: float
     escrow_uid: Optional[str] = None
+    settlement_ref: Optional[str] = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
     # per-hour price by duration_seconds/3600 to compute total payment.
@@ -40,17 +42,66 @@ class DealContext:
     token_contract: Optional[str] = None
     token_decimals: Optional[float] = None
     accepted_escrow_proposal: Optional[dict[str, Any]] = None
-    # Canonical settlement carrier: mechanism-neutral plan dict
-    # (market_core.schemas.SettlementPlan shape). accepted_escrow_terms
-    # is its LEGACY flat-alkahest view — derived from the plan when the
-    # log carries one, read directly from pre-plan logs otherwise.
+    # Canonical mechanism-neutral settlement carrier plus the optional
+    # legacy flat term payload recorded on older wire exchanges.
     settlement_plan: Optional[dict[str, Any]] = None
     accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
     accepted_provision_terms: Optional[dict[str, Any]] = None
 
 
-def load_deal_context(run_id: str) -> DealContext:
-    """Read a buyer run-log and extract the deal context.
+def _parse_publisher_trust(value: Any) -> TrustedIdentitySet:
+    if isinstance(value, TrustedIdentitySet):
+        return value
+    if not isinstance(value, dict) or set(value) != {"identities"}:
+        raise ValueError("publisher_principals must contain identities")
+    identities = value["identities"]
+    if not isinstance(identities, (list, tuple)):
+        raise ValueError("publisher_principals identities must be an array")
+    return TrustedIdentitySet(
+        identities=tuple(Identity.model_validate(item) for item in identities)
+    )
+
+
+def _refresh_publisher_trust(
+    run_id: str,
+    *,
+    signer: Signer,
+    listing_id: str,
+    recorded: TrustedIdentitySet,
+    refresh: Callable[[str, str, str, str], TrustedIdentitySet],
+    publisher_id: str,
+    source_registry_url: str,
+    source_registry_authority: str,
+) -> TrustedIdentitySet:
+    current = refresh(
+        listing_id,
+        publisher_id,
+        source_registry_url,
+        source_registry_authority,
+    )
+    if not isinstance(current, TrustedIdentitySet):
+        raise typer.BadParameter(
+            "Signed listing refresh did not return publisher_principals"
+        )
+    if current != recorded:
+        RunLog.open(run_id, signer=signer).event(
+            "publisher_trust_refreshed",
+            listing_id=listing_id,
+            publisher_id=publisher_id,
+            publisher_principals=current.model_dump(mode="json"),
+            source_registry_url=source_registry_url,
+            source_registry_authority=source_registry_authority,
+        )
+    return current
+
+
+def load_deal_context(
+    run_id: str,
+    *,
+    signer: Signer,
+    refresh_publisher_principals: Callable[[str, str, str, str], TrustedIdentitySet],
+) -> DealContext:
+    """Read a buyer run-log and extract signer-bound deal context.
 
     Tolerates either a `market negotiate` log (one negotiation,
     fields at the run_started/run_ended boundary) or a `market buy`
@@ -58,18 +109,23 @@ def load_deal_context(run_id: str) -> DealContext:
     recent agreed one). Picks up any `escrow_created` event already
     present so callers can short-circuit stage 3.
     """
-    events = read_run(run_id)
+    events = read_run(run_id, signer=signer)
     if not events:
         raise typer.BadParameter(
-            f"No run-log found for run_id={run_id!r}. "
-            f"Check `market logs runs`."
+            f"No run-log found for run_id={run_id!r}. Check `market logs runs`."
         )
+    buyer_principal = Identity.model_validate(events[0]["buyer_principal"])
+    publisher_principals: Optional[TrustedIdentitySet] = None
+    publisher_id: Optional[str] = None
+    source_registry_url: Optional[str] = None
+    source_registry_authority: Optional[str] = None
 
     seller_url: Optional[str] = None
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
     agreed_amount: Optional[float] = None
     escrow_uid: Optional[str] = None
+    settlement_ref: Optional[str] = None
     duration_seconds: int = 3600
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
@@ -95,26 +151,70 @@ def load_deal_context(run_id: str) -> DealContext:
         raw_proposal = ev.get("accepted_escrow_proposal")
         if isinstance(raw_proposal, dict):
             accepted_escrow_proposal = raw_proposal
-            from market_alkahest.schemas import (
-                accepted_recipient_address,
-                accepted_token_address,
-            )
-
-            recipient = accepted_recipient_address(raw_proposal)
-            if recipient:
-                seller_wallet_address = recipient
-            token = accepted_token_address(raw_proposal)
-            if token:
-                token_contract = token
         raw_provision = ev.get("accepted_provision_terms")
         if isinstance(raw_provision, dict):
             accepted_provision_terms = raw_provision
 
+    def _capture_publisher_principals(ev: dict[str, Any]) -> None:
+        nonlocal publisher_principals
+        raw = ev.get("publisher_principals")
+        if raw is None:
+            return
+        try:
+            candidate = _parse_publisher_trust(raw)
+        except (TypeError, ValueError) as exc:
+            raise typer.BadParameter(
+                f"Run-log {run_id!r} has malformed publisher_principals."
+            ) from exc
+        if publisher_principals is not None and candidate != publisher_principals:
+            raise typer.BadParameter(
+                f"Run-log {run_id!r} has conflicting selected publisher principals."
+            )
+        publisher_principals = candidate
+
+    def _capture_publisher_binding(ev: dict[str, Any]) -> None:
+        nonlocal publisher_id, source_registry_url, source_registry_authority
+        values = (
+            ("publisher_id", ev.get("publisher_id")),
+            ("source_registry_url", ev.get("source_registry_url")),
+            ("source_registry_authority", ev.get("source_registry_authority")),
+        )
+        for name, value in values:
+            if value is None:
+                continue
+            normalized = (
+                str(value).rstrip("/") if name == "source_registry_url" else str(value)
+            )
+            existing = {
+                "publisher_id": publisher_id,
+                "source_registry_url": source_registry_url,
+                "source_registry_authority": source_registry_authority,
+            }[name]
+            if existing is not None and existing != normalized:
+                raise typer.BadParameter(f"Run-log {run_id!r} has conflicting {name}.")
+            if name == "publisher_id":
+                publisher_id = normalized
+            elif name == "source_registry_url":
+                source_registry_url = normalized
+            else:
+                source_registry_authority = normalized
+
     for ev in events:
         ev_type = ev.get("event")
+        _capture_publisher_binding(ev)
+        if ev_type == "publisher_trust_refreshed":
+            try:
+                publisher_principals = _parse_publisher_trust(
+                    ev.get("publisher_principals")
+                )
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed refreshed publisher trust."
+                ) from exc
 
         # `negotiate` end carries the agreed_amount + negotiation_id.
         if ev_type == "run_ended":
+            _capture_publisher_principals(ev)
             last_status = ev.get("status")
             _capture_accepted_terms(ev)
             if ev.get("agreed_amount") is not None:
@@ -124,6 +224,7 @@ def load_deal_context(run_id: str) -> DealContext:
 
         # `market buy`-style log.
         if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
+            _capture_publisher_principals(ev)
             _capture_accepted_terms(ev)
             seller_url = ev.get("seller_url") or seller_url
             if ev.get("agreed_amount") is not None:
@@ -136,6 +237,10 @@ def load_deal_context(run_id: str) -> DealContext:
             uid = ev.get("escrow_uid")
             if isinstance(uid, str) and uid:
                 escrow_uid = uid
+        if ev_type == "settlement_started":
+            ref = ev.get("settlement_ref")
+            if isinstance(ref, str) and ref:
+                settlement_ref = ref
         if ev_type == "escrow_create_start":
             terms = ev.get("terms", {})
             if isinstance(terms, dict):
@@ -148,6 +253,7 @@ def load_deal_context(run_id: str) -> DealContext:
 
         # `negotiate`-style log start carries seller_url + listing id.
         if ev_type == "run_started":
+            _capture_publisher_principals(ev)
             if ev.get("seller_url"):
                 seller_url = ev["seller_url"]
             if ev.get("listing_id"):
@@ -165,12 +271,18 @@ def load_deal_context(run_id: str) -> DealContext:
                     pass
 
     missing = [
-        name for name, v in (
+        name
+        for name, v in (
+            ("publisher_principals", publisher_principals),
+            ("publisher_id", publisher_id),
+            ("source_registry_url", source_registry_url),
+            ("source_registry_authority", source_registry_authority),
             ("seller_url", seller_url),
             ("listing_id", listing_id),
             ("negotiation_id", negotiation_id),
             ("agreed_amount", agreed_amount),
-        ) if not v
+        )
+        if not v
     ]
     if missing:
         raise typer.BadParameter(
@@ -178,30 +290,38 @@ def load_deal_context(run_id: str) -> DealContext:
             f"Last status was {last_status!r}. Recovery requires a "
             f"prior `agreed` outcome."
         )
+    publisher_principals = _refresh_publisher_trust(
+        run_id,
+        signer=signer,
+        listing_id=listing_id,  # type: ignore[arg-type]
+        recorded=publisher_principals,  # type: ignore[arg-type]
+        refresh=refresh_publisher_principals,
+        publisher_id=publisher_id,  # type: ignore[arg-type]
+        source_registry_url=source_registry_url,  # type: ignore[arg-type]
+        source_registry_authority=source_registry_authority,  # type: ignore[arg-type]
+    )
 
-    # Pre-plan logs carry only the flat terms; coerce them so consumers
-    # always see a plan. New logs carry the plan; keep the flat view in
-    # sync by deriving it from the plan's alkahest obligations.
+    # Pre-plan logs carry only the flat opaque terms; the generic carrier
+    # can preserve those payloads without decoding their mechanism schema.
     if settlement_plan is None and accepted_escrow_terms:
         from market_core.schemas import SettlementPlan
 
         settlement_plan = SettlementPlan.model_validate(
             accepted_escrow_terms
         ).model_dump()
-    elif settlement_plan is not None and not accepted_escrow_terms:
-        from market_alkahest.plans import escrow_terms_from_settlement_plan
-
-        accepted_escrow_terms = [
-            terms.model_dump()
-            for terms in escrow_terms_from_settlement_plan(settlement_plan)
-        ]
 
     return DealContext(
-        seller_url=seller_url,                # type: ignore[arg-type]
-        listing_id=listing_id,                # type: ignore[arg-type]
-        negotiation_id=negotiation_id,        # type: ignore[arg-type]
-        agreed_amount=agreed_amount,            # type: ignore[arg-type]
+        buyer_principal=buyer_principal,
+        publisher_principals=publisher_principals,  # type: ignore[arg-type]
+        publisher_id=publisher_id,  # type: ignore[arg-type]
+        source_registry_url=source_registry_url,  # type: ignore[arg-type]
+        source_registry_authority=source_registry_authority,  # type: ignore[arg-type]
+        seller_url=seller_url,  # type: ignore[arg-type]
+        listing_id=listing_id,  # type: ignore[arg-type]
+        negotiation_id=negotiation_id,  # type: ignore[arg-type]
+        agreed_amount=agreed_amount,  # type: ignore[arg-type]
         escrow_uid=escrow_uid,
+        settlement_ref=settlement_ref,
         duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,
         token_contract=token_contract,
@@ -213,109 +333,9 @@ def load_deal_context(run_id: str) -> DealContext:
     )
 
 
-@dataclass
-class ChainSettings:
-    """Buyer-side chain + token resolution result.
-
-    ``ssh_public_key`` is the domain's provisioning payload: the VM
-    domain resolves and requires one before settlement submission (its
-    shim wraps this resolver); durationless domains pass "".
-    """
-    buyer_address: str
-    buyer_private_key: str
-    ssh_public_key: str
-    rpc_url: str
-    chain_name: str
-    alkahest_addr_config: Optional[str]
-    token_contract: str
-    token_decimals: int
-
-
-def resolve_chain_settings(
-    *,
-    buyer_address: Optional[str],
-    buyer_private_key: Optional[str],
-    ssh_public_key: str = "",
-    chain: "ChainConfig",
-    token_contract: Optional[str],
-    token_decimals: Optional[int],
-) -> ChainSettings:
-    """Resolve wallet/token credentials around a pre-selected ChainConfig.
-
-    Callers pick the chain first — via :func:`select_chain_for_listing` (buy /
-    negotiate), :func:`chain_by_name` (escrow ops with --chain), or by
-    looking it up from the run-log (settle --from). This function only
-    validates the wallet credentials and resolves token decimals against
-    the chosen chain's RPC. ``ssh_public_key`` arrives already resolved
-    (the VM shim resolves and enforces it; other domains pass "").
-    """
-    from .buyer_config import resolve_buyer_wallet
-
-    addr, pk = resolve_buyer_wallet(
-        override_addr=buyer_address, override_pk=buyer_private_key,
-    )
-    ssh = ssh_public_key or ""
-
-    _key_for = {
-        "buyer_priv_key": "wallet.private_key",
-    }
-    missing = [n for n, v in (
-        ("buyer_priv_key", pk),
-    ) if not v]
-    if missing:
-        typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
-        for name in missing:
-            typer.secho(
-                f"  • {name} — set with: market config set {_key_for[name]} <value>",
-                err=True, fg=typer.colors.RED,
-            )
-        typer.secho(
-            "Run `market config init-user` to scaffold a config file with the full set of keys.",
-            err=True, fg=typer.colors.YELLOW,
-        )
-        raise typer.Exit(2)
-
-    tc = token_contract
-    decimals: Optional[int] = token_decimals
-    if not tc:
-        typer.secho(
-            "No --token-contract given and no token recorded on the run-log. "
-            "Pass --token-contract or resume from a run-log that captured the "
-            "negotiated token (`market buy` / `market negotiate` log it as "
-            "part of round 0).",
-            err=True, fg=typer.colors.RED,
-        )
-        raise typer.Exit(2)
-    if decimals is None:
-        from market_alkahest.token import TokenResolutionError, resolve_token
-        try:
-            meta = resolve_token(
-                tc, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
-            )
-            decimals = meta.decimals
-        except (TokenResolutionError, RuntimeError) as exc:
-            typer.secho(
-                f"Could not resolve token {tc} on chain {chain.name!r} — pass "
-                f"--token-decimals or check the chain's rpc_url. ({exc})",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-
-    return ChainSettings(
-        buyer_address=addr,
-        buyer_private_key=pk,
-        ssh_public_key=ssh,
-        rpc_url=chain.rpc_url,
-        chain_name=chain.name,
-        alkahest_addr_config=chain.alkahest_address_config_path,
-        token_contract=tc,
-        token_decimals=decimals,
-    )
-
-
-def open_run_log(run_id: str) -> RunLog:
-    """Append-only run log for the run we're recovering."""
-    return RunLog.open(run_id)
+def open_run_log(run_id: str, *, signer: Signer) -> RunLog:
+    """Append-only run log for the signer-bound run being recovered."""
+    return RunLog.open(run_id, signer=signer)
 
 
 @dataclass
@@ -327,10 +347,16 @@ class NegotiationResumePoint:
     ``resume=`` argument so we skip ``/negotiate/new`` and continue
     against the seller's existing thread.
     """
+
     seller_url: str
     listing_id: str
     negotiation_id: str
     transcript: list  # list[NegotiationRound] — typed downstream
+    buyer_principal: Identity
+    publisher_principals: TrustedIdentitySet
+    publisher_id: str
+    source_registry_url: str
+    source_registry_authority: str
     last_seller_proposal: Optional[dict]
     rounds_completed: int
     last_status: Optional[str]
@@ -340,13 +366,10 @@ class NegotiationResumePoint:
     policy: Optional[str] = None
 
 
-def is_negotiation_complete(run_id: str) -> bool:
-    """True iff the run-log already contains an `agreed` negotiation outcome.
+def is_negotiation_complete(run_id: str, *, signer: Signer) -> bool:
+    """Return whether the signer-bound log has an agreed negotiation outcome."""
 
-    Used by ``market buy --from`` to decide whether to resume the
-    negotiation round loop or jump straight to settlement.
-    """
-    for ev in read_run(run_id):
+    for ev in read_run(run_id, signer=signer):
         if ev.get("event") == "negotiation_completed" and ev.get("status") == "agreed":
             return True
         if ev.get("event") == "run_ended" and ev.get("status") == "agreed":
@@ -354,22 +377,25 @@ def is_negotiation_complete(run_id: str) -> bool:
     return False
 
 
-def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
-    """Reconstruct a partial negotiation from a prior run-log.
-
-    Reads ``negotiation_round`` events to rebuild the transcript and
-    pick the most recent seller counter proposal. Raises
-    ``typer.BadParameter`` if the log doesn't have enough state to
-    resume (no negotiation_id, no recorded rounds, etc.).
-    """
+def load_negotiation_resume_point(
+    run_id: str,
+    *,
+    signer: Signer,
+    refresh_publisher_principals: Callable[[str, str, str, str], TrustedIdentitySet],
+) -> NegotiationResumePoint:
+    """Reconstruct a partial negotiation for the principal owning the log."""
     from market_policy.negotiation_middleware import NegotiationRound
 
-    events = read_run(run_id)
+    events = read_run(run_id, signer=signer)
     if not events:
         raise typer.BadParameter(
-            f"No run-log found for run_id={run_id!r}. "
-            f"Check `market logs runs`."
+            f"No run-log found for run_id={run_id!r}. Check `market logs runs`."
         )
+    buyer_principal = Identity.model_validate(events[0]["buyer_principal"])
+    publisher_principals: Optional[TrustedIdentitySet] = None
+    publisher_id: Optional[str] = None
+    source_registry_url: Optional[str] = None
+    source_registry_authority: Optional[str] = None
 
     seller_url: Optional[str] = None
     listing_id: Optional[str] = None
@@ -381,7 +407,50 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
 
     policy: Optional[str] = None
     for ev in events:
+        for name in (
+            "publisher_id",
+            "source_registry_url",
+            "source_registry_authority",
+        ):
+            raw_binding = ev.get(name)
+            if raw_binding is None:
+                continue
+            normalized = (
+                str(raw_binding).rstrip("/")
+                if name == "source_registry_url"
+                else str(raw_binding)
+            )
+            existing = {
+                "publisher_id": publisher_id,
+                "source_registry_url": source_registry_url,
+                "source_registry_authority": source_registry_authority,
+            }[name]
+            if existing is not None and existing != normalized:
+                raise typer.BadParameter(f"Run-log {run_id!r} has conflicting {name}.")
+            if name == "publisher_id":
+                publisher_id = normalized
+            elif name == "source_registry_url":
+                source_registry_url = normalized
+            else:
+                source_registry_authority = normalized
         et = ev.get("event")
+        raw_publisher_principals = ev.get("publisher_principals")
+        if raw_publisher_principals is not None:
+            try:
+                candidate = _parse_publisher_trust(raw_publisher_principals)
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed publisher_principals."
+                ) from exc
+            if et != "publisher_trust_refreshed":
+                if (
+                    publisher_principals is not None
+                    and candidate != publisher_principals
+                ):
+                    raise typer.BadParameter(
+                        f"Run-log {run_id!r} has conflicting publisher principals."
+                    )
+            publisher_principals = candidate
         if et == "run_started":
             seller_url = ev.get("seller_url") or seller_url
             listing_id = ev.get("listing_id") or listing_id
@@ -399,20 +468,26 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
             rounds_completed = max(rounds_completed, round_idx + 1)
             our_action = our.get("action") or "initial"
             our_proposal = our.get("proposal")
-            transcript.append(NegotiationRound(
-                round_number=round_idx,
-                sender="us",
-                action=our_action,
-                proposal=our_proposal if isinstance(our_proposal, dict) else None,
-            ))
+            transcript.append(
+                NegotiationRound(
+                    round_number=round_idx,
+                    sender="us",
+                    action=our_action,
+                    proposal=our_proposal if isinstance(our_proposal, dict) else None,
+                )
+            )
             their_action = their.get("action") or "counter"
             their_proposal = their.get("proposal")
-            transcript.append(NegotiationRound(
-                round_number=round_idx,
-                sender="them",
-                action=their_action,
-                proposal=their_proposal if isinstance(their_proposal, dict) else None,
-            ))
+            transcript.append(
+                NegotiationRound(
+                    round_number=round_idx,
+                    sender="them",
+                    action=their_action,
+                    proposal=their_proposal
+                    if isinstance(their_proposal, dict)
+                    else None,
+                )
+            )
             if their_action == "counter" and isinstance(their_proposal, dict):
                 last_seller_proposal = their_proposal
         elif et == "negotiation_completed":
@@ -422,21 +497,44 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
             if ev.get("listing_id"):
                 listing_id = str(ev["listing_id"])
 
-    missing = [n for n, v in (
-        ("seller_url", seller_url),
-        ("listing_id", listing_id),
-        ("negotiation_id", negotiation_id),
-    ) if not v]
+    missing = [
+        n
+        for n, v in (
+            ("seller_url", seller_url),
+            ("publisher_principals", publisher_principals),
+            ("publisher_id", publisher_id),
+            ("source_registry_url", source_registry_url),
+            ("source_registry_authority", source_registry_authority),
+            ("listing_id", listing_id),
+            ("negotiation_id", negotiation_id),
+        )
+        if not v
+    ]
     if missing:
         raise typer.BadParameter(
             f"Run-log {run_id!r} is missing fields needed to resume: "
             f"{', '.join(missing)}. Last status was {last_status!r}."
         )
+    publisher_principals = _refresh_publisher_trust(
+        run_id,
+        signer=signer,
+        listing_id=listing_id,  # type: ignore[arg-type]
+        recorded=publisher_principals,  # type: ignore[arg-type]
+        refresh=refresh_publisher_principals,
+        publisher_id=publisher_id,  # type: ignore[arg-type]
+        source_registry_url=source_registry_url,  # type: ignore[arg-type]
+        source_registry_authority=source_registry_authority,  # type: ignore[arg-type]
+    )
 
     return NegotiationResumePoint(
-        seller_url=seller_url,                # type: ignore[arg-type]
-        listing_id=listing_id,                # type: ignore[arg-type]
-        negotiation_id=negotiation_id,        # type: ignore[arg-type]
+        seller_url=seller_url,  # type: ignore[arg-type]
+        listing_id=listing_id,  # type: ignore[arg-type]
+        negotiation_id=negotiation_id,  # type: ignore[arg-type]
+        buyer_principal=buyer_principal,
+        publisher_principals=publisher_principals,  # type: ignore[arg-type]
+        publisher_id=publisher_id,  # type: ignore[arg-type]
+        source_registry_url=source_registry_url,  # type: ignore[arg-type]
+        source_registry_authority=source_registry_authority,  # type: ignore[arg-type]
         transcript=transcript,
         last_seller_proposal=last_seller_proposal,
         rounds_completed=rounds_completed,

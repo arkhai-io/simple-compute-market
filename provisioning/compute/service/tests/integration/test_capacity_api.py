@@ -13,6 +13,17 @@ from httpx import ASGITransport, AsyncClient
 
 from market_site.ledger import ALLOCATION_MODE_EXCLUSIVE, ALLOCATION_MODE_SHAREABLE
 from compute_provisioning_service.main import app
+from market_site_client import SiteCapacityClient
+from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
+
+
+def _site_capacity_client(base_url: str, *, transport):
+    return SiteCapacityClient(
+        base_url,
+        STOREFRONT_SIGNER,
+        SERVICE_AUTHORITIES,
+        transport=transport,
+    )
 
 
 class CapacityApi:
@@ -364,7 +375,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         attributes={"vm_host": "kvm1", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
@@ -439,7 +450,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         attributes={"vm_host": "kvm1", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
@@ -476,7 +487,7 @@ async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
         attributes={"vm_host": "kvm1"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.resource_pool_projection()
     rows = data["resource_pools"]
     default_row = next(row for row in rows if row["resource_pool_id"] == "default")
@@ -497,7 +508,7 @@ async def test_site_capacity_projection_version_endpoints_through_the_real_clien
     from compute_provisioning_service.container import container
     from compute_provisioning_service.db.models import Host
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
 
     pool_version_before = await remote.resource_pool_projection_version()
     bucket_version_before = await remote.capacity_bucket_projection_version()
@@ -561,7 +572,7 @@ async def test_site_capacity_buckets_projection_through_the_real_client(
         attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
     )
 
-    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    remote = _site_capacity_client("http://test", transport=ASGITransport(app=app))
     data = await remote.capacity_bucket_projection()
     buckets = [
         b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"

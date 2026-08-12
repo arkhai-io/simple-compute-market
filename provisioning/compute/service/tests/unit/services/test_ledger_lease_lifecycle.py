@@ -14,16 +14,21 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from market_identity import Ed25519Signer, TrustedIdentitySet
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.models import Base
+from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
-from compute_provisioning_service.services.deal_event_sink import notify_storefront_capacity_released
+from compute_provisioning_service.services.deal_event_sink import (
+    StorefrontLifecycleEventSink,
+    notify_storefront_capacity_released,
+)
 from market_fulfillment import (
     FulfillmentBase,
     FulfillmentOrchestrator,
@@ -45,6 +50,15 @@ from bare_metal_provisioning_adapter.release import (
     BARE_METAL_EXECUTOR_KIND,
     BareMetalReleaseExecutor,
     bare_metal_executor_ref,
+)
+
+_SERVICE_SIGNER = Ed25519Signer(b"\x11" * 32)
+_STOREFRONT_SIGNER = Ed25519Signer(b"\x12" * 32)
+_IDENTITY = ProvisioningIdentityContext(
+    signer=_SERVICE_SIGNER,
+    storefront_principal=_STOREFRONT_SIGNER.identity,
+    admin_principal=Ed25519Signer(b"\x13" * 32).identity,
+    storefront_site_id="default",
 )
 
 
@@ -154,7 +168,7 @@ def _settings(**overrides):
     s = MagicMock()
     s.lease_watchdog_grace_period_seconds = 300
     s.storefront_url = "http://storefront:8001"
-    s.storefront_admin_key = "admin-key"
+    s.storefront_site_id = "default"
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -205,13 +219,26 @@ def _lifecycle(
         default_executor_kind=VM_EXECUTOR_KIND,
     )
     settings = _settings(**settings_overrides)
+    principal_authority = MagicMock()
+    principal_authority.active_principals.return_value = TrustedIdentitySet(
+        identities=(_STOREFRONT_SIGNER.identity,)
+    )
+    event_sink = StorefrontLifecycleEventSink(
+        settings,
+        _IDENTITY,
+        principal_authority,
+    )
     return LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
         executor_release=executor_release,
         release_jobs=release_jobs,
         capacity_released_notifier=(
-            lambda reservation: notify_storefront_capacity_released(settings, reservation)
+            lambda reservation: notify_storefront_capacity_released(
+                settings,
+                reservation,
+                sink=event_sink,
+            )
         ),
     )
 
@@ -299,13 +326,19 @@ async def test_expired_ledger_lease_releases_locally_and_notifies(
     assert released["state"] == "released"
     assert ledger.snapshot()[0]["available_units"] == 8
 
-    # Deal event went to the owning storefront; the legacy PATCH did not.
     client_cls.assert_called_once_with(
-        base_url="http://storefront:8001", admin_key="admin-key",
+        base_url="http://storefront:8001",
+        signer=_SERVICE_SIGNER,
+        caller_role="service",
+        expected_publishers=TrustedIdentitySet(
+            identities=(_STOREFRONT_SIGNER.identity,)
+        ),
     )
     sf.notify_capacity_released.assert_awaited_once()
     args, kwargs = sf.notify_capacity_released.await_args
     assert args == (capacity_reservation_id,)
+    assert kwargs["site_id"] == "default"
+    assert kwargs["request_id"].startswith("capacity-release-")
     assert "resource_id" not in kwargs
     sf.patch_resource.assert_not_awaited()
 

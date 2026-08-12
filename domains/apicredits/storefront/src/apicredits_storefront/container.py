@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         SettlementServicingWorker,
         SettlementSQLiteRepository,
     )
+    from market_identity import Signer
 
     from apicredits_storefront.services.listing_service import ListingService
     from apicredits_storefront.services.system_service import SystemService
@@ -34,6 +35,7 @@ resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None
 resolved_system_service: "SystemService | None" = None
+resolved_marketplace_signer: "Signer | None" = None
 
 
 def get_alkahest_client(chain_name: str) -> Optional[Any]:

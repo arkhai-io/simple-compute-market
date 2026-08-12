@@ -29,16 +29,32 @@ from .listing_cli import listing_app
 
 def register(app: typer.Typer) -> None:
     """Register the VM compute schema's buyer commands on the core app."""
-    app.add_typer(listing_app, name="listing", help="Browse marketplace listings (list/show).")
+    app.add_typer(
+        listing_app, name="listing", help="Browse marketplace listings (list/show)."
+    )
     app.add_typer(
         config_app,
         name="config",
         help="Inspect or edit the buyer.toml (path/show/get/set/init-user).",
     )
-    app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
-    app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (create, reclaim).")
-    app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
-    app.add_typer(chain_app, name="chain", help="Sanity-check chain config (eth_getCode against configured addresses).")
+    app.add_typer(
+        logs_app,
+        name="logs",
+        help="Inspect past buy/negotiate runs (run-log JSONL files).",
+    )
+    app.add_typer(
+        escrow_app, name="escrow", help="Buyer-side escrow lifecycle (create, reclaim)."
+    )
+    app.add_typer(
+        network_app,
+        name="network",
+        help="Join the operator's ZeroTier network and list peers.",
+    )
+    app.add_typer(
+        chain_app,
+        name="chain",
+        help="Sanity-check chain config (eth_getCode against configured addresses).",
+    )
 
     buy_module.register(app)
     negotiate_module.register(app)
@@ -52,9 +68,7 @@ def _buyer_market_domain() -> MarketDomainContract:
 
     return replace(
         base,
-        declared_capabilities=(
-            base.declared_capabilities | {DomainCapability.BUYER}
-        ),
+        declared_capabilities=(base.declared_capabilities | {DomainCapability.BUYER}),
         buyer=ImmutableBuyerCapability(
             register_commands=register,
             build_provision_terms=make_vm_provision_terms,

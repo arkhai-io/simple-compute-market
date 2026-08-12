@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "integrationTests": {"$ref": "#/definitions/image"},
+        "registryIdentity": {"$ref": "#/definitions/activeRegistryIdentity"},
+        "provisioningIdentity": {"$ref": "#/definitions/publicIdentity"},
+        "rpc": {
+          "type": "object",
+          "required": ["enabled", "chainId", "host", "port"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "chainId": {"type": "integer", "minimum": 1},
+            "host": {"type": "string", "minLength": 1},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "required": ["identity"],
+      "properties": {
+        "image": {"$ref": "#/definitions/image"},
+        "identity": {"$ref": "#/definitions/identity"}
+      }
+    },
+    "storefront": {
+      "type": "object",
+      "properties": {
+        "image": {"$ref": "#/definitions/image"},
+        "agents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/definitions/storefrontAgent"}
+        }
+      }
+    },
+    "provisioning": {
+      "type": "object",
+      "required": ["identity", "storefrontIdentity", "adminIdentity"],
+      "properties": {
+        "server": {
+          "type": "object",
+          "properties": {
+            "image": {"$ref": "#/definitions/image"}
+          }
+        },
+        "identity": {"$ref": "#/definitions/identity"},
+        "storefrontIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
+        "adminIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
+        "sshKey": {"$ref": "#/definitions/externalSecretReference"},
+        "sshDecryptionKey": {"$ref": "#/definitions/externalSecretReference"},
+        "config": {
+          "type": "object",
+          "properties": {
+            "golden_root_ssh_password": false,
+            "frp_dashboard_password": false,
+            "ssh_decryption_key": false,
+            "inventory_ini": false,
+            "storefront_admin_key": false
+          }
+        },
+        "storefront": {
+          "type": "object",
+          "properties": {
+            "adminKey": false
+          }
+        },
+        "inventory": false
+      }
+    },
+    "integrationTests": {
+      "type": "object",
+      "properties": {
+        "image": {"$ref": "#/definitions/image"}
+      }
+    },
+    "e2e-tests": {
+      "type": "object",
+      "properties": {
+        "integrationTests": {"$ref": "#/definitions/image"},
+        "createSecret": {"const": false},
+        "secretName": {"type": "string", "minLength": 1},
+        "seller": {"$ref": "#/definitions/publicEip191Principal"},
+        "buyer": {"$ref": "#/definitions/publicEip191Principal"}
+      }
+    }
+  },
+  "definitions": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {"const": ""},
+            {"pattern": "^sha256:[0-9a-f]{64}$"}
+          ]
+        }
+      }
+    },
+    "externalSecretReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createSecret", "secretName"],
+      "properties": {
+        "createSecret": {"const": false},
+        "secretName": {"type": "string", "minLength": 1},
+        "sshPrivateKey": false,
+        "privateKey": false,
+        "key": false
+      }
+    },
+    "credentialSecret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "minLength": 1}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal", "credentialSecret"],
+      "properties": {
+        "authority": {"type": "string", "minLength": 1},
+        "principal": {"$ref": "#/definitions/publicIdentity"},
+        "credentialSecret": {"$ref": "#/definitions/credentialSecret"},
+        "servicePeers": {"$ref": "#/definitions/servicePeers"},
+        "administrators": {"$ref": "#/definitions/administrators"}
+      }
+    },
+    "publicIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "identifier"],
+      "properties": {
+        "scheme": {"enum": ["ed25519", "eip191"]},
+        "identifier": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"scheme": {"const": "eip191"}}},
+          "then": {"properties": {"identifier": {"pattern": "^0x[0-9a-f]{40}$"}}}
+        },
+        {
+          "if": {"properties": {"scheme": {"const": "ed25519"}}},
+          "then": {"properties": {"identifier": {"pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"}}}
+        }
+      ]
+    },
+    "trustedIdentitySet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principals"],
+      "properties": {
+        "principals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/publicIdentity"}
+        }
+      }
+    },
+    "activeRegistryIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "principal"],
+      "properties": {
+        "authority": {"type": "string", "minLength": 1},
+        "principal": {"$ref": "#/definitions/publicIdentity"}
+      }
+    },
+    "registryAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "principals"],
+      "properties": {
+        "authority": {"type": "string", "minLength": 1},
+        "principals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"$ref": "#/definitions/publicIdentity"}
+        }
+      }
+    },
+    "servicePeers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "siteId", "principals"],
+        "properties": {
+          "role": {"const": "service"},
+          "siteId": {"type": "string", "minLength": 1},
+          "principals": {"$ref": "#/definitions/trustedIdentitySet/properties/principals"}
+        }
+      }
+    },
+    "administrators": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["principals"],
+        "properties": {
+          "principals": {"$ref": "#/definitions/trustedIdentitySet/properties/principals"}
+        }
+      }
+    },
+    "hostedSettlement": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "contractVersion": {"const": "0.1.0"},
+        "expectedSchemaVersion": {"const": 4},
+        "expectedManifestDigest": {"pattern": "^(sha256:)?[0-9a-f]{64}$"},
+        "expectedAuthority": {"$ref": "#/definitions/trustedIdentitySet"},
+        "requiredCapabilities": {
+          "type": "array",
+          "allOf": [
+            {"contains": {"const": "scheme-tagged-identities.v1"}},
+            { "contains": { "const": "account-owner-retirement.v1" } },
+            {"contains": {"const": "account-owner-admission.v1"}},
+            {"contains": {"const": "account-owner-rotation.v1"}},
+            {"contains": {"const": "signer-injected-client.v1"}},
+            {"contains": {"const": "provider-neutral-seller-onboarding.v1"}}
+          ]
+        }
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {
+        "required": ["contractVersion", "expectedSchemaVersion", "expectedManifestDigest", "expectedAuthority", "requiredCapabilities"]
+      }
+    },
+    "storefrontAgent": {
+      "type": "object",
+      "required": ["name", "identity"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "identity": {"$ref": "#/definitions/identity"},
+        "secret": {
+          "type": "object",
+          "properties": {
+            "createSecret": {"const": false},
+            "secretName": {"type": "string"},
+            "configKey": {"type": "string", "minLength": 1},
+            "privKey": false,
+            "privateKey": false,
+            "hostedSettlementRequestCredential": false
+          }
+        },
+        "config": {
+          "type": "object",
+          "required": ["registryAuthority"],
+          "properties": {
+            "chain": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {"name": {"type": "string", "minLength": 1}}
+            },
+            "registryAuthority": {"$ref": "#/definitions/registryAuthority"},
+            "hostedSettlement": {"$ref": "#/definitions/hostedSettlement"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["config"],
+            "properties": {
+              "config": {"required": ["chain"]}
+            }
+          },
+          "then": {
+            "required": ["secret"],
+            "properties": {
+              "secret": {
+                "required": ["createSecret", "secretName"],
+                "properties": {
+                  "createSecret": {"const": false},
+                  "secretName": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "publicEip191Principal": {
+      "type": "object",
+      "properties": {
+        "privateKey": false,
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scheme", "identifier"],
+          "properties": {
+            "scheme": {"const": "eip191"},
+            "identifier": {"pattern": "^0x[0-9a-f]{40}$"}
+          }
+        }
+      }
+    }
+  }
+}

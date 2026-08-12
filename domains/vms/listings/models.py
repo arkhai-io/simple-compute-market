@@ -12,6 +12,7 @@ from pydantic import (
 from market_alkahest.schemas import AcceptedEscrow, EscrowDemand
 
 from market_alkahest.token import ERC20TokenMetadata
+from market_identity import Identity
 
 # =============================================================================
 # Domain Model Class Hierarchy
@@ -529,7 +530,12 @@ class Listing(BaseModel):
     """Marketplace listing for trading compute resources and tokens."""
 
     listing_id: str = Field(description="The id of the listing")
-    seller: str = Field(description="The card URL of the agent that posted the listing")
+    storefront_url: str = Field(
+        description="The public URL of the storefront that posted the listing"
+    )
+    seller_principal: Identity = Field(
+        description="Canonical marketplace principal that owns the listing"
+    )
     buyer: str | None = Field(
         default="",
         description="The card URL of the agent that took the listing",

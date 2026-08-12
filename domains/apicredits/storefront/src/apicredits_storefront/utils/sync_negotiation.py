@@ -45,6 +45,7 @@ from market_policy.scalar_policies import _amount_from_proposal
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_core.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationRound
+from market_identity import Identity
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,8 @@ def _normalize_api_credits_message_terms(provision_terms: Any) -> Any | None:
 
 def _accepted_escrow_artifacts(
     *,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     proposal: EscrowProposal | dict[str, Any] | None,
     agreed_amount: int,
     uses_scalar_amount: bool = True,
@@ -147,6 +150,12 @@ def _accepted_escrow_artifacts(
     error = artifacts.pop("accepted_escrow_terms_error", None)
     if error:
         logger.debug("Could not materialize accepted escrow terms: %s", error)
+    plan = artifacts.get("settlement_plan")
+    if isinstance(plan, dict):
+        for obligation in plan.get("obligations") or []:
+            if isinstance(obligation, dict):
+                obligation["payer_principal"] = buyer_principal.model_dump(mode="json")
+                obligation["claimant_principal"] = seller_principal.model_dump(mode="json")
     return artifacts
 
 
@@ -228,7 +237,8 @@ async def start_sync_negotiation(
     *,
     sqlite_client: Any,
     our_listing_id: str,
-    buyer_address: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     proposal: EscrowProposal | None = None,
     provision_terms: Any = None,
     our_base_url: str,
@@ -283,7 +293,7 @@ async def start_sync_negotiation(
             requested_quantity=quantity,
             key_mode=key_mode,
             key_id=key_id,
-            buyer_wallet=buyer_address,
+            buyer_principal=buyer_principal,
         )
     except ValueError as exc:
         if "price-less" in str(exc) or "default_min_price" in str(exc):
@@ -321,6 +331,8 @@ async def start_sync_negotiation(
         their_listing_id="",
         our_agent_id=our_base_url,
         their_agent_id=their_agent_url,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
         our_initial_amount=our_amount,
         our_strategy=strategy,
         requested_duration_seconds=None,
@@ -328,7 +340,12 @@ async def start_sync_negotiation(
         buyer_escrow_proposal=(
             accepted_proposal.model_dump() if accepted_proposal is not None else None
         ),
-        opening_sender=their_agent_url or buyer_address,
+        provision_terms=(
+            normalized_terms.model_dump(mode="json")
+            if normalized_terms is not None
+            else None
+        ),
+        opening_sender_principal=buyer_principal,
         opening_amount=their_amount,
     )
     # What is being bought — fixed at round 0, read back at settlement.
@@ -341,6 +358,7 @@ async def start_sync_negotiation(
         )
 
     await _record_seller_decision(
+        seller_principal=seller_principal,
         neg_id=neg_id,
         our_amount=our_amount,
         their_amount=their_amount,
@@ -381,6 +399,8 @@ async def start_sync_negotiation(
         )
     if accepted_proposal is not None:
         artifacts = _accepted_escrow_artifacts(
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
             proposal=accepted_proposal,
             agreed_amount=int(
                 agreed_amount if decision.action == "accept" else our_amount
@@ -401,7 +421,8 @@ async def continue_sync_negotiation(
     buyer_action: str,
     buyer_proposal: dict[str, Any] | None,
     buyer_reason: str | None,
-    buyer_address: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     seller_round_hook: ApiCreditsSellerRoundHook | None = None,
 ) -> dict[str, Any]:
     """Drive one further round against an existing thread."""
@@ -415,6 +436,10 @@ async def continue_sync_negotiation(
             f"Negotiation {neg_id} is already in terminal state "
             f"{thread.get('terminal_state')!r}",
         )
+    if Identity.model_validate(thread.get("buyer_principal")) != buyer_principal:
+        raise ValueError(f"Negotiation {neg_id} buyer principal mismatch")
+    if Identity.model_validate(thread.get("seller_principal")) != seller_principal:
+        raise ValueError(f"Negotiation {neg_id} seller principal mismatch")
 
     our_listing_id = thread.get("our_listing_id")
     our_order_dict = (
@@ -452,13 +477,14 @@ async def continue_sync_negotiation(
                 int(_Decimal(str(m["proposed_price"])))
                 for m in reversed(messages)
                 if m.get("action_taken") == "counter_offer"
-                and m.get("sender") != buyer_address
+                and m.get("sender_principal")
+                != buyer_principal.model_dump(mode="json")
             ),
             our_amount,
         )
         await _record_buyer_accept_message(
             negotiation_id=neg_id,
-            sender=buyer_address,
+            sender_principal=buyer_principal,
             our_amount=our_amount,
             accepted_amount=last_seller_amount,
         )
@@ -484,6 +510,8 @@ async def continue_sync_negotiation(
         response: dict[str, Any] = {"action": "accept"}
         response.update(
             _accepted_escrow_artifacts(
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
                 proposal=buyer_pinned_proposal,
                 agreed_amount=int(last_seller_amount),
                 uses_scalar_amount=uses_scalar_amount,
@@ -494,7 +522,7 @@ async def continue_sync_negotiation(
     if buyer_action == "exit":
         await _record_buyer_exit_message(
             negotiation_id=neg_id,
-            sender=buyer_address,
+            sender_principal=buyer_principal,
             our_amount=our_amount,
         )
         stage_event(
@@ -508,9 +536,7 @@ async def continue_sync_negotiation(
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
 
-    from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
-
-    our_sender = BASE_URL_OVERRIDE or "seller"
+    our_sender = seller_principal
     history = _history_from_messages(
         messages,
         our_sender,
@@ -531,7 +557,7 @@ async def continue_sync_negotiation(
         requested_quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,
-        buyer_wallet=buyer_address,
+        buyer_principal=buyer_principal,
         strategy_label=strategy,
     )
     policy_intermediate = round_result.intermediate or {}
@@ -548,12 +574,13 @@ async def continue_sync_negotiation(
     our_amount = round_result.our_amount
     await _record_buyer_counter_message(
         negotiation_id=neg_id,
-        sender=buyer_address,
+        sender_principal=buyer_principal,
         our_amount=our_amount,
         counter_amount=buyer_amount,
     )
     decision = round_result.decision
     await _record_seller_decision(
+        seller_principal=seller_principal,
         neg_id=neg_id,
         our_amount=our_amount,
         their_amount=buyer_amount,
@@ -589,6 +616,8 @@ async def continue_sync_negotiation(
     if decision.action == "accept":
         response.update(
             _accepted_escrow_artifacts(
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
                 proposal=buyer_pinned_proposal,
                 agreed_amount=(
                     int(decision_amount)
@@ -604,17 +633,15 @@ async def continue_sync_negotiation(
 async def _record_seller_decision(
     *,
     neg_id: str,
+    seller_principal: Identity,
     our_amount: int,
     their_amount: int,
     decision: Any,
 ) -> None:
-    from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
-
-    sender = BASE_URL_OVERRIDE or "seller"
     decision_amount = _amount_from_proposal(decision.proposal)
     await _record_seller_decision_message(
         negotiation_id=neg_id,
-        sender=sender,
+        sender_principal=seller_principal,
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,

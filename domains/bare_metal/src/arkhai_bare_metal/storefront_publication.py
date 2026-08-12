@@ -245,7 +245,6 @@ def reopen_derived_bare_metal_listing_if_present(
     accepted_escrows: list[dict[str, Any]],
     demands: list[dict[str, Any]],
     max_duration_seconds: int | None,
-    private_key: str | None,
     publish_existing_listing: Any,
 ) -> dict[str, Any] | None:
     """Reopen a tracked listing through caller-supplied publication."""
@@ -267,7 +266,7 @@ def reopen_derived_bare_metal_listing_if_present(
             SET status = 'open', paused = 0,
                 updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'),
                 offer_resource = ?, accepted_escrows = ?, demands = ?,
-                max_duration_seconds = ?, seller = ?
+                max_duration_seconds = ?, storefront_url = ?
             WHERE listing_id = ?
             """,
             (
@@ -296,7 +295,6 @@ def reopen_derived_bare_metal_listing_if_present(
         demands=demands,
         max_duration_seconds=max_duration_seconds,
         storefront_url=base_url,
-        private_key=private_key,
     )
 
 

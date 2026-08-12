@@ -1,8 +1,16 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from market_identity import Identity, create_signer
 from src.api.routes import router
+from src.api.publisher_auth import (
+    complete_authenticated_error,
+    registry_authority_signer,
+    signed_response,
+)
 from src.config import settings
 from src.db.database import init_db
 
@@ -25,6 +33,26 @@ async def lifespan(app: FastAPI):
     logger.info("Starting listing registry service...")
 
     init_db()
+    if not (
+        settings.registry_authority_id
+        and settings.registry_authority_scheme
+        and settings.registry_authority_identifier
+        and settings.registry_authority_credential_file
+    ):
+        raise RuntimeError("registry authority principal and credential file are required")
+    expected_registry = Identity(
+        scheme=settings.registry_authority_scheme,
+        identifier=settings.registry_authority_identifier,
+    )
+    credential = Path(
+        settings.registry_authority_credential_file
+    ).read_text(encoding="utf-8").strip()
+    registry_signer = create_signer(expected_registry.scheme, credential)
+    if registry_signer.identity != expected_registry:
+        raise RuntimeError(
+            "registry authority credential does not match configured principal"
+        )
+    app.state.registry_authority_signer = registry_signer
     logger.info("Database initialized")
 
     # Bootstrap a single API key from env if configured AND the table
@@ -61,10 +89,37 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Listing Registry",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     root_path=settings.root_path,
 )
+
+
+@app.exception_handler(HTTPException)
+async def authenticated_http_error(request: Request, error: HTTPException):
+    authenticated = getattr(
+        request.state,
+        "authenticated_registry_request",
+        None,
+    )
+    if authenticated is None:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": error.detail},
+            headers=error.headers,
+        )
+    db = request.state.authenticated_registry_db
+    complete_authenticated_error(
+        authenticated=authenticated,
+        db=db,
+        error=error,
+    )
+    return signed_response(
+        authenticated=authenticated,
+        signer=registry_authority_signer(request),
+        status=error.status_code,
+        body={"detail": error.detail},
+    )
 
 # Add CORS middleware
 app.add_middleware(

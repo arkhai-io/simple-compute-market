@@ -7,11 +7,11 @@ being pushed back as a separate message.
 Shape:
 
     POST /negotiate/new
-      {listing_id, buyer_address, provision_terms, proposal}
+      {listing_id, buyer_principal, provision_terms, proposal}
       → {neg_id, action: "counter"|"accept"|"exit"|"reject", proposal?, reason?}
 
     POST /negotiate/{neg_id}
-      {action: "counter"|"accept"|"exit", proposal?, reason?, buyer_address}
+      {action: "counter"|"accept"|"exit", proposal?, reason?, buyer_principal}
       → {action, proposal?, reason?}
 
 `action` in the request is what the buyer is proposing *in this round*.
@@ -35,7 +35,7 @@ import json
 import logging
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
 from core_storefront.negotiation_sync import (
@@ -78,6 +78,7 @@ from market_core.schemas import (
     SettlementPlan,
     SettlementSelection,
 )
+from market_identity import Identity
 from market_policy.negotiation_middleware import (
     NegotiationDecision,
     NegotiationRound,
@@ -227,6 +228,8 @@ def _accepted_escrow_artifacts(
     proposal: EscrowProposal | dict[str, Any] | None,
     agreed_amount: int,
     duration_seconds: int,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     uses_scalar_amount: bool = True,
 ) -> dict[str, Any]:
     from market_storefront.utils.config import settings as _settings
@@ -242,10 +245,47 @@ def _accepted_escrow_artifacts(
             getattr(_settings, "heartbeat_interval_seconds", 60)
         ),
     )
+    plan = artifacts.get("settlement_plan")
+    if isinstance(plan, dict):
+        for obligation in plan.get("obligations") or []:
+            if not isinstance(obligation, dict):
+                continue
+            payer = (
+                buyer_principal
+                if obligation.get("payer") == "buyer"
+                else seller_principal
+            )
+            claimant = (
+                buyer_principal
+                if obligation.get("claimant") == "buyer"
+                else seller_principal
+            )
+            obligation["payer_principal"] = payer.model_dump(mode="json")
+            obligation["claimant_principal"] = claimant.model_dump(mode="json")
+        plan["buyer_principal"] = buyer_principal.model_dump(mode="json")
+        plan["seller_principal"] = seller_principal.model_dump(mode="json")
     error = artifacts.pop("accepted_escrow_terms_error", None)
     if error:
         logger.debug("Could not materialize accepted escrow terms: %s", error)
     return artifacts
+
+
+def _decision_wire(decision: Any) -> dict[str, Any]:
+    """Serialize scalar proposal amounts as uint256-safe decimal strings."""
+
+    payload = decision.to_dict()
+    proposal = payload.get("proposal")
+    if not isinstance(proposal, dict):
+        return payload
+    fields = proposal.get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("amount"), int):
+        return payload
+    proposal = dict(proposal)
+    proposal_fields = dict(fields)
+    proposal_fields["amount"] = str(proposal_fields["amount"])
+    proposal["fields"] = proposal_fields
+    payload["proposal"] = proposal
+    return payload
 
 
 def _accepted_hosted_artifacts(
@@ -253,7 +293,8 @@ def _accepted_hosted_artifacts(
     selection: dict[str, Any],
     option: dict[str, Any],
     agreed_amount: int,
-    buyer_address: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
 ) -> dict[str, Any]:
     if agreed_amount < 1:
         raise OfferUnfulfillableError("hosted_amount_below_one_minor_unit")
@@ -262,22 +303,22 @@ def _accepted_hosted_artifacts(
         "option_id"
     ) or accepted.mechanism != option.get("mechanism"):
         raise OfferUnfulfillableError("settlement_selection_not_exact")
-    from market_storefront.utils.config import settings
-
-    claimant_address = str(settings.wallet.address or "")
-    if not claimant_address:
-        raise OfferUnfulfillableError("seller_wallet_address_unavailable")
     params = dict(option.get("params") or {})
     condition = params.get("condition")
     if not isinstance(condition, dict):
         raise OfferUnfulfillableError("hosted_condition_unavailable")
-    params["payer_address"] = buyer_address
-    params["claimant_address"] = claimant_address
+    advertised_claimant = Identity.model_validate(params.get("claimant_principal"))
+    if advertised_claimant != seller_principal:
+        raise OfferUnfulfillableError("hosted_claimant_principal_mismatch")
+    params["payer_principal"] = buyer_principal.model_dump(mode="json")
+    params["claimant_principal"] = seller_principal.model_dump(mode="json")
     plan = SettlementPlan(
         obligations=[
             SettlementObligation(
                 payer="buyer",
                 claimant="seller",
+                payer_principal=buyer_principal,
+                claimant_principal=seller_principal,
                 amount=agreed_amount,
                 asset=str(option.get("asset") or ""),
                 expiration_unix=accepted.expiration_unix,
@@ -287,9 +328,17 @@ def _accepted_hosted_artifacts(
             )
         ]
     )
+    plan_payload = plan.model_dump()
+    payer_value = buyer_principal.model_dump(mode="json")
+    claimant_value = seller_principal.model_dump(mode="json")
+    obligation = plan_payload["obligations"][0]
+    obligation["payer_principal"] = payer_value
+    obligation["claimant_principal"] = claimant_value
+    plan_payload["buyer_principal"] = payer_value
+    plan_payload["seller_principal"] = claimant_value
     return {
         "settlement_selection": accepted.model_dump(),
-        "settlement_plan": plan.model_dump(),
+        "settlement_plan": plan_payload,
     }
 
 
@@ -300,7 +349,8 @@ def _accepted_settlement_artifacts(
     agreed_amount: int,
     duration_seconds: int,
     uses_scalar_amount: bool,
-    buyer_address: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
 ) -> dict[str, Any]:
     proposal_dict = (
         proposal.model_dump() if isinstance(proposal, EscrowProposal) else proposal
@@ -330,13 +380,16 @@ def _accepted_settlement_artifacts(
             selection=selection.model_dump(),
             option=option,
             agreed_amount=agreed_amount,
-            buyer_address=buyer_address,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
     return _accepted_escrow_artifacts(
         proposal=proposal,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
     )
 
 
@@ -562,7 +615,8 @@ async def start_sync_negotiation(
     *,
     sqlite_client: Any,
     our_listing_id: str,
-    buyer_address: str,
+    buyer_principal: Identity,
+    seller_principal: Identity,
     proposal: EscrowProposal | dict[str, Any] | None = None,
     provision_terms: Any = None,
     our_base_url: str,
@@ -702,6 +756,8 @@ async def start_sync_negotiation(
         their_listing_id="",  # buyer has no listing; column kept for symmetry
         our_agent_id=our_base_url,
         their_agent_id=their_agent_url,
+        buyer_principal=buyer_principal,
+        seller_principal=seller_principal,
         our_initial_amount=our_amount,
         our_strategy=strategy,
         requested_duration_seconds=requested_duration_seconds,
@@ -716,7 +772,7 @@ async def start_sync_negotiation(
             if vm_message_terms is not None
             else None
         ),
-        opening_sender=their_agent_url or buyer_address,
+        opening_sender_principal=buyer_principal,
         opening_amount=their_amount,
     )
 
@@ -725,6 +781,7 @@ async def start_sync_negotiation(
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,
+        seller_principal=seller_principal,
     )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
@@ -759,7 +816,12 @@ async def start_sync_negotiation(
         decision_amount=int(decision_amount) if decision_amount is not None else None,
         decision_reason=decision.reason,
     )
-    response: dict[str, Any] = {"negotiation_id": neg_id, **decision.to_dict()}
+    response: dict[str, Any] = {
+        "negotiation_id": neg_id,
+        "buyer_principal": buyer_principal.model_dump(mode="json"),
+        "seller_principal": seller_principal.model_dump(mode="json"),
+        **_decision_wire(decision),
+    }
     if provision_terms is not None:
         response["accepted_provision_terms"] = provision_terms.model_dump()
     if accepted_proposal is not None:
@@ -778,6 +840,8 @@ async def start_sync_negotiation(
                 )
             ),
             uses_scalar_amount=uses_scalar_amount,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
         if decision.action == "accept":
             response.update(artifacts)
@@ -790,7 +854,8 @@ async def start_sync_negotiation(
             agreed_amount=int(
                 agreed_amount if decision.action == "accept" else our_amount
             ),
-            buyer_address=buyer_address,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
         response["settlement_selection"] = artifacts["settlement_selection"]
         if decision.action == "accept":
@@ -798,6 +863,8 @@ async def start_sync_negotiation(
             await sqlite_client.commit_settlement_plan(
                 negotiation_id=neg_id,
                 settlement_plan=artifacts["settlement_plan"],
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
             )
     return response
 
@@ -809,7 +876,9 @@ async def continue_sync_negotiation(
     buyer_action: str,
     buyer_proposal: dict[str, Any] | None,
     buyer_reason: str | None,
-    buyer_address: str,
+    buyer_principal: Identity | dict[str, Any],
+    actor_principal: Identity,
+    seller_principal: Identity | dict[str, Any] | None = None,
     seller_round_hook: SellerRoundHook | None = None,
 ) -> dict[str, Any]:
     """Drive one further round against an existing thread.
@@ -833,6 +902,20 @@ async def continue_sync_negotiation(
             f"Negotiation {neg_id} is already in terminal state "
             f"{thread.get('terminal_state')!r}",
         )
+    stored_buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
+    stored_seller_principal = Identity.model_validate(thread.get("seller_principal"))
+    expected_buyer = Identity.model_validate(buyer_principal)
+    if expected_buyer != stored_buyer_principal:
+        raise ValueError("buyer principal does not own this negotiation")
+    buyer_principal = stored_buyer_principal
+    if seller_principal is not None:
+        expected_seller = Identity.model_validate(seller_principal)
+        if expected_seller != stored_seller_principal:
+            raise ValueError("seller principal does not own this negotiation")
+    message_role: Literal["buyer", "admin"] = (
+        "buyer" if actor_principal == buyer_principal else "admin"
+    )
+    seller_principal = stored_seller_principal
 
     our_listing_id = thread.get("our_listing_id")
     our_order_dict = (
@@ -865,7 +948,7 @@ async def continue_sync_negotiation(
         for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
-        and m.get("sender") != buyer_address
+        and m.get("sender_principal") == seller_principal.model_dump(mode="json")
     ]
 
     # Buyer-declared action short-circuits (accept / exit). No policy call.
@@ -875,13 +958,15 @@ async def continue_sync_negotiation(
                 int(Decimal(str(m["proposed_price"])))
                 for m in reversed(messages)
                 if m.get("action_taken") == "counter_offer"
-                and m.get("sender") != buyer_address
+                and m.get("sender_principal")
+                == seller_principal.model_dump(mode="json")
             ),
             our_amount,
         )
         await _record_buyer_accept_message(
             negotiation_id=neg_id,
-            sender=buyer_address,
+            sender_principal=actor_principal,
+            sender_role=message_role,
             our_amount=our_amount,
             accepted_amount=last_seller_amount,
         )
@@ -913,6 +998,8 @@ async def continue_sync_negotiation(
         )
         response = {
             "action": "accept",
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "seller_principal": seller_principal.model_dump(mode="json"),
         }
         artifacts = _accepted_settlement_artifacts(
             proposal=buyer_pinned_proposal,
@@ -920,7 +1007,8 @@ async def continue_sync_negotiation(
             agreed_amount=int(last_seller_amount),
             duration_seconds=int(agreed_duration_seconds),
             uses_scalar_amount=uses_scalar_amount,
-            buyer_address=buyer_address,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
         response.update(artifacts)
         settlement_plan = artifacts.get("settlement_plan")
@@ -928,13 +1016,16 @@ async def continue_sync_negotiation(
             await sqlite_client.commit_settlement_plan(
                 negotiation_id=neg_id,
                 settlement_plan=settlement_plan,
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
             )
         return response
 
     if buyer_action == "exit":
         await _record_buyer_exit_message(
             negotiation_id=neg_id,
-            sender=buyer_address,
+            sender_principal=actor_principal,
+            sender_role=message_role,
             our_amount=our_amount,
         )
         stage_event(
@@ -943,14 +1034,17 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             reason=buyer_reason or "buyer_exit",
         )
-        return {"action": "exit", "reason": "buyer_exit"}
+        return {
+            "action": "exit",
+            "reason": "buyer_exit",
+            "buyer_principal": buyer_principal.model_dump(mode="json"),
+            "seller_principal": seller_principal.model_dump(mode="json"),
+        }
 
     if buyer_action != "counter":
         raise ValueError(f"Unsupported buyer action {buyer_action!r}")
 
-    from market_storefront.utils.config import BASE_URL_OVERRIDE
-
-    our_sender = BASE_URL_OVERRIDE or "seller"
+    our_sender = seller_principal
     history = _history_from_messages(
         messages,
         our_sender,
@@ -998,7 +1092,8 @@ async def continue_sync_negotiation(
     our_amount = round_result.our_amount
     await _record_buyer_counter_message(
         negotiation_id=neg_id,
-        sender=buyer_address,
+        sender_principal=actor_principal,
+        sender_role=message_role,
         our_amount=our_amount,
         counter_amount=buyer_amount,
     )
@@ -1008,6 +1103,7 @@ async def continue_sync_negotiation(
         our_amount=our_amount,
         their_amount=buyer_amount,
         decision=decision,
+        seller_principal=seller_principal,
     )
     decision_amount = _amount_from_proposal(decision.proposal)
     if decision.action == "accept":
@@ -1042,7 +1138,11 @@ async def continue_sync_negotiation(
         decision_amount=int(decision_amount) if decision_amount is not None else None,
         decision_reason=decision.reason,
     )
-    response = decision.to_dict()
+    response = {
+        **_decision_wire(decision),
+        "buyer_principal": buyer_principal.model_dump(mode="json"),
+        "seller_principal": seller_principal.model_dump(mode="json"),
+    }
     if decision.action == "accept":
         artifacts = _accepted_settlement_artifacts(
             proposal=buyer_pinned_proposal,
@@ -1056,7 +1156,8 @@ async def continue_sync_negotiation(
                 or 3600
             ),
             uses_scalar_amount=uses_scalar_amount,
-            buyer_address=buyer_address,
+            buyer_principal=buyer_principal,
+            seller_principal=seller_principal,
         )
         response.update(artifacts)
         settlement_plan = artifacts.get("settlement_plan")
@@ -1064,6 +1165,8 @@ async def continue_sync_negotiation(
             await sqlite_client.commit_settlement_plan(
                 negotiation_id=neg_id,
                 settlement_plan=settlement_plan,
+                buyer_principal=buyer_principal,
+                seller_principal=seller_principal,
             )
     return response
 
@@ -1073,16 +1176,16 @@ async def _record_seller_decision(
     neg_id: str,
     our_amount: int,
     their_amount: int,
+    seller_principal: Identity,
     decision: NegotiationDecision,
 ) -> None:
     """Persist the seller's decision using VM proposal amount extraction."""
-    from market_storefront.utils.config import BASE_URL_OVERRIDE
 
-    sender = BASE_URL_OVERRIDE or "seller"
+    sender_principal = seller_principal
     decision_amount = _amount_from_proposal(decision.proposal)
     await _record_seller_decision_message(
         negotiation_id=neg_id,
-        sender=sender,
+        sender_principal=sender_principal,
         our_amount=our_amount,
         their_amount=their_amount,
         decision=decision,

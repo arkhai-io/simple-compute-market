@@ -21,6 +21,7 @@ from domains.vms.listings.models import (
     Region,
 )
 from domains.vms.listings.pricing import extract_initial_price_from_order
+from market_identity import Ed25519Signer
 from market_storefront.utils.config import settings
 from tests._settings_overrides import settings_overrides
 
@@ -51,7 +52,8 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
             "literal_fields": {"token": _TOKEN_ADDR},
             "rates": rates,
         }],
-        seller="http://seller:8001",
+        storefront_url="http://seller:8001",
+        seller_principal=Ed25519Signer(b"\x31" * 32).identity,
     )
 
 

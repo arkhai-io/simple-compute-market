@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# Repeatable structural check for the rendered umbrella chart.
-#
-# Asserts the invariants that the storefront config-split refactor
-# depends on — without these holding, non-sensitive config changes
-# would still trigger Secret rotations and sensitive values could leak
-# into a ConfigMap. The CI check is stable across cosmetic chart edits
-# (no byte-level snapshots) and targeted at the structural pieces only.
+# Structural identity/secret/optional-chain checks for the umbrella chart.
 
 set -euo pipefail
 
@@ -13,11 +7,34 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/.."
 RELEASE="${RELEASE:-arkhai-test}"
 
-RENDERED="$(mktemp)"
-trap 'rm -f "$RENDERED"' EXIT
+DEFAULT_RENDERED="$(mktemp)"
+FIAT_RENDERED="$(mktemp)"
+EVM_RENDERED="$(mktemp)"
+OVERLAP_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
-    --values "$CHART_DIR/values.yaml" >"$RENDERED" 2>/dev/null
+    --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
+helm template "$RELEASE-fiat" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" >"$FIAT_RENDERED" 2>/dev/null
+helm template "$RELEASE-evm" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" >"$EVM_RENDERED" 2>/dev/null
+helm template "$RELEASE-overlap" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    --values "$CHART_DIR/fixtures/identity-overlap-values.yaml" \
+    --set-string 'storefront.agents[0].identity.servicePeers.provisioning_default.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].identity.servicePeers.provisioning_default.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
+    --set-string 'storefront.agents[0].identity.administrators.operator.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].identity.administrators.operator.principals[1].identifier=0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc' \
+    --set-string 'storefront.agents[0].config.registryAuthority.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].config.registryAuthority.principals[1].identifier=0x90f79bf6eb2c4f870365e785982e1f101e93b906' \
+    --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
+    --set-string 'storefront.agents[0].config.hostedSettlement.expectedAuthority.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].config.hostedSettlement.expectedAuthority.principals[1].identifier=0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63' >"$OVERLAP_RENDERED" 2>/dev/null
 
 errors=0
 fail() {
@@ -28,112 +45,138 @@ pass() {
     echo "ok    $*"
 }
 
-# Slice one rendered document out of the combined stream. Helm emits
-# `# Source: <chart>/templates/<file>` before each doc; we capture from
-# that header until the next Source comment.
 extract_section() {
-    local pattern="$1"
+    local rendered="$1"
+    local pattern="$2"
     awk -v pat="$pattern" '
         /^# Source: / { in_section = ($0 ~ pat) }
         in_section { print }
-    ' "$RENDERED"
+    ' "$rendered"
 }
 
-CONFIGMAP="$(extract_section 'storefront/templates/configmap\.yaml')"
-SECRET="$(extract_section 'storefront/templates/secrets\.yaml')"
-DEPLOYMENT="$(extract_section 'storefront/templates/deployment\.yaml')"
-
-STOREFRONT_PVC="$(extract_section   'storefront/templates/pvc\.yaml')"
-REGISTRY_PVC="$(extract_section     'registry/templates/pvc\.yaml')"
-PROVISIONING_PVC="$(extract_section 'provisioning/templates/pvc\.yaml')"
-REGISTRY_DEPLOY="$(extract_section     'registry/templates/deployment\.yaml')"
-PROVISIONING_DEPLOY="$(extract_section 'provisioning/templates/deployment\.yaml')"
-
-# --- Per-agent objects all render ---
-[[ -n "$CONFIGMAP"  ]] && pass "storefront ConfigMap renders"   || fail "no storefront ConfigMap"
-[[ -n "$SECRET"     ]] && pass "storefront Secret renders"      || fail "no storefront Secret"
-[[ -n "$DEPLOYMENT" ]] && pass "storefront Deployment renders"  || fail "no storefront Deployment"
-
-# --- Key layout matches what the runtime loader expects ---
-grep -qF "storefront.toml:"         <<<"$CONFIGMAP" && pass "ConfigMap exposes storefront.toml key"        || fail "ConfigMap missing storefront.toml key"
-grep -qF "storefront.secrets.toml:" <<<"$SECRET"    && pass "Secret exposes storefront.secrets.toml key"  || fail "Secret missing storefront.secrets.toml key"
-grep -qE "config-[a-z]+-secret\.yml:" <<<"$SECRET" && pass "Secret retains smoke-test profile yml" || fail "Secret missing config-<component>-secret.yml (smoke-test pod depends on it)"
-
-# --- Deployment mounts both files at /etc/arkhai/ ---
-grep -qE "mountPath: +/etc/arkhai/storefront\.toml"         <<<"$DEPLOYMENT" && pass "Deployment mounts storefront.toml at /etc/arkhai/"         || fail "Deployment missing storefront.toml mount"
-grep -qE "mountPath: +/etc/arkhai/storefront\.secrets\.toml" <<<"$DEPLOYMENT" && pass "Deployment mounts storefront.secrets.toml at /etc/arkhai/" || fail "Deployment missing storefront.secrets.toml mount"
-
-# --- Independent checksums for rollout isolation ---
-grep -qF "checksum/config:"  <<<"$DEPLOYMENT" && pass "checksum/config annotation present"  || fail "missing checksum/config"
-grep -qF "checksum/secrets:" <<<"$DEPLOYMENT" && pass "checksum/secrets annotation present" || fail "missing checksum/secrets"
-
-# --- No sensitive leak: private_key must not appear in the ConfigMap ---
-if grep -qF "private_key" <<<"$CONFIGMAP"; then
-    fail "private_key leaks into ConfigMap-rendered storefront.toml"
-else
-    pass "no private_key in ConfigMap storefront.toml"
-fi
-
-# --- Sensitive presence: private_key must appear in the Secret ---
-grep -qF "private_key" <<<"$SECRET" && pass "private_key present in Secret storefront.secrets.toml" || fail "private_key missing from Secret"
-
-# ============================================================================
-# SQLite persistence — every SQLite-backed service has a PVC, mounts it,
-# pins Recreate strategy, and sets fsGroup so the container user can write.
-# ============================================================================
-
-# --- PVCs render for all three services ---
-[[ -n "$STOREFRONT_PVC"   ]] && pass "storefront PVC renders"   || fail "no storefront PVC"
-[[ -n "$REGISTRY_PVC"     ]] && pass "registry PVC renders"     || fail "no registry PVC"
-[[ -n "$PROVISIONING_PVC" ]] && pass "provisioning PVC renders" || fail "no provisioning PVC"
-
-# --- helm.sh/resource-policy: keep protects state across `helm uninstall` ---
-for name in STOREFRONT_PVC REGISTRY_PVC PROVISIONING_PVC; do
-    body="${!name}"
-    if grep -qF "helm.sh/resource-policy: keep" <<<"$body"; then
-        pass "${name} carries resource-policy: keep"
+expect_present() {
+    local body="$1"
+    local pattern="$2"
+    local label="$3"
+    if [[ -f "$body" ]]; then
+        grep -qE "$pattern" "$body" && pass "$label" || fail "$label"
     else
-        fail "${name} missing resource-policy: keep (state would be reaped on helm uninstall)"
+        grep -qE "$pattern" <<<"$body" && pass "$label" || fail "$label"
     fi
-done
+}
 
-# --- Each PVC requests ReadWriteOnce ---
-for name in STOREFRONT_PVC REGISTRY_PVC PROVISIONING_PVC; do
-    body="${!name}"
-    if grep -qE 'accessModes:\s*$' <<<"$body" && grep -qE '"ReadWriteOnce"|ReadWriteOnce' <<<"$body"; then
-        pass "${name} requests ReadWriteOnce"
+expect_absent() {
+    local body="$1"
+    local pattern="$2"
+    local label="$3"
+    if [[ -f "$body" ]]; then
+        if grep -qE "$pattern" "$body"; then
+            fail "$label"
+        else
+            pass "$label"
+        fi
+    elif grep -qE "$pattern" <<<"$body"; then
+        fail "$label"
     else
-        fail "${name} missing ReadWriteOnce access mode"
+        pass "$label"
     fi
-done
+}
 
-# --- Each Deployment uses Recreate strategy (rolling + RWO = deadlock) ---
-for name in DEPLOYMENT REGISTRY_DEPLOY PROVISIONING_DEPLOY; do
-    body="${!name}"
-    if grep -qE "type:\s+Recreate" <<<"$body"; then
-        pass "${name} uses Recreate strategy"
+expect_render_failure() {
+    local fixture="$1"
+    local label="$2"
+    if helm template "$RELEASE-invalid" "$CHART_DIR" \
+        --values "$CHART_DIR/values.yaml" \
+        --values "$fixture" >/dev/null 2>&1; then
+        fail "$label"
     else
-        fail "${name} missing Recreate strategy"
+        pass "$label"
     fi
-done
+}
 
-# --- fsGroup: 1000 on pod spec — without it SQLite write fails on perms ---
-for name in DEPLOYMENT REGISTRY_DEPLOY PROVISIONING_DEPLOY; do
-    body="${!name}"
-    if grep -qE "fsGroup:\s+1000" <<<"$body"; then
-        pass "${name} sets fsGroup: 1000"
-    else
-        fail "${name} missing fsGroup: 1000"
-    fi
-done
+DEFAULT_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/configmap\.yaml')"
+DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/deployment\.yaml')"
+FIAT_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'storefront/templates/configmap\.yaml')"
+FIAT_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'storefront/templates/deployment\.yaml')"
+FIAT_REGISTRY="$(extract_section "$FIAT_RENDERED" 'registry/templates/deployment\.yaml')"
+EVM_CONFIGMAP="$(extract_section "$EVM_RENDERED" 'storefront/templates/configmap\.yaml')"
+EVM_DEPLOYMENT="$(extract_section "$EVM_RENDERED" 'storefront/templates/deployment\.yaml')"
+PROVISIONING_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/configmap\.yaml')"
+PROVISIONING_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/deployment\.yaml')"
+OVERLAP_CONFIGMAP="$(extract_section "$OVERLAP_RENDERED" 'storefront/templates/configmap\.yaml')"
+OVERLAP_PROVISIONING_CONFIGMAP="$(extract_section "$OVERLAP_RENDERED" 'provisioning/templates/configmap\.yaml')"
 
-# --- Deployments reference their PVC by claimName ---
-grep -qE "claimName:\s+arkhai-test-storefront-bob-data"   <<<"$DEPLOYMENT"          && pass "storefront Deployment binds to its PVC"   || fail "storefront Deployment missing PVC claim"
-grep -qE "claimName:\s+arkhai-test-registry-data"         <<<"$REGISTRY_DEPLOY"     && pass "registry Deployment binds to its PVC"     || fail "registry Deployment missing PVC claim"
-grep -qE "claimName:\s+arkhai-test-provisioning-data"     <<<"$PROVISIONING_DEPLOY" && pass "provisioning Deployment binds to its PVC" || fail "provisioning Deployment missing PVC claim"
+expect_present "$DEFAULT_CONFIGMAP" 'storefront\.toml:' "storefront ConfigMap renders"
+expect_present "$DEFAULT_DEPLOYMENT" 'mountPath: +/etc/arkhai/storefront\.toml' "storefront mounts public config"
+expect_present "$DEFAULT_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "signer credential uses environment injection"
+expect_present "$DEFAULT_DEPLOYMENT" 'name: +\"?arkhai-bob-identity\"?' "signer credential references a Secret"
+expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "default manifests contain no signing key fields"
+expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
+
+expect_present "$FIAT_CONFIGMAP" 'scheme = \"ed25519\"' "fiat profile renders Ed25519 scheme"
+expect_present "$FIAT_CONFIGMAP" 'identifier = \"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\"' "fiat profile renders the configured public storefront principal"
+expect_present "$FIAT_CONFIGMAP" 'expected_schema_version = 4' "fiat profile pins hosted schema 4"
+expect_present "$FIAT_CONFIGMAP" 'scheme-tagged-identities\.v1' "fiat profile pins scheme-tagged hosted identity"
+expect_present "$FIAT_CONFIGMAP" 'signer-injected-client\.v1' "fiat profile pins signer-injected hosted client"
+expect_present "$FIAT_CONFIGMAP" 'account-owner-retirement\.v1' "fiat profile pins owner retirement"
+expect_present "$FIAT_DEPLOYMENT" 'name: +\"?fiat-bob-marketplace-identity\"?' "fiat signer comes from a Secret reference"
+expect_absent "$FIAT_CONFIGMAP" '\[wallet\]|\[chains\.' "fiat storefront config omits wallet and chains"
+expect_absent "$FIAT_DEPLOYMENT" 'wait-for-rpc|CHAIN_ID|RPC_URL' "fiat storefront pod omits chain readiness"
+expect_absent "$FIAT_REGISTRY" 'CHAIN_ID|RPC_URL' "fiat registry pod omits chain configuration"
+expect_present "$FIAT_REGISTRY" 'name: +REGISTRY_AUTHORITY_SCHEME' "fiat registry renders its public signer scheme"
+expect_present "$FIAT_REGISTRY" 'value: +\"?NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y\"?' "fiat registry renders its public authority"
+expect_present "$FIAT_REGISTRY" 'secretName: +\"?fiat-registry-identity\"?' "fiat registry signer credential is Secret-referenced"
+expect_absent "$FIAT_RENDERED" 'private_key|privateKey|request_credential|STRIPE_[A-Z_]*KEY' "fiat manifests contain no private or provider credentials"
+expect_present "$PROVISIONING_CONFIGMAP" 'scheme: +ed25519' "fiat provisioning renders Ed25519 public principals"
+expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' "fiat provisioning renders its public service identity"
+expect_absent "$FIAT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "fiat manifests contain no legacy administrator shared secret"
+expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc' "fiat provisioning pins the trusted storefront principal"
+expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' "fiat provisioning pins a distinct administrator principal"
+expect_present "$PROVISIONING_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "fiat provisioning injects its signer credential"
+expect_present "$PROVISIONING_DEPLOYMENT" 'name: +\"?fiat-provisioning-identity\"?' "fiat provisioning signer is Secret-referenced"
+expect_present "$FIAT_CONFIGMAP" '\[identity\.service_peers\.provisioning_default\]' "fiat storefront renders provisioning service-peer trust"
+expect_present "$FIAT_CONFIGMAP" 'site_id = \"default\"' "fiat storefront binds provisioning callbacks to the default site"
+expect_present "$FIAT_CONFIGMAP" '\[provisioning\.identity\]' "fiat storefront pins provisioning response authority"
+expect_present "$FIAT_CONFIGMAP" 'identifier = \"xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI\"' "fiat storefront trusts the provisioning principal"
+expect_present "$FIAT_CONFIGMAP" '\[identity\.administrators\.operator\]' "fiat storefront renders explicit administrator trust"
+expect_present "$FIAT_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\", identifier = \"5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g\" \}\]' "fiat storefront administrator is principal-bound and distinct from its service signer"
+expect_present "$FIAT_CONFIGMAP" '\[registry\.authorities\.\"http://arkhai-test-fiat-registry:8080\"\]' "fiat storefront pins registry response authority by URL"
+expect_present "$FIAT_CONFIGMAP" 'authority = \"registry-a\"' "fiat storefront pins the stable registry authority id separately from its URL"
+expect_present "$FIAT_CONFIGMAP" 'identifier = \"NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y\"' "fiat storefront trusts the registry service principal"
+expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:1111111111111111111111111111111111111111111111111111111111111111' "fiat registry image is digest-pinned"
+expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:2222222222222222222222222222222222222222222222222222222222222222' "fiat provisioning image is digest-pinned"
+expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:3333333333333333333333333333333333333333333333333333333333333333' "fiat storefront image is digest-pinned"
+expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:4444444444444444444444444444444444444444444444444444444444444444' "fiat smoke images are digest-pinned"
+expect_absent "$FIAT_RENDERED" 'kind: +Secret|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "fiat chart renders only pre-existing Secret references"
+
+expect_present "$EVM_CONFIGMAP" 'scheme = \"eip191\"' "EVM profile renders explicit EIP-191 scheme"
+expect_present "$EVM_CONFIGMAP" '\[chains\.anvil\]' "EVM profile renders explicit chain"
+expect_present "$OVERLAP_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\"[^]]+\}, \{ scheme = \"eip191\"' "overlap profile renders ordered two-principal storefront trust"
+expect_present "$OVERLAP_PROVISIONING_CONFIGMAP" 'identifier: +0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc' "overlap profile renders second provisioning administrator principal"
+expect_present "$EVM_CONFIGMAP" 'chain_id = 31337' "EVM profile renders explicit chain ID"
+expect_present "$EVM_DEPLOYMENT" 'wait-for-rpc' "EVM profile retains chain readiness"
+expect_present "$EVM_DEPLOYMENT" 'name: +\"?evm-bob-marketplace-identity\"?' "EVM marketplace signer is Secret-referenced"
+expect_present "$EVM_DEPLOYMENT" 'secretName: +\"?evm-bob-runtime\"?' "EVM wallet overlay is Secret-referenced"
+expect_absent "$EVM_RENDERED" 'private_key|privateKey|request_credential|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "EVM manifests reference secrets without embedding keys"
+
+expect_render_failure \
+    "$CHART_DIR/fixtures/invalid-missing-identity-secret-values.yaml" \
+    "missing identity Secret reference fails schema/render"
+expect_render_failure \
+    "$CHART_DIR/fixtures/invalid-missing-registry-identity-secret-values.yaml" \
+    "missing registry signer Secret reference fails schema/render"
+expect_render_failure \
+    "$CHART_DIR/fixtures/invalid-registry-authority-mismatch-values.yaml" \
+    "mismatched active registry authority fails render"
+expect_render_failure \
+    "$CHART_DIR/fixtures/invalid-hosted-identity-v1-values.yaml" \
+    "schema 3 hosted authority fails schema/render"
+expect_render_failure \
+    "$CHART_DIR/fixtures/invalid-missing-hosted-capability-values.yaml" \
+    "missing hosted identity capability fails schema/render"
 
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2
     exit 1
 fi
-echo "All structural assertions passed."
+echo "All structural identity assertions passed."

@@ -34,12 +34,15 @@ from core_buyer import (
     run_buy,
 )
 from core_buyer.deal_helpers import is_negotiation_complete
-from core_buyer.negotiation_client import _load_buyer_chain
+from .buyer_client import load_buyer_chain
 from core_buyer.orchestration import make_negotiate_hook, make_settle_hook
 from core_buyer.run_log import RunLog
-from domains.apicredits.negotiation import make_api_credits_provision_terms
+from domains.apicredits.negotiation import (
+    ApiCreditsProvisionTerms,
+    make_api_credits_provision_terms,
+)
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
-from market_alkahest.schemas import EscrowProposal
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
 from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
@@ -113,14 +116,14 @@ def register(credits_app: typer.Typer) -> None:
             False,
             "--new-key",
             help="Issue a fresh API key for this purchase (the default "
-            "disposition; the seller binds it to your wallet).",
+            "disposition; the seller binds it to your marketplace principal).",
         ),
         key_id: Optional[str] = typer.Option(
             None,
             "--key-id",
             help="Top up an existing key instead of issuing a new one. "
-            "v1 sellers reject unless the key is bound to the "
-            "purchasing wallet (or carries no ownership claim).",
+            "The key must be bound to the authenticated marketplace principal "
+            "or carry no ownership claim.",
         ),
         service_name: Optional[str] = typer.Option(
             None,
@@ -208,15 +211,25 @@ def register(credits_app: typer.Typer) -> None:
             "--settlement-timeout",
             help="Max seconds to wait for issuance before giving up.",
         ),
-        buyer_address: Optional[str] = typer.Option(
+        identity_scheme: Optional[str] = typer.Option(
             None,
-            "--buyer-address",
-            help="Override buyer wallet address (default: derived from wallet.private_key).",
+            "--identity-scheme",
+            help="Marketplace signer scheme (default: identity.scheme).",
         ),
-        buyer_private_key: Optional[str] = typer.Option(
+        identity_identifier: Optional[str] = typer.Option(
             None,
-            "--buyer-priv-key",
-            help="Override buyer private key (default: wallet.private_key).",
+            "--identity-identifier",
+            help="Public marketplace signer identifier (default: identity.identifier).",
+        ),
+        evm_address: Optional[str] = typer.Option(
+            None,
+            "--evm-address",
+            help="EVM address required for the selected Alkahest effect.",
+        ),
+        evm_private_key: Optional[str] = typer.Option(
+            None,
+            "--evm-private-key",
+            help="EVM private key required only to create the Alkahest escrow.",
         ),
         **policy_values: Any,
     ) -> None:
@@ -248,6 +261,21 @@ def register(credits_app: typer.Typer) -> None:
         )
         initial_price: Optional[float] = policy_params_all.get("initial_price")
         max_price: Optional[float] = policy_params_all.get("max_price")
+        from .common import (
+            resolve_buyer_signer,
+            resolve_identity_config,
+            resolve_identity_credential,
+        )
+
+        identity_config = resolve_identity_config(
+            override_scheme=identity_scheme,
+            override_identifier=identity_identifier,
+        )
+        signer = resolve_buyer_signer(
+            identity_config,
+            resolve_identity_credential(),
+        )
+        principal = identity_config.principal
 
         if from_run:
             if not is_negotiation_complete(from_run):
@@ -262,8 +290,9 @@ def register(credits_app: typer.Typer) -> None:
             run_settle_from_log(
                 run_id=from_run,
                 escrow_uid=None,
-                buyer_address=buyer_address,
-                buyer_private_key=buyer_private_key,
+                signer=signer,
+                evm_address=evm_address,
+                evm_private_key=evm_private_key,
                 chain_name=chain_name,
                 poll_interval=poll_interval,
                 settlement_timeout=settlement_timeout,
@@ -304,21 +333,35 @@ def register(credits_app: typer.Typer) -> None:
             APICREDITS_SCHEMA_ID,
             build_token_filter_params,
             resolve_buyer_wallet,
-            resolve_indexer_urls_for_schema,
             resolve_discovery_timeout,
-            resolve_indexer_auth,
+            resolve_indexer_urls,
+            resolve_indexer_urls_for_schema,
+            resolve_registry_api_keys,
+            resolve_registry_authorities,
             select_chain_for_listing,
         )
 
-        addr, pk = resolve_buyer_wallet(
-            override_addr=buyer_address,
-            override_pk=buyer_private_key,
-        )
-        reg_urls = resolve_indexer_urls_for_schema(
-            APICREDITS_SCHEMA_ID, override=registry_urls
+        evm_addr, evm_key = resolve_buyer_wallet(
+            override_addr=evm_address,
+            override_pk=evm_private_key,
         )
         deadline = resolve_discovery_timeout(override=discovery_timeout)
-        reg_auth = resolve_indexer_auth()
+        candidate_urls = resolve_indexer_urls(override=registry_urls)
+        registry_authorities = resolve_registry_authorities(candidate_urls)
+        reg_urls = resolve_indexer_urls_for_schema(
+            APICREDITS_SCHEMA_ID,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            override=registry_urls,
+            timeout=deadline,
+        )
+        registry_authorities = {url: registry_authorities[url] for url in reg_urls}
+        all_registry_api_keys = resolve_registry_api_keys()
+        registry_api_keys = {
+            url: all_registry_api_keys[url]
+            for url in reg_urls
+            if url in all_registry_api_keys
+        }
         # Pick a chain up-front when there's no listing context yet; the
         # orchestrator only considers listings that accept this chain.
         chain_cfg = select_chain_for_listing(
@@ -331,13 +374,15 @@ def register(credits_app: typer.Typer) -> None:
         addr_cfg = chain_cfg.alkahest_address_config_path
 
         _key_for = {
-            "buyer_priv_key": "wallet.private_key",
+            "buyer_evm_address": "wallet.address",
+            "buyer_evm_private_key": "wallet.private_key",
             "registry_urls": "registry.urls",
         }
         missing = [
             n
             for n, v in (
-                ("buyer_priv_key", pk),
+                ("buyer_evm_address", evm_addr),
+                ("buyer_evm_private_key", evm_key),
                 ("registry_urls", reg_urls),
             )
             if not v
@@ -390,7 +435,11 @@ def register(credits_app: typer.Typer) -> None:
 
         # Escrow-terms builder + on-chain submit hook, env-config-closed
         # at this layer so the orchestrator doesn't see chain creds.
-        from core_buyer.escrow_client import (
+        from .escrow_client import (
+            accepted_proposal_recipient,
+            encode_escrow_proposal,
+            looks_like_propagation_lag,
+            make_alkahest_settlement_payload_fn,
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
         )
@@ -400,7 +449,7 @@ def register(credits_app: typer.Typer) -> None:
             addr_config_path=addr_cfg or None,
         )
         create_escrow = make_create_escrow_fn(
-            private_key=pk,
+            private_key=evm_key,
             rpc_url=rpc,
             chain_name=selected_chain_name,
             addr_config_path=addr_cfg or None,
@@ -413,8 +462,10 @@ def register(credits_app: typer.Typer) -> None:
             matches = query_registry_for_matches_multi(
                 reg_urls,
                 timeout=deadline,
+                signer=signer,
+                registry_authorities=registry_authorities,
                 filters=active_filters or None,
-                auth=reg_auth,
+                api_keys=registry_api_keys,
             )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
@@ -457,10 +508,11 @@ def register(credits_app: typer.Typer) -> None:
 
         config = BuyConfig(
             registry_urls=reg_urls,
-            buyer_address=addr,
-            buyer_private_key=pk,
+            registry_authorities=registry_authorities,
+            principal=principal,
+            signer=signer,
             discovery_timeout=deadline,
-            indexer_auth=reg_auth,
+            registry_api_keys=registry_api_keys,
             aggregation_policy=aggregation_policy,
         )
         constraints = BuyConstraints(
@@ -474,7 +526,7 @@ def register(credits_app: typer.Typer) -> None:
             key_id=resolved_key_id,
         )
 
-        from core_buyer.escrow_selection import select_escrow_entry
+        from .escrow_selection import select_escrow_entry
 
         def build_escrow_proposal_for_match(match: dict) -> EscrowProposal | None:
             entry = select_escrow_entry(
@@ -483,7 +535,7 @@ def register(credits_app: typer.Typer) -> None:
                 token_contract_filter=tc,
                 assume_yes=assume_yes,
                 rpc_url=rpc,
-                buyer_address=addr,
+                buyer_address=evm_addr,
                 console=console,
                 compatible=_policy.compatible,
                 preference=_policy.prefer_settlement,
@@ -497,8 +549,9 @@ def register(credits_app: typer.Typer) -> None:
             )
 
         run_log = RunLog.start(
+            principal=principal,
             command="market credits buy",
-            buyer_address=addr,
+            buyer_evm_address=evm_addr,
             registry_urls=reg_urls,
             policy=_policy.name,
             policy_params=policy_params_all,
@@ -518,7 +571,10 @@ def register(credits_app: typer.Typer) -> None:
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
         header.add_row("Registries", ", ".join(reg_urls))
-        header.add_row("Buyer wallet", addr)
+        header.add_row(
+            "Marketplace principal", f"{principal.scheme.value}:{principal.identifier}"
+        )
+        header.add_row("EVM chain wallet", evm_addr)
         header.add_row("Quantity", str(quantity))
         header.add_row(
             "Key", key_mode + (f" ({resolved_key_id})" if resolved_key_id else "")
@@ -588,7 +644,7 @@ def register(credits_app: typer.Typer) -> None:
         from .common import resolve_negotiation_config
 
         policies, policy_mode = resolve_negotiation_config()
-        negotiation_chain = _load_buyer_chain(
+        negotiation_chain = load_buyer_chain(
             policies=policies,
             policy_mode=policy_mode,
             default_guards=buyer_policies.APICREDITS_BUYER_GUARDS,
@@ -600,17 +656,26 @@ def register(credits_app: typer.Typer) -> None:
             provision=provision,
             unit_count=float(quantity),
             build_escrow_proposal=build_escrow_proposal_for_match,
+            encode_escrow_proposal=encode_escrow_proposal,
             max_negotiation_rounds=max_rounds,
             derive_prices=None,
             chain=negotiation_chain,
+            decode_provision_terms=ApiCreditsProvisionTerms.model_validate,
+            decode_escrow_proposal=EscrowProposal.model_validate,
+            decode_escrow_terms=EscrowTerms.model_validate,
         )
         settle_hook = make_settle_hook(
             config=config,
             unit_count=float(quantity),
             duration_seconds=0,  # credit deals fund a quantity, not a lease
-            ssh_public_key="",
             build_escrow_terms=build_escrow_terms,
             create_escrow=create_escrow,
+            settlement_recipient=accepted_proposal_recipient,
+            build_settlement_payload=make_alkahest_settlement_payload_fn(
+                buyer_evm_address=evm_addr,
+            ),
+            settlement_submit_max_attempts=6,
+            settlement_submit_retryable=looks_like_propagation_lag,
             confirm_settlement=confirm_settlement_cb,
             settlement_poll_interval=poll_interval,
             settlement_total_timeout=settlement_timeout,

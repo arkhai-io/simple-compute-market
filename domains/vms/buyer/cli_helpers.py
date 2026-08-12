@@ -3,6 +3,7 @@
 Lives next to the per-command modules in ``groups/`` rather than at the
 package root so callers don't see it as part of the public API.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -38,5 +39,3 @@ def resolve_prices_from_matches(
         console=console,
         interactive=interactive,
     )
-
-

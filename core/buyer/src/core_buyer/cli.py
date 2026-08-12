@@ -25,16 +25,35 @@ from core_buyer.orchestrator import (
     fetch_listing_dict_multi,
     query_registry_for_matches_multi,
 )
+from core_buyer.buyer_config import (
+    resolve_buyer_signer,
+    resolve_identity_config,
+    resolve_identity_credential,
+)
 from core_buyer.plugins import discover_domains
 from core_buyer.registry_config import (
     resolve_discovery_timeout,
-    resolve_indexer_auth,
     resolve_indexer_urls,
+    resolve_registry_api_keys,
+    resolve_registry_authorities,
 )
 from market_core import MarketDomainContract, validate_domain_contracts
 
 if TYPE_CHECKING:
     from market_policy.buyer_policy import BuyerPolicy
+
+
+def _registry_identity_context(registry_urls: list[str]):
+    identity_config = resolve_identity_config()
+    signer = resolve_buyer_signer(
+        identity_config,
+        resolve_identity_credential(),
+    )
+    return (
+        signer,
+        resolve_registry_authorities(registry_urls),
+        resolve_registry_api_keys(),
+    )
 
 
 def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
@@ -44,7 +63,8 @@ def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
         if "=" not in raw:
             typer.secho(
                 f"Invalid --filter {raw!r}; expected name=value.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         name, value = raw.split("=", 1)
@@ -53,7 +73,8 @@ def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
         if not name or not value:
             typer.secho(
                 f"Invalid --filter {raw!r}; name and value must be non-empty.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(2)
         parsed[name] = value
@@ -84,7 +105,6 @@ def interactive_disposition(assume_yes: bool) -> bool:
     the form policy hooks receive (``derive_prices(interactive=...)``)
     so a policy never re-derives it from the environment.
     """
-    import os
     import sys
 
     try:
@@ -107,7 +127,10 @@ def assume_yes_option(help: str) -> Any:
 
 
 def register_policy_verb(
-    app: typer.Typer, name: str, fn: Any, policy: "BuyerPolicy",
+    app: typer.Typer,
+    name: str,
+    fn: Any,
+    policy: "BuyerPolicy",
 ) -> None:
     """Bind a policy-bearing verb (``buy``/``negotiate``) onto the app.
 
@@ -134,21 +157,28 @@ def _build_generic_listing_app() -> typer.Typer:
     @listing_app.command("list")
     def listing_list(
         registry_urls: Optional[str] = typer.Option(
-            None, "--registry-urls", "-r",
+            None,
+            "--registry-urls",
+            "-r",
             help="Comma-separated listing registry base URLs "
-                 "(config.toml: registry.urls).",
+            "(config.toml: registry.urls).",
         ),
         discovery_timeout: Optional[float] = typer.Option(
-            None, "--discovery-timeout",
+            None,
+            "--discovery-timeout",
             help="Per-registry deadline in seconds.",
         ),
         raw_filters: Optional[list[str]] = typer.Option(
-            None, "--filter", "-f",
+            None,
+            "--filter",
+            "-f",
             help="Registry filter-spec parameter as name=value. Repeatable. "
-                 "This is the only filter surface without a schema plugin; "
-                 "install one for named flags and rendered output.",
+            "This is the only filter surface without a schema plugin; "
+            "install one for named flags and rendered output.",
         ),
-        limit: int = typer.Option(50, "--limit", "-l", help="Maximum listings to fetch (1-200)."),
+        limit: int = typer.Option(
+            50, "--limit", "-l", help="Maximum listings to fetch (1-200)."
+        ),
         offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
     ) -> None:
         """List open listings from the configured registries as raw JSON."""
@@ -156,14 +186,17 @@ def _build_generic_listing_app() -> typer.Typer:
             raise typer.BadParameter("limit must be between 1 and 200")
         if offset < 0:
             raise typer.BadParameter("offset must be >= 0")
-        urls = [u.rstrip("/") for u in resolve_indexer_urls(override=registry_urls)]
+        urls = resolve_indexer_urls(override=registry_urls)
+        signer, authorities, api_keys = _registry_identity_context(urls)
         filters: dict[str, object] = {"limit": limit, "offset": offset}
         filters.update(parse_filter_options(raw_filters))
         items = query_registry_for_matches_multi(
             urls,
             timeout=resolve_discovery_timeout(override=discovery_timeout),
+            signer=signer,
+            registry_authorities=authorities,
             filters=filters,
-            auth=resolve_indexer_auth(),
+            api_keys=api_keys,
         )
         typer.echo(json.dumps(items, indent=2, default=str))
 
@@ -171,22 +204,29 @@ def _build_generic_listing_app() -> typer.Typer:
     def listing_show(
         listing_id: str = typer.Argument(..., help="Listing ID"),
         registry_urls: Optional[str] = typer.Option(
-            None, "--registry-urls", "-r",
+            None,
+            "--registry-urls",
+            "-r",
             help="Comma-separated listing registry base URLs "
-                 "(config.toml: registry.urls).",
+            "(config.toml: registry.urls).",
         ),
         discovery_timeout: Optional[float] = typer.Option(
-            None, "--discovery-timeout",
+            None,
+            "--discovery-timeout",
             help="Per-registry deadline in seconds.",
         ),
     ) -> None:
         """Show one listing as raw JSON — first configured registry that knows it wins."""
-        urls = [u.rstrip("/") for u in resolve_indexer_urls(override=registry_urls)]
+        urls = resolve_indexer_urls(override=registry_urls)
+        signer, authorities, api_keys = _registry_identity_context(urls)
         try:
             found = fetch_listing_dict_multi(
-                urls, listing_id,
+                urls,
+                listing_id,
                 timeout=resolve_discovery_timeout(override=discovery_timeout),
-                auth=resolve_indexer_auth(),
+                signer=signer,
+                registry_authorities=authorities,
+                api_keys=api_keys,
             )
         except RuntimeError as exc:
             typer.secho(str(exc), err=True, fg=typer.colors.RED)
@@ -194,7 +234,8 @@ def _build_generic_listing_app() -> typer.Typer:
         if found is None:
             typer.secho(
                 f"Listing {listing_id!r} not found in any of {len(urls)} registries.",
-                err=True, fg=typer.colors.RED,
+                err=True,
+                fg=typer.colors.RED,
             )
             raise typer.Exit(code=1)
         typer.echo(json.dumps(found, indent=2, default=str))
@@ -209,7 +250,8 @@ def _make_plugin_required_stub(verb: str):
             f"installed. Install your market domain's buyer package; core "
             f"only provides generic listing browsing via "
             f"`market listing list --filter name=value`.",
-            err=True, fg=typer.colors.RED,
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
 
@@ -253,7 +295,9 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
 
     def version_callback(value: bool) -> None:
         if value:
-            typer.echo(f"market (arkhai-core-buyer) version {_dist_version('arkhai-core-buyer')}")
+            typer.echo(
+                f"market (arkhai-core-buyer) version {_dist_version('arkhai-core-buyer')}"
+            )
             for domain in domains:
                 typer.echo(
                     f"  market domain: {domain.identity} "
@@ -264,15 +308,20 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
     @app.callback()
     def main(
         version_flag: bool = typer.Option(
-            None, "--version", "-v",
-            callback=version_callback, is_eager=True,
+            None,
+            "--version",
+            "-v",
+            callback=version_callback,
+            is_eager=True,
             help="Show version and exit.",
         ),
         config_file: Optional[str] = typer.Option(
-            None, "--config",
-            callback=_config_path_callback, is_eager=True,
+            None,
+            "--config",
+            callback=_config_path_callback,
+            is_eager=True,
             help="Path to an explicit buyer.toml. Defaults to "
-                 "$XDG_CONFIG_HOME/arkhai/buyer.toml.",
+            "$XDG_CONFIG_HOME/arkhai/buyer.toml.",
         ),
     ) -> None:
         """Buyer CLI for Arkhai market operations."""
@@ -287,9 +336,7 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
             )
             return
         for domain in domains:
-            typer.echo(
-                f"{domain.identity}  [contract {domain.contract_version}]"
-            )
+            typer.echo(f"{domain.identity}  [contract {domain.contract_version}]")
 
     for domain in domains:
         if domain.buyer is not None:
@@ -298,14 +345,18 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
     claimed = _registered_names(app)
     if "listing" not in claimed:
         app.add_typer(
-            _build_generic_listing_app(), name="listing",
+            _build_generic_listing_app(),
+            name="listing",
             help="Browse registry listings generically (raw JSON, --filter passthrough).",
         )
     for verb in ("buy", "negotiate", "settle"):
         if verb not in claimed:
             app.command(
                 verb,
-                context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+                context_settings={
+                    "allow_extra_args": True,
+                    "ignore_unknown_options": True,
+                },
             )(_make_plugin_required_stub(verb))
 
     return app

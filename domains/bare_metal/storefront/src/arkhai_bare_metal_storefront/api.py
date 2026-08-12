@@ -5,11 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from core_storefront.auth import (
-    AuthError,
-    verify_admin_key,
-    verify_buyer_signature,
-)
+from core_storefront.auth import AuthError, authenticate_request
 from core_storefront.models.listing_models import ListingListResponse, ListingResponse
 from core_storefront.models.negotiation_models import (
     NegotiateContinueRequest,
@@ -20,8 +16,9 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.system_models import AdminPauseResponse, HealthResponse
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from market_identity import EMPTY_BODY, Identity
 from .models import (
     BareMetalSettleRequest,
     BareMetalSettleResponse,
@@ -30,6 +27,7 @@ from .models import (
 from .negotiation_service import NegotiationRequestError
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_service import SettlementRequestError
+from .response_auth import bind_response_auth
 
 router = APIRouter()
 
@@ -41,11 +39,76 @@ def _runtime(request: Request) -> BareMetalStorefrontRuntime:
     return runtime
 
 
-def _admin(runtime: BareMetalStorefrontRuntime, supplied: str | None) -> None:
+async def _principal(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    operation: str,
+    resource: str,
+    expected_role: str,
+    expected_principal: Identity | None = None,
+    allowed_principals: tuple[Identity, ...] | None = None,
+    body: Any = EMPTY_BODY,
+) -> Identity:
     try:
-        verify_admin_key(configured=runtime.admin_key, supplied=supplied)
+        authenticated = await authenticate_request(
+            headers=request.headers,
+            method=request.method,
+            operation=operation,
+            resource=resource,
+            body=body,
+            expected_role=expected_role,
+            replay_store=runtime.db,
+            expected_principal=expected_principal,
+            allowed_principals=allowed_principals,
+        )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    bind_response_auth(
+        request,
+        authenticated,
+        operation=operation,
+        resource=resource,
+    )
+    if not authenticated.dispatch_allowed:
+        raise HTTPException(status_code=409, detail="request was already dispatched")
+    return authenticated.principal
+
+
+async def _buyer(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    operation: str,
+    resource: str,
+    expected_principal: Identity,
+    body: Any = EMPTY_BODY,
+) -> Identity:
+    return await _principal(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=resource,
+        body=body,
+        expected_role="buyer",
+        expected_principal=expected_principal,
+    )
+
+
+async def _admin(
+    *,
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    operation: str,
+) -> Identity:
+    return await _principal(
+        request=request,
+        runtime=runtime,
+        operation=operation,
+        resource=request.url.path,
+        expected_role="admin",
+        allowed_principals=runtime.admin_principals.identities,
+    )
 
 
 def _listing_response(
@@ -101,15 +164,17 @@ async def negotiate_new(
 ) -> NegotiateNewResponse:
     runtime = _runtime(request)
     try:
-        identity = verify_buyer_signature(
-            headers=request.headers,
+        identity = await _buyer(
+            request=request,
+            runtime=runtime,
             operation="negotiate_new",
-            resource_id=body.listing_id,
-            claimed_address=body.buyer_address,
+            resource=body.listing_id,
+            body=body.model_dump(mode="json", exclude_none=True),
+            expected_principal=body.buyer_principal,
         )
         return await runtime.negotiation_service().open(
             request=body,
-            buyer_identity=identity.identifier,
+            buyer_principal=identity,
         )
     except (AuthError, NegotiationRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -125,21 +190,20 @@ async def negotiate_continue(
     request: Request,
 ) -> NegotiateContinueResponse:
     runtime = _runtime(request)
-    try:
-        identity = verify_buyer_signature(
-            headers=request.headers,
-            operation="negotiate_continue",
-            resource_id=negotiation_id,
-            claimed_address=body.buyer_address,
-        )
-    except AuthError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    identity = await _buyer(
+        request=request,
+        runtime=runtime,
+        operation="negotiate_continue",
+        resource=negotiation_id,
+        body=body.model_dump(mode="json", exclude_none=True),
+        expected_principal=body.buyer_principal,
+    )
     thread = await runtime.db.load_negotiation_thread_row(
         negotiation_id=negotiation_id,
     )
     if thread is None:
         raise HTTPException(status_code=404, detail="negotiation not found")
-    if thread.get("buyer") != identity.identifier:
+    if thread.get("buyer_principal") != identity:
         raise HTTPException(status_code=403, detail="negotiation buyer mismatch")
     if thread.get("terminal_state") is not None:
         raise HTTPException(status_code=409, detail="negotiation is terminal")
@@ -157,17 +221,31 @@ async def list_negotiations(
     listing_id: str,
     request: Request,
     terminal_state: str | None = None,
-    buyer_address: str | None = None,
+    buyer_scheme: str | None = None,
+    buyer_identifier: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> NegotiationListResponse:
     runtime = _runtime(request)
+    if (buyer_scheme is None) != (buyer_identifier is None):
+        raise HTTPException(
+            status_code=422,
+            detail="buyer_scheme and buyer_identifier must be supplied together",
+        )
+    try:
+        buyer_principal = (
+            Identity(scheme=buyer_scheme, identifier=buyer_identifier)
+            if buyer_scheme is not None and buyer_identifier is not None
+            else None
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="invalid buyer principal") from exc
     if await runtime.db.load_listing(listing_id=listing_id) is None:
         raise HTTPException(status_code=404, detail="listing not found")
     rows = await runtime.db.list_negotiations_for_listing(
         listing_id=listing_id,
         terminal_state=terminal_state,
-        buyer_address=buyer_address,
+        buyer_principal=buyer_principal,
         limit=limit,
         offset=offset,
     )
@@ -209,16 +287,18 @@ async def settle(
 ) -> BareMetalSettleResponse:
     runtime = _runtime(request)
     try:
-        identity = verify_buyer_signature(
-            headers=request.headers,
+        identity = await _buyer(
+            request=request,
+            runtime=runtime,
             operation="settle_escrow",
-            resource_id=escrow_uid,
-            claimed_address=body.buyer_address,
+            resource=escrow_uid,
+            body=body.model_dump(mode="json", exclude_none=True),
+            expected_principal=body.buyer_principal,
         )
         return await runtime.settlement_service().verify(
             escrow_uid=escrow_uid,
             request=body,
-            buyer_identity=identity.identifier,
+            buyer_principal=identity,
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -230,20 +310,28 @@ async def settle(
 )
 async def settle_status(
     escrow_uid: str,
-    buyer_address: str,
     request: Request,
 ) -> BareMetalSettleStatusResponse:
     runtime = _runtime(request)
     try:
-        identity = verify_buyer_signature(
-            headers=request.headers,
+        escrow = await runtime.db.load_escrow(escrow_uid=escrow_uid)
+        if escrow is None:
+            raise SettlementRequestError("escrow not found", status_code=404)
+        thread = await runtime.db.load_negotiation_thread_row(
+            negotiation_id=str(escrow["negotiation_id"]),
+        )
+        if thread is None:
+            raise SettlementRequestError("negotiation not found", status_code=404)
+        identity = await _buyer(
+            request=request,
+            runtime=runtime,
             operation="settle_status",
-            resource_id=escrow_uid,
-            claimed_address=buyer_address,
+            expected_principal=Identity.model_validate(thread["buyer_principal"]),
+            resource=escrow_uid,
         )
         return await runtime.settlement_service().status(
             escrow_uid=escrow_uid,
-            buyer_identity=identity.identifier,
+            buyer_principal=identity,
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -256,32 +344,23 @@ async def health(request: Request) -> HealthResponse:
 
 
 @router.get("/api/v1/system/status", response_model=HealthResponse)
-async def system_status(
-    request: Request,
-    x_admin_key: Annotated[str | None, Header()] = None,
-) -> HealthResponse:
+async def system_status(request: Request) -> HealthResponse:
     runtime = _runtime(request)
-    _admin(runtime, x_admin_key)
+    await _admin(request=request, runtime=runtime, operation="system_status")
     return HealthResponse.model_validate(await runtime.health())
 
 
 @router.post("/api/v1/admin/pause", response_model=AdminPauseResponse)
-async def pause(
-    request: Request,
-    x_admin_key: Annotated[str | None, Header()] = None,
-) -> AdminPauseResponse:
+async def pause(request: Request) -> AdminPauseResponse:
     runtime = _runtime(request)
-    _admin(runtime, x_admin_key)
+    await _admin(request=request, runtime=runtime, operation="pause")
     await runtime.db.set_global_paused(paused=True)
     return AdminPauseResponse(paused=True, message="storefront paused")
 
 
 @router.post("/api/v1/admin/resume", response_model=AdminPauseResponse)
-async def resume(
-    request: Request,
-    x_admin_key: Annotated[str | None, Header()] = None,
-) -> AdminPauseResponse:
+async def resume(request: Request) -> AdminPauseResponse:
     runtime = _runtime(request)
-    _admin(runtime, x_admin_key)
+    await _admin(request=request, runtime=runtime, operation="resume")
     await runtime.db.set_global_paused(paused=False)
     return AdminPauseResponse(paused=False, message="storefront resumed")
