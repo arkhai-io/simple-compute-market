@@ -9,8 +9,14 @@ from market_hosted_settlement import MarketplaceSignerAdapter, adapt_expected_au
 from market_hosted_settlement.settlement_config import StripeSettlementConfig
 
 
-def released_authority_client(*, config_path: Path, signer: Any, caller_role: str):
-    """Build only the released public hosted client from the hosted TOML fixture."""
+def released_authority_client(
+    *,
+    config_path: Path,
+    signer: Any,
+    caller_role: str,
+    base_url: str | None = None,
+):
+    """Build only the released public hosted client from marketplace configuration."""
 
     with config_path.open("rb") as source:
         document = tomllib.load(source)
@@ -19,7 +25,7 @@ def released_authority_client(*, config_path: Path, signer: Any, caller_role: st
         raise RuntimeError("hosted authority client configuration is incomplete")
     return HostedSettlementClient(
         ClientConfig(
-            base_url=config.base_url,
+            base_url=base_url or config.base_url,
             signer=MarketplaceSignerAdapter(signer),
             caller_role=caller_role,
             authority_id=config.authority_id or "",

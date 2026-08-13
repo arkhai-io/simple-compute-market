@@ -40,9 +40,7 @@ class LifecycleBridge:
         if action == "prepare_collection":
             return self._prepare(case="collection")
         if action == "prepare_refund":
-            capability = getattr(
-                self._marketplace, "eligible_pretransfer_refund_available", None
-            )
+            capability = getattr(self._marketplace, "eligible_pretransfer_refund_available", None)
             if capability is None or capability() is not True:
                 return {"ok": True, "available": False}
             return self._prepare(case="refund")
@@ -82,12 +80,22 @@ class LifecycleBridge:
             if deal.terminal is None:
                 raise RuntimeError("eligible pre-transfer refund was not requested")
             return self._terminal_response(deal, authority_state="refunded")
+        if action == "recover_eligible_pretransfer_refund":
+            deal = self._deal(body)
+            recover = getattr(self._marketplace, "recover_eligible_pretransfer_refund", None)
+            terminal = (
+                recover(deal.settlement_ref)
+                if recover is not None
+                else self._marketplace.reclaim(deal.settlement_ref)
+            )
+            self._require_terminal(terminal, deal, kind="refund", state="reclaimed")
+            return self._terminal_response(deal, authority_state="refunded")
         if action == "shutdown":
             return {"ok": True, "shutdown": True}
         raise RuntimeError("unsupported marketplace lifecycle action")
 
     def _prepare(self, *, case: str) -> dict[str, Any]:
-        select_case = getattr(self._marketplace, "select_real_stripe_case", None)
+        select_case = getattr(self._marketplace, "select_stripe_test_case", None)
         if select_case is not None:
             select_case(case)
         composition = self._marketplace.verify_composition()
@@ -146,9 +154,7 @@ class LifecycleBridge:
             raise RuntimeError("marketplace and authority terminal state did not converge")
 
     @staticmethod
-    def _terminal_response(
-        deal: _Deal, *, authority_state: str | None = None
-    ) -> dict[str, Any]:
+    def _terminal_response(deal: _Deal, *, authority_state: str | None = None) -> dict[str, Any]:
         terminal = deal.terminal
         assert terminal is not None
         return {
@@ -180,7 +186,9 @@ def main() -> int:
             if not isinstance(body, dict):
                 raise RuntimeError("request must be an object")
             response = bridge.request(body)
-        except (ExternalUnavailable, OSError, TimeoutError, ConnectionError):
+        except TimeoutError:
+            response = {"ok": False, "code": "convergence_timeout"}
+        except (ExternalUnavailable, OSError, ConnectionError):
             response = {"ok": False, "code": "marketplace_unavailable"}
         except Exception:
             response = {"ok": False, "code": "marketplace_lifecycle_contract"}

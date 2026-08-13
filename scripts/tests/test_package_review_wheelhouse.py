@@ -91,9 +91,9 @@ def _stage_root(
         b"identity-0.2.0"
     )
     hosted_client_wheel = _hosted_client_wheel(entry_points=hosted_entry_points)
-    (root / ".dist" / "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl").write_bytes(
-        hosted_client_wheel
-    )
+    (
+        root / ".dist" / "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl"
+    ).write_bytes(hosted_client_wheel)
     manifest = {"payload": {"identity_contract": _IDENTITY_CONTRACT}}
     (root / ".dist" / "release-manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
@@ -162,15 +162,24 @@ def test_wheelhouse_requires_exact_identity_release_filename(tmp_path: Path) -> 
     assert "arkhai_kit_identity-0.2.0-py3-none-any.whl" in result.stderr
 
 
+def test_wheelhouse_rejects_hosted_fixture_distribution(tmp_path: Path) -> None:
+    root, env = _stage_root(tmp_path)
+    fixture = root / ".dist" / "arkhai_hosted_settlement_e2e-0.1.0-py3-none-any.whl"
+    fixture.write_bytes(b"retired fixture")
+
+    result = _run(root, env)
+
+    assert result.returncode == 2
+    assert "cannot contain fixture distribution" in result.stderr
+
+
 def test_wheelhouse_rejects_incomplete_hosted_identity_contract(
     tmp_path: Path,
 ) -> None:
     root, env = _stage_root(tmp_path)
     trust_path = root / "manifests" / "hosted-settlement-v0.1.0-trust.json"
     trust = json.loads(trust_path.read_text(encoding="utf-8"))
-    trust["identity_contract"]["capabilities"].remove(
-        "account-owner-retirement.v1"
-    )
+    trust["identity_contract"]["capabilities"].remove("account-owner-retirement.v1")
     trust_path.write_text(json.dumps(trust), encoding="utf-8")
 
     result = _run(root, env)
@@ -291,6 +300,12 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
     }
     assert pins["hosted_client_wheel"] == {
         "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",
-        "sha256": hashlib.sha256(_hosted_client_wheel()).hexdigest(),
+        "sha256": hashlib.sha256(
+            (
+                root
+                / ".dist"
+                / "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl"
+            ).read_bytes()
+        ).hexdigest(),
         "entry_point_metadata": False,
     }

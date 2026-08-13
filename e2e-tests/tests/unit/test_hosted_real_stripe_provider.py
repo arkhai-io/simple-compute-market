@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,119 +13,106 @@ from src.hosted_real_stripe.stripe_api import (
     TerminalProjection,
 )
 
+ESCROW = "escrow-protected-001"
+SESSION = "cs_private"
+
+
+def _ref(prefix: str, *parts: str) -> str:
+    digest = hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+    return f"{prefix}_{digest[:40]}"
+
 
 def _expected() -> ExpectedEffect:
     return ExpectedEffect(
         operation_ref="market-operation-001",
+        checkout_session_id=SESSION,
         amount=1250,
         currency="usd",
         destination_account="acct_protected",
-        transfer_group="market-group-001",
-        created_after=1_800_000_000,
+        transfer_group=ESCROW,
     )
 
 
-def _objects() -> dict[str, dict[str, Any]]:
-    metadata = {"operation_ref": "market-operation-001"}
-    return {
-        "/v1/checkout/sessions": {
-            "data": [
-                {
-                    "id": "cs_private",
-                    "metadata": metadata,
-                    "mode": "payment",
-                    "status": "complete",
-                    "payment_status": "paid",
-                    "amount_total": 1250,
-                    "currency": "usd",
-                    "payment_intent": "pi_private",
-                }
-            ],
-            "has_more": False,
-        },
-        "/v1/transfers": {
-            "data": [
-                {
-                    "id": "tr_private",
-                    "metadata": metadata,
-                    "amount": 1250,
-                    "currency": "usd",
-                    "destination": "acct_protected",
-                    "transfer_group": "market-group-001",
-                    "source_transaction": "ch_private",
-                }
-            ],
-            "has_more": False,
-        },
-        "/v1/payment_intents/pi_private": {"latest_charge": "ch_private"},
-        "/v1/refunds": {
-            "data": [
-                {
-                    "id": "re_private",
-                    "metadata": metadata,
-                    "amount": 1250,
-                    "currency": "usd",
-                    "status": "succeeded",
-                }
-            ],
-            "has_more": False,
-        },
+def _transport(*, duplicate: bool = False, wrong_destination: bool = False):
+    checkout_metadata = {"escrow_ref": ESCROW, "operation_ref": _ref("checkout", ESCROW)}
+    charge = {
+        "id": "ch_private",
+        "amount_captured": 1250,
+        "currency": "usd",
+        "paid": True,
+    }
+    intent = {
+        "id": "pi_private",
+        "livemode": False,
+        "status": "succeeded",
+        "amount_received": 1250,
+        "currency": "usd",
+        "metadata": checkout_metadata,
+        "latest_charge": charge,
+    }
+    session = {
+        "id": SESSION,
+        "livemode": False,
+        "mode": "payment",
+        "status": "complete",
+        "payment_status": "paid",
+        "amount_total": 1250,
+        "currency": "usd",
+        "client_reference_id": ESCROW,
+        "metadata": checkout_metadata,
+        "payment_intent": intent,
+    }
+    transfer = {
+        "id": "tr_private",
+        "livemode": False,
+        "amount": 1250,
+        "currency": "usd",
+        "destination": "acct_wrong" if wrong_destination else "acct_protected",
+        "source_transaction": "ch_private",
+        "transfer_group": ESCROW,
+        "metadata": {"operation_ref": _ref("collect", ESCROW)},
     }
 
+    def request(path: str, params: Mapping[str, str]) -> dict[str, Any]:
+        if path == f"/v1/checkout/sessions/{SESSION}":
+            return session
+        if path == "/v1/checkout/sessions/search":
+            assert params["query"] == f"metadata['operation_ref']:'{_ref('checkout', ESCROW)}'"
+            data = [session]
+            if duplicate:
+                data.append({**session, "id": "cs_duplicate"})
+            return {"data": data, "has_more": False}
+        if path == "/v1/transfers":
+            assert params["transfer_group"] == ESCROW
+            return {"data": [transfer], "has_more": False}
+        raise AssertionError(f"unexpected retrieval: {path}")
 
-def _client(objects: dict[str, dict[str, Any]]) -> StripeApi:
-    def transport(path: str, _params: Mapping[str, str]) -> dict[str, Any]:
-        return objects[path]
-
-    return StripeApi("sk_test_private", transport=transport)
-
-
-def test_collection_requires_exact_checkout_transfer_and_source_relation() -> None:
-    terminal = TerminalProjection("collected", "collected", "ready")
-    evidence = _client(_objects()).inspect_collection(_expected(), terminal)
-    assert evidence.checkout_count == 1
-    assert evidence.transfer_count == 1
-    assert evidence.destination_matches
-    assert evidence.transfer_group_matches
-    assert evidence.source_transaction_matches
-    assert evidence.operation_metadata_matches
+    return request
 
 
-@pytest.mark.parametrize("path", ("/v1/checkout/sessions", "/v1/transfers"))
-def test_collection_rejects_duplicate_provider_effect(path: str) -> None:
-    objects = _objects()
-    objects[path]["data"] = objects[path]["data"] * 2
-    with pytest.raises(ProviderInvariantError):
-        _client(objects).inspect_collection(
-            _expected(), TerminalProjection("collected", "collected", "ready")
-        )
-
-
-def test_collection_rejects_wrong_destination_or_source_transaction() -> None:
-    for field, value in (
-        ("destination", "acct_other"),
-        ("source_transaction", "ch_other"),
-    ):
-        objects = _objects()
-        objects["/v1/transfers"]["data"][0][field] = value
-        with pytest.raises(ProviderInvariantError):
-            _client(objects).inspect_collection(
-                _expected(), TerminalProjection("collected", "collected", "ready")
-            )
-
-
-def test_pretransfer_refund_requires_one_checkout_refund_and_no_transfer() -> None:
-    objects = _objects()
-    objects["/v1/transfers"]["data"] = []
-    evidence = _client(objects).inspect_refund(
-        _expected(), TerminalProjection("reclaimed", "refunded", "ready")
+def test_collection_retrieves_exact_checkout_and_metadata_related_transfer() -> None:
+    evidence = StripeApi("rk_test_secret", transport=_transport()).inspect_collection(
+        _expected(),
+        TerminalProjection(
+            marketplace_state="collected",
+            authority_state="collected",
+            fulfillment_state="fulfilled",
+        ),
     )
-    assert evidence.refund_count == 1
-    assert evidence.transfer_count == 0
+    assert evidence.checkout_count == 1
+    assert evidence.payment_intent_count == 1
+    assert evidence.charge_count == 1
+    assert evidence.transfer_count == 1
+    assert evidence.operation_metadata_matches is True
 
 
-def test_pretransfer_refund_rejects_any_transfer() -> None:
-    with pytest.raises(ProviderInvariantError):
-        _client(_objects()).inspect_refund(
-            _expected(), TerminalProjection("reclaimed", "refunded", "ready")
+def test_exact_retrieval_rejects_duplicate_checkout_or_wrong_destination() -> None:
+    terminal = TerminalProjection("collected", "collected", "fulfilled")
+    with pytest.raises(ProviderInvariantError, match="multiple Checkout"):
+        StripeApi("rk_test_secret", transport=_transport(duplicate=True)).inspect_collection(
+            _expected(), terminal
         )
+    with pytest.raises(ProviderInvariantError, match="accepted terms"):
+        StripeApi(
+            "rk_test_secret", transport=_transport(wrong_destination=True)
+        ).inspect_collection(_expected(), terminal)

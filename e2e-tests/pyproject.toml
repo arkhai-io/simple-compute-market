@@ -52,7 +52,7 @@ dev = [
     "mypy>=1.8",
     "ruff>=0.3",
 ]
-real-stripe = [
+stripe-test = [
     "playwright==1.54.0",
 ]
 
@@ -90,9 +90,7 @@ markers = [
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
-    "e2e_hosted_settlement: Opt-in artifact-backed hosted settlement VM lifecycle and hermetic recovery scenarios",
-    "e2e_hosted_settlement_eas: Separately selected local Anvil/EAS hosted condition-boundary scenarios",
-    "e2e_hosted_real_stripe: Protected external Stripe test-mode hosted settlement compatibility evidence",
+    "e2e_hosted_stripe_test: Protected Stripe test-mode hosted settlement compatibility evidence",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",

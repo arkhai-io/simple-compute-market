@@ -70,7 +70,6 @@ required_capabilities = [
   "signer-injected-client.v1",
   "provider-neutral-seller-onboarding.v1",
 ]
-account_ref = "fixture-account"
 currency = "usd"
 condition_profile = "vm-fulfillment"
 request_timeout_seconds = 10.0

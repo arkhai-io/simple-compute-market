@@ -26,6 +26,12 @@ if [[ ! -d "${ROOT_DIR}/.dist" ]]; then
   echo ".dist is missing; invoke this script through 'make review-wheelhouse'" >&2
   exit 2
 fi
+for forbidden in "${ROOT_DIR}/.dist"/arkhai_hosted_settlement_e2e-*.whl; do
+  if [[ -e "${forbidden}" ]]; then
+    echo "hosted production wheelhouse cannot contain fixture distribution: $(basename "${forbidden}")" >&2
+    exit 2
+  fi
+done
 cp -a "${ROOT_DIR}/.dist" "${BUNDLE_DIR}/wheelhouse"
 for required in "${IDENTITY_WHEEL}" "${HOSTED_CLIENT_WHEEL}" "${HOSTED_MANIFEST}"; do
   if [[ ! -f "${BUNDLE_DIR}/wheelhouse/${required}" ]]; then

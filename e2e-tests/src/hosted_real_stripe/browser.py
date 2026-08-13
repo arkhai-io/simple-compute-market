@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
+
+CheckoutOutcome = Literal["success", "decline", "insufficient_funds", "authentication"]
+_SESSION_ID = re.compile(r"(?:^|/)(cs_(?P<mode>test|live)_[A-Za-z0-9_]+)(?:$|[/?#])")
+_SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
 
 
 class ChromiumUnavailable(RuntimeError):
@@ -12,21 +18,40 @@ class ChromiumUnavailable(RuntimeError):
 
 
 class CheckoutContractError(RuntimeError):
-    """The real Checkout page did not expose or complete the test contract."""
+    """The real Checkout page did not expose or complete the selected contract."""
 
 
 @dataclass(frozen=True)
 class StripeTestInputs:
-    email: str = "arkhai-hosted-e2e@example.invalid"
-    card_number: str = "4242424242424242"
+    email: str
+    card_number: str
     expiry: str = "12/34"
     cvc: str = "123"
     cardholder_name: str = "Arkhai Hosted E2E"
     postal_code: str = "94107"
 
+    @classmethod
+    def for_outcome(cls, outcome: CheckoutOutcome) -> "StripeTestInputs":
+        cards = {
+            "success": "4242424242424242",
+            "decline": "4000000000000002",
+            "insufficient_funds": "4000000000009995",
+            "authentication": "4000002500003155",
+        }
+        return cls(
+            email=f"arkhai-{outcome.replace('_', '-')}@example.invalid",
+            card_number=cards[outcome],
+        )
+
+
+@dataclass(frozen=True)
+class BrowserPaymentResult:
+    checkout_session_id: str
+    outcome: CheckoutOutcome
+
 
 class ChromiumCheckout:
-    """Complete a hosted Checkout without screenshots, traces, or URL persistence."""
+    """Exercise Checkout without screenshots, traces, logs, or URL persistence."""
 
     def __init__(
         self,
@@ -37,16 +62,30 @@ class ChromiumCheckout:
         self._timeout_ms = timeout_ms
         self._playwright_factory = playwright_factory
 
-    def complete(self, checkout_url: str, inputs: StripeTestInputs | None = None) -> None:
-        parsed = urlsplit(checkout_url)
-        if parsed.scheme != "https" or parsed.hostname != "checkout.stripe.com":
-            raise CheckoutContractError("buyer action is not a Stripe-hosted Checkout URL")
-        test_inputs = inputs or StripeTestInputs()
+    def require_available(self) -> None:
         factory = self._playwright_factory or _load_playwright
         try:
-            context_manager = factory()
-            with context_manager as playwright:
-                browser = playwright.chromium.launch(headless=True)
+            with factory() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    env=_browser_environment(),
+                )
+                browser.close()
+        except ChromiumUnavailable:
+            raise
+        except Exception as exc:
+            raise ChromiumUnavailable("protected Chromium is unavailable") from exc
+
+    def pay(self, checkout_url: str, *, outcome: CheckoutOutcome) -> BrowserPaymentResult:
+        session_id = checkout_session_id(checkout_url)
+        test_inputs = StripeTestInputs.for_outcome(outcome)
+        factory = self._playwright_factory or _load_playwright
+        try:
+            with factory() as playwright:
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    env=_browser_environment(),
+                )
                 try:
                     context = browser.new_context()
                     page = context.new_page()
@@ -91,11 +130,16 @@ class ChromiumCheckout:
                     if submit is None:
                         raise CheckoutContractError("Checkout submit action is unavailable")
                     submit.click()
-                    page.wait_for_url(
-                        lambda url: urlsplit(str(url)).hostname != "checkout.stripe.com",
-                        timeout=self._timeout_ms,
-                        wait_until="domcontentloaded",
-                    )
+                    if outcome == "authentication":
+                        _complete_authentication(page, self._timeout_ms)
+                    if outcome in {"decline", "insufficient_funds"}:
+                        _wait_for_decline(page, self._timeout_ms)
+                    else:
+                        page.wait_for_url(
+                            lambda url: urlsplit(str(url)).hostname != "checkout.stripe.com",
+                            timeout=self._timeout_ms,
+                            wait_until="domcontentloaded",
+                        )
                 finally:
                     browser.close()
         except CheckoutContractError:
@@ -104,7 +148,22 @@ class ChromiumCheckout:
             name = type(exc).__name__.lower()
             if "executable" in str(exc).lower() or "playwright" in name:
                 raise ChromiumUnavailable("protected Chromium is unavailable") from exc
-            raise CheckoutContractError("Stripe test Checkout did not complete") from exc
+            raise CheckoutContractError(
+                "Stripe test Checkout did not reach the selected outcome"
+            ) from exc
+        return BrowserPaymentResult(checkout_session_id=session_id, outcome=outcome)
+
+
+def checkout_session_id(checkout_url: str) -> str:
+    parsed = urlsplit(checkout_url)
+    if parsed.scheme != "https" or parsed.hostname != "checkout.stripe.com":
+        raise CheckoutContractError("buyer action is not a Stripe-hosted Checkout URL")
+    match = _SESSION_ID.search(parsed.path)
+    if match is None:
+        raise CheckoutContractError("Checkout action has no exact session identity")
+    if match.group("mode") != "test":
+        raise CheckoutContractError("live Checkout actions are prohibited")
+    return match.group(1)
 
 
 def _load_playwright() -> Any:
@@ -113,6 +172,10 @@ def _load_playwright() -> Any:
     except ImportError as exc:
         raise ChromiumUnavailable("protected Chromium automation is unavailable") from exc
     return sync_playwright()
+
+
+def _browser_environment() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
 
 
 def _first_visible(page: Any, selectors: tuple[str, ...]) -> Any | None:
@@ -137,3 +200,33 @@ def _fill_optional(page: Any, selectors: tuple[str, ...], value: str) -> None:
     locator = _first_visible(page, selectors)
     if locator is not None:
         locator.fill(value)
+
+
+def _wait_for_decline(page: Any, timeout_ms: int) -> None:
+    error = page.locator("[role='alert'], [data-testid='payment-error'], .Error").first
+    try:
+        error.wait_for(state="visible", timeout=timeout_ms)
+    except Exception as exc:
+        raise CheckoutContractError(
+            "Stripe Checkout did not expose the documented decline"
+        ) from exc
+    if urlsplit(str(page.url)).hostname != "checkout.stripe.com":
+        raise CheckoutContractError("declined Checkout unexpectedly completed")
+
+
+def _complete_authentication(page: Any, timeout_ms: int) -> None:
+    selectors = (
+        "#test-source-authorize-3ds",
+        "button[data-testid='test-source-authorize-3ds']",
+        "button:has-text('Complete authentication')",
+    )
+    for frame in page.frames:
+        for selector in selectors:
+            locator = frame.locator(selector).first
+            try:
+                locator.wait_for(state="visible", timeout=timeout_ms)
+                locator.click()
+                return
+            except Exception:
+                continue
+    raise CheckoutContractError("Stripe test authentication challenge was unavailable")

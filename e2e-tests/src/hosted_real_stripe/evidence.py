@@ -1,7 +1,8 @@
-"""Sanitized evidence for the opt-in Stripe test-mode system lane."""
+"""Allowlisted evidence for the protected Stripe test-mode system lane."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -9,19 +10,57 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-SchemaId = Literal["arkhai.hosted-settlement-real-stripe-evidence.v1"]
-SCHEMA_ID: Final[SchemaId] = "arkhai.hosted-settlement-real-stripe-evidence.v1"
+SchemaId = Literal["arkhai.hosted-settlement-stripe-test-evidence.v2"]
+SCHEMA_ID: Final[SchemaId] = "arkhai.hosted-settlement-stripe-test-evidence.v2"
 _FORBIDDEN_VALUE = re.compile(
-    r"(?:sk_(?:test|live)_|rk_(?:test|live)_|whsec_|https://checkout\.stripe\.com/|"
-    r"https://connect\.stripe\.com/|\b(?:acct|cs|pi|ch|tr|re)_[A-Za-z0-9_]+)",
+    r"(?:sk_(?:test|live)_|rk_(?:test|live)_|whsec_|https?://|"
+    r"\b(?:acct|cs|pi|ch|tr|re|evt|cus|pm)_[A-Za-z0-9_]+)",
     re.IGNORECASE,
 )
-_OPERATION_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_OPAQUE_REF = re.compile(r"^(?:run|op)_[0-9a-f]{24}$")
+_WORKFLOW_REF = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/@:-]{7,255}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
-Outcome = Literal["passed", "failed", "unavailable"]
-RefundOutcome = Literal["passed", "unavailable", "not_requested"]
+ResultClass = Literal["passed", "product", "account", "environment", "timeout"]
+Scenario = Literal[
+    "collection",
+    "reclaim",
+    "missed_webhook",
+    "api_restart",
+    "worker_restart",
+    "decline",
+    "insufficient_funds",
+    "authentication",
+]
+Stage = Literal[
+    "release_identity",
+    "authorization",
+    "account_readiness",
+    "browser_preflight",
+    "webhook_forwarding",
+    "hosted_release",
+    "marketplace_lifecycle",
+    "browser_checkout",
+    "provider_inspection",
+    "recovery",
+    "complete",
+]
+DiagnosticCode = Literal[
+    "credentials_missing",
+    "authorization_rejected",
+    "stripe_unavailable",
+    "account_not_ready",
+    "chromium_unavailable",
+    "stripe_cli_unavailable",
+    "webhook_route_unavailable",
+    "hosted_release_unavailable",
+    "marketplace_unavailable",
+    "lifecycle_contract_rejected",
+    "checkout_contract_rejected",
+    "provider_invariant_failed",
+    "convergence_timeout",
+]
 
 
 class EvidenceValidationError(ValueError):
@@ -29,14 +68,27 @@ class EvidenceValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class MarketplaceIdentityEvidence:
+    repository: Literal["arkhai/simple-market-service"]
+    commit: str
+
+
+@dataclass(frozen=True)
+class HostedReleaseIdentityEvidence:
+    repository: Literal["arkhai/hosted-settlement-service"]
+    source_commit: str
+    workflow_run_id: str
+    workflow_ref: str
+    manifest_sha256: str
+    client_wheel_sha256: str
+    image_digest: str
+
+
+@dataclass(frozen=True)
 class IdentityEvidence:
-    marketplace_repository: Literal["arkhai/simple-market-service"]
-    marketplace_commit: str
-    hosted_repository: Literal["arkhai/hosted-settlement-service"]
-    hosted_source_commit: str
-    hosted_workflow_run_id: str
-    hosted_manifest_sha256: str
-    hosted_image_digest: str
+    marketplace: MarketplaceIdentityEvidence
+    hosted_release: HostedReleaseIdentityEvidence
+    run_ref: str
 
 
 @dataclass(frozen=True)
@@ -44,183 +96,206 @@ class ProviderEvidence:
     name: Literal["stripe"] = "stripe"
     mode: Literal["test"] = "test"
     connected_account_ready: bool = False
+    loopback_webhook_verified: bool = False
 
 
 @dataclass(frozen=True)
-class UnavailableEvidence:
-    phase: Literal[
-        "authorization",
-        "account_readiness",
-        "webhook_forwarding",
-        "hosted_release",
-        "marketplace_lifecycle",
-        "browser_checkout",
-        "provider_inspection",
-        "refund",
-    ]
-    code: Literal[
-        "credentials_missing",
-        "account_unavailable",
-        "account_not_ready",
-        "stripe_cli_unavailable",
-        "webhook_unavailable",
-        "hosted_release_unavailable",
-        "marketplace_lifecycle_unavailable",
-        "chromium_unavailable",
-        "provider_inspection_unavailable",
-        "refund_externally_unavailable",
-    ]
-
-
-@dataclass(frozen=True)
-class FailureEvidence:
-    phase: Literal[
-        "authorization",
-        "release_identity",
-        "marketplace_lifecycle",
-        "browser_checkout",
-        "provider_inspection",
-        "refund",
-    ]
-    code: Literal[
-        "authorization_contract_rejected",
-        "release_identity_rejected",
-        "lifecycle_contract_rejected",
-        "checkout_contract_rejected",
-        "collection_invariant_failed",
-        "refund_invariant_failed",
-    ]
+class DiagnosticEvidence:
+    stage: Stage
+    code: DiagnosticCode
 
 
 @dataclass(frozen=True)
 class CollectionEvidence:
     operation_ref: str
-    checkout_count: int
-    transfer_count: int
+    checkout_count: Literal[1]
+    payment_intent_count: Literal[1]
+    charge_count: Literal[1]
+    transfer_count: Literal[1]
     amount: int
     currency: str
-    destination_matches: bool
-    transfer_group_matches: bool
-    source_transaction_matches: bool
-    operation_metadata_matches: bool
-    marketplace_state: str
-    authority_state: str
-    fulfillment_state: str
+    destination_matches: Literal[True]
+    transfer_group_matches: Literal[True]
+    source_transaction_matches: Literal[True]
+    operation_metadata_matches: Literal[True]
+    marketplace_state: Literal["collected"]
+    authority_state: Literal["collected"]
+    fulfillment_state: Literal["fulfilled"]
 
 
 @dataclass(frozen=True)
 class RefundEvidence:
-    outcome: RefundOutcome
-    operation_ref: str | None = None
-    checkout_count: int | None = None
-    refund_count: int | None = None
-    transfer_count: int | None = None
-    amount: int | None = None
-    currency: str | None = None
-    operation_metadata_matches: bool | None = None
-    marketplace_state: str | None = None
-    authority_state: str | None = None
-    unavailable: UnavailableEvidence | None = None
+    operation_ref: str
+    checkout_count: Literal[1]
+    payment_intent_count: Literal[1]
+    charge_count: Literal[1]
+    refund_count: Literal[1]
+    transfer_count: Literal[0]
+    amount: int
+    currency: str
+    operation_metadata_matches: Literal[True]
+    marketplace_state: Literal["reclaimed"]
+    authority_state: Literal["refunded"]
 
 
 @dataclass(frozen=True)
-class RealStripeEvidence:
+class PaymentOutcomeEvidence:
+    operation_ref: str
+    outcome: Literal[
+        "declined",
+        "insufficient_funds",
+        "authentication_succeeded",
+    ]
+    checkout_count: Literal[1]
+    payment_intent_count: int
+    charge_count: int
+    transfer_count: Literal[0]
+    refund_count: Literal[0]
+    operation_metadata_matches: Literal[True]
+
+
+@dataclass(frozen=True)
+class RecoveryEvidence:
+    kind: Literal["missed_webhook", "api_restart", "worker_restart"]
+    process: Literal["webhook_forwarder", "api", "worker"]
+    original_operation_preserved: Literal[True]
+    checkout_count: Literal[1]
+    terminal_effect_count: Literal[1]
+
+
+@dataclass(frozen=True)
+class StripeTestEvidence:
     identities: IdentityEvidence
     provider: ProviderEvidence
-    outcome: Outcome
+    scenario: Scenario
+    result: ResultClass
+    stage: Stage
+    operation_ref: str | None = None
     collection: CollectionEvidence | None = None
-    refund: RefundEvidence = RefundEvidence(outcome="not_requested")
-    unavailable: UnavailableEvidence | None = None
-    failure: FailureEvidence | None = None
+    refund: RefundEvidence | None = None
+    payment_outcome: PaymentOutcomeEvidence | None = None
+    recovery: RecoveryEvidence | None = None
+    diagnostic: DiagnosticEvidence | None = None
     schema: SchemaId = SCHEMA_ID
-    lane: Literal["external"] = "external"
+    lane: Literal["stripe-test"] = "stripe-test"
 
 
-def _validate_evidence(report: RealStripeEvidence) -> dict[str, object]:
+def opaque_ref(kind: Literal["run", "op"], value: str) -> str:
+    """Return a stable report identity without exposing an internal/provider reference."""
+
+    if not value or any(character.isspace() for character in value):
+        raise EvidenceValidationError("opaque evidence identity source is invalid")
+    return f"{kind}_{hashlib.sha256(value.encode()).hexdigest()[:24]}"
+
+
+def _validate_evidence(report: StripeTestEvidence) -> dict[str, object]:
     payload = asdict(report)
-    if report.schema != SCHEMA_ID or report.lane != "external":
-        raise EvidenceValidationError("report must use the exact external evidence contract")
+    if report.schema != SCHEMA_ID or report.lane != "stripe-test":
+        raise EvidenceValidationError("report must use the exact Stripe test evidence contract")
     identities = report.identities
     if (
-        identities.marketplace_repository != "arkhai/simple-market-service"
-        or not _COMMIT.fullmatch(identities.marketplace_commit)
-        or identities.hosted_repository != "arkhai/hosted-settlement-service"
-        or not _COMMIT.fullmatch(identities.hosted_source_commit)
-        or not identities.hosted_workflow_run_id.isdigit()
+        identities.marketplace.repository != "arkhai/simple-market-service"
+        or not _COMMIT.fullmatch(identities.marketplace.commit)
+        or identities.hosted_release.repository != "arkhai/hosted-settlement-service"
+        or not _COMMIT.fullmatch(identities.hosted_release.source_commit)
+        or not identities.hosted_release.workflow_run_id.isdigit()
+        or not _WORKFLOW_REF.fullmatch(identities.hosted_release.workflow_ref)
+        or not _OPAQUE_REF.fullmatch(identities.run_ref)
+        or not identities.run_ref.startswith("run_")
     ):
-        raise EvidenceValidationError("source identities must name exact trusted repositories and revisions")
-    for digest in (identities.hosted_manifest_sha256, identities.hosted_image_digest):
+        raise EvidenceValidationError("consumer, hosted release, and run identities must be exact")
+    for digest in (
+        identities.hosted_release.manifest_sha256,
+        identities.hosted_release.client_wheel_sha256,
+        identities.hosted_release.image_digest,
+    ):
         if not _DIGEST.fullmatch(digest):
             raise EvidenceValidationError("release identities must be exact sha256 digests")
 
-    if report.outcome == "passed":
-        if report.collection is None or report.unavailable is not None or report.failure is not None:
-            raise EvidenceValidationError("passed evidence requires collection and no lane error")
-    elif report.outcome == "unavailable":
-        if report.unavailable is None or report.collection is not None or report.failure is not None:
-            raise EvidenceValidationError("unavailable evidence requires one unavailable reason")
-    elif report.failure is None or report.collection is not None or report.unavailable is not None:
-        raise EvidenceValidationError("failed evidence requires one allowlisted failure")
-
-    if report.collection is not None:
-        _validate_operation_ref(report.collection.operation_ref)
-        if report.collection.checkout_count != 1 or report.collection.transfer_count != 1:
-            raise EvidenceValidationError("collection evidence requires exactly one Checkout and transfer")
-        if report.collection.amount <= 0 or not _valid_currency(report.collection.currency):
-            raise EvidenceValidationError("collection amount/currency are invalid")
-        if not all(
-            (
-                report.collection.destination_matches,
-                report.collection.transfer_group_matches,
-                report.collection.source_transaction_matches,
-                report.collection.operation_metadata_matches,
+    if report.operation_ref is not None:
+        _validate_operation_ref(report.operation_ref)
+    if report.result == "passed":
+        if report.stage != "complete" or report.diagnostic is not None:
+            raise EvidenceValidationError(
+                "passed evidence must terminate at complete without diagnostics"
             )
+        _validate_passed_scenario(report)
+    else:
+        if report.diagnostic is None or report.diagnostic.stage != report.stage:
+            raise EvidenceValidationError("failed evidence requires one stage-matched diagnostic")
+        if any(
+            value is not None
+            for value in (report.collection, report.refund, report.payment_outcome, report.recovery)
         ):
-            raise EvidenceValidationError("collection relationship evidence is incomplete")
-
-    refund = report.refund
-    if refund.outcome == "passed":
-        if refund.unavailable is not None or None in (
-            refund.operation_ref,
-            refund.checkout_count,
-            refund.refund_count,
-            refund.transfer_count,
-            refund.amount,
-            refund.currency,
-            refund.operation_metadata_matches,
-            refund.marketplace_state,
-            refund.authority_state,
-        ):
-            raise EvidenceValidationError("passed refund evidence is incomplete")
-        assert refund.operation_ref is not None
-        _validate_operation_ref(refund.operation_ref)
-        if (refund.checkout_count, refund.refund_count, refund.transfer_count) != (1, 1, 0):
-            raise EvidenceValidationError("refund evidence requires one Checkout/refund and no transfer")
-        if not refund.operation_metadata_matches:
-            raise EvidenceValidationError("refund metadata does not match the operation")
-    elif refund.outcome == "unavailable":
-        if refund.unavailable is None or refund.unavailable.phase != "refund":
-            raise EvidenceValidationError("unavailable refund requires a refund reason")
-    elif refund.unavailable is not None:
-        raise EvidenceValidationError("unrequested refund cannot have an unavailable reason")
+            raise EvidenceValidationError("failed evidence cannot claim completed Stripe effects")
 
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     if _FORBIDDEN_VALUE.search(encoded):
-        raise EvidenceValidationError("provider secret, identifier, or action URL reached evidence")
+        raise EvidenceValidationError(
+            "secret, provider identity, payload URL, or customer data reached evidence"
+        )
     return payload
 
 
+def _validate_passed_scenario(report: StripeTestEvidence) -> None:
+    if report.operation_ref is None:
+        raise EvidenceValidationError("passed evidence requires an opaque operation identity")
+    scenario = report.scenario
+    if scenario in {"collection", "missed_webhook", "api_restart"}:
+        if (
+            report.collection is None
+            or report.refund is not None
+            or report.payment_outcome is not None
+        ):
+            raise EvidenceValidationError("collection scenario evidence is incomplete")
+    elif scenario in {"reclaim", "worker_restart"}:
+        if (
+            report.refund is None
+            or report.collection is not None
+            or report.payment_outcome is not None
+        ):
+            raise EvidenceValidationError("reclaim scenario evidence is incomplete")
+    elif (
+        report.payment_outcome is None or report.collection is not None or report.refund is not None
+    ):
+        raise EvidenceValidationError("payment-outcome scenario evidence is incomplete")
+
+    if scenario in {"missed_webhook", "api_restart", "worker_restart"}:
+        if report.recovery is None or report.recovery.kind != scenario:
+            raise EvidenceValidationError("recovery scenario requires matching recovery evidence")
+    elif report.recovery is not None:
+        raise EvidenceValidationError("ordinary scenario cannot claim recovery evidence")
+
+    for effect in (report.collection, report.refund, report.payment_outcome):
+        if effect is not None:
+            _validate_operation_ref(effect.operation_ref)
+            if effect.operation_ref != report.operation_ref:
+                raise EvidenceValidationError("effect and report operation identities differ")
+    for effect in (report.collection, report.refund):
+        if effect is not None and (effect.amount <= 0 or not _valid_currency(effect.currency)):
+            raise EvidenceValidationError("effect amount/currency are invalid")
+    if report.payment_outcome is not None:
+        expected = {
+            "decline": "declined",
+            "insufficient_funds": "insufficient_funds",
+            "authentication": "authentication_succeeded",
+        }.get(scenario)
+        if report.payment_outcome.outcome != expected:
+            raise EvidenceValidationError("payment outcome does not match the selected scenario")
+
+
 def _validate_operation_ref(value: str) -> None:
-    if not _OPERATION_REF.fullmatch(value) or _FORBIDDEN_VALUE.search(value):
-        raise EvidenceValidationError("operation_ref is not a safe marketplace identity")
+    if not _OPAQUE_REF.fullmatch(value) or not value.startswith("op_"):
+        raise EvidenceValidationError("operation_ref must be an opaque marketplace identity")
 
 
 def _valid_currency(value: str) -> bool:
     return len(value) == 3 and value.isascii() and value.islower() and value.isalpha()
 
 
-def write_evidence(path: Path, report: RealStripeEvidence) -> None:
+def write_evidence(path: Path, report: StripeTestEvidence) -> None:
     """Atomically write only schema-validated, provider-identifier-free evidence."""
+
     payload = _validate_evidence(report)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")

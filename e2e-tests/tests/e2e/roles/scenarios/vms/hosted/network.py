@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 import time
-import uuid
 import tomllib
-from dataclasses import dataclass
+import uuid
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Literal
 
 import httpx
@@ -19,7 +16,7 @@ from registry_client import SyncRegistryClient
 from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 from storefront_client import SyncStorefrontClient
 
-from .control import stable_operation_ref
+from .driver import stable_operation_ref
 from .driver import (
     BuyerAction,
     CompositionSnapshot,
@@ -81,21 +78,15 @@ class NetworkMarketplacePort:
 
     def __init__(self, *, buyer_config: Path) -> None:
         self.buyer_config = _config(buyer_config)
-        storefront_path = Path(
-            os.environ.get(
-                "HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG",
-                "/app/config/hosted-storefront.toml",
-            )
-        )
+        storefront_path = Path(_required("HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG"))
         if not storefront_path.is_file():
-            raise RuntimeError(
-                f"selected hosted E2E scenario requires storefront config: {storefront_path}"
-            )
+            raise RuntimeError("selected Stripe test scenario requires storefront config")
         self.storefront_config = _config(storefront_path)
         self.storefront_url = _required("HOSTED_STOREFRONT_URL")
         self.registry_url = _required("HOSTED_REGISTRY_URL")
         self.provisioning_url = _required("HOSTED_PROVISIONING_URL")
         self.authority_url = _required("HOSTED_SETTLEMENT_AUTHORITY_URL")
+        self.account_ref = _required("HOSTED_SETTLEMENT_E2E_ACCOUNT_REF")
         self._buyer_signer = _signer(
             self.buyer_config,
             _required("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL"),
@@ -168,15 +159,8 @@ class NetworkMarketplacePort:
                 )
             )
         self._listing_id: str | None = None
-        condition_decision = os.environ.get("HOSTED_SETTLEMENT_E2E_EXPECTED_CONDITION", "satisfied")
-        if condition_decision == "satisfied":
-            self._condition_decision: Literal["satisfied", "unsatisfied"] = "satisfied"
-        elif condition_decision == "unsatisfied":
-            self._condition_decision = "unsatisfied"
-        else:
-            raise RuntimeError(
-                "HOSTED_SETTLEMENT_E2E_EXPECTED_CONDITION must be satisfied or unsatisfied"
-            )
+        self._operations: dict[str, str] = {}
+        self._condition_decision: Literal["satisfied"] = "satisfied"
 
     def ensure_capacity(self) -> None:
         resource = asyncio.run(
@@ -200,25 +184,13 @@ class NetworkMarketplacePort:
             raise AssertionError("hosted capacity registration returned wrong resource")
 
     def verify_composition(self) -> CompositionSnapshot:
-        authority = httpx.get(self.authority_url + "/health/e2e-ready", timeout=10).json()
-        if authority.get("assembly") != "simulated-e2e":
-            raise AssertionError("authority readiness is not the E2E assembly")
-        expected_production = _required("HOSTED_SETTLEMENT_E2E_PRODUCTION_MANIFEST_DIGEST")
-        expected_e2e = _required("HOSTED_SETTLEMENT_E2E_MANIFEST_DIGEST")
+        authority = httpx.get(self.authority_url + "/health/ready", timeout=10).json()
+        expected_manifest = _required("HOSTED_SETTLEMENT_E2E_PRODUCTION_MANIFEST_DIGEST")
+        if authority.get("manifest_digest") != expected_manifest:
+            raise AssertionError("authority readiness has the wrong production release")
         return CompositionSnapshot(
             authority_ready=authority.get("ready") is True,
-            simulator_ready=authority.get("provider") == "simulated",
-            control_protocol=str(authority.get("control_protocol") or ""),
-            production_manifest_digest=(
-                str(authority.get("manifest_digest"))
-                if authority.get("manifest_digest") == expected_production
-                else ""
-            ),
-            e2e_manifest_digest=(
-                str(authority.get("e2e_manifest_digest"))
-                if authority.get("e2e_manifest_digest") == expected_e2e
-                else ""
-            ),
+            production_manifest_digest=expected_manifest,
         )
 
     def verify_runtime(self) -> RuntimeSnapshot:
@@ -234,26 +206,33 @@ class NetworkMarketplacePort:
             ),
             signer=self._seller_signer,
             caller_role="account_owner",
+            base_url=self.authority_url,
         )
         account = authority.account_readiness(
-            "fixture-account",
-            request_id="hosted-account-readiness-0001",
+            self.account_ref,
+            request_id=f"stripe-test-account-{uuid.uuid4().hex}",
         )
         wallet_free = not self.buyer_config.get("Wallet") and not self.buyer_config.get("Chains")
+        required_capabilities = {"card_payments", "transfers"}
         return RuntimeSnapshot(
             wallet_free=bool(wallet_free),
             runtime_ready=status.status_code == 200,
-            account_ready=account.ready,
+            account_ready=account.ready
+            and required_capabilities.issubset(set(account.capabilities)),
         )
 
+    def select_stripe_test_case(self, case: str) -> None:
+        if case not in {"collection", "refund"}:
+            raise ValueError("unsupported Stripe test lifecycle case")
+
+    def eligible_pretransfer_refund_available(self) -> bool:
+        return True
+
     def create_and_publish_listing(self) -> ListingSnapshot:
-        # The hosted profile seeds this deterministic resource through the
-        # ordinary storefront startup importer; no administrator control plane
-        # is part of the wallet-free marketplace scenario.
         created = self.seller.create_listing(
             offer={**_OFFER, "resource_id": self._resource_id},
             settlement_config={
-                "account_ref": "fixture-account",
+                "account_ref": self.account_ref,
                 "currency": "usd",
                 "rate_minor_units": 2000,
                 "condition_profile": "vm-fulfillment",
@@ -349,10 +328,12 @@ class NetworkMarketplacePort:
             raise AssertionError("hosted materialization returned no Checkout action")
         amount = int(obligation["amount"])
         currency = str(obligation["asset"])
+        operation_ref = stable_operation_ref("materialize", obligation_ref)
+        self._operations[str(settlement_ref)] = operation_ref
         return MaterializationSnapshot(
             obligation_ref=obligation_ref,
             settlement_ref=str(settlement_ref),
-            operation_ref=stable_operation_ref("materialize", obligation_ref),
+            operation_ref=operation_ref,
             action=BuyerAction(
                 kind=str(action.get("kind") or started.get("action_kind") or "redirect"),
                 expires_at_unix=int(
@@ -362,10 +343,17 @@ class NetworkMarketplacePort:
             ),
             amount=amount,
             currency=currency,
-            destination_fixture="fixture-account",
+            destination_account_ref=self.account_ref,
             transfer_group=str(settlement_ref),
             source_relation="checkout-charge",
         )
+
+    def wait_funded(self, settlement_ref: str) -> bool:
+        status = self._wait_public_status(
+            settlement_ref,
+            {"funded", "ready", "collecting", "collected"},
+        )
+        return status.get("status") in {"funded", "ready", "collecting", "collected"}
 
     def complete_vm_fulfillment(self, settlement_ref: str) -> FulfillmentSnapshot:
         status = self._buyer_status(settlement_ref)
@@ -387,7 +375,7 @@ class NetworkMarketplacePort:
     def wait_terminal(self, settlement_ref: str) -> TerminalSnapshot:
         status = self._wait_public_status(settlement_ref, {"collected"})
         return TerminalSnapshot(
-            operation_ref=stable_operation_ref("collect", settlement_ref),
+            operation_ref=self._operation(settlement_ref),
             marketplace_status=str(status["status"]),
             authority_status=str(status["status"]),
             effect_kind="transfer",
@@ -400,11 +388,14 @@ class NetworkMarketplacePort:
         if result.get("status") != "reclaimed":
             result = self._wait_public_status(settlement_ref, {"reclaimed"})
         return TerminalSnapshot(
-            operation_ref=stable_operation_ref("reclaim", settlement_ref),
+            operation_ref=self._operation(settlement_ref),
             marketplace_status=str(result["status"]),
             authority_status=str(result["status"]),
             effect_kind="refund",
         )
+
+    def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
+        return self.reclaim(settlement_ref)
 
     def _buyer_status(self, settlement_ref: str) -> dict[str, Any]:
         from domains.vms.buyer.hosted_settlement import poll_hosted_settlement
@@ -419,6 +410,12 @@ class NetworkMarketplacePort:
             signer=self._buyer_signer,
             resolve_seller_principals=self._publisher_resolver(),
         )
+
+    def _operation(self, settlement_ref: str) -> str:
+        try:
+            return self._operations[settlement_ref]
+        except KeyError as exc:
+            raise AssertionError("unknown protected settlement operation") from exc
 
     def _require_listing_id(self) -> str:
         listing_id = self._listing_id
@@ -443,88 +440,17 @@ class NetworkMarketplacePort:
         return make_publisher_trust_resolver(config=config, listing=listing)
 
     def _wait_public_status(self, settlement_ref: str, terminal: set[str]):
-        deadline = time.monotonic() + 60
-        last = None
+        timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            last = self._buyer_status(settlement_ref)
-            if last.get("status") in terminal:
-                return last
-            time.sleep(0.2)
-        raise AssertionError(f"hosted public status did not reach {sorted(terminal)}: {last}")
+            status = self._buyer_status(settlement_ref)
+            if status.get("status") in terminal:
+                return status
+            time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        raise TimeoutError("named hosted public status did not converge")
 
 
-class ComposeRestarter:
-    _services = {
-        "authority_api": "hosted-settlement-api",
-        "authority_worker": "hosted-settlement-worker",
-        "storefront": "bob-storefront",
-    }
-
-    def restart(self, component: str, *, preserve_state: bool) -> None:
-        if not preserve_state:
-            raise AssertionError("restart recovery must preserve named volumes")
-        service = self._services[component]
-        command = os.environ.get("HOSTED_SETTLEMENT_E2E_RESTART_COMMAND", "").strip()
-        if not command:
-            raise RuntimeError(
-                "selected restart scenario requires HOSTED_SETTLEMENT_E2E_RESTART_COMMAND"
-            )
-        completed = subprocess.run(
-            [*command.split(), service], capture_output=True, text=True, timeout=60
-        )
-        if completed.returncode:
-            raise RuntimeError(f"restart failed for {service}")
-
-
-@dataclass
-class NetworkMechanismPort:
-    """Scenario-facing configuration endpoint supplied by the hosted test runner."""
-
-    endpoint: str
-    selected: str | None = None
-    accepted: str | None = None
-
-    def configure(self, *, priority, stripe_ready, alkahest_ready):
-        response = httpx.post(
-            self.endpoint,
-            json={
-                "priority": list(priority),
-                "readiness": {
-                    "fiat.stripe.v1": stripe_ready,
-                    "alkahest.v1": alkahest_ready,
-                },
-            },
-            timeout=10,
-        )
-        response.raise_for_status()
-        self.selected = response.json().get("selected")
-        self.accepted = response.json().get("accepted", self.selected)
-
-    def selected_mechanism(self):
-        return self.selected
-
-    def recover_readiness(self):
-        response = httpx.post(self.endpoint + "/recover", timeout=10)
-        response.raise_for_status()
-        self.selected = response.json().get("selected")
-
-    def mutate_after_acceptance(self):
-        response = httpx.post(self.endpoint + "/mutate", timeout=10)
-        response.raise_for_status()
-        self.selected = response.json().get("selected")
-
-    def existing_operation_mechanism(self):
-        response = httpx.get(self.endpoint + "/accepted", timeout=10)
-        response.raise_for_status()
-        return response.json().get("mechanism", self.accepted)
-
-
-def create_hosted_ports(*, buyer_config: Path):
+def create_protected_marketplace(*, buyer_config: Path) -> NetworkMarketplacePort:
     marketplace = NetworkMarketplacePort(buyer_config=buyer_config)
     marketplace.ensure_capacity()
-    mechanisms = NetworkMechanismPort(_required("HOSTED_SETTLEMENT_E2E_MECHANISM_CONTROL_URL"))
-    return SimpleNamespace(
-        marketplace=marketplace,
-        restarter=ComposeRestarter(),
-        mechanisms=mechanisms,
-    )
+    return marketplace

@@ -136,8 +136,9 @@ branching or reinterpreting the Alkahest full-deal state. A collection,
 reclaim, missed-webhook, API-restart, or worker-restart scenario:
 
 1. binds the exact marketplace commit and ordinary signed hosted production
-   manifest, client wheel, service image, hosted source commit, and producer
-   workflow/run identity;
+   manifest, client wheel, service image, signed release repository/workflow
+   reference/source commit, and the protected producer workflow run identity
+   recorded separately as orchestration evidence;
 2. proves a test-mode secret and non-live Stripe objects, API connectivity, the
    exact allowlisted connected account's ownership/capabilities/readiness, the
    fixed loopback webhook path, and Chromium availability;
@@ -171,14 +172,22 @@ Run from the repository root after installing the Stripe CLI and Chromium:
 
 ```console
 make hosted-stripe-test \
-  HOSTED_RELEASE_DIR=/path/to/production-release \
+  HOSTED_RELEASE_TRUST=/path/to/release-trust \
+  HOSTED_RELEASE_MANIFEST=/path/to/production-release/release-manifest.json \
+  HOSTED_CLIENT_WHEEL=/path/to/production-release/client.whl \
+  HOSTED_COMPOSE_ENV=.dist/hosted-settlement-compose.env \
   HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
   HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
+  HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:<digest> \
   HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
+  HOSTED_PRODUCTION_WORKFLOW_REF=<signed-producer-workflow-ref> \
   HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
   HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
   HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
-  HOSTED_STRIPE_TEST_SCENARIO=<scenario>
+  HOSTED_STRIPE_TEST_SCENARIO=<scenario> \
+  HOSTED_STRIPE_TEST_ACCOUNT_REF=<allowlisted-account-reference> \
+  HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT=<environment-name> \
+  HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE=/path/to/protected-authority.env
 ```
 
 Provide `STRIPE_SECRET_KEY` (a test-mode `sk_test` or least-privilege
@@ -187,18 +196,31 @@ protected Secret/environment boundary. `HOSTED_STRIPE_TEST_EVIDENCE` may
 select the sanitized report destination. Connect onboarding is a separate
 manual or scheduled account-lifecycle smoke; every transaction run still
 retrieves and validates the maintained allowlisted account before publication.
+The target generates a release-pinned ephemeral storefront config from signed
+authority/manifest coordinates and removes it on every outcome.
 
 An explicit run that lacks a release, credential, network, account, webhook,
 Stripe CLI, or browser prerequisite fails before the applicable mutation
 boundary. Reports classify terminal outcomes as `product`, `account`,
 `environment`, or `timeout` and keep the marketplace repository/commit
-separate from the hosted manifest/client/image/source/producer-run identity.
+separate from the hosted manifest/client/image and signed
+repository/workflow-reference/source identity. The protected producer workflow
+run identity remains separate orchestration evidence rather than a
+signed-manifest field.
 Their allowlist contains scenario/stage, unique run reference, opaque operation
 identity, normalized state/amount/currency/cardinality, failure class, and
 bounded diagnostics. Credentials, Checkout or Account Link URLs,
 account/customer/card data, raw webhooks, unrestricted provider payloads, and
 unrelated provider objects are excluded from state, process output, and
 reports.
+
+For an authorized recovery that must preserve authority state and the
+maintained connected-account binding, stop the protected processes without
+removing the authority volume:
+
+```console
+make hosted-stripe-test-stop
+```
 
 Deterministic provider failure placement and event ordering are covered in the
 hosted producer's credential-free financial-provider and webhook-inbox

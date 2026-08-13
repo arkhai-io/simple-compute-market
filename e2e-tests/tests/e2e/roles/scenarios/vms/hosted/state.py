@@ -5,36 +5,24 @@ from typing import Any
 
 
 class HostedStagePrerequisiteError(RuntimeError):
-    """A staged hosted scenario was invoked before its exact inputs existed."""
+    """A staged protected scenario was invoked before its public inputs existed."""
 
 
 @dataclass
 class DealState:
-    """Marketplace-owned state for one hosted VM settlement scenario.
-
-    Only public marketplace/authority references and sanitized evidence belong in
-    this carrier. Checkout URLs, provider object identifiers, credentials, raw
-    events, and the private control address remain inside their fixture boundary.
-    """
+    """Public marketplace/authority state for one protected Stripe test scenario."""
 
     authority_ready: bool = False
-    simulator_ready: bool = False
-    control_protocol: str | None = None
     production_manifest_digest: str | None = None
-    e2e_manifest_digest: str | None = None
-
     wallet_free: bool = False
     runtime_ready: bool = False
     account_ready: bool = False
-
     listing_id: str | None = None
     publication_ref: str | None = None
     registry_listing_id: str | None = None
-
     negotiation_id: str | None = None
     accepted_terms_hash: str | None = None
     accepted_mechanism: str | None = None
-
     obligation_ref: str | None = None
     settlement_ref: str | None = None
     materialize_operation_ref: str | None = None
@@ -42,18 +30,15 @@ class DealState:
     buyer_action_expires_at_unix: int | None = None
     amount: int | None = None
     currency: str | None = None
-    destination_fixture: str | None = None
+    destination_account_ref: str | None = None
     transfer_group: str | None = None
     source_relation: str | None = None
-
-
     funded: bool = False
     capacity_reservation_ref: str | None = None
     fulfillment_ref: str | None = None
     condition_anchor: str | None = None
     portable_condition_projected: bool = False
     condition_decision: str | None = None
-
     effect_operation_ref: str | None = None
     marketplace_status: str | None = None
     authority_status: str | None = None
@@ -66,23 +51,19 @@ def state_fields() -> tuple[str, ...]:
 
 
 def require_state(deal_state: DealState, *required: str) -> None:
-    """Require exact, declared carrier fields without converting failure to skip."""
+    """Require exact declared fields without converting failure to a skip."""
 
     known = frozenset(state_fields())
     unknown = tuple(name for name in required if name not in known)
     if unknown:
-        raise AttributeError(
-            "unknown hosted DealState field(s): " + ", ".join(sorted(unknown))
-        )
+        raise AttributeError("unknown hosted DealState field(s): " + ", ".join(sorted(unknown)))
     missing: list[str] = []
     for name in required:
         value: Any = getattr(deal_state, name)
         if value is None or value is False or value == "" or value == () or value == []:
             missing.append(name)
     if missing:
-        rendered = ", ".join(
-            f"DealState.{name}={getattr(deal_state, name)!r}" for name in missing
-        )
+        rendered = ", ".join(f"DealState.{name}={getattr(deal_state, name)!r}" for name in missing)
         raise HostedStagePrerequisiteError(
             f"hosted scenario prerequisite not satisfied: {rendered}"
         )

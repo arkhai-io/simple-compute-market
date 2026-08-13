@@ -12,23 +12,20 @@ HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.1.0-trust.json
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
 HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
 HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
-HOSTED_SERVICE_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_service-0.1.0-py3-none-any.whl
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
-HOSTED_E2E_RELEASE_DIR ?= $(HOSTED_RELEASE_DIR)
-HOSTED_E2E_RELEASE_MANIFEST ?=
-HOSTED_E2E_MANIFEST_SHA256 ?=
-HOSTED_E2E_FIXTURE_WHEEL ?=
-HOSTED_E2E_SERVICE_WHEEL ?= $(HOSTED_SERVICE_WHEEL)
-HOSTED_E2E_RELEASE_AUTHORITY_ID ?=
-HOSTED_E2E_RELEASE_AUTHORITY_ADDRESS ?=
-HOSTED_E2E_RELEASE_REPOSITORY ?=
-HOSTED_E2E_RELEASE_WORKFLOW_REF ?=
-HOSTED_E2E_RELEASE_SOURCE_COMMIT ?=
-HOSTED_PRODUCTION_MANIFEST_DIGEST ?=
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
+HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?=
+HOSTED_PRODUCTION_IMAGE_DIGEST ?=
 HOSTED_PRODUCTION_SOURCE_COMMIT ?=
+HOSTED_PRODUCTION_WORKFLOW_REF ?=
 HOSTED_PRODUCTION_WORKFLOW_RUN_ID ?=
-HOSTED_REAL_STRIPE_EVIDENCE ?= $(DIST_DIR)/hosted-real-stripe-evidence.json
+HOSTED_MARKETPLACE_COMMIT ?=
+HOSTED_STRIPE_TEST_RUN_REF ?=
+HOSTED_STRIPE_TEST_SCENARIO ?=
+HOSTED_STRIPE_TEST_ACCOUNT_REF ?=
+HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
+HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
+HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 HOSTED_RELEASE_FILES := release-manifest.json \
 	arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl \
 	openapi-v0.1.0.json conformance-v0.1.0.json migrations-v4.json \
@@ -40,7 +37,7 @@ VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	--wheel $(HOSTED_CLIENT_WHEEL)
 
 .PHONY: review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-provisioning test-provisioning-iac test-registry test-storefront test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-storefront-client dist-policy dist-compute-provisioning dist-compute-provisioning-service dist-kits dist-hosted-client verify-hosted-release dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-images push-helm push-wheelhouse
-.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-hermetic-preflight hosted-compose-up hosted-compose-start hosted-compose-restart hosted-compose-clean hosted-hermetic hosted-local-eas hosted-real-stripe
+.PHONY: test-release-tooling test-deployment-packaging prepare-hosted-compose hosted-preflight hosted-compose-up hosted-compose-start hosted-compose-restart hosted-compose-clean hosted-stripe-test hosted-stripe-test-stop
 .PHONY: dist-arkhai-core-registry
 
 # ---------------------------------------------------------------------------
@@ -131,46 +128,22 @@ hosted-preflight: prepare-hosted-compose
 prepare-hosted-compose: ## Verify production inputs and render a non-secret Compose env.
 	uv run --no-project --with 'eth-account>=0.13,<0.14' \
 		python scripts/prepare-hosted-compose.py \
-		--mode production \
 		--trust "$(HOSTED_RELEASE_TRUST)" \
 		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
 		--wheel "$(HOSTED_CLIENT_WHEEL)" \
 		--output "$(HOSTED_COMPOSE_ENV)"
 
-hosted-hermetic-preflight: ## Verify compatible signed E2E inputs before startup.
-	uv run --no-project --with 'eth-account>=0.13,<0.14' \
-		python scripts/prepare-hosted-compose.py \
-		--mode hermetic \
-		--trust "$(HOSTED_RELEASE_TRUST)" \
-		--manifest "$(HOSTED_RELEASE_MANIFEST)" \
-		--wheel "$(HOSTED_CLIENT_WHEEL)" \
-		--service-wheel "$(HOSTED_E2E_SERVICE_WHEEL)" \
-		--e2e-manifest "$(HOSTED_E2E_RELEASE_MANIFEST)" \
-		--e2e-manifest-sha256 "$(HOSTED_E2E_MANIFEST_SHA256)" \
-		--e2e-fixture-wheel "$(HOSTED_E2E_FIXTURE_WHEEL)" \
-		--e2e-authority-id "$(HOSTED_E2E_RELEASE_AUTHORITY_ID)" \
-		--e2e-authority-address "$(HOSTED_E2E_RELEASE_AUTHORITY_ADDRESS)" \
-		--e2e-repository "$(HOSTED_E2E_RELEASE_REPOSITORY)" \
-		--e2e-workflow-ref "$(HOSTED_E2E_RELEASE_WORKFLOW_REF)" \
-		--e2e-source-commit "$(HOSTED_E2E_RELEASE_SOURCE_COMMIT)" \
-		--output "$(HOSTED_COMPOSE_ENV)"
 
 hosted-compose-start: hosted-preflight ## Start a clean production hosted stack.
 	$(MAKE) hosted-compose-clean
-	@test -n "$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_DIGEST"; exit 1; }
-	HOSTED_SETTLEMENT_RELEASE_DIR="$(abspath $(HOSTED_RELEASE_DIR))" \
-	HOSTED_PRODUCTION_MANIFEST_DIGEST="$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" \
-		docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
+	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
 			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml up -d --wait
 
 hosted-compose-up: hosted-compose-start ## Compatibility alias for clean startup.
 
 hosted-compose-restart: ## Restart while preserving hosted named volumes.
 	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing generated Compose env $(HOSTED_COMPOSE_ENV); run make hosted-preflight"; exit 1; }
-	@test -n "$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_DIGEST"; exit 1; }
-	HOSTED_SETTLEMENT_RELEASE_DIR="$(abspath $(HOSTED_RELEASE_DIR))" \
-	HOSTED_PRODUCTION_MANIFEST_DIGEST="$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" \
-		docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
+	docker compose --profile hosted-production --env-file "$(HOSTED_COMPOSE_ENV)" \
 			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml restart
 
 hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete volumes.
@@ -179,81 +152,66 @@ hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete 
 		temporary=$$(mktemp); env_file="$$temporary"; \
 		printf '%s\n' \
 			'HOSTED_SETTLEMENT_VERIFIED_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_E2E_VERIFIED_AUTHORITY_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_E2E_VERIFIED_SIMULATOR_IMAGE=invalid/cleanup@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_E2E_VERIFIED_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-			'HOSTED_E2E_CONTROL_PROTOCOL=cleanup' 'HOSTED_E2E_FIXTURE_VERSION=0' > "$$env_file"; \
+			'HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000' \
+			'HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=$(CURDIR)' > "$$env_file"; \
 	fi; \
 	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
 	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
 	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
 	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
 	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
-	HOSTED_SETTLEMENT_ENV_FILE=/dev/null HOSTED_SETTLEMENT_E2E_ENV_FILE=/dev/null \
-	HOSTED_SETTLEMENT_E2E_RUNNER_ENV_FILE=/dev/null HOSTED_SETTLEMENT_E2E_RESTART_ENV_FILE=/dev/null \
 	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
-	HOSTED_SETTLEMENT_RELEASE_DIR="$(CURDIR)" HOSTED_PRODUCTION_MANIFEST_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-		docker compose --profile hosted-production --profile hosted-hermetic --profile hosted-real-stripe \
+	docker compose --profile hosted-production --profile hosted-stripe-test \
 		--env-file "$$env_file" -f domains/vms/compose.yml -f compose.hosted-settlement.yml \
 			-f compose.vms-fiat.yml down -v --remove-orphans; \
 	status=$$?; test -z "$$temporary" || rm -f "$$temporary"; exit $$status
 
-hosted-hermetic: hosted-hermetic-preflight ## Run simulated hosted system evidence from a clean store.
-	@mkdir -p "$(DIST_DIR)"
-	@install -m 0644 "$(HOSTED_CLIENT_WHEEL)" "$(DIST_DIR)/$$(basename "$(HOSTED_CLIENT_WHEEL)")"
-	@install -m 0644 "$(HOSTED_E2E_SERVICE_WHEEL)" "$(DIST_DIR)/$$(basename "$(HOSTED_E2E_SERVICE_WHEEL)")"
-	@install -m 0644 "$(HOSTED_E2E_FIXTURE_WHEEL)" "$(DIST_DIR)/$$(basename "$(HOSTED_E2E_FIXTURE_WHEEL)")"
-	$(MAKE) -C e2e-tests build-hosted HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION="$$(sed -n 's/^HOSTED_E2E_FIXTURE_VERSION=//p' "$(HOSTED_COMPOSE_ENV)")"
-	$(MAKE) hosted-compose-clean
-	@test -n "$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_DIGEST"; exit 1; }
-	@status=0; \
-	HOSTED_COMPOSE_MODE=hermetic \
-	HOSTED_SETTLEMENT_RELEASE_DIR="$(abspath $(HOSTED_E2E_RELEASE_DIR))" \
-	HOSTED_PRODUCTION_MANIFEST_DIGEST="$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" \
-		docker compose --profile hosted-hermetic --env-file "$(HOSTED_COMPOSE_ENV)" \
-			-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
-			up -d --wait hosted-settlement-simulator hosted-settlement-control \
-				hosted-settlement-worker hosted-settlement-event-worker \
-				hosted-compose-control bob-storefront || status=$$?; \
-	if [ "$$status" -eq 0 ]; then \
-		HOSTED_COMPOSE_MODE=hermetic \
-		HOSTED_SETTLEMENT_RELEASE_DIR="$(abspath $(HOSTED_E2E_RELEASE_DIR))" \
-		HOSTED_PRODUCTION_MANIFEST_DIGEST="$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" \
-			docker compose --profile hosted-hermetic --env-file "$(HOSTED_COMPOSE_ENV)" \
-				-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
-				run --rm --no-deps hosted-settlement-admit-fixture || status=$$?; \
-	fi; \
-	if [ "$$status" -eq 0 ]; then \
-		runner_id=$$(HOSTED_COMPOSE_MODE=hermetic \
-		HOSTED_SETTLEMENT_RELEASE_DIR="$(abspath $(HOSTED_E2E_RELEASE_DIR))" \
-		HOSTED_PRODUCTION_MANIFEST_DIGEST="$(HOSTED_PRODUCTION_MANIFEST_DIGEST)" \
-			docker compose --profile hosted-hermetic --env-file "$(HOSTED_COMPOSE_ENV)" \
-				-f domains/vms/compose.yml -f compose.hosted-settlement.yml -f compose.vms-fiat.yml \
-				run -d --no-deps hosted-e2e-runner) || status=$$?; \
-	fi; \
-	if [ "$$status" -eq 0 ]; then \
-		runner_status=$$(docker wait "$$runner_id") || status=$$?; \
-		docker logs "$$runner_id" || status=$$?; \
-		docker rm "$$runner_id" >/dev/null || status=$$?; \
-		if [ "$$status" -eq 0 ] && [ "$$runner_status" -ne 0 ]; then status=$$runner_status; fi; \
-	fi; \
-	$(MAKE) hosted-compose-clean; exit $$status
+hosted-stripe-test-stop: ## Stop protected roles while preserving authority state.
+	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing HOSTED_COMPOSE_ENV"; exit 1; }
+	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
+	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
+	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
+	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
+	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
+	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
+	VMS_PROVISIONING_IDENTITY_ENV_FILE=/dev/null \
+	VMS_BOB_IDENTITY_ENV_FILE=/dev/null \
+	docker compose --profile hosted-stripe-test --env-file "$(HOSTED_COMPOSE_ENV)" \
+		-f domains/vms/compose.yml -f compose.hosted-settlement.yml \
+		-f compose.vms-fiat.yml down --remove-orphans
 
-hosted-local-eas: hosted-hermetic-preflight ## Run the separately selected local EAS condition profile.
-	$(MAKE) -C e2e-tests hosted-local-eas HOSTED_COMPOSE_ENV="$(abspath $(HOSTED_COMPOSE_ENV))"
 
-hosted-real-stripe: hosted-preflight ## Run separately labeled external Stripe test-mode evidence.
+hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode system scenario.
+	@test -n "$(STRIPE_SECRET_KEY)" || { echo "ERROR: missing STRIPE_SECRET_KEY"; exit 1; }
+	@test -n "$(STRIPE_CONNECTED_ACCOUNT_ID)" || { echo "ERROR: missing STRIPE_CONNECTED_ACCOUNT_ID"; exit 1; }
 	@test -n "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_MANIFEST_SHA256"; exit 1; }
+	@test -n "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" || { echo "ERROR: missing HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256"; exit 1; }
+	@test -n "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" || { echo "ERROR: missing HOSTED_PRODUCTION_IMAGE_DIGEST"; exit 1; }
 	@test -n "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" || { echo "ERROR: missing HOSTED_PRODUCTION_SOURCE_COMMIT"; exit 1; }
+	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_REF)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_REF"; exit 1; }
 	@test -n "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" || { echo "ERROR: missing HOSTED_PRODUCTION_WORKFLOW_RUN_ID"; exit 1; }
-	@skip_refund=; test "$(ATTEMPT_REFUND)" != "false" || skip_refund=--skip-refund; \
-	uv run --project e2e-tests --extra real-stripe python -m src.hosted_real_stripe.driver \
+	@test -n "$(HOSTED_MARKETPLACE_COMMIT)" || { echo "ERROR: missing HOSTED_MARKETPLACE_COMMIT"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_RUN_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_RUN_REF"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_SCENARIO)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_SCENARIO"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
+	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
+	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
+	uv run --project e2e-tests --extra stripe-test python -m src.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
+		--hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" \
+		--hosted-image-digest "$(HOSTED_PRODUCTION_IMAGE_DIGEST)" \
 		--hosted-source-commit "$(HOSTED_PRODUCTION_SOURCE_COMMIT)" \
+		--hosted-workflow-ref "$(HOSTED_PRODUCTION_WORKFLOW_REF)" \
 		--hosted-workflow-run-id "$(HOSTED_PRODUCTION_WORKFLOW_RUN_ID)" \
-		--marketplace-commit "$$(git rev-parse HEAD)" \
-		--evidence "$(HOSTED_REAL_STRIPE_EVIDENCE)" $$skip_refund
+		--marketplace-commit "$(HOSTED_MARKETPLACE_COMMIT)" \
+		--observed-marketplace-commit "$$(git rev-parse HEAD)" \
+		--run-identity "$(HOSTED_STRIPE_TEST_RUN_REF)" \
+		--scenario "$(HOSTED_STRIPE_TEST_SCENARIO)" \
+		--account-ref "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" \
+		--authority-environment "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" \
+		--hosted-service-env-base "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" \
+		--evidence "$(HOSTED_STRIPE_TEST_EVIDENCE)"
 
 dist-hosted-client: verify-hosted-release ## Copy only verified immutable release inputs into .dist.
 	@if [ "$(abspath $(HOSTED_RELEASE_DIR))" != "$(abspath $(DIST_DIR))" ]; then \

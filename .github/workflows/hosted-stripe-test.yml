@@ -1,0 +1,273 @@
+name: Hosted settlement Stripe test-mode acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketplace_commit:
+        description: Exact trusted marketplace commit on the default branch
+        required: true
+        type: string
+      hosted_release_run_id:
+        description: Exact trusted hosted producer workflow run ID
+        required: true
+        type: string
+      hosted_release_artifact:
+        description: Exact ordinary hosted production release artifact name
+        required: true
+        type: string
+      hosted_manifest_sha256:
+        description: Exact ordinary hosted release manifest file digest
+        required: true
+        type: string
+      hosted_client_wheel_sha256:
+        description: Exact ordinary hosted public client wheel digest
+        required: true
+        type: string
+      hosted_source_commit:
+        description: Exact signed hosted release source commit
+        required: true
+        type: string
+      hosted_workflow_ref:
+        description: Exact signed hosted release workflow reference
+        required: true
+        type: string
+      hosted_image_digest:
+        description: Exact ordinary hosted production image digest
+        required: true
+        type: string
+      scenario:
+        description: Protected Stripe test scenario
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - collection
+          - reclaim
+          - missed_webhook
+          - api_restart
+          - worker_restart
+          - decline
+          - insufficient_funds
+          - authentication
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hosted-stripe-test.yml
+      - compose.hosted-settlement.yml
+      - e2e-tests/src/hosted_real_stripe/**
+      - e2e-tests/tests/e2e/roles/scenarios/vms/hosted/**
+      - domains/vms/buyer/**
+      - domains/vms/storefront/**
+      - kit/hosted-settlement/**
+      - scripts/prepare-hosted-compose.py
+      - scripts/verify-hosted-release.py
+  schedule:
+    - cron: "23 5 * * 2"
+
+concurrency:
+  group: hosted-stripe-test-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  id-token: write
+
+jobs:
+  stripe-test:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    environment: hosted-stripe-test
+    runs-on: [self-hosted, hosted-stripe-test]
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        scenario: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.scenario != 'all' && format('["{0}"]', inputs.scenario) || '["collection","reclaim","missed_webhook","api_restart","worker_restart","decline","insufficient_funds","authentication"]') }}
+    env:
+      COMPOSE_PROJECT_NAME: simple-market-service-hosted-stripe-test
+      HOSTED_RELEASE_DIR: ${{ github.workspace }}/.protected-hosted-release
+      EVIDENCE_DIR: ${{ github.workspace }}/stripe-test-evidence
+      TRUSTED_MARKETPLACE_COMMIT: ${{ inputs.marketplace_commit || github.sha }}
+      HOSTED_RELEASE_RUN_ID: ${{ inputs.hosted_release_run_id || vars.HOSTED_STRIPE_TEST_RELEASE_RUN_ID }}
+      HOSTED_RELEASE_ARTIFACT: ${{ inputs.hosted_release_artifact || vars.HOSTED_STRIPE_TEST_RELEASE_ARTIFACT }}
+      HOSTED_MANIFEST_SHA256: ${{ inputs.hosted_manifest_sha256 || vars.HOSTED_STRIPE_TEST_MANIFEST_SHA256 }}
+      HOSTED_CLIENT_WHEEL_SHA256: ${{ inputs.hosted_client_wheel_sha256 || vars.HOSTED_STRIPE_TEST_CLIENT_WHEEL_SHA256 }}
+      HOSTED_SOURCE_COMMIT: ${{ inputs.hosted_source_commit || vars.HOSTED_STRIPE_TEST_SOURCE_COMMIT }}
+      HOSTED_WORKFLOW_REF: ${{ inputs.hosted_workflow_ref || vars.HOSTED_STRIPE_TEST_WORKFLOW_REF }}
+      HOSTED_IMAGE_DIGEST: ${{ inputs.hosted_image_digest || vars.HOSTED_STRIPE_TEST_IMAGE_DIGEST }}
+    steps:
+      - name: Checkout exact trusted marketplace source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.TRUSTED_MARKETPLACE_COMMIT }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reject untrusted or incomplete run identities
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$TRUSTED_MARKETPLACE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HOSTED_RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$HOSTED_MANIFEST_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$HOSTED_CLIENT_WHEEL_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$HOSTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HOSTED_WORKFLOW_REF" =~ ^[A-Za-z0-9.][A-Za-z0-9._/@:-]{7,255}$ ]]
+          [[ "$HOSTED_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$HOSTED_RELEASE_ARTIFACT" ]]
+          test "$(git rev-parse HEAD)" = "$TRUSTED_MARKETPLACE_COMMIT"
+          git merge-base --is-ancestor "$TRUSTED_MARKETPLACE_COMMIT" "origin/$DEFAULT_BRANCH"
+
+      - name: Mint short-lived hosted artifact token
+        id: hosted-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b
+        with:
+          app-id: ${{ vars.HOSTED_RELEASE_APP_ID }}
+          private-key: ${{ secrets.HOSTED_RELEASE_APP_PRIVATE_KEY }}
+          owner: arkhai
+          repositories: hosted-settlement-service
+
+      - name: Download exact ordinary hosted production release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ env.HOSTED_RELEASE_ARTIFACT }}
+          path: ${{ env.HOSTED_RELEASE_DIR }}
+          repository: arkhai/hosted-settlement-service
+          run-id: ${{ env.HOSTED_RELEASE_RUN_ID }}
+          github-token: ${{ steps.hosted-token.outputs.token }}
+
+      - name: Install protected Chromium runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --project e2e-tests --extra stripe-test --frozen
+          uv run --project e2e-tests --extra stripe-test playwright install chromium
+
+      - name: Acquire role-scoped credentials and run scenario
+        id: lane
+        shell: bash
+        continue-on-error: true
+        env:
+          CREDENTIAL_BROKER_URL: ${{ vars.HOSTED_E2E_CREDENTIAL_BROKER_URL }}
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          set -euo pipefail
+          umask 077
+          secret_dir="$(mktemp -d)"
+          cleanup() {
+            unset credentials oidc_response oidc_token registry_token expires_at
+            unset STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
+            unset HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL
+            unset HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL
+            unset HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL
+            unset VMS_REGISTRY_ADMIN_API_KEY VMS_REGISTRY_BOOTSTRAP_API_KEY
+            unset VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE
+            unset VMS_PROVISIONING_IDENTITY_ENV_FILE VMS_BOB_IDENTITY_ENV_FILE
+            unset VMS_BOB_STOREFRONT_SECRETS_FILE
+            docker logout ghcr.io >/dev/null 2>&1 || true
+            rm -rf "$secret_dir"
+          }
+          trap cleanup EXIT
+          oidc_response="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=arkhai-hosted-stripe-test")"
+          oidc_token="$(jq --exit-status --raw-output '.value' <<<"$oidc_response")"
+          unset oidc_response
+          credentials="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $oidc_token" \
+            "$CREDENTIAL_BROKER_URL/v1/hosted-stripe-test")"
+          unset oidc_token
+          expires_at="$(jq --exit-status '.expires_at_unix' <<<"$credentials")"
+          now="$(date +%s)"
+          (( expires_at > now && expires_at - now <= 3600 ))
+          registry_token="$(jq --exit-status --raw-output '.registry_read_token' <<<"$credentials")"
+          STRIPE_SECRET_KEY="$(jq --exit-status --raw-output '.stripe_restricted_key' <<<"$credentials")"
+          STRIPE_CONNECTED_ACCOUNT_ID="$(jq --exit-status --raw-output '.connected_account_id' <<<"$credentials")"
+          account_ref="$(jq --exit-status --raw-output '.account_ref' <<<"$credentials")"
+          authority_environment="$(jq --exit-status --raw-output '.authority_environment' <<<"$credentials")"
+          buyer_credential="$(jq --exit-status --raw-output '.buyer_identity_credential' <<<"$credentials")"
+          storefront_credential="$(jq --exit-status --raw-output '.storefront_identity_credential' <<<"$credentials")"
+          admin_credential="$(jq --exit-status --raw-output '.admin_identity_credential' <<<"$credentials")"
+          registry_a_credential="$(jq --exit-status --raw-output '.registry_a_identity_credential' <<<"$credentials")"
+          registry_b_credential="$(jq --exit-status --raw-output '.registry_b_identity_credential' <<<"$credentials")"
+          provisioning_credential="$(jq --exit-status --raw-output '.provisioning_identity_credential' <<<"$credentials")"
+          registry_admin_key="$(jq --exit-status --raw-output '.registry_admin_api_key' <<<"$credentials")"
+          registry_bootstrap_key="$(jq --exit-status --raw-output '.registry_bootstrap_api_key' <<<"$credentials")"
+          jq --exit-status -r '
+            .authority_env
+            | to_entries[]
+            | select(.key | test("^[A-Z_][A-Z0-9_]*$"))
+            | select(.value | type == "string" and (contains("\\n") | not) and (contains("\\r") | not))
+            | "\(.key)=\(.value)"
+          ' <<<"$credentials" >"$secret_dir/authority.env"
+          unset credentials
+          printf '%s' "$registry_a_credential" >"$secret_dir/registry-a"
+          printf '%s' "$registry_b_credential" >"$secret_dir/registry-b"
+          printf 'ARKHAI_IDENTITY_CREDENTIAL=%s\n' "$provisioning_credential" >"$secret_dir/provisioning.env"
+          printf 'ARKHAI_IDENTITY_CREDENTIAL=%s\n' "$storefront_credential" >"$secret_dir/storefront.env"
+          : >"$secret_dir/storefront.secrets.toml"
+          for value in "$registry_token" "$STRIPE_SECRET_KEY" "$STRIPE_CONNECTED_ACCOUNT_ID" \
+            "$buyer_credential" "$storefront_credential" "$admin_credential" \
+            "$registry_a_credential" "$registry_b_credential" "$provisioning_credential" \
+            "$registry_admin_key" "$registry_bootstrap_key"; do
+            echo "::add-mask::$value"
+          done
+          export STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
+          export HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL="$buyer_credential"
+          export HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL="$storefront_credential"
+          export HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL="$admin_credential"
+          export VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$secret_dir/registry-a"
+          export VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE="$secret_dir/registry-b"
+          export VMS_PROVISIONING_IDENTITY_ENV_FILE="$secret_dir/provisioning.env"
+          export VMS_BOB_IDENTITY_ENV_FILE="$secret_dir/storefront.env"
+          export VMS_BOB_STOREFRONT_SECRETS_FILE="$secret_dir/storefront.secrets.toml"
+          export VMS_REGISTRY_ADMIN_API_KEY="$registry_admin_key"
+          export VMS_REGISTRY_BOOTSTRAP_API_KEY="$registry_bootstrap_key"
+          printf '%s' "$registry_token" |
+            docker login ghcr.io --username '${{ github.actor }}' --password-stdin >/dev/null
+          mkdir -p "$EVIDENCE_DIR"
+          make hosted-stripe-test \
+            HOSTED_RELEASE_MANIFEST="$HOSTED_RELEASE_DIR/release-manifest.json" \
+            HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl" \
+            HOSTED_PRODUCTION_MANIFEST_SHA256="$HOSTED_MANIFEST_SHA256" \
+            HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256="$HOSTED_CLIENT_WHEEL_SHA256" \
+            HOSTED_PRODUCTION_IMAGE_DIGEST="$HOSTED_IMAGE_DIGEST" \
+            HOSTED_PRODUCTION_SOURCE_COMMIT="$HOSTED_SOURCE_COMMIT" \
+            HOSTED_PRODUCTION_WORKFLOW_REF="$HOSTED_WORKFLOW_REF" \
+            HOSTED_PRODUCTION_WORKFLOW_RUN_ID="$HOSTED_RELEASE_RUN_ID" \
+            HOSTED_MARKETPLACE_COMMIT="$TRUSTED_MARKETPLACE_COMMIT" \
+            HOSTED_STRIPE_TEST_RUN_REF="${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.${SCENARIO}" \
+            HOSTED_STRIPE_TEST_SCENARIO="$SCENARIO" \
+            HOSTED_STRIPE_TEST_ACCOUNT_REF="$account_ref" \
+            HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT="$authority_environment" \
+            HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE="$secret_dir/authority.env" \
+            HOSTED_STRIPE_TEST_EVIDENCE="$EVIDENCE_DIR/${SCENARIO}.json"
+
+      - name: Upload allowlisted sanitized evidence only
+        if: always() && hashFiles(format('stripe-test-evidence/{0}.json', matrix.scenario)) != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hosted-stripe-test-${{ matrix.scenario }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stripe-test-evidence/${{ matrix.scenario }}.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Stop protected roles and preserve authority recovery state
+        if: always()
+        shell: bash
+        run: make hosted-stripe-test-stop || true
+
+      - name: Fail for non-passing protected evidence
+        if: always()
+        shell: bash
+        env:
+          LANE_OUTCOME: ${{ steps.lane.outcome }}
+        run: |
+          set -euo pipefail
+          test "$LANE_OUTCOME" = success

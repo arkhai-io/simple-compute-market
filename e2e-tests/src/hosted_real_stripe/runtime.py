@@ -1,4 +1,4 @@
-"""Secret-contained processes for the protected real-provider E2E lane."""
+"""Secret-contained processes for the protected Stripe test-mode system lane."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import shutil
 import stat
 import subprocess
+import signal
 import tempfile
 import sys
 import threading
@@ -17,6 +18,8 @@ from typing import Any, Mapping, Sequence
 
 _WEBHOOK_SECRET = re.compile(r"\b(whsec_[A-Za-z0-9]+)\b")
 _SENSITIVE_ENV = re.compile(r"(?:STRIPE|WEBHOOK)", re.IGNORECASE)
+_SAFE_CONFIG_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$")
+_PROTECTED_PROFILE = "hosted-stripe-test"
 
 
 class ProcessUnavailable(RuntimeError):
@@ -25,6 +28,10 @@ class ProcessUnavailable(RuntimeError):
 
 class LifecycleContractError(RuntimeError):
     """The marketplace-owned lifecycle bridge returned invalid state."""
+
+
+class LifecycleConvergenceTimeout(TimeoutError):
+    """A named marketplace state did not converge within its bound."""
 
 
 class StripeWebhookForwarder:
@@ -37,6 +44,7 @@ class StripeWebhookForwarder:
         self._process: subprocess.Popen[str] | None = None
         self._values: queue.Queue[str | None] = queue.Queue()
         self._reader: threading.Thread | None = None
+        self._paused = False
 
     def start(self, timeout: float = 30.0) -> str:
         if self._process is not None:
@@ -44,7 +52,7 @@ class StripeWebhookForwarder:
         executable = shutil.which(self._executable)
         if executable is None:
             raise ProcessUnavailable("Stripe CLI is unavailable")
-        env = dict(os.environ)
+        env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
         env["STRIPE_API_KEY"] = self._api_key
         try:
             self._process = subprocess.Popen(
@@ -70,6 +78,20 @@ class StripeWebhookForwarder:
             raise ProcessUnavailable("Stripe CLI exited before webhook forwarding was ready")
         return value
 
+    def pause(self) -> None:
+        process = self._process
+        if process is None or process.poll() is not None or not hasattr(signal, "SIGSTOP"):
+            raise ProcessUnavailable("Stripe webhook forwarder cannot be paused")
+        process.send_signal(signal.SIGSTOP)
+        self._paused = True
+
+    def resume(self) -> None:
+        process = self._process
+        if process is None or process.poll() is not None or not hasattr(signal, "SIGCONT"):
+            raise ProcessUnavailable("Stripe webhook forwarder cannot be resumed")
+        process.send_signal(signal.SIGCONT)
+        self._paused = False
+
     def _discard_output(self) -> None:
         process = self._process
         assert process is not None and process.stdout is not None
@@ -91,6 +113,9 @@ class StripeWebhookForwarder:
         process = self._process
         if process is None:
             return
+        if self._paused and process.poll() is None and hasattr(signal, "SIGCONT"):
+            process.send_signal(signal.SIGCONT)
+            self._paused = False
         if process.poll() is None:
             process.terminate()
             try:
@@ -132,7 +157,7 @@ class EphemeralServiceEnv:
     def __enter__(self) -> Path:
         values = self._read_base()
         values.update(self._values)
-        directory = Path(tempfile.mkdtemp(prefix="arkhai-hosted-real-stripe-"))
+        directory = Path(tempfile.mkdtemp(prefix="arkhai-hosted-stripe-test-"))
         directory.chmod(stat.S_IRWXU)
         path = directory / "authority.env"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -182,6 +207,101 @@ class EphemeralServiceEnv:
         self._directory = None
 
 
+class EphemeralMarketplaceConfig:
+    """Render release-pinned marketplace trust without provider identifiers."""
+
+    def __init__(
+        self,
+        *,
+        template: Path,
+        account_ref: str,
+        authority_id: str,
+        authority_scheme: str,
+        authority_address: str,
+        authority_environment: str,
+        manifest_digest: str,
+    ) -> None:
+        self._template = template
+        self._values = {
+            "account_ref": account_ref,
+            "authority_id": authority_id,
+            "authority_scheme": authority_scheme,
+            "authority_address": authority_address,
+            "authority_environment": authority_environment,
+            "manifest_digest": manifest_digest,
+        }
+        self._directory: Path | None = None
+        self.path: Path | None = None
+
+    def __enter__(self) -> Path:
+        if any(not _SAFE_CONFIG_VALUE.fullmatch(value) for value in self._values.values()):
+            raise ProcessUnavailable("marketplace release configuration is invalid")
+        try:
+            text = self._template.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ProcessUnavailable("marketplace configuration template is unavailable") from exc
+        text = _replace_toml_setting(text, "authority_id", self._values["authority_id"])
+        text = _replace_toml_setting(
+            text,
+            "environment",
+            self._values["authority_environment"],
+        )
+        text = _replace_toml_setting(
+            text,
+            "expected_manifest_digest",
+            self._values["manifest_digest"],
+        )
+        stripe_header = "[Settlement.stripe]\n"
+        if text.count(stripe_header) != 1:
+            raise ProcessUnavailable("marketplace configuration has no exact Stripe section")
+        text = text.replace(
+            stripe_header,
+            stripe_header + f'account_ref = "{self._values["account_ref"]}"\n',
+            1,
+        )
+        authority_pattern = re.compile(
+            r"(\[Settlement\.stripe\.authority\]\n)principals = \[[^\n]+\]"
+        )
+        text, count = authority_pattern.subn(
+            (
+                r"\1principals = [{ scheme = \""
+                + self._values["authority_scheme"]
+                + r"\", identifier = \""
+                + self._values["authority_address"]
+                + r"\" }]"
+            ),
+            text,
+            count=1,
+        )
+        if count != 1:
+            raise ProcessUnavailable("marketplace authority trust section is invalid")
+        directory = Path(tempfile.mkdtemp(prefix="arkhai-hosted-stripe-test-config-"))
+        directory.chmod(stat.S_IRWXU)
+        path = directory / "storefront.toml"
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(text)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            directory.rmdir()
+            raise
+        self._directory = directory
+        self.path = path
+        return path
+
+    def __exit__(self, *_exc: object) -> None:
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
+        if self._directory is not None:
+            try:
+                self._directory.rmdir()
+            except OSError:
+                pass
+        self.path = None
+        self._directory = None
+
+
 class ComposeStack:
     """Start the ordinary digest-pinned marketplace/authority topology."""
 
@@ -194,23 +314,45 @@ class ComposeStack:
         cwd: Path,
     ) -> None:
         self._cwd = cwd
-        self._base = [executable, "compose", "--env-file", str(compose_env)]
-        for path in compose_files:
-            self._base.extend(("-f", str(path)))
+        self._base = [
+            executable,
+            "compose",
+            "--profile",
+            _PROTECTED_PROFILE,
+            "--env-file",
+            str(compose_env),
+        ]
         self._started = False
         self._runtime_env: dict[str, str] | None = None
 
-    def start(self, *, authority_env_path: Path) -> None:
-        env = dict(os.environ)
+    def start(
+        self,
+        *,
+        authority_env_path: Path,
+        marketplace_config_path: Path,
+    ) -> None:
+        env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
         env["HOSTED_SETTLEMENT_ENV_FILE"] = str(authority_env_path)
+        env["VMS_BOB_STRIPE_STOREFRONT_CONFIG"] = str(marketplace_config_path)
         self._runtime_env = env
         self._run((*self._base, "up", "-d", "--wait"), env=env, check=True)
         self._started = True
 
+    def restart(self, role: str) -> None:
+        service = {
+            "api": "hosted-settlement-api",
+            "worker": "hosted-settlement-worker",
+        }.get(role)
+        if service is None or self._runtime_env is None:
+            raise ProcessUnavailable("ordinary hosted restart role is unavailable")
+        self._run((*self._base, "restart", service), env=self._runtime_env, check=True)
+
     def stop(self) -> None:
-        env = self._runtime_env or dict(os.environ)
+        env = self._runtime_env or {
+            key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)
+        }
         self._run(
-            (*self._base, "down", "-v", "--remove-orphans"),
+            (*self._base, "down", "--remove-orphans"),
             env=env,
             check=False,
         )
@@ -245,20 +387,35 @@ class ComposeStack:
 class MarketplaceLifecycleSession:
     """In-memory JSON-lines bridge to the marketplace-owned staged scenario."""
 
-    def __init__(self, command: Sequence[str], *, cwd: Path) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        environment: Mapping[str, str] | None = None,
+        request_timeout: float = 120.0,
+    ) -> None:
         if not command or any(not isinstance(item, str) or not item for item in command):
             raise LifecycleContractError("lifecycle command must be a non-empty argv array")
+        if request_timeout <= 0:
+            raise LifecycleContractError("lifecycle request timeout must be positive")
+        additions = dict(environment or {})
+        if any(_SENSITIVE_ENV.search(key) for key in additions):
+            raise LifecycleContractError(
+                "lifecycle environment cannot receive provider credentials"
+            )
         self._command = tuple(command)
         self._cwd = cwd
+        self._environment = additions
+        self._request_timeout = request_timeout
         self._process: subprocess.Popen[str] | None = None
         self._stderr_reader: threading.Thread | None = None
+        self._stdout_reader: threading.Thread | None = None
+        self._responses: queue.Queue[str | None] = queue.Queue()
 
     def start(self) -> None:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not _SENSITIVE_ENV.search(key)
-        }
+        env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
+        env.update(self._environment)
         try:
             self._process = subprocess.Popen(
                 self._command,
@@ -273,7 +430,9 @@ class MarketplaceLifecycleSession:
         except OSError as exc:
             raise ProcessUnavailable("marketplace lifecycle bridge was unavailable") from exc
         self._stderr_reader = threading.Thread(target=self._discard_stderr, daemon=True)
+        self._stdout_reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._stderr_reader.start()
+        self._stdout_reader.start()
 
     def request(self, action: str, **fields: object) -> dict[str, Any]:
         process = self._process
@@ -282,20 +441,39 @@ class MarketplaceLifecycleSession:
         request = {"action": action, **fields}
         process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
         process.stdin.flush()
-        line = process.stdout.readline()
-        if not line:
+        try:
+            line = self._responses.get(timeout=self._request_timeout)
+        except queue.Empty as exc:
+            raise LifecycleConvergenceTimeout(
+                "marketplace lifecycle stage did not converge within its bound"
+            ) from exc
+        if line is None:
             raise ProcessUnavailable("marketplace lifecycle bridge exited unexpectedly")
         try:
             response = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise LifecycleContractError("marketplace lifecycle bridge returned invalid JSON") from exc
+            raise LifecycleContractError(
+                "marketplace lifecycle bridge returned invalid JSON"
+            ) from exc
         if not isinstance(response, dict):
             raise LifecycleContractError("marketplace lifecycle bridge returned a non-object")
         if response.get("ok") is not True:
-            if response.get("code") == "marketplace_unavailable":
+            code = response.get("code")
+            if code == "marketplace_unavailable":
                 raise ProcessUnavailable("marketplace lifecycle state was unavailable")
+            if code == "convergence_timeout":
+                raise LifecycleConvergenceTimeout(
+                    "marketplace lifecycle stage did not converge within its bound"
+                )
             raise LifecycleContractError("marketplace lifecycle bridge rejected a stage")
         return response
+
+    def _read_stdout(self) -> None:
+        process = self._process
+        assert process is not None and process.stdout is not None
+        for line in process.stdout:
+            self._responses.put(line)
+        self._responses.put(None)
 
     def _discard_stderr(self) -> None:
         process = self._process
@@ -335,6 +513,14 @@ class MarketplaceLifecycleSession:
 
     def __exit__(self, *_exc: object) -> None:
         self.stop()
+
+
+def _replace_toml_setting(text: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"^{re.escape(key)} = \"[^\n]*\"$", re.MULTILINE)
+    replaced, count = pattern.subn(f'{key} = "{value}"', text, count=1)
+    if count != 1:
+        raise ProcessUnavailable(f"marketplace configuration is missing {key}")
+    return replaced
 
 
 def parse_lifecycle_command(value: str | None) -> tuple[str, ...]:

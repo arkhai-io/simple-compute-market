@@ -219,6 +219,22 @@ def test_schema_four_identity_release_is_accepted(tmp_path: Path) -> None:
     assert result["capabilities"] == _REQUIRED_CAPABILITIES
 
 
+def test_production_manifest_with_test_fixture_artifact_is_rejected(
+    tmp_path: Path,
+) -> None:
+    def add_fixture(payload: dict[str, Any]) -> None:
+        payload["fixture_wheel"] = {
+            "filename": "arkhai_hosted_settlement_e2e-0.1.0-py3-none-any.whl",
+            "sha256": "sha256:" + "ef" * 32,
+        }
+
+    with pytest.raises(
+        verifier.ReleaseVerificationError,
+        match="test-only hosted artifact",
+    ):
+        _verify(tmp_path, mutate_payload=add_fixture)
+
+
 def test_client_wheel_with_seller_entry_point_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(
         verifier.ReleaseVerificationError,
@@ -292,9 +308,14 @@ def test_tampered_provenance_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_compose_env_uses_exact_verified_image(tmp_path: Path) -> None:
+def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> None:
     trust_path, manifest_path, client_path = _stage_release(tmp_path)
     output_path = tmp_path / "hosted-compose.env"
+    release = verifier.verify_release(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+    )
 
     image = preparer.prepare_compose_env(
         trust_path=trust_path,
@@ -302,11 +323,30 @@ def test_compose_env_uses_exact_verified_image(tmp_path: Path) -> None:
         wheel_path=client_path,
         output_path=output_path,
     )
+    values = dict(
+        line.split("=", 1)
+        for line in output_path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    )
 
     assert image == f"ghcr.io/arkhai/hosted-settlement-service@sha256:{'ab' * 32}"
-    assert output_path.read_text(encoding="utf-8").splitlines()[1] == (
-        f"HOSTED_SETTLEMENT_VERIFIED_IMAGE={image}"
-    )
+    assert values == {
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": release["authority_address"],
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": release["authority_id"],
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME": release["authority_scheme"],
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256": (
+            "sha256:" + release["client_wheel_sha256"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE": image,
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST": release["manifest_digest"],
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256": (
+            "sha256:" + release["manifest_sha256"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR": str(manifest_path.resolve().parent),
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": release["source_commit"],
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": release["repository"],
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": release["workflow_ref"],
+    }
 
 
 def test_compose_env_rejects_arbitrary_image_override(
@@ -338,6 +378,27 @@ def test_compose_env_rejects_tampered_digest_override(
     with pytest.raises(
         preparer.ComposePreparationError,
         match="HOSTED_SETTLEMENT_IMAGE_DIGEST does not match",
+    ):
+        preparer.prepare_compose_env(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_compose_env_rejects_arbitrary_release_directory_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
+        str(tmp_path / "unverified-release"),
+    )
+
+    with pytest.raises(
+        preparer.ComposePreparationError,
+        match="HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR does not match",
     ):
         preparer.prepare_compose_env(
             trust_path=trust_path,
@@ -379,51 +440,44 @@ def test_generated_environment_contains_only_allowlisted_nonsecret_keys(
         if line and not line.startswith("#")
     }
     assert keys == {
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
+        "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_SCHEME",
+        "HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256",
         "HOSTED_SETTLEMENT_VERIFIED_IMAGE",
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST",
         "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR",
+        "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT",
+        "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY",
+        "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF",
     }
 
 
-def test_selected_hermetic_mode_reports_exact_missing_manifest(
-    tmp_path: Path,
+def test_compose_preparer_rejects_release_mode_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    trust_path, manifest_path, client_path = _stage_release(tmp_path)
-    with pytest.raises(
-        preparer.ComposePreparationError,
-        match="HOSTED_SERVICE_WHEEL",
-    ):
-        preparer.prepare_compose_env(
-            mode="hermetic",
-            trust_path=trust_path,
-            manifest_path=manifest_path,
-            wheel_path=client_path,
-            service_wheel_path=None,
-            output_path=tmp_path / "hosted-compose.env",
-        )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prepare-hosted-compose.py",
+            "--trust",
+            "trust.json",
+            "--manifest",
+            "release-manifest.json",
+            "--wheel",
+            "client.whl",
+            "--output",
+            "compose.env",
+            "--mode",
+            "hermetic",
+        ],
+    )
 
+    with pytest.raises(SystemExit) as exc_info:
+        preparer.main()
 
-def test_production_manifest_is_not_accepted_as_hermetic_manifest(
-    tmp_path: Path,
-) -> None:
-    trust_path, manifest_path, client_path = _stage_release(tmp_path)
-    service_bytes = _client_wheel_bytes()
-    service_path = tmp_path / "arkhai_hosted_settlement_service-0.1.0-py3-none-any.whl"
-    service_path.write_bytes(service_bytes)
-    with pytest.raises(verifier.ReleaseVerificationError, match="E2E contract_version"):
-        production = verifier.verify_release(
-            trust_path=trust_path,
-            manifest_path=manifest_path,
-            wheel_path=client_path,
-        )
-        verifier.verify_hermetic_release(
-            production=production,
-            manifest_path=manifest_path,
-            manifest_sha256=_sha(manifest_path.read_bytes()),
-            fixture_wheel_path=client_path,
-            service_wheel_path=service_path,
-            authority_id="release-authority",
-            authority_address=Account.from_key(_AUTHORITY_KEY).address.lower(),
-            repository="arkhai/hosted-settlement-service",
-            workflow_ref=".github/workflows/release.yml@refs/tags/v0.1.0",
-            source_commit="12" * 20,
-        )
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --mode hermetic" in capsys.readouterr().err

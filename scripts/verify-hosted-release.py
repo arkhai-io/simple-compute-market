@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify immutable hosted production and private E2E release inputs."""
+"""Verify immutable hosted production release inputs."""
 
 from __future__ import annotations
 
@@ -12,16 +12,9 @@ from pathlib import Path
 from typing import Any
 
 _RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
-_E2E_RELEASE_CONTRACT = "arkhai.hosted-settlement-private-e2e.v1"
 _RELEASE_VERSION = "0.1.0"
 _API_VERSION = "0.1.0"
 _SCHEMA_VERSION = 4
-_CONTROL_PROTOCOL = "arkhai.hosted-settlement-e2e-control.v1"
-_CLOCK_PROTOCOL = "arkhai.hosted-settlement-e2e-clock.v1"
-_PROVIDER_PROTOCOL = "arkhai.hosted-settlement-e2e-provider.v1"
-_CONTROL_SCHEMA_CONTRACT = "arkhai.hosted-settlement-e2e-control-schema.v1"
-_SIMULATOR_MIGRATIONS_CONTRACT = "arkhai.hosted-settlement-e2e-simulator-migrations.v1"
-_SIMULATOR_SCHEMA_VERSION = 1
 _CAPABILITIES = (
     "conditional-escrow.v1",
     "stripe-connect-separate-charges-transfers.v1",
@@ -33,14 +26,6 @@ _CAPABILITIES = (
     "account-owner-retirement.v1",
     "signer-injected-client.v1",
     "provider-neutral-seller-onboarding.v1",
-)
-_E2E_CAPABILITIES = (
-    "deterministic-provider.v1",
-    "controlled-clock.v1",
-    "controlled-events.v1",
-    "authenticated-control.v1",
-    "sanitized-effects.v1",
-    "process-restart.v1",
 )
 _IDENTITY_CONTRACT = {
     "request_signature_protocol": "arkhai.hosted-request-signature.v2",
@@ -70,6 +55,14 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_FORBIDDEN_RELEASE_TOKENS = (
+    "e2e",
+    "fixture",
+    "simulator",
+    "control",
+    "clock",
+    "event-worker",
+)
 
 
 class ReleaseVerificationError(RuntimeError):
@@ -282,7 +275,6 @@ def verify_release(
     trust_path: Path,
     manifest_path: Path,
     wheel_path: Path | None,
-    service_wheel_path: Path | None = None,
 ) -> dict[str, Any]:
     _, trust = _read_json(trust_path, "release trust config")
     _equal(trust.get("contract_version"), _RELEASE_CONTRACT, "trust contract_version")
@@ -352,6 +344,18 @@ def verify_release(
         "client_wheel.sha256",
     )
     expected_client_path = manifest_path.parent / str(trusted_client["filename"])
+
+    for field, descriptor in payload.items():
+        if not isinstance(descriptor, dict) or "filename" not in descriptor:
+            continue
+        filename = str(descriptor["filename"]).lower()
+        if any(
+            token in field.lower() or token in filename
+            for token in _FORBIDDEN_RELEASE_TOKENS
+        ):
+            raise ReleaseVerificationError(
+                "production release manifest contains a test-only hosted artifact"
+            )
     staged_client = wheel_path or expected_client_path
     if staged_client.resolve() != expected_client_path.resolve():
         raise ReleaseVerificationError(
@@ -361,13 +365,6 @@ def verify_release(
 
     service = _object(payload.get("service_wheel"), "payload.service_wheel")
     service_sha = _sha(service.get("sha256"), "service_wheel.sha256")
-    if service_wheel_path is not None:
-        expected_service_path = manifest_path.parent / str(service.get("filename"))
-        if service_wheel_path.resolve() != expected_service_path.resolve():
-            raise ReleaseVerificationError(
-                "service wheel must be staged beside the release manifest"
-            )
-        service_sha = _verify_wheel(service_wheel_path, service, field="service")
 
     image_reference, image_digest = _verify_image(
         _object(payload.get("service_image"), "payload.service_image"),
@@ -389,6 +386,9 @@ def verify_release(
         "api_version": _API_VERSION,
         "schema_version": _SCHEMA_VERSION,
         "capabilities": list(_CAPABILITIES),
+        "authority_id": authority_id,
+        "authority_scheme": "eip191",
+        "authority_address": authority_address,
         "identity_contract": _IDENTITY_CONTRACT,
         "repository": repository,
         "workflow_ref": workflow_ref,
@@ -397,234 +397,9 @@ def verify_release(
     }
 
 
-def verify_hermetic_release(
-    *,
-    production: dict[str, Any],
-    manifest_path: Path,
-    manifest_sha256: str,
-    fixture_wheel_path: Path,
-    service_wheel_path: Path,
-    authority_id: str,
-    authority_address: str,
-    repository: str,
-    workflow_ref: str,
-    source_commit: str,
-) -> dict[str, Any]:
-    expected_raw_sha = _sha(manifest_sha256, "E2E manifest_sha256")
-    if not _ADDRESS.fullmatch(authority_address):
-        raise ReleaseVerificationError("trusted E2E authority_address is invalid")
-    if not _COMMIT.fullmatch(source_commit):
-        raise ReleaseVerificationError("trusted E2E source_commit is invalid")
-    raw, envelope = _read_json(manifest_path, "staged E2E release manifest")
-    if hashlib.sha256(raw).hexdigest() != expected_raw_sha:
-        raise ReleaseVerificationError(
-            "staged E2E release manifest hash does not match"
-        )
-    payload = _verify_signature(
-        envelope,
-        authority_id=authority_id,
-        authority_address=authority_address,
-        label="E2E",
-    )
-    _equal(
-        payload.get("contract_version"), _E2E_RELEASE_CONTRACT, "E2E contract_version"
-    )
-    _equal(payload.get("designation"), "e2e-only", "E2E designation")
-    _equal(
-        payload.get("release_version"),
-        production["release_version"],
-        "E2E release_version",
-    )
-    _equal(payload.get("control_protocol"), _CONTROL_PROTOCOL, "E2E control_protocol")
-    _equal(payload.get("clock_protocol"), _CLOCK_PROTOCOL, "E2E clock_protocol")
-    _equal(
-        payload.get("provider_protocol"), _PROVIDER_PROTOCOL, "E2E provider_protocol"
-    )
-    _equal(
-        tuple(payload.get("capabilities") or ()), _E2E_CAPABILITIES, "E2E capabilities"
-    )
-    build = _object(payload.get("build"), "E2E payload.build")
-    _equal(build.get("repository"), repository, "E2E build.repository")
-    _equal(build.get("workflow_ref"), workflow_ref, "E2E build.workflow_ref")
-    _equal(build.get("source_commit"), source_commit, "E2E build.source_commit")
-
-    compatibility = _object(payload.get("production"), "E2E payload.production")
-    _equal(
-        compatibility.get("manifest_digest"),
-        production["manifest_digest"],
-        "E2E production manifest_digest",
-    )
-    _equal(
-        compatibility.get("release_version"),
-        production["release_version"],
-        "E2E production release_version",
-    )
-    _equal(
-        compatibility.get("client_wheel_sha256"),
-        "sha256:" + production["client_wheel_sha256"],
-        "E2E production client wheel",
-    )
-    _equal(
-        compatibility.get("service_wheel_sha256"),
-        "sha256:" + production["service_wheel_sha256"],
-        "E2E production service wheel",
-    )
-    _equal(
-        compatibility.get("service_image_digest"),
-        production["service_image_digest"],
-        "E2E production service image",
-    )
-    _equal(
-        compatibility.get("migration_schema_version"),
-        production["schema_version"],
-        "E2E production migration schema",
-    )
-    production_manifest = _object(
-        payload.get("production_manifest"), "E2E payload.production_manifest"
-    )
-    _equal(
-        production_manifest.get("sha256"),
-        "sha256:" + production["manifest_sha256"],
-        "E2E production manifest file hash",
-    )
-    _equal(
-        production_manifest.get("filename"),
-        manifest_path.parent.joinpath(str(production_manifest.get("filename"))).name,
-        "E2E production manifest filename",
-    )
-    _verify_file(manifest_path.parent, production_manifest, "E2E production manifest")
-
-    fixture = _object(payload.get("fixture_wheel"), "E2E payload.fixture_wheel")
-    fixture_sha = _verify_wheel(
-        fixture_wheel_path,
-        fixture,
-        field="E2E fixture",
-        expected_distribution="arkhai-hosted-settlement-e2e",
-        expected_version=str(payload.get("release_version")),
-    )
-    service_descriptor = _object(
-        _object(
-            json.loads(
-                (
-                    manifest_path.parent / str(production_manifest["filename"])
-                ).read_bytes()
-            ),
-            "production manifest",
-        ).get("payload"),
-        "production manifest payload",
-    ).get("service_wheel")
-    service_sha = _verify_wheel(
-        service_wheel_path,
-        _object(service_descriptor, "production service_wheel"),
-        field="service",
-    )
-    _equal(
-        "sha256:" + service_sha,
-        compatibility.get("service_wheel_sha256"),
-        "E2E staged service wheel",
-    )
-
-    control_schema_descriptor = _object(
-        payload.get("control_schema"), "E2E payload.control_schema"
-    )
-    control_schema_path = _verify_file(
-        manifest_path.parent, control_schema_descriptor, "E2E control schema"
-    )
-    _, control_schema = _read_json(control_schema_path, "E2E control schema")
-    _equal(
-        control_schema.get("contract"),
-        _CONTROL_SCHEMA_CONTRACT,
-        "control schema contract",
-    )
-    _equal(
-        control_schema.get("control_protocol"),
-        _CONTROL_PROTOCOL,
-        "control schema protocol",
-    )
-    _equal(
-        control_schema.get("clock_protocol"), _CLOCK_PROTOCOL, "control clock protocol"
-    )
-    _equal(
-        control_schema.get("provider_protocol"),
-        _PROVIDER_PROTOCOL,
-        "control provider protocol",
-    )
-
-    authority_migrations = _object(
-        payload.get("authority_migrations"), "E2E payload.authority_migrations"
-    )
-    _equal(
-        authority_migrations.get("schema_version"),
-        production["schema_version"],
-        "E2E authority migration schema",
-    )
-    _verify_file(manifest_path.parent, authority_migrations, "E2E authority migrations")
-    simulator_migrations = _object(
-        payload.get("simulator_migrations"), "E2E payload.simulator_migrations"
-    )
-    _equal(
-        simulator_migrations.get("schema_version"),
-        _SIMULATOR_SCHEMA_VERSION,
-        "E2E simulator migration schema",
-    )
-    simulator_path = _verify_file(
-        manifest_path.parent, simulator_migrations, "E2E simulator migrations"
-    )
-    _, simulator_document = _read_json(simulator_path, "E2E simulator migrations")
-    _equal(
-        simulator_document.get("contract"),
-        _SIMULATOR_MIGRATIONS_CONTRACT,
-        "E2E simulator migrations contract",
-    )
-    _equal(
-        simulator_document.get("schema_version"),
-        _SIMULATOR_SCHEMA_VERSION,
-        "E2E simulator migrations schema",
-    )
-    for field in ("sbom", "provenance"):
-        _verify_file(
-            manifest_path.parent,
-            _object(payload.get(field), f"E2E payload.{field}"),
-            f"E2E {field}",
-        )
-
-    authority_reference, authority_digest = _verify_image(
-        _object(payload.get("authority_image"), "E2E payload.authority_image"),
-        "E2E authority_image",
-    )
-    simulator_reference, simulator_digest = _verify_image(
-        _object(payload.get("simulator_image"), "E2E payload.simulator_image"),
-        "E2E simulator_image",
-    )
-    canonical_digest = "sha256:" + hashlib.sha256(_canonical_jcs(envelope)).hexdigest()
-    return {
-        "kind": "e2e-only",
-        "manifest_sha256": expected_raw_sha,
-        "manifest_digest": canonical_digest,
-        "authority_image_reference": authority_reference,
-        "authority_image_digest": authority_digest,
-        "simulator_image_reference": simulator_reference,
-        "simulator_image_digest": simulator_digest,
-        "fixture_wheel_sha256": fixture_sha,
-        "fixture_version": str(fixture.get("version")),
-        "control_protocol": _CONTROL_PROTOCOL,
-        "clock_protocol": _CLOCK_PROTOCOL,
-        "provider_protocol": _PROVIDER_PROTOCOL,
-        "simulator_schema_version": _SIMULATOR_SCHEMA_VERSION,
-        "capabilities": list(_E2E_CAPABILITIES),
-        "repository": repository,
-        "workflow_ref": workflow_ref,
-        "source_commit": source_commit,
-        "production": production,
-    }
-
-
 def verify_ready_response(
     production: dict[str, Any],
     response: dict[str, Any],
-    *,
-    e2e: dict[str, Any] | None = None,
-    e2e_response: dict[str, Any] | None = None,
 ) -> None:
     checks = {
         "ready": True,
@@ -644,30 +419,6 @@ def verify_ready_response(
         raise ReleaseVerificationError(
             f"ready response is missing required capabilities: {', '.join(missing)}"
         )
-    if e2e is None:
-        if e2e_response is not None:
-            raise ReleaseVerificationError("E2E ready response has no verified release")
-        return
-    if e2e_response is None:
-        raise ReleaseVerificationError("E2E ready response is required")
-    e2e_checks = {
-        "ready": True,
-        "manifest_digest": production["manifest_digest"],
-        "e2e_manifest_digest": e2e["manifest_digest"],
-        "control_protocol": e2e["control_protocol"],
-    }
-    for field, expected in e2e_checks.items():
-        if e2e_response.get(field) != expected:
-            raise ReleaseVerificationError(
-                f"E2E ready response {field} does not match release"
-            )
-    missing = sorted(
-        set(e2e["capabilities"]) - set(e2e_response.get("capabilities") or ())
-    )
-    if missing:
-        raise ReleaseVerificationError(
-            f"E2E ready response is missing required capabilities: {', '.join(missing)}"
-        )
 
 
 def main() -> int:
@@ -675,54 +426,13 @@ def main() -> int:
     parser.add_argument("--trust", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--wheel", type=Path)
-    parser.add_argument("--service-wheel", type=Path)
-    parser.add_argument("--e2e-manifest", type=Path)
-    parser.add_argument("--e2e-manifest-sha256")
-    parser.add_argument("--e2e-fixture-wheel", type=Path)
-    parser.add_argument("--e2e-authority-id")
-    parser.add_argument("--e2e-authority-address")
-    parser.add_argument("--e2e-repository")
-    parser.add_argument("--e2e-workflow-ref")
-    parser.add_argument("--e2e-source-commit")
     args = parser.parse_args()
     try:
-        production = verify_release(
+        result = verify_release(
             trust_path=args.trust,
             manifest_path=args.manifest,
             wheel_path=args.wheel,
-            service_wheel_path=args.service_wheel,
         )
-        result: dict[str, Any] = production
-        if args.e2e_manifest is not None:
-            required = {
-                "--service-wheel": args.service_wheel,
-                "--e2e-manifest-sha256": args.e2e_manifest_sha256,
-                "--e2e-fixture-wheel": args.e2e_fixture_wheel,
-                "--e2e-authority-id": args.e2e_authority_id,
-                "--e2e-authority-address": args.e2e_authority_address,
-                "--e2e-repository": args.e2e_repository,
-                "--e2e-workflow-ref": args.e2e_workflow_ref,
-                "--e2e-source-commit": args.e2e_source_commit,
-            }
-            missing = next(
-                (name for name, value in required.items() if not value), None
-            )
-            if missing:
-                raise ReleaseVerificationError(
-                    f"missing required hermetic input {missing}"
-                )
-            result = verify_hermetic_release(
-                production=production,
-                manifest_path=args.e2e_manifest,
-                manifest_sha256=str(args.e2e_manifest_sha256),
-                fixture_wheel_path=args.e2e_fixture_wheel,
-                service_wheel_path=args.service_wheel,
-                authority_id=str(args.e2e_authority_id),
-                authority_address=str(args.e2e_authority_address),
-                repository=str(args.e2e_repository),
-                workflow_ref=str(args.e2e_workflow_ref),
-                source_commit=str(args.e2e_source_commit),
-            )
     except (ReleaseVerificationError, OSError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))

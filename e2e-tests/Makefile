@@ -17,7 +17,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build build-hosted venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-hermetic hosted-local-eas hosted-real-stripe
+.PHONY: build venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-stripe-test hosted-stripe-test-stop
 
 # -----------------------------------------------------------------------
 # Setup
@@ -70,14 +70,9 @@ build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
-build-hosted:
-	@test -n "$(HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION)" || { echo "ERROR: missing HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION"; exit 1; }
-	cd .. && docker build --target hosted \
-		--build-arg HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION="$(HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION)" \
-		-t $(IMAGE_NAME):e2e-tests-hosted -f e2e-tests/Dockerfile .
 
 hosted-preflight:
-	$(MAKE) -C .. hosted-hermetic-preflight
+	$(MAKE) -C .. hosted-preflight
 
 hosted-start:
 	$(MAKE) -C .. hosted-compose-start
@@ -88,19 +83,12 @@ hosted-restart:
 hosted-clean:
 	$(MAKE) -C .. hosted-compose-clean
 
-hosted-hermetic:
-	$(MAKE) -C .. hosted-hermetic
 
-hosted-local-eas:
-	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing generated hosted Compose env $(HOSTED_COMPOSE_ENV)"; exit 1; }
-	cd .. && HOSTED_COMPOSE_MODE=hermetic \
-		docker compose --profile hosted-hermetic --profile evm-multi-seller \
-		--env-file "$(HOSTED_COMPOSE_ENV)" -f compose.vms.yml -f compose.hosted-settlement.yml \
-		run --rm hosted-e2e-runner .venv/bin/pytest -m e2e_hosted_settlement_eas \
-		tests/e2e/roles/scenarios/vms/hosted
+hosted-stripe-test:
+	$(MAKE) -C .. hosted-stripe-test
 
-hosted-real-stripe:
-	$(MAKE) -C .. hosted-real-stripe
+hosted-stripe-test-stop:
+	$(MAKE) -C .. hosted-stripe-test-stop
 
 # -----------------------------------------------------------------------
 # Tests — local

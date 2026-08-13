@@ -16,32 +16,36 @@ def test_authority_port_coexists_with_registry_container_port() -> None:
     base = (REPO_ROOT / "domains" / "vms" / "compose.yml").read_text(encoding="utf-8")
     assert '"8080:8080"' in base
     assert '"127.0.0.1:${HOSTED_SETTLEMENT_HOST_PORT:-18080}:8080"' in COMPOSE
-    assert "http://hosted-settlement-api:8080" in COMPOSE
+    assert '"127.0.0.1:${HOSTED_STOREFRONT_HOST_PORT:-18081}:8001"' in COMPOSE
+    assert 'base_url = "http://127.0.0.1:8080"' in (
+        REPO_ROOT / "e2e-tests" / "config" / "hosted-storefront.toml"
+    ).read_text(encoding="utf-8")
     assert "network_mode: service:hosted-settlement-api" in COMPOSE
     assert "aliases: [bob-storefront]" in COMPOSE
 
 
-def test_control_and_provider_services_are_internal_only() -> None:
-    assert "hosted-control:\n    internal: true" in COMPOSE
-    assert "hosted-provider:\n    internal: true" in COMPOSE
-    control = COMPOSE.split("  hosted-settlement-control:", 1)[1].split(
-        "  hosted-settlement-admit-fixture:", 1
-    )[0]
-    assert "networks: [hosted-control]" in control
-    assert "ports:" not in control
-    admission = COMPOSE.split("  hosted-settlement-admit-fixture:", 1)[1].split(
-        "  hosted-settlement-api:", 1
-    )[0]
-    assert "networks: [hosted-provider, hosted-control]" in admission
-    assert "ports:" not in admission
-    api = COMPOSE.split("  hosted-settlement-api:", 1)[1].split(
-        "  hosted-settlement-worker:", 1
-    )[0]
-    assert "hosted-provider: {}" in api
-    worker = COMPOSE.split("  hosted-settlement-worker:", 1)[1].split(
-        "  hosted-settlement-event-worker:", 1
-    )[0]
-    assert "networks: [default, hosted-provider]" in worker
+def test_compose_contains_only_ordinary_hosted_roles() -> None:
+    for service in (
+        "hosted-settlement-migrate:",
+        "hosted-settlement-api:",
+        "hosted-settlement-worker:",
+    ):
+        assert service in COMPOSE
+    for retired in (
+        "hosted-settlement-simulator",
+        "hosted-settlement-control",
+        "hosted-settlement-admit-fixture",
+        "hosted-settlement-event-worker",
+        "hosted-compose-control",
+        "hosted-e2e-runner",
+        "hosted-hermetic",
+        "controlled-clock",
+        "controlled-events",
+    ):
+        assert retired not in COMPOSE
+    assert 'command: ["hosted-settlement-migrate"]' in COMPOSE
+    assert 'command: ["hosted-settlement-api"' in COMPOSE
+    assert 'command: ["hosted-settlement-worker"' in COMPOSE
 
 
 def test_compose_has_no_source_or_editable_sibling_mount() -> None:
@@ -49,7 +53,7 @@ def test_compose_has_no_source_or_editable_sibling_mount() -> None:
     assert "../hosted-settlement" not in lowered
     assert "editable" not in lowered
     assert "/src" not in lowered
-    assert "source: ${HOSTED_SETTLEMENT_RELEASE_DIR" in COMPOSE
+    assert "source: ${HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR" in COMPOSE
     assert "read_only: true" in COMPOSE
 
 
@@ -66,11 +70,9 @@ def test_hosted_storefront_uses_hosted_inventory_seed() -> None:
     assert "kvm1 ansible_host=127.0.0.1 ansible_user=stub" in provisioning
 
 
-def test_secret_environment_files_are_required_and_not_generated() -> None:
+def test_only_hosted_service_secret_environment_is_required() -> None:
     assert "HOSTED_SETTLEMENT_ENV_FILE:?" in COMPOSE
-    assert "HOSTED_SETTLEMENT_E2E_ENV_FILE:?" in COMPOSE
-    assert "HOSTED_SETTLEMENT_E2E_RUNNER_ENV_FILE:?" in COMPOSE
-    assert COMPOSE.count("required: true") >= 3
+    assert "HOSTED_SETTLEMENT_E2E" not in COMPOSE
     preparer = (REPO_ROOT / "scripts" / "prepare-hosted-compose.py").read_text(
         encoding="utf-8"
     )
@@ -82,9 +84,9 @@ def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
     restart = ROOT_MAKE.split("hosted-compose-restart:", 1)[1].split(
         "hosted-compose-clean:", 1
     )[0]
-    clean = ROOT_MAKE.split("hosted-compose-clean:", 1)[1].split("hosted-hermetic:", 1)[
-        0
-    ]
+    clean = ROOT_MAKE.split("hosted-compose-clean:", 1)[1].split(
+        "hosted-stripe-test:", 1
+    )[0]
     assert " restart" in restart
     assert " down -v --remove-orphans" in clean
     assert "down -v" not in restart
@@ -99,20 +101,56 @@ def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
         assert variable in clean
 
 
-def test_explicit_lanes_and_hosted_only_image_target_exist() -> None:
+def test_only_production_and_protected_stripe_targets_exist() -> None:
     for target in (
         "hosted-preflight:",
-        "hosted-hermetic-preflight:",
         "hosted-compose-start:",
         "hosted-compose-restart:",
         "hosted-compose-clean:",
-        "hosted-hermetic:",
-        "hosted-local-eas:",
-        "hosted-real-stripe:",
+        "hosted-stripe-test:",
     ):
         assert target in ROOT_MAKE
-    assert "build-hosted:" in E2E_MAKE
-    assert "--target hosted" in E2E_MAKE
+    for retired in (
+        "hosted-hermetic-preflight:",
+        "hosted-hermetic:",
+        "hosted-local-eas:",
+        "build-hosted:",
+        "hosted-real-stripe:",
+    ):
+        assert retired not in ROOT_MAKE
+        assert retired not in E2E_MAKE
+
+
+def test_active_composition_has_no_fixture_or_simulator_selector() -> None:
+    surfaces = (
+        REPO_ROOT / "Makefile",
+        REPO_ROOT / "compose.hosted-settlement.yml",
+        REPO_ROOT / "e2e-tests" / "Dockerfile",
+        REPO_ROOT / "e2e-tests" / "Makefile",
+        REPO_ROOT / "scripts" / "prepare-hosted-compose.py",
+        REPO_ROOT / "scripts" / "verify-hosted-release.py",
+    )
+    forbidden = (
+        "arkhai_hosted_settlement_e2e",
+        "HOSTED_E2E_FIXTURE",
+        "HOSTED_E2E_MANIFEST",
+        "hosted-hermetic",
+        "hosted-settlement-simulator",
+        "hosted-settlement-control",
+        "hosted-settlement-event-worker",
+        "controlled-clock",
+        "controlled-events",
+        "e2e-fixture-wheel",
+        "e2e-manifest",
+        "verify_hermetic_release",
+    )
+    for path in surfaces:
+        content = path.read_text(encoding="utf-8")
+        assert not set(forbidden).intersection(content.split())
+        for token in forbidden:
+            assert token not in content, (
+                f"{path.relative_to(REPO_ROOT)} contains {token}"
+            )
 
 
 def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
@@ -150,6 +188,22 @@ def test_wallet_free_fixtures_have_only_public_portable_configuration() -> None:
         assert field_paths(document).isdisjoint(forbidden)
 
 
+def test_marketplace_hosted_configs_contain_no_provider_fixture_identity() -> None:
+    for filename in ("hosted-storefront.toml", "hosted-buyer.toml"):
+        content = (REPO_ROOT / "e2e-tests" / "config" / filename).read_text(
+            encoding="utf-8"
+        )
+        for forbidden in (
+            "fixture-account",
+            "account_ref",
+            "connected_account",
+            "provider_credential",
+            "webhook_secret",
+            "control_url",
+        ):
+            assert forbidden not in content
+
+
 @pytest.mark.parametrize(
     "field,value",
     (
@@ -184,45 +238,3 @@ def test_ready_gate_rejects_digest_schema_and_capability_mismatch(
     response[field] = value
     with pytest.raises(module.ReleaseVerificationError, match="ready response"):
         module.verify_ready_response(production, response)
-
-
-def test_hermetic_ready_gate_rejects_wrong_control_version() -> None:
-    import importlib.util
-
-    path = REPO_ROOT / "scripts" / "verify-hosted-release.py"
-    spec = importlib.util.spec_from_file_location("hosted_control_verifier", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    production = {
-        "manifest_digest": "sha256:" + "1" * 64,
-        "api_version": "0.1.0",
-        "schema_version": 4,
-        "capabilities": [],
-    }
-    e2e = {
-        "manifest_digest": "sha256:" + "2" * 64,
-        "control_protocol": "arkhai.hosted-settlement-e2e-control.v1",
-        "capabilities": [],
-    }
-    response = {
-        "ready": True,
-        "manifest_digest": production["manifest_digest"],
-        "api_version": "0.1.0",
-        "schema_version": 4,
-        "capabilities": [],
-    }
-    e2e_response = {
-        "ready": True,
-        "manifest_digest": production["manifest_digest"],
-        "e2e_manifest_digest": e2e["manifest_digest"],
-        "control_protocol": "arkhai.hosted-settlement-e2e-control.v0",
-        "capabilities": [],
-    }
-    with pytest.raises(module.ReleaseVerificationError, match="control_protocol"):
-        module.verify_ready_response(
-            production,
-            response,
-            e2e=e2e,
-            e2e_response=e2e_response,
-        )

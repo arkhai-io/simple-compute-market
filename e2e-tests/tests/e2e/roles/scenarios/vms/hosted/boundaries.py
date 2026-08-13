@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-_PRIVATE_MODULE_PREFIX = "hosted_settlement_e2e"
 _FORBIDDEN_CONFIG_TOKENS = frozenset(
     {
         "wallet",
@@ -15,12 +14,11 @@ _FORBIDDEN_CONFIG_TOKENS = frozenset(
         "rpc",
         "rpc_url",
         "chain_signer",
-        "eas",
         "provider",
+        "control_url",
         "webhook",
         "database",
         "administrator",
-        "control",
         "credential",
         "secret",
     }
@@ -32,7 +30,7 @@ class HostedBoundaryError(AssertionError):
 
 
 def assert_wallet_free_config(path: Path) -> Mapping[str, Any]:
-    """Validate the portable hosted profile without resolving private packages."""
+    """Validate the public, wallet-free hosted settlement profile."""
 
     with path.open("rb") as source:
         document = tomllib.load(source)
@@ -44,8 +42,7 @@ def assert_wallet_free_config(path: Path) -> Mapping[str, Any]:
                 normalized = str(key).lower().replace("-", "_")
                 current = f"{prefix}.{key}" if prefix else str(key)
                 if normalized in _FORBIDDEN_CONFIG_TOKENS or any(
-                    token in normalized
-                    for token in ("private_key", "api_key", "webhook_secret", "control_url")
+                    token in normalized for token in ("private_key", "api_key", "webhook_secret")
                 ):
                     forbidden.append(current)
                 visit(child, current)
@@ -76,25 +73,34 @@ def assert_wallet_free_config(path: Path) -> Mapping[str, Any]:
     return document
 
 
-def assert_public_import_boundary(modules: tuple[str, ...]) -> None:
-    """Prove public discovery imports no private simulator/control package."""
+def assert_import_boundary(
+    modules: tuple[str, ...],
+    *,
+    forbidden_prefixes: tuple[str, ...] = ("tests.support",),
+) -> None:
+    """Prove ordinary runtime imports do not load test-only collaborators."""
 
     before = frozenset(sys.modules)
     for module in modules:
         importlib.import_module(module)
     imported = frozenset(sys.modules).difference(before)
     leaked = sorted(
-        name for name in imported if name == _PRIVATE_MODULE_PREFIX or name.startswith(_PRIVATE_MODULE_PREFIX + ".")
+        name
+        for name in imported
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in forbidden_prefixes)
     )
     if leaked:
         raise HostedBoundaryError(
-            "public import/discovery loaded private hosted artifacts: " + ", ".join(leaked)
+            "ordinary runtime import loaded test-only modules: " + ", ".join(leaked)
         )
 
 
 def hosted_selection_requested(
-    *, invocation_args: tuple[str, ...], marker_expression: str, environment_enabled: bool
+    *,
+    invocation_args: tuple[str, ...],
+    marker_expression: str,
+    environment_enabled: bool,
 ) -> bool:
-    if environment_enabled or "e2e_hosted_settlement" in marker_expression:
+    if environment_enabled or "e2e_hosted_stripe_test" in marker_expression:
         return True
-    return any("scenarios/vms/hosted" in argument.replace("\\", "/") for argument in invocation_args)
+    return any("hosted-stripe-test" in argument for argument in invocation_args)

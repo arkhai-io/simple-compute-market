@@ -8,7 +8,7 @@ import pytest
 
 from tests.e2e.roles.scenarios.vms.hosted.boundaries import (
     HostedBoundaryError,
-    assert_public_import_boundary,
+    assert_import_boundary,
     assert_wallet_free_config,
     hosted_selection_requested,
 )
@@ -64,7 +64,7 @@ priority = ["fiat.stripe.v1"]
         assert_wallet_free_config(config)
 
 
-def test_public_import_discovery_works_without_private_artifact(monkeypatch) -> None:
+def test_public_import_discovery_works_without_fixture_distribution(monkeypatch) -> None:
     for name in tuple(sys.modules):
         if name == "hosted_settlement_e2e" or name.startswith("hosted_settlement_e2e."):
             monkeypatch.delitem(sys.modules, name, raising=False)
@@ -76,7 +76,7 @@ def test_public_import_discovery_works_without_private_artifact(monkeypatch) -> 
         return real_import(name, package)
 
     monkeypatch.setattr(importlib, "import_module", import_without_private)
-    assert_public_import_boundary(
+    assert_import_boundary(
         (
             "market_hosted_settlement",
             "market_storefront.settlement_composition",
@@ -89,14 +89,17 @@ def test_public_import_discovery_works_without_private_artifact(monkeypatch) -> 
     ("args", "marker", "enabled", "expected"),
     (
         ((), "", False, False),
-        (("tests/e2e/roles/scenarios/vms/hosted",), "", False, True),
-        ((), "e2e_hosted_settlement", False, True),
+        (("hosted-stripe-test",), "", False, True),
+        ((), "e2e_hosted_stripe_test", False, True),
         ((), "", True, True),
     ),
 )
-def test_hosted_collection_is_explicitly_opt_in(args, marker, enabled, expected) -> None:
-    assert hosted_selection_requested(
-        invocation_args=args,
-        marker_expression=marker,
-        environment_enabled=enabled,
-    ) is expected
+def test_hosted_stripe_collection_is_explicitly_opt_in(args, marker, enabled, expected) -> None:
+    assert (
+        hosted_selection_requested(
+            invocation_args=args,
+            marker_expression=marker,
+            environment_enabled=enabled,
+        )
+        is expected
+    )
