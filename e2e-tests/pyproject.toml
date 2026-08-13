@@ -27,6 +27,7 @@ dependencies = [
     "arkhai-core-storefront-client>=0.17.0",
     "arkhai-core-registry-client>=0.11.0",
     "arkhai-kit-alkahest>=0.1.0",
+    "arkhai-kit-site-client>=0.1.0",
 	"arkhai-vms-storefront>=0.3.0",
     "arkhai-vms-provisioning-operator-client>=0.3.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
@@ -50,6 +51,9 @@ dev = [
     "isort>=5.13",
     "mypy>=1.8",
     "ruff>=0.3",
+]
+real-stripe = [
+    "playwright==1.54.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -86,6 +90,9 @@ markers = [
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
+    "e2e_hosted_settlement: Opt-in artifact-backed hosted settlement VM lifecycle and hermetic recovery scenarios",
+    "e2e_hosted_settlement_eas: Separately selected local Anvil/EAS hosted condition-boundary scenarios",
+    "e2e_hosted_real_stripe: Protected external Stripe test-mode hosted settlement compatibility evidence",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
@@ -124,9 +131,9 @@ line_length = 100
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = false
 ignore_missing_imports = true

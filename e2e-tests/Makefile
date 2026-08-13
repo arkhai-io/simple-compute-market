@@ -17,7 +17,7 @@ MODULE ?= contracts
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= ../.dist
 
-.PHONY: build venv test test-e2e
+.PHONY: build build-hosted venv test test-e2e hosted-preflight hosted-start hosted-restart hosted-clean hosted-hermetic hosted-local-eas hosted-real-stripe
 
 # -----------------------------------------------------------------------
 # Setup
@@ -31,10 +31,29 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
-	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client \
-	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-core                           --reinstall-package arkhai-core \
+	--upgrade-package arkhai-core-buyer                     --reinstall-package arkhai-core-buyer \
+	--upgrade-package arkhai-core-storefront                --reinstall-package arkhai-core-storefront \
+	--upgrade-package arkhai-core-registry-client            --reinstall-package arkhai-core-registry-client \
+	--upgrade-package arkhai-core-storefront-client          --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-kit-config                      --reinstall-package arkhai-kit-config \
+	--upgrade-package arkhai-kit-identity                    --reinstall-package arkhai-kit-identity \
+	--upgrade-package arkhai-kit-policy                      --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-kit-settlement-runtime          --reinstall-package arkhai-kit-settlement-runtime \
+	--upgrade-package arkhai-kit-alkahest                    --reinstall-package arkhai-kit-alkahest \
+	--upgrade-package arkhai-hosted-settlement-client        --reinstall-package arkhai-hosted-settlement-client \
+	--upgrade-package arkhai-kit-hosted-settlement           --reinstall-package arkhai-kit-hosted-settlement \
+	--upgrade-package arkhai-kit-site                        --reinstall-package arkhai-kit-site \
+	--upgrade-package arkhai-kit-site-client                 --reinstall-package arkhai-kit-site-client \
+	--upgrade-package arkhai-kit-resource-pools              --reinstall-package arkhai-kit-resource-pools \
+	--upgrade-package arkhai-kit-fulfillment                 --reinstall-package arkhai-kit-fulfillment \
+	--upgrade-package arkhai-vms                             --reinstall-package arkhai-vms \
+	--upgrade-package arkhai-vms-buyer                       --reinstall-package arkhai-vms-buyer \
+	--upgrade-package arkhai-vms-storefront                  --reinstall-package arkhai-vms-storefront \
+	--upgrade-package arkhai-bare-metal                      --reinstall-package arkhai-bare-metal \
+	--upgrade-package arkhai-compute-provisioning            --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
-	--upgrade-package arkhai-vms-storefront          --reinstall-package arkhai-vms-storefront
+	--upgrade-package arkhai-apicredits-buyer                --reinstall-package arkhai-apicredits-buyer
 
 # -----------------------------------------------------------------------
 # Build
@@ -50,6 +69,38 @@ build: build-images
 build-images: reinit
 	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f e2e-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+
+build-hosted:
+	@test -n "$(HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION)" || { echo "ERROR: missing HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION"; exit 1; }
+	cd .. && docker build --target hosted \
+		--build-arg HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION="$(HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION)" \
+		-t $(IMAGE_NAME):e2e-tests-hosted -f e2e-tests/Dockerfile .
+
+hosted-preflight:
+	$(MAKE) -C .. hosted-hermetic-preflight
+
+hosted-start:
+	$(MAKE) -C .. hosted-compose-start
+
+hosted-restart:
+	$(MAKE) -C .. hosted-compose-restart
+
+hosted-clean:
+	$(MAKE) -C .. hosted-compose-clean
+
+hosted-hermetic:
+	$(MAKE) -C .. hosted-hermetic
+
+hosted-local-eas:
+	@test -f "$(HOSTED_COMPOSE_ENV)" || { echo "ERROR: missing generated hosted Compose env $(HOSTED_COMPOSE_ENV)"; exit 1; }
+	cd .. && HOSTED_COMPOSE_MODE=hermetic \
+		docker compose --profile hosted-hermetic --profile evm-multi-seller \
+		--env-file "$(HOSTED_COMPOSE_ENV)" -f compose.vms.yml -f compose.hosted-settlement.yml \
+		run --rm hosted-e2e-runner .venv/bin/pytest -m e2e_hosted_settlement_eas \
+		tests/e2e/roles/scenarios/vms/hosted
+
+hosted-real-stripe:
+	$(MAKE) -C .. hosted-real-stripe
 
 # -----------------------------------------------------------------------
 # Tests — local

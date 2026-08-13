@@ -1,9 +1,6 @@
 # Hosted-fiat VM profile. No Anvil/RPC service or EVM wallet environment is
 # included. Public Ed25519 principals live in the mounted storefront profile;
 # signer material comes only from the referenced identity env file.
-include:
-  - domains/vms/compose.yml
-  - compose.hosted-settlement.yml
 
 services:
   registry:
@@ -28,8 +25,10 @@ services:
     env_file:
       - ${VMS_PROVISIONING_IDENTITY_ENV_FILE:?set provisioning Ed25519 signer credential environment file}
     environment:
-      - PROVISIONING_IDENTITY__PRINCIPAL__SCHEME=ed25519
-      - PROVISIONING_IDENTITY__PRINCIPAL__IDENTIFIER=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
-      - 'PROVISIONING_STOREFRONT_IDENTITY__PRINCIPALS=[{"scheme":"ed25519","identifier":"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"}]'
+      - PROVISIONING_IDENTITY__SCHEME=ed25519
+      - PROVISIONING_IDENTITY__IDENTIFIER=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
+      - PROVISIONING_STOREFRONT_IDENTITY__SCHEME=ed25519
+      - PROVISIONING_STOREFRONT_IDENTITY__IDENTIFIER=0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
       - PROVISIONING_STOREFRONT_SITE_ID=default
-      - 'PROVISIONING_ADMIN_IDENTITY__PRINCIPALS=[{"scheme":"ed25519","identifier":"5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g"}]'
+      - PROVISIONING_ADMIN_IDENTITY__SCHEME=ed25519
+      - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g

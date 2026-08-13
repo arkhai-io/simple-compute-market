@@ -27,13 +27,25 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 from unittest.mock import MagicMock
 
-from vm_provisioning_adapter.models.ansible import ConnectivityResult, InventoryHost, InventoryResponse
+from vm_provisioning_adapter.models.ansible import (
+    ConnectivityResult,
+    InventoryHost,
+    InventoryResponse,
+)
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleResult, AnsibleRun
+from vm_provisioning_adapter.services.ansible_service import (
+    AnsibleError,
+    AnsibleResult,
+    AnsibleRun,
+)
+
+if TYPE_CHECKING:
+    from vm_provisioning_adapter.models.system_model import EvaluateJobResponse
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +113,14 @@ class MockAnsibleService:
         """Return a dummy path — no file is written."""
         return Path(f"/tmp/mock_vars_{params.vm_action}.yml")
 
+    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
+        """Mirror the production renderer's protected variable namespace."""
+        from vm_provisioning_adapter.services.ansible_service import AnsibleService
+
+        real = AnsibleService.__new__(AnsibleService)
+        real._settings = self._settings
+        return real.reserved_var_keys(params)
+
     def start_playbook(
         self,
         playbook_path: Path,
@@ -151,6 +171,7 @@ class MockAnsibleService:
     ) -> AnsibleRunResult:
         """Delegate to real parsing logic — only subprocess boundary is mocked."""
         from vm_provisioning_adapter.services.ansible_service import AnsibleService
+
         real = AnsibleService.__new__(AnsibleService)
         real._settings = self._settings
         return real.parse_playbook_result(result, params, public_host=public_host)
@@ -174,7 +195,9 @@ class MockAnsibleService:
 
     def get_inventory(self, search: str | None = None) -> InventoryResponse:
         return InventoryResponse(
-            inventory_path=str(getattr(self._settings, "resolved_inventory_path", "/mock/hosts")),
+            inventory_path=str(
+                getattr(self._settings, "resolved_inventory_path", "/mock/hosts")
+            ),
             hosts=self.parse_inventory(search=search),
         )
 
@@ -194,7 +217,9 @@ class MockAnsibleService:
             detail="mock: connectivity check always succeeds",
         )
 
-    async def check_connectivity_with_inventory(self, host: str, inventory_path) -> ConnectivityResult:
+    async def check_connectivity_with_inventory(
+        self, host: str, inventory_path
+    ) -> ConnectivityResult:
         """Always reports reachable in mock mode (ignores inventory_path)."""
         await asyncio.sleep(0)
         return ConnectivityResult(
@@ -207,6 +232,7 @@ class MockAnsibleService:
         """Return a minimal temp file in mock mode; Ansible is never called."""
         import tempfile
         from pathlib import Path
+
         p = Path(tempfile.gettempdir()) / "mock_inventory.ini"
         p.write_text("[kvm_hosts]\n", encoding="utf-8")
         return p
@@ -215,10 +241,6 @@ class MockAnsibleService:
 # ---------------------------------------------------------------------------
 # ProgrammableMockAnsibleService — when→then rule-based mock
 # ---------------------------------------------------------------------------
-
-
-from dataclasses import dataclass, field as dc_field
-from typing import Optional as _Optional
 
 
 @dataclass
@@ -245,12 +267,12 @@ class MockRule:
 
     match: dict = dc_field(default_factory=dict)
     pause_before_result: bool = False
-    result_stdout: _Optional[str] = None
-    fail_with: _Optional[str] = None
+    result_stdout: Optional[str] = None
+    fail_with: Optional[str] = None
     rule_id: str = ""
 
     # Internal gate — created in ProgrammableMockAnsibleService.add_rule
-    _gate: _Optional[asyncio.Event] = dc_field(default=None, repr=False)
+    _gate: Optional[asyncio.Event] = dc_field(default=None, repr=False)
 
 
 class ProgrammableMockAnsibleService(MockAnsibleService):
@@ -288,6 +310,7 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
     def add_rule(self, rule: MockRule) -> None:
         if not rule.rule_id:
             import uuid as _uuid
+
             rule.rule_id = str(_uuid.uuid4())[:8]
         if rule.pause_before_result:
             rule._gate = asyncio.Event()
@@ -331,8 +354,9 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
     # Rule lookup
     # ------------------------------------------------------------------
 
-    def _find_rule(self, params: "AnsibleJobParams") -> _Optional[MockRule]:
+    def _find_rule(self, params: "AnsibleJobParams") -> Optional[MockRule]:
         import dataclasses as _dc
+
         params_dict = _dc.asdict(params)
         for rule in self._rules.values():
             if all(params_dict.get(k) == v for k, v in rule.match.items()):
@@ -376,7 +400,9 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
         rule_matched = rule.rule_id if rule is not None else None
         would_pause = rule.pause_before_result if rule is not None else False
 
-        params_valid = len(errors) == 0 and bool(params.vm_host) and bool(params.vm_action)
+        params_valid = (
+            len(errors) == 0 and bool(params.vm_host) and bool(params.vm_action)
+        )
 
         return EvaluateJobResponse(
             params_valid=params_valid,
@@ -390,16 +416,18 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
     # AnsibleService interface override
     # ------------------------------------------------------------------
 
-    def start_playbook(self, playbook_path, inventory_path, extra_vars_path,
-                       limit, extra_cli_vars=None) -> "AnsibleRun":
+    def start_playbook(
+        self, playbook_path, inventory_path, extra_vars_path, limit, extra_cli_vars=None
+    ) -> "AnsibleRun":
         # Store the job_id from extra_vars_path stem for event notification.
         # The vars file is named after the job_id by build_vars_file.
         return super().start_playbook(
             playbook_path, inventory_path, extra_vars_path, limit, extra_cli_vars
         )
 
-    async def wait_for_playbook(self, run: "AnsibleRun", timeout_seconds: int,
-                                log_callback=None) -> "AnsibleResult":
+    async def wait_for_playbook(
+        self, run: "AnsibleRun", timeout_seconds: int, log_callback=None
+    ) -> "AnsibleResult":
         """Apply the first matching rule, then either pause, fail, or succeed."""
         # Recover the params from the vars file path — it holds the AnsibleJobParams
         # serialised by build_vars_file.  For rule matching we read the params back.
@@ -411,12 +439,17 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
             if rule.pause_before_result and rule._gate:
                 await rule._gate.wait()
             if rule.fail_with:
-                from vm_provisioning_adapter.services.ansible_service import AnsibleError
+                from vm_provisioning_adapter.services.ansible_service import (
+                    AnsibleError,
+                )
+
                 raise AnsibleError(rule.fail_with, stdout="", stderr=rule.fail_with)
             if rule.result_stdout:
                 original_stdout = self._stdout
                 self._stdout = rule.result_stdout
-                result = await super().wait_for_playbook(run, timeout_seconds, log_callback)
+                result = await super().wait_for_playbook(
+                    run, timeout_seconds, log_callback
+                )
                 self._stdout = original_stdout
                 return result
 

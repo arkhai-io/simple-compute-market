@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arkhai.hosted-settlement-real-stripe-evidence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "lane", "identities", "provider", "outcome", "collection", "refund", "unavailable", "failure"],
+  "properties": {
+    "schema": {"const": "arkhai.hosted-settlement-real-stripe-evidence.v1"},
+    "lane": {"const": "external"},
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["marketplace_repository", "marketplace_commit", "hosted_repository", "hosted_source_commit", "hosted_workflow_run_id", "hosted_manifest_sha256", "hosted_image_digest"],
+      "properties": {
+        "marketplace_repository": {"const": "arkhai/simple-market-service"},
+        "marketplace_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "hosted_repository": {"const": "arkhai/hosted-settlement-service"},
+        "hosted_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "hosted_workflow_run_id": {"type": "string", "pattern": "^[0-9]+$"},
+        "hosted_manifest_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "hosted_image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mode", "connected_account_ready"],
+      "properties": {
+        "name": {"const": "stripe"},
+        "mode": {"const": "test"},
+        "connected_account_ready": {"type": "boolean"}
+      }
+    },
+    "outcome": {"enum": ["passed", "failed", "unavailable"]},
+    "collection": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation_ref", "checkout_count", "transfer_count", "amount", "currency", "destination_matches", "transfer_group_matches", "source_transaction_matches", "operation_metadata_matches", "marketplace_state", "authority_state", "fulfillment_state"],
+          "properties": {
+            "operation_ref": {"$ref": "#/$defs/operationRef"},
+            "checkout_count": {"const": 1},
+            "transfer_count": {"const": 1},
+            "amount": {"type": "integer", "minimum": 1},
+            "currency": {"type": "string", "pattern": "^[a-z]{3}$"},
+            "destination_matches": {"const": true},
+            "transfer_group_matches": {"const": true},
+            "source_transaction_matches": {"const": true},
+            "operation_metadata_matches": {"const": true},
+            "marketplace_state": {"$ref": "#/$defs/state"},
+            "authority_state": {"$ref": "#/$defs/state"},
+            "fulfillment_state": {"$ref": "#/$defs/state"}
+          }
+        }
+      ]
+    },
+    "refund": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "operation_ref", "checkout_count", "refund_count", "transfer_count", "amount", "currency", "operation_metadata_matches", "marketplace_state", "authority_state", "unavailable"],
+      "properties": {
+        "outcome": {"enum": ["passed", "unavailable", "not_requested"]},
+        "operation_ref": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/operationRef"}]},
+        "checkout_count": {"type": ["integer", "null"], "minimum": 0},
+        "refund_count": {"type": ["integer", "null"], "minimum": 0},
+        "transfer_count": {"type": ["integer", "null"], "minimum": 0},
+        "amount": {"type": ["integer", "null"], "minimum": 1},
+        "currency": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-z]{3}$"}]},
+        "operation_metadata_matches": {"type": ["boolean", "null"]},
+        "marketplace_state": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/state"}]},
+        "authority_state": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/state"}]},
+        "unavailable": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/unavailable"}]}
+      }
+    },
+    "unavailable": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/unavailable"}]},
+    "failure": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/failure"}]}
+  },
+  "$defs": {
+    "operationRef": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "state": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,63}$"},
+    "unavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "code"],
+      "properties": {
+        "phase": {"enum": ["authorization", "account_readiness", "webhook_forwarding", "hosted_release", "marketplace_lifecycle", "browser_checkout", "provider_inspection", "refund"]},
+        "code": {"enum": ["credentials_missing", "account_unavailable", "account_not_ready", "stripe_cli_unavailable", "webhook_unavailable", "hosted_release_unavailable", "marketplace_lifecycle_unavailable", "chromium_unavailable", "provider_inspection_unavailable", "refund_externally_unavailable"]}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "code"],
+      "properties": {
+        "phase": {"enum": ["authorization", "release_identity", "marketplace_lifecycle", "browser_checkout", "provider_inspection", "refund"]},
+        "code": {"enum": ["authorization_contract_rejected", "release_identity_rejected", "lifecycle_contract_rejected", "checkout_contract_rejected", "collection_invariant_failed", "refund_invariant_failed"]}
+      }
+    }
+  }
+}

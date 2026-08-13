@@ -78,3 +78,24 @@ ENV ACTIVE_PROFILES="docker"
 ENV CONFIG_DIRECTORY="/app/config/"
 
 CMD .venv/bin/pytest
+
+# Explicit private-artifact target. Ordinary builds stop at runtime and never
+# resolve this distribution. Hosted preflight supplies the exact verified wheel
+# in /dist and passes its manifest-declared version.
+FROM runtime AS hosted
+
+ARG HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Private packages are deliberately absent from the ordinary runtime image.
+# Hosted builds receive only the preflight-verified wheels staged in .dist.
+COPY .dist/arkhai_hosted_settlement_client-*.whl /dist/
+COPY .dist/arkhai_hosted_settlement_service-*.whl /dist/
+COPY .dist/arkhai_hosted_settlement_e2e-*.whl /dist/
+
+RUN test -n "$HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION" \
+    && uv pip install \
+        --python /app/.venv/bin/python \
+        --find-links /dist \
+        "arkhai-hosted-settlement-e2e==$HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION"

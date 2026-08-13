@@ -127,3 +127,53 @@ uv run pytest tests/e2e/roles/layers/ -v
 uv run pytest tests/e2e/roles/scenarios/apicredits/ -v
 uv run pytest tests/e2e/roles/scenarios/vms/ -v
 ```
+
+## Hosted fiat scenarios
+
+Hosted VM scenarios use a dedicated state carrier under
+`scenarios/vms/hosted/`; they do not branch or reinterpret the Alkahest
+full-deal state. The stages are:
+
+1. verify authority/simulator readiness and the production/private manifest
+   identities;
+2. prove wallet-free runtime and connected fixture-account readiness;
+3. publish and discover a listing;
+4. negotiate accepted `fiat.stripe.v1` terms;
+5. materialize one obligation and capture its redirect action and stable
+   operation reference;
+6. fund through the selected provider lane;
+7. complete VM fulfillment and project portable condition evidence;
+8. collect or reclaim and inspect exactly one bounded normalized effect; and
+9. report marketplace, authority, and release identities.
+
+Each stage consumes exact `DealState` names through `require_state`. Checkout
+and Account Link URLs are transient and excluded from reports. Simulator
+control credentials, provider credentials, raw events, and raw authority
+payloads remain outside the marketplace state carrier.
+
+Run the lanes from the repository root:
+
+```bash
+# Exact signed private artifacts; clean volumes before and after the run.
+make hosted-hermetic \
+  HOSTED_RELEASE_DIR=/path/to/production-release \
+  HOSTED_E2E_RELEASE_DIR=/path/to/private-e2e-release
+
+# Local EAS/allowlisted-arbiter condition conformance; finance stays simulated.
+make hosted-local-eas
+
+# Real Stripe test-mode evidence; requires authorized secrets and account state.
+make hosted-real-stripe
+```
+
+`hosted-hermetic` covers collection, expiry reclaim, event withholding,
+duplication and ordering, uncertain provider acknowledgements, process
+restart, readiness, and mechanism coexistence without sleeps. A clean run
+removes hosted authority, simulator, and clock volumes; restart-specific
+controls retain them only across the tested boundary.
+
+The local EAS and real Stripe commands are deliberately independent.
+Hermetic output is never reported as EAS or Stripe evidence. If external
+credentials, connected-account readiness, webhook reachability, or an
+authorized protected workflow is unavailable, report that prerequisite
+instead of skipping silently or substituting simulator results.

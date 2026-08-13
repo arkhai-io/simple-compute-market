@@ -1,0 +1,190 @@
+name: Hosted settlement real Stripe evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketplace_commit:
+        description: Exact trusted marketplace commit on the default branch
+        required: true
+        type: string
+      hosted_release_run_id:
+        description: Trusted hosted producer workflow run ID
+        required: true
+        type: string
+      hosted_release_artifact:
+        description: Exact ordinary hosted release artifact name
+        required: true
+        type: string
+      hosted_manifest_sha256:
+        description: Exact signed ordinary hosted manifest digest
+        required: true
+        type: string
+      hosted_source_commit:
+        description: Exact hosted release source commit
+        required: true
+        type: string
+      hosted_image_digest:
+        description: Exact ordinary hosted image digest
+        required: true
+        type: string
+      attempt_refund:
+        description: Attempt eligible pre-transfer external refund evidence
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: hosted-real-stripe-${{ inputs.marketplace_commit }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+  id-token: write
+
+jobs:
+  real-stripe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    environment: hosted-real-stripe
+    runs-on: [self-hosted, hosted-real-stripe]
+    timeout-minutes: 90
+    env:
+      COMPOSE_PROJECT_NAME: simple-market-service-hosted-real-stripe
+      HOSTED_RELEASE_DIR: ${{ github.workspace }}/.private-hosted-release
+      HOSTED_REAL_STRIPE_EVIDENCE: ${{ github.workspace }}/hosted-real-stripe-evidence.json
+    steps:
+      - name: Checkout exact marketplace source without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.marketplace_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reject non-default-branch or inexact source identities
+        shell: bash
+        env:
+          TRUSTED_COMMIT: ${{ inputs.marketplace_commit }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HOSTED_SOURCE_COMMIT: ${{ inputs.hosted_source_commit }}
+          HOSTED_MANIFEST_SHA256: ${{ inputs.hosted_manifest_sha256 }}
+          HOSTED_IMAGE_DIGEST: ${{ inputs.hosted_image_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$TRUSTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HOSTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HOSTED_MANIFEST_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$HOSTED_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$TRUSTED_COMMIT"
+          git merge-base --is-ancestor "$TRUSTED_COMMIT" "origin/$DEFAULT_BRANCH"
+
+      - name: Mint short-lived hosted artifact token
+        id: hosted-token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b
+        with:
+          app-id: ${{ vars.HOSTED_RELEASE_APP_ID }}
+          private-key: ${{ secrets.HOSTED_RELEASE_APP_PRIVATE_KEY }}
+          owner: arkhai
+          repositories: hosted-settlement-service
+
+      - name: Download exact trusted hosted release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.hosted_release_artifact }}
+          path: ${{ env.HOSTED_RELEASE_DIR }}
+          repository: arkhai/hosted-settlement-service
+          run-id: ${{ inputs.hosted_release_run_id }}
+          github-token: ${{ steps.hosted-token.outputs.token }}
+
+      - name: Install protected test-only Chromium runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --project e2e-tests --extra real-stripe --frozen
+          uv run --project e2e-tests --extra real-stripe playwright install chromium
+
+      - name: Acquire short-lived restricted credentials and run external lane
+        id: lane
+        shell: bash
+        continue-on-error: true
+        env:
+          CREDENTIAL_BROKER_URL: ${{ vars.HOSTED_E2E_CREDENTIAL_BROKER_URL }}
+          HOSTED_PRODUCTION_RELEASE_DIR: ${{ env.HOSTED_RELEASE_DIR }}
+          HOSTED_PRODUCTION_MANIFEST_SHA256: ${{ inputs.hosted_manifest_sha256 }}
+          HOSTED_PRODUCTION_SOURCE_COMMIT: ${{ inputs.hosted_source_commit }}
+          HOSTED_PRODUCTION_IMAGE_DIGEST: ${{ inputs.hosted_image_digest }}
+          HOSTED_PRODUCTION_WORKFLOW_RUN_ID: ${{ inputs.hosted_release_run_id }}
+          ATTEMPT_REFUND: ${{ inputs.attempt_refund }}
+        run: |
+          set -euo pipefail
+          cleanup_credentials() {
+            unset credentials oidc_response oidc_token registry_token expires_at
+            unset STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
+            docker logout ghcr.io >/dev/null 2>&1 || true
+          }
+          run_lane() {
+            make hosted-real-stripe \
+              HOSTED_REAL_STRIPE_EVIDENCE="$HOSTED_REAL_STRIPE_EVIDENCE" \
+              HOSTED_PRODUCTION_MANIFEST_SHA256="$HOSTED_PRODUCTION_MANIFEST_SHA256" \
+              HOSTED_PRODUCTION_SOURCE_COMMIT="$HOSTED_PRODUCTION_SOURCE_COMMIT" \
+              HOSTED_PRODUCTION_IMAGE_DIGEST="$HOSTED_PRODUCTION_IMAGE_DIGEST" \
+              HOSTED_PRODUCTION_WORKFLOW_RUN_ID="$HOSTED_PRODUCTION_WORKFLOW_RUN_ID" \
+              ATTEMPT_REFUND="$ATTEMPT_REFUND"
+          }
+          acquire_credentials() {
+            oidc_response="$(curl --fail --silent --show-error \
+              --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=arkhai-hosted-real-stripe")" || return 1
+            oidc_token="$(jq --exit-status --raw-output '.value' <<<"$oidc_response")" || return 1
+            unset oidc_response
+            credentials="$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $oidc_token" \
+              "$CREDENTIAL_BROKER_URL/v1/hosted-real-stripe")" || return 1
+            unset oidc_token
+            expires_at="$(jq --exit-status '.expires_at_unix' <<<"$credentials")" || return 1
+            now="$(date +%s)"
+            (( expires_at > now && expires_at - now <= 3600 )) || return 1
+            registry_token="$(jq --exit-status --raw-output '.registry_read_token' <<<"$credentials")" || return 1
+            STRIPE_SECRET_KEY="$(jq --exit-status --raw-output '.stripe_restricted_key' <<<"$credentials")" || return 1
+            STRIPE_CONNECTED_ACCOUNT_ID="$(jq --exit-status --raw-output '.connected_account_id' <<<"$credentials")" || return 1
+            unset credentials
+          }
+          trap cleanup_credentials EXIT
+          if ! acquire_credentials; then
+            cleanup_credentials
+            run_lane
+            exit $?
+          fi
+          echo "::add-mask::$registry_token"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          echo "::add-mask::$STRIPE_CONNECTED_ACCOUNT_ID"
+          export STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
+          printf '%s' "$registry_token" |
+            docker login ghcr.io --username '${{ github.actor }}' --password-stdin >/dev/null
+          run_lane
+
+      - name: Upload allowlisted sanitized evidence only
+        if: always() && hashFiles('hosted-real-stripe-evidence.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hosted-real-stripe-${{ inputs.marketplace_commit }}-${{ inputs.hosted_release_run_id }}
+          path: hosted-real-stripe-evidence.json
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Tear down all local processes and volumes
+        if: always()
+        shell: bash
+        run: make hosted-compose-clean || true
+
+      - name: Fail for unavailable or failed external evidence
+        if: always()
+        shell: bash
+        env:
+          LANE_OUTCOME: ${{ steps.lane.outcome }}
+        run: |
+          set -euo pipefail
+          test "$LANE_OUTCOME" = success

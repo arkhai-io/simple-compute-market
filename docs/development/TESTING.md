@@ -292,6 +292,33 @@ with mixed signature versions or an address-only fallback.
   readiness failure when any authority or client lacks the pinned identity
   version.
 
+## Hosted Settlement System Evidence
+
+Hosted settlement has three separately reported system lanes:
+
+- `make hosted-hermetic` verifies signed production and private E2E artifacts,
+  starts digest-pinned authority and simulator images, and runs the
+  marketplace-owned wallet-free VM lifecycle. Deterministic controls may set
+  finance, time, and event outcomes, but marketplace packages use only public
+  storefront and authority clients. Reports contain release identities and
+  bounded normalized effects, never raw provider events or credentials.
+- `make hosted-local-eas` runs condition-boundary conformance with local
+  Anvil/EAS/arbiter infrastructure. It does not change the default portable
+  non-EVM condition path or provide Stripe evidence.
+- `make hosted-real-stripe` uses the ordinary hosted image, browser-driven
+  test-mode Checkout, verified webhook forwarding, and authoritative provider
+  inspection. Missing credentials, connected-account readiness, webhook
+  reachability, protected workflow access, or provider behavior is an external
+  limitation to report; hermetic output never substitutes for it.
+
+The hosted service repository owns process conformance and the signed private
+fixture release. This repository owns consumer composition and staged
+discovery, negotiation, materialization, funding, fulfillment, collection,
+reclaim, uncertainty, restart, readiness, and coexistence scenarios. Each
+report records the consumer commit, production manifest, and private E2E
+manifest independently. Default public and fork suites neither resolve private
+artifacts nor receive private credentials.
+
 ## Boundary-Change Validation
 
 Moving or renaming a contract at a package boundary needs more than

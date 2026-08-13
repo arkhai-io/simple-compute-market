@@ -1,79 +1,253 @@
-# Hosted-settlement release overlay. Prepare the verified nonsecret image env
-# with `make prepare-hosted-compose` before invoking Compose.
+# Optional hosted-settlement overlay. All image and command selectors are
+# generated after signed release verification; ordinary Compose targets omit it.
+x-hosted-service: &hosted-service
+  image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run the selected hosted preflight}
+  profiles: [hosted-production, hosted-hermetic, hosted-real-stripe]
+  env_file:
+    - path: ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service Secret environment file}
+      required: true
+  environment:
+    HOSTED_COMPOSE_MODE: ${HOSTED_COMPOSE_MODE:-production}
+    HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST: ${HOSTED_PRODUCTION_MANIFEST_DIGEST:?set verified canonical production manifest digest}
+    HOSTED_VERIFIED_E2E_MANIFEST_DIGEST: ${HOSTED_E2E_VERIFIED_MANIFEST_DIGEST:-}
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+x-hosted-e2e-service: &hosted-e2e-service
+  image: ${HOSTED_E2E_VERIFIED_SIMULATOR_IMAGE:?run make hosted-hermetic-preflight}
+  profiles: [hosted-hermetic]
+  env_file:
+    - path: ${HOSTED_SETTLEMENT_E2E_ENV_FILE:?set hosted E2E Secret environment file}
+      required: true
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
 services:
   hosted-settlement-migrate:
-    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
-    command: ["hosted-settlement-migrate"]
-    env_file:
-      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
-    read_only: true
+    <<: *hosted-service
+    command: ["${HOSTED_SETTLEMENT_MIGRATE_COMMAND:-hosted-settlement-migrate}"]
     restart: "no"
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
     volumes:
       - hosted-settlement-data:/var/lib/hosted-settlement
-      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+      - hosted-settlement-simulator-data:/var/lib/hosted-settlement-simulator
+      - hosted-settlement-clock-data:/var/lib/hosted-settlement-clock
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
 
-  hosted-settlement-api:
-    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
-    command: ["hosted-settlement-api", "--host", "0.0.0.0", "--port", "8080"]
+  hosted-settlement-simulator:
+    <<: *hosted-e2e-service
+    command: ["hosted-settlement-e2e-simulator", "--host", "0.0.0.0", "--port", "8082"]
     depends_on:
       hosted-settlement-migrate:
         condition: service_completed_successfully
-    env_file:
-      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
-    ports:
-      - "18080:8080"
-    read_only: true
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp:size=16m,mode=1777
+    volumes:
+      - hosted-settlement-simulator-data:/var/lib/hosted-settlement-simulator
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified E2E release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [hosted-provider]
+
+  hosted-settlement-control:
+    <<: *hosted-e2e-service
+    command: ["hosted-settlement-e2e-control-api", "--host", "0.0.0.0", "--port", "8083"]
+    depends_on:
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - hosted-settlement-simulator-data:/var/lib/hosted-settlement-simulator
+      - hosted-settlement-clock-data:/var/lib/hosted-settlement-clock
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified E2E release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [hosted-control]
+
+  hosted-settlement-admit-fixture:
+    <<: *hosted-e2e-service
+    command: ["hosted-settlement-e2e-admit-fixture"]
+    depends_on:
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+      hosted-settlement-simulator:
+        condition: service_started
+    restart: "no"
     volumes:
       - hosted-settlement-data:/var/lib/hosted-settlement
-      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+      - type: volume
+        source: hosted-settlement-clock-data
+        target: /var/lib/hosted-settlement-clock
+        read_only: true
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified E2E release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [hosted-provider, hosted-control]
+
+  hosted-settlement-api:
+    <<: *hosted-service
+    command: ["${HOSTED_SETTLEMENT_API_COMMAND:-hosted-settlement-api}", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      hosted-settlement-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${HOSTED_SETTLEMENT_HOST_PORT:-18080}:8080"
+    networks:
+      default:
+        aliases: [bob-storefront]
+      hosted-control: {}
+      hosted-provider: {}
+    restart: unless-stopped
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - type: volume
+        source: hosted-settlement-clock-data
+        target: /var/lib/hosted-settlement-clock
+        read_only: true
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
     healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2)); required={'scheme-tagged-identities.v1','account-owner-admission.v1','account-owner-rotation.v1','account-owner-retirement.v1','signer-injected-client.v1','provider-neutral-seller-onboarding.v1'}; assert d.get('ready') and d.get('schema_version') == 4 and d.get('request_signature_protocol') == 'arkhai.hosted-request-signature.v2' and d.get('response_signature_protocol') == 'arkhai.hosted-response-signature.v2' and d.get('supported_identity_schemes') == ['eip191','ed25519'] and required.issubset(d.get('capabilities', []))"
+      test: ["CMD-SHELL", "python -c \"import json,os,urllib.request; p=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health/ready',timeout=2)); production={'conditional-escrow.v1','stripe-connect-separate-charges-transfers.v1','portable-attestation.v1','eas-arbiter.v1','scheme-tagged-identities.v1','account-owner-admission.v1','account-owner-rotation.v1','account-owner-retirement.v1','signer-injected-client.v1','provider-neutral-seller-onboarding.v1'}; hermetic=os.environ['HOSTED_COMPOSE_MODE']=='hermetic'; d=json.load(urllib.request.urlopen('http://127.0.0.1:8080/health/e2e-ready',timeout=2)) if hermetic else {}; e2e={'deterministic-provider.v1','controlled-clock.v1','controlled-events.v1','authenticated-control.v1','sanitized-effects.v1','process-restart.v1'}; assert p.get('ready') and p.get('manifest_digest')==os.environ['HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST'] and p.get('api_version')=='0.1.0' and p.get('schema_version')==4 and production.issubset(p.get('capabilities',[])) and (not hermetic or (d.get('assembly')=='simulated-e2e' and d.get('manifest_digest')==os.environ['HOSTED_VERIFIED_PRODUCTION_MANIFEST_DIGEST'] and d.get('e2e_manifest_digest')==os.environ['HOSTED_VERIFIED_E2E_MANIFEST_DIGEST'] and d.get('control_protocol')=='arkhai.hosted-settlement-e2e-control.v1' and e2e.issubset(d.get('capabilities',[]))))\""]
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 10s
 
   hosted-settlement-worker:
-    image: ${HOSTED_SETTLEMENT_VERIFIED_IMAGE:?run make prepare-hosted-compose and pass its generated env with --env-file}
-    command: ["hosted-settlement-worker", "--interval-seconds", "5"]
+    <<: *hosted-service
+    command: ["${HOSTED_SETTLEMENT_WORKER_COMMAND:-hosted-settlement-worker}", "--interval-seconds", "${HOSTED_SETTLEMENT_WORKER_INTERVAL:-5}"]
     depends_on:
       hosted-settlement-api:
         condition: service_healthy
-      hosted-settlement-migrate:
-        condition: service_completed_successfully
-    env_file:
-      - ${HOSTED_SETTLEMENT_ENV_FILE:?set hosted service environment file}
-    read_only: true
     restart: unless-stopped
+    volumes:
+      - hosted-settlement-data:/var/lib/hosted-settlement
+      - type: volume
+        source: hosted-settlement-clock-data
+        target: /var/lib/hosted-settlement-clock
+        read_only: true
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [default, hosted-provider]
+
+  hosted-settlement-event-worker:
+    <<: *hosted-e2e-service
+    command: ["hosted-settlement-e2e-event-worker", "--interval-seconds", "1"]
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - hosted-settlement-simulator-data:/var/lib/hosted-settlement-simulator
+      - type: bind
+        source: ${HOSTED_SETTLEMENT_RELEASE_DIR:?set verified E2E release directory}
+        target: /opt/hosted-settlement/release
+        read_only: true
+    networks: [default]
+
+  hosted-compose-control:
+    image: arkhai:e2e-tests-hosted
+    profiles: [hosted-hermetic]
+    command: [".venv/bin/python", "-m", "src.hosted_restart_control", "serve"]
+    env_file:
+      - path: ${HOSTED_SETTLEMENT_E2E_RESTART_ENV_FILE:?set isolated restart-control Secret environment file}
+        required: true
+    environment:
+      HOSTED_SETTLEMENT_E2E_ENGINE_SOCKET: /var/run/docker.sock
+    volumes:
+      - ${HOSTED_SETTLEMENT_E2E_ENGINE_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    networks: [hosted-control]
+    read_only: true
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp:size=16m,mode=1777
-    volumes:
-      - hosted-settlement-data:/var/lib/hosted-settlement
-      - ${HOSTED_SETTLEMENT_RELEASE_DIR:?set signed release directory}:/opt/hosted-settlement/release:ro
+    healthcheck:
+      test: ["CMD-SHELL", ".venv/bin/python -c \"import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8084/health/ready',timeout=2))['ready']\""]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
 
-  bob-storefront:
+  hosted-e2e-runner:
+    image: arkhai:e2e-tests-hosted
+    profiles: [hosted-hermetic]
+    command: [".venv/bin/pytest", "-m", "e2e_hosted_settlement", "tests/e2e/roles/scenarios/vms/hosted"]
     depends_on:
       hosted-settlement-api:
         condition: service_healthy
+      bob-storefront:
+        condition: service_healthy
+      hosted-compose-control:
+        condition: service_healthy
+    environment:
+      ARKHAI_RUN_HOSTED_E2E: "1"
+      XDG_CONFIG_HOME: /app/config/hosted-buyer
+      HOSTED_STOREFRONT_URL: http://bob-storefront:8001
+      HOSTED_REGISTRY_URL: http://registry:8080
+      HOSTED_PROVISIONING_URL: http://provisioning:8081
+      HOSTED_SETTLEMENT_AUTHORITY_URL: http://hosted-settlement-api:8080
+      HOSTED_SETTLEMENT_E2E_CONTROL_URL: http://hosted-settlement-control:8083
+      HOSTED_SETTLEMENT_E2E_MECHANISM_CONTROL_URL: http://hosted-compose-control:8084/mechanisms
+      HOSTED_SETTLEMENT_E2E_CONTROL_PROTOCOL: ${HOSTED_E2E_CONTROL_PROTOCOL:?run make hosted-hermetic-preflight}
+      HOSTED_SETTLEMENT_E2E_FIXTURE_VERSION: ${HOSTED_E2E_FIXTURE_VERSION:?run make hosted-hermetic-preflight}
+      HOSTED_SETTLEMENT_E2E_STOREFRONT_CONFIG: /app/config/hosted-storefront.toml
+      HOSTED_SETTLEMENT_E2E_BUYER_CONFIG: /app/config/hosted-buyer/arkhai/buyer.toml
+      HOSTED_SETTLEMENT_E2E_PRODUCTION_MANIFEST_DIGEST: ${HOSTED_PRODUCTION_MANIFEST_DIGEST:?set verified canonical production manifest digest}
+      HOSTED_SETTLEMENT_E2E_MANIFEST_DIGEST: ${HOSTED_E2E_VERIFIED_MANIFEST_DIGEST:?run make hosted-hermetic-preflight}
+      HOSTED_SETTLEMENT_E2E_RESTART_COMMAND: ".venv/bin/python -m src.hosted_restart_control restart"
+      HOSTED_SETTLEMENT_E2E_RESTART_URL: http://hosted-compose-control:8084
     env_file:
-      - ${VMS_BOB_IDENTITY_ENV_FILE:?set signer credential environment file}
+      - path: ${HOSTED_SETTLEMENT_E2E_RUNNER_ENV_FILE:?set hosted runner Secret environment file}
+        required: true
     volumes:
-      - ${VMS_BOB_HOSTED_STOREFRONT_CONFIG:-./config.hosted-fiat-ed25519.toml}:/etc/arkhai/storefront.toml:ro
+      - ${PWD}/e2e-tests/config/hosted-buyer.toml:/app/config/hosted-buyer/arkhai/buyer.toml:ro
+      - ${PWD}/e2e-tests/config/hosted-storefront.toml:/app/config/hosted-storefront.toml:ro
+    network_mode: service:hosted-settlement-api
+    restart: "no"
+
+  provisioning:
+    profiles: [hosted-production, hosted-hermetic, hosted-real-stripe]
+    environment:
+      PROVISIONING_INVENTORY_INI: |-
+        [kvm_hosts]
+        kvm1 ansible_host=127.0.0.1 ansible_user=stub gpus=1 gpu_model=H100
+
+  bob-storefront:
+    profiles: [hosted-production, hosted-hermetic, hosted-real-stripe]
+    depends_on:
+      hosted-settlement-api:
+        condition: service_healthy
+    ports: !reset []
+    network_mode: service:hosted-settlement-api
+    env_file:
+      - path: ${VMS_BOB_IDENTITY_ENV_FILE:?set signer credential environment file}
+        required: true
+    volumes:
+      - ${VMS_BOB_STRIPE_STOREFRONT_CONFIG:-./config.stripe-fiat-ed25519.toml}:/etc/arkhai/storefront.toml:ro
+      - ${PWD}/e2e-tests/config/hosted-resources.csv:/app/hosted-resources.csv:ro
 
 volumes:
   hosted-settlement-data:
+  hosted-settlement-simulator-data:
+  hosted-settlement-clock-data:
+
+networks:
+  hosted-provider:
+    internal: true
+  hosted-control:
+    internal: true

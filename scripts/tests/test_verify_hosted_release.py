@@ -3,15 +3,17 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import io
 import json
-from pathlib import Path
-from typing import Any, Callable
 import sys
+import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFIER_PATH = REPO_ROOT / "scripts" / "verify-hosted-release.py"
@@ -60,12 +62,33 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _client_wheel_bytes(*, entry_points: str | None = None) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        archive.writestr("hosted_settlement_client/__init__.py", "")
+        archive.writestr(
+            "arkhai_hosted_settlement_client-0.1.0.dist-info/METADATA",
+            "Name: arkhai-hosted-settlement-client\nVersion: 0.1.0\n",
+        )
+        archive.writestr(
+            "arkhai_hosted_settlement_client-0.1.0.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nTag: py3-none-any\n",
+        )
+        if entry_points is not None:
+            archive.writestr(
+                "arkhai_hosted_settlement_client-0.1.0.dist-info/entry_points.txt",
+                entry_points,
+            )
+    return buffer.getvalue()
+
+
 def _stage_release(
     root: Path,
     *,
     mutate_payload: Callable[[dict[str, Any]], None] | None = None,
     mutate_envelope: Callable[[dict[str, Any]], None] | None = None,
     mutate_trust: Callable[[dict[str, Any]], None] | None = None,
+    client_entry_points: str | None = None,
 ) -> tuple[Path, Path, Path]:
     artifact_contents = {
         "openapi-v0.1.0.json": b'{"openapi":"3.1.0"}\n',
@@ -78,16 +101,19 @@ def _stage_release(
         (root / filename).write_bytes(contents)
 
     client_filename = "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl"
-    client_bytes = b"exact hosted client wheel fixture"
+    client_bytes = _client_wheel_bytes(entry_points=client_entry_points)
     client_path = root / client_filename
     client_path.write_bytes(client_bytes)
     client_sha = _sha(client_bytes)
     image_digest = "sha256:" + "ab" * 32
-    artifact = lambda filename: {
-        "filename": filename,
-        "media_type": "application/json",
-        "sha256": "sha256:" + _sha(artifact_contents[filename]),
-    }
+
+    def artifact(filename: str) -> dict[str, str]:
+        return {
+            "filename": filename,
+            "media_type": "application/json",
+            "sha256": "sha256:" + _sha(artifact_contents[filename]),
+        }
+
     payload: dict[str, Any] = {
         "contract_version": "arkhai.hosted-settlement-release.v2",
         "release_version": "0.1.0",
@@ -193,6 +219,20 @@ def test_schema_four_identity_release_is_accepted(tmp_path: Path) -> None:
     assert result["capabilities"] == _REQUIRED_CAPABILITIES
 
 
+def test_client_wheel_with_seller_entry_point_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(
+        verifier.ReleaseVerificationError,
+        match="must not contain console-script entry-point metadata",
+    ):
+        _verify(
+            tmp_path,
+            client_entry_points=(
+                "[console_scripts]\n"
+                "hosted-settlement-seller = hosted_settlement_client.seller:main\n"
+            ),
+        )
+
+
 @pytest.mark.parametrize("schema_version", [1, 3, 5])
 def test_non_current_trusted_schema_is_rejected(
     tmp_path: Path, schema_version: int
@@ -223,6 +263,17 @@ def test_old_signature_envelope_is_rejected(tmp_path: Path) -> None:
             mutate_envelope=lambda envelope: envelope.__setitem__(
                 "signature_scheme", "ed25519"
             ),
+        )
+
+
+def test_unsigned_local_manifest_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(verifier.ReleaseVerificationError, match="signature"):
+        _verify(
+            tmp_path,
+            mutate_envelope=lambda envelope: envelope.__setitem__(
+                "signature", "00" * 65
+            ),
+            mutate_trust=lambda trust: trust.__setitem__("workflow_ref", "local"),
         )
 
 
@@ -262,7 +313,9 @@ def test_compose_env_rejects_arbitrary_image_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     trust_path, manifest_path, client_path = _stage_release(tmp_path)
-    monkeypatch.setenv("HOSTED_SETTLEMENT_VERIFIED_IMAGE", "attacker.invalid/image:latest")
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE", "attacker.invalid/image:latest"
+    )
 
     with pytest.raises(
         preparer.ComposePreparationError,
@@ -291,4 +344,86 @@ def test_compose_env_rejects_tampered_digest_override(
             manifest_path=manifest_path,
             wheel_path=client_path,
             output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_floating_production_image_tag_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(
+        verifier.ReleaseVerificationError, match="must not contain a floating tag"
+    ):
+        _verify(
+            tmp_path,
+            mutate_payload=lambda payload: payload["service_image"].__setitem__(
+                "reference", "ghcr.io/arkhai/hosted-settlement-service:latest"
+            ),
+            mutate_trust=lambda trust: trust["service_image"].__setitem__(
+                "reference", "ghcr.io/arkhai/hosted-settlement-service:latest"
+            ),
+        )
+
+
+def test_generated_environment_contains_only_allowlisted_nonsecret_keys(
+    tmp_path: Path,
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    output = tmp_path / "hosted-compose.env"
+    preparer.prepare_compose_env(
+        trust_path=trust_path,
+        manifest_path=manifest_path,
+        wheel_path=client_path,
+        output_path=output,
+    )
+    keys = {
+        line.split("=", 1)[0]
+        for line in output.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    }
+    assert keys == {
+        "HOSTED_SETTLEMENT_VERIFIED_IMAGE",
+        "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
+    }
+
+
+def test_selected_hermetic_mode_reports_exact_missing_manifest(
+    tmp_path: Path,
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    with pytest.raises(
+        preparer.ComposePreparationError,
+        match="HOSTED_SERVICE_WHEEL",
+    ):
+        preparer.prepare_compose_env(
+            mode="hermetic",
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+            service_wheel_path=None,
+            output_path=tmp_path / "hosted-compose.env",
+        )
+
+
+def test_production_manifest_is_not_accepted_as_hermetic_manifest(
+    tmp_path: Path,
+) -> None:
+    trust_path, manifest_path, client_path = _stage_release(tmp_path)
+    service_bytes = _client_wheel_bytes()
+    service_path = tmp_path / "arkhai_hosted_settlement_service-0.1.0-py3-none-any.whl"
+    service_path.write_bytes(service_bytes)
+    with pytest.raises(verifier.ReleaseVerificationError, match="E2E contract_version"):
+        production = verifier.verify_release(
+            trust_path=trust_path,
+            manifest_path=manifest_path,
+            wheel_path=client_path,
+        )
+        verifier.verify_hermetic_release(
+            production=production,
+            manifest_path=manifest_path,
+            manifest_sha256=_sha(manifest_path.read_bytes()),
+            fixture_wheel_path=client_path,
+            service_wheel_path=service_path,
+            authority_id="release-authority",
+            authority_address=Account.from_key(_AUTHORITY_KEY).address.lower(),
+            repository="arkhai/hosted-settlement-service",
+            workflow_ref=".github/workflows/release.yml@refs/tags/v0.1.0",
+            source_commit="12" * 20,
         )

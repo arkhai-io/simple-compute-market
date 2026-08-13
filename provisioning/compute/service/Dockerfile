@@ -88,6 +88,10 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=${APPUSER_UID} \
         --refresh-package arkhai-compute-provisioning-service \
         --refresh-package arkhai-vms-provisioning-adapter \
         --refresh-package arkhai-bare-metal-provisioning-adapter \
+        --refresh-package arkhai-kit-site \
+        --refresh-package arkhai-kit-resource-pools \
+        --refresh-package arkhai-kit-fulfillment \
+        --refresh-package arkhai-compute-provisioning \
         --refresh-package arkhai-core-storefront-client \
         --refresh-package arkhai-kit-identity \
         --refresh-package arkhai-kit-site-client \
