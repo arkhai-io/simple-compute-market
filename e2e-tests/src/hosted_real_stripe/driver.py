@@ -149,11 +149,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 authority_address=release.hosted_authority_address,
                 authority_environment=args.authority_environment,
                 manifest_digest=release.hosted_manifest_digest,
+                shared_directory=args.compose_env.parent,
             ) as marketplace_config:
                 with EphemeralServiceEnv(
                     api_key=secret,
                     webhook_secret=webhook_secret,
                     base_path=args.hosted_service_env_base,
+                    shared_directory=args.compose_env.parent,
                 ) as authority_env:
                     execution.stage = "hosted_release"
                     with ComposeStack(

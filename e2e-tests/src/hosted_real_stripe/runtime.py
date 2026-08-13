@@ -143,6 +143,7 @@ class EphemeralServiceEnv:
         api_key: str,
         webhook_secret: str,
         base_path: Path | None = None,
+        shared_directory: Path,
     ) -> None:
         self._values = {
             "HOSTED_SETTLEMENT_PROVIDER_KIND": "stripe",
@@ -151,13 +152,19 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
         }
         self._base_path = base_path
+        self._shared_directory = shared_directory
         self._directory: Path | None = None
         self.path: Path | None = None
 
     def __enter__(self) -> Path:
         values = self._read_base()
         values.update(self._values)
-        directory = Path(tempfile.mkdtemp(prefix="arkhai-hosted-stripe-test-"))
+        directory = Path(
+            tempfile.mkdtemp(
+                prefix="arkhai-hosted-stripe-test-",
+                dir=self._shared_directory,
+            )
+        )
         directory.chmod(stat.S_IRWXU)
         path = directory / "authority.env"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -220,6 +227,7 @@ class EphemeralMarketplaceConfig:
         authority_address: str,
         authority_environment: str,
         manifest_digest: str,
+        shared_directory: Path,
     ) -> None:
         self._template = template
         self._values = {
@@ -230,6 +238,7 @@ class EphemeralMarketplaceConfig:
             "authority_environment": authority_environment,
             "manifest_digest": manifest_digest,
         }
+        self._shared_directory = shared_directory
         self._directory: Path | None = None
         self.path: Path | None = None
 
@@ -263,19 +272,25 @@ class EphemeralMarketplaceConfig:
             r"(\[Settlement\.stripe\.authority\]\n)principals = \[[^\n]+\]"
         )
         text, count = authority_pattern.subn(
-            (
-                r"\1principals = [{ scheme = \""
+            lambda match: (
+                match.group(1)
+                + 'principals = [{ scheme = "'
                 + self._values["authority_scheme"]
-                + r"\", identifier = \""
+                + '", identifier = "'
                 + self._values["authority_address"]
-                + r"\" }]"
+                + '" }]'
             ),
             text,
             count=1,
         )
         if count != 1:
             raise ProcessUnavailable("marketplace authority trust section is invalid")
-        directory = Path(tempfile.mkdtemp(prefix="arkhai-hosted-stripe-test-config-"))
+        directory = Path(
+            tempfile.mkdtemp(
+                prefix="arkhai-hosted-stripe-test-config-",
+                dir=self._shared_directory,
+            )
+        )
         directory.chmod(stat.S_IRWXU)
         path = directory / "storefront.toml"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
