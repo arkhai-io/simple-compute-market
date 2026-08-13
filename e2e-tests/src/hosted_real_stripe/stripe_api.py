@@ -273,6 +273,11 @@ class StripeApi:
         if refunds:
             raise ProviderInvariantError("payment-outcome-only scenario created a refund")
 
+        normalized: Literal[
+            "declined",
+            "insufficient_funds",
+            "authentication_succeeded",
+        ]
         if outcome == "authentication":
             if charge is None:
                 raise ProviderNotConverged("authenticated charge is not visible")

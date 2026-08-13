@@ -6,7 +6,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import Any, Literal, Sequence, cast
 
 from .browser import (
     CheckoutContractError,
@@ -237,10 +237,12 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         classification, code = "environment", "chromium_unavailable"
     except ProcessUnavailable:
         classification = "environment"
-        code = {
-            "webhook_forwarding": "stripe_cli_unavailable",
-            "hosted_release": "hosted_release_unavailable",
-        }.get(execution.stage, "marketplace_unavailable")
+        if execution.stage == "webhook_forwarding":
+            code = "stripe_cli_unavailable"
+        elif execution.stage == "hosted_release":
+            code = "hosted_release_unavailable"
+        else:
+            code = "marketplace_unavailable"
     except (LifecycleConvergenceTimeout, ProviderConvergenceTimeout):
         classification, code = "timeout", "convergence_timeout"
     except CheckoutContractError:
@@ -306,7 +308,7 @@ def _execute_scenario(
         execution.stage = "provider_inspection"
         payment_outcome = stripe.wait_for_payment_outcome(
             expected,
-            scenario,
+            cast(Literal["decline", "insufficient_funds", "authentication"], scenario),
             timeout=provider_timeout,
             poll_interval=poll_interval,
         )

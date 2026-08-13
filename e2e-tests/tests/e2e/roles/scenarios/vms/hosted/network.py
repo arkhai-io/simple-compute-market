@@ -324,8 +324,11 @@ class NetworkMarketplacePort:
         )
         action = started.get("action") or {}
         settlement_ref = started.get("settlement_ref")
+        expires_at = action.get("expires_at_unix") or started.get("action_expires_at_unix")
         if not settlement_ref or not action.get("url"):
             raise AssertionError("hosted materialization returned no Checkout action")
+        if not isinstance(expires_at, int):
+            raise AssertionError("hosted materialization returned no action expiry")
         amount = int(obligation["amount"])
         currency = str(obligation["asset"])
         operation_ref = stable_operation_ref("materialize", obligation_ref)
@@ -336,9 +339,7 @@ class NetworkMarketplacePort:
             operation_ref=operation_ref,
             action=BuyerAction(
                 kind=str(action.get("kind") or started.get("action_kind") or "redirect"),
-                expires_at_unix=int(
-                    action.get("expires_at_unix") or started.get("action_expires_at_unix")
-                ),
+                expires_at_unix=expires_at,
                 url=str(action["url"]),
             ),
             amount=amount,
