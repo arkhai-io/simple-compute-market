@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import time
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Sequence, cast
+
+from hosted_settlement_client import sign_account_owner_admission
+from market_hosted_settlement.adapter import MarketplaceSignerAdapter
+from market_identity import create_signer
 
 from .browser import (
     CheckoutContractError,
@@ -131,6 +138,13 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
         execution.stage = "account_readiness"
         account = stripe.retrieve_account(account_id)
         require_ready_account(account, account_id)
+        binding_contract = _maintained_account_binding(
+            storefront_config=args.storefront_config,
+            authority_id=release.hosted_authority_id,
+            account_ref=args.account_ref,
+            provider_account_id=account_id,
+            run_identity=run_identity,
+        )
         provider = ProviderEvidence(connected_account_ready=True)
 
         execution.stage = "browser_preflight"
@@ -167,6 +181,11 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                         stack.start(
                             authority_env_path=authority_env,
                             marketplace_config_path=marketplace_config,
+                        )
+                        execution.stage = "account_readiness"
+                        stack.bind_existing_account(
+                            account_ref=args.account_ref,
+                            binding_contract=binding_contract,
                         )
                         execution.stage = "webhook_forwarding"
                         verify_loopback_webhook_endpoint(
@@ -238,13 +257,16 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
     except ChromiumUnavailable:
         classification, code = "environment", "chromium_unavailable"
     except ProcessUnavailable:
-        classification = "environment"
-        if execution.stage == "webhook_forwarding":
-            code = "stripe_cli_unavailable"
-        elif execution.stage == "hosted_release":
-            code = "hosted_release_unavailable"
+        if execution.stage == "account_readiness":
+            classification, code = "account", "account_not_ready"
         else:
-            code = "marketplace_unavailable"
+            classification = "environment"
+            if execution.stage == "webhook_forwarding":
+                code = "stripe_cli_unavailable"
+            elif execution.stage == "hosted_release":
+                code = "hosted_release_unavailable"
+            else:
+                code = "marketplace_unavailable"
     except (LifecycleConvergenceTimeout, ProviderConvergenceTimeout):
         classification, code = "timeout", "convergence_timeout"
     except CheckoutContractError:
@@ -265,6 +287,46 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
             diagnostic=DiagnosticEvidence(stage=execution.stage, code=code),
         ),
         1,
+    )
+
+
+def _maintained_account_binding(
+    *,
+    storefront_config: Path,
+    authority_id: str,
+    account_ref: str,
+    provider_account_id: str,
+    run_identity: str,
+) -> str:
+    credential = os.environ.get("HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL")
+    if not credential:
+        raise AuthorizationUnavailable("storefront account-owner credential is unavailable")
+    try:
+        parsed = tomllib.loads(storefront_config.read_text(encoding="utf-8"))
+        identity = parsed["Identity"]["principal"]
+        scheme = identity["scheme"]
+        identifier = identity["identifier"]
+        if not isinstance(scheme, str) or not isinstance(identifier, str):
+            raise ValueError("storefront identity is invalid")
+        signer = create_signer(scheme, credential)
+        if signer.identity.identifier != identifier:
+            raise ValueError("storefront credential does not match configured identity")
+        admission = sign_account_owner_admission(
+            signer=MarketplaceSignerAdapter(signer),
+            authority_id=authority_id,
+            account_ref=account_ref,
+            nonce=opaque_ref("op", f"account-admission:{run_identity}"),
+            valid_until_unix=int(time.time()) + 3600,
+        )
+    except (KeyError, OSError, TypeError, ValueError, tomllib.TOMLDecodeError) as exc:
+        raise AuthorizationRejected("storefront account-owner authorization is invalid") from exc
+    return json.dumps(
+        {
+            "provider_account_id": provider_account_id,
+            "admission": admission.model_dump(mode="json"),
+        },
+        separators=(",", ":"),
+        sort_keys=True,
     )
 
 

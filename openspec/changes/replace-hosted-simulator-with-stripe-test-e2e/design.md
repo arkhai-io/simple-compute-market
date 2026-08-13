@@ -208,10 +208,8 @@ producer documentation named below is owned and published independently by
 | Completed simulator-era implementation remains historical but its incomplete acceptance and closeout are superseded by this replacement | `openspec/changes/add-local-hosted-settlement-e2e/{proposal,design,tasks}.md` |
 | This evidence cutover does not change the hosted settlement product goal | No `docs/development/ROADMAP.md` change |
 
-Concrete producer artifacts are run outputs, not documentation constants. A
-production-only release generated after the coordinated cutover becomes valid
-handoff evidence only when its signature and complete identity tuple pass
-`hosted-preflight`; each protected report records that tuple alongside, and
-separately from, its exact marketplace commit. The pre-cutover implementation
-checkpoints above preserve provenance but are not substitutes for that release
-or for a protected Stripe run.
+The production-only hosted release is signed by `local-release-authority` at `0x78379a48a88afbe69dcbc943b80f390bf1b3315e`. Its canonical manifest digest is `sha256:218f991d91d513918f7ee7e4524df9d57bc232c52c32c3b6b6ce9de336f86350`, and the exact `release-manifest.json` file hash pinned by `manifests/hosted-settlement-v0.1.0-trust.json` is `sha256:ff97f4d41b1737050f16ed0912cc77bbaca06ea3e128b664704eb9b1a9fc8fe6`.
+
+The consumer pins client wheel `arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl` at `sha256:47ed10de818f7349a902ccb539806832938253ece1d0c2cde6e9bdca75f8b6ed` and `localhost/arkhai-hosted-settlement-service@sha256:0ccf7bba99d36091b36cd911d9da1d0046045c3749a560469aecdfe9b1d31da5`. The producer release additionally binds service wheel `sha256:90778bef0f74262857ba13cb5f4f0db98d8481d469a16c643f12912ccaff1565`, migrations schema 4 `sha256:933c809825e6ab474625553d2d33c00dada562646e5e007f12c0b8d925cbf571`, OpenAPI `sha256:e5af2ebe64a61b37e93444984686ebcc4d8e6250b7d585c1817b1779911e4b88`, conformance `sha256:98469a194352bee2db8b564109cfe4b607ff55aacc06fcb1808b52032b7d41bc`, SPDX SBOM `sha256:6f2fe61986f880c4b5ef8c13063b036875d6ce9aa35eb1eda3063d30685fa10f`, and provenance `sha256:aaa0473ea3bbcc3adb0b7bf37e0dbcb814488ed7f0d38a27662b3d77c32d1536`.
+
+Producer repository `arkhai/hosted-settlement-service`, workflow ref `.github/workflows/release.yml@local/5d07bcd83e631447969ba85eeec15aa775f0d08f`, source commit `5d07bcd83e631447969ba85eeec15aa775f0d08f`, and producer run identity `local-5d07bcd` remain separate from the marketplace commit and protected Stripe workflow run identity. Marketplace release preflight verified this tuple before generating `.dist/hosted-settlement-compose.env`.

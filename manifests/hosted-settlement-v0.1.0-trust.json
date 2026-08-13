@@ -36,20 +36,20 @@
     "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding"
   },
   "manifest_filename": "release-manifest.json",
-  "manifest_sha256": "4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e",
+  "manifest_sha256": "b32fef4a7e33dabc1f1250a2381211e5f2c4f0ea29aba17f607a3eb0d4d763c3",
   "authority_id": "local-release-authority",
-  "authority_address": "0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63",
+  "authority_address": "0x78379a48a88afbe69dcbc943b80f390bf1b3315e",
   "repository": "arkhai/hosted-settlement-service",
-  "workflow_ref": ".github/workflows/release.yml@local/d167a7adbdc2aee90c976b643bc18bd4045c4bf6",
-  "source_commit": "d167a7adbdc2aee90c976b643bc18bd4045c4bf6",
+  "workflow_ref": ".github/workflows/release.yml@local/88c4fb44973a4e358afa122538d15db46ba228bd",
+  "source_commit": "88c4fb44973a4e358afa122538d15db46ba228bd",
   "client_wheel": {
     "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",
     "distribution": "arkhai-hosted-settlement-client",
     "version": "0.1.0",
-    "sha256": "a1524d11bfbd76a3ce63b02b9ea698bb09557c7789948be7011ec80af896bfe9"
+    "sha256": "47ed10de818f7349a902ccb539806832938253ece1d0c2cde6e9bdca75f8b6ed"
   },
   "service_image": {
     "reference": "localhost/arkhai-hosted-settlement-service",
-    "digest": "sha256:28a59051cc7c8fb681bb01b71421eb5b4f817e582a44c09acf7bc637617b9ef2"
+    "digest": "sha256:54745f6e292aef14b685df205e30a8d28a7cb915ef48137a263930ec8247cb31"
   }
 }

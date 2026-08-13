@@ -10,13 +10,14 @@ from typing import Any, Literal
 
 import httpx
 from market_identity import Identity, TrustedIdentitySet, create_signer
+from core_buyer.registry_config import RegistryAuthority
 from market_settlement_runtime import derive_obligation_ref
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 from storefront_client import SyncStorefrontClient
 
-from .driver import stable_operation_ref
+from .authority import released_authority_client
 from .driver import (
     BuyerAction,
     CompositionSnapshot,
@@ -26,6 +27,7 @@ from .driver import (
     NegotiationSnapshot,
     RuntimeSnapshot,
     TerminalSnapshot,
+    stable_operation_ref,
 )
 
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"
@@ -65,6 +67,25 @@ def _signer(config: dict[str, Any], credential: str):
     return signer
 
 
+def _primary_registry_authority(config: dict[str, Any]) -> dict[str, Any]:
+    registry = config.get("registry")
+    if not isinstance(registry, dict):
+        raise RuntimeError("buyer configuration has no registry section")
+    urls = registry.get("urls")
+    authorities = registry.get("authorities")
+    if (
+        not isinstance(urls, list)
+        or not urls
+        or not isinstance(urls[0], str)
+        or not isinstance(authorities, dict)
+    ):
+        raise RuntimeError("buyer configuration has no primary registry authority")
+    authority = authorities.get(urls[0])
+    if not isinstance(authority, dict):
+        raise RuntimeError("buyer configuration has no primary registry authority")
+    return authority
+
+
 def _option(listing) -> dict[str, Any]:
     options = listing.extra.get("settlement_options", [])
     hosted = [item for item in options if item.get("mechanism") == "fiat.stripe.v1"]
@@ -98,7 +119,7 @@ class NetworkMarketplacePort:
         )
         self._seller_signer = seller_signer
         seller_trust = TrustedIdentitySet(identities=(seller_signer.identity,))
-        registry_authority = self.buyer_config["registry"]["authorities"][self.registry_url]
+        registry_authority = _primary_registry_authority(self.buyer_config)
         self.registry = SyncRegistryClient(
             base_url=self.registry_url,
             signer=buyer_signer,
@@ -106,8 +127,6 @@ class NetworkMarketplacePort:
             expected_registries=_trusted(registry_authority),
             registry_authority=registry_authority["authority"],
         )
-        from core_buyer.registry_config import RegistryAuthority
-
         self._registry_authority = RegistryAuthority(
             authority=registry_authority["authority"],
             principals=_trusted(registry_authority),
@@ -194,8 +213,6 @@ class NetworkMarketplacePort:
         )
 
     def verify_runtime(self) -> RuntimeSnapshot:
-        from .authority import released_authority_client
-
         status = httpx.get(self.storefront_url + "/health", timeout=10)
         authority = released_authority_client(
             config_path=Path(

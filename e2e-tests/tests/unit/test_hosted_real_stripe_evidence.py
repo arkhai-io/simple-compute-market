@@ -145,13 +145,40 @@ def test_account_gate_requires_ready_application_controlled_test_account() -> No
         "capabilities": {"card_payments": "active", "transfers": "active"},
         "requirements": {"currently_due": [], "past_due": [], "disabled_reason": None},
         "controller": {
-            "requirement_collection": "application",
+            "fees": {"payer": "application"},
+            "is_controller": True,
+            "losses": {"payments": "application"},
+            "requirement_collection": "stripe",
             "stripe_dashboard": {"type": "express"},
+            "type": "application",
         },
     }
     require_ready_account(account, "acct_protected")
     with pytest.raises(AuthorizationUnavailable):
         require_ready_account({**account, "payouts_enabled": False}, "acct_protected")
+
+
+def test_account_gate_accepts_transfer_only_application_controlled_account() -> None:
+    require_ready_account(
+        {
+            "id": "acct_protected",
+            "livemode": None,
+            "charges_enabled": True,
+            "payouts_enabled": True,
+            "details_submitted": True,
+            "capabilities": {"transfers": "active"},
+            "requirements": {"currently_due": [], "past_due": [], "disabled_reason": None},
+            "controller": {
+                "fees": {"payer": "application"},
+                "is_controller": True,
+                "losses": {"payments": "application"},
+                "requirement_collection": "stripe",
+                "stripe_dashboard": {"type": "express"},
+                "type": "application",
+            },
+        },
+        "acct_protected",
+    )
 
 
 def test_evidence_is_allowlisted_private_and_rejects_provider_values(tmp_path: Path) -> None:

@@ -314,7 +314,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3" },
     { name = "web3", specifier = ">=7.0" },
 ]
-provides-extras = ["dev", "real-stripe"]
+provides-extras = ["dev", "stripe-test"]
 
 [[package]]
 name = "arkhai-hosted-settlement-client"

@@ -215,16 +215,19 @@ def require_ready_account(account: dict[str, object], expected_id: str) -> None:
     requirements = account.get("requirements")
     requirement_data = requirements if isinstance(requirements, dict) else {}
     controller_compatible = (
-        controller_data.get("requirement_collection") == "application"
-        and dashboard_data.get("type") == "express"
+        dashboard_data.get("type") == "express"
+        and controller_data.get("type") == "application"
+        and controller_data.get("is_controller") is True
+        and isinstance(controller_data.get("fees"), dict)
+        and isinstance(controller_data.get("losses"), dict)
     ) or account_type == "express"
     ready = (
         account.get("id") == expected_id
-        and account.get("livemode") is False
+        and account.get("livemode") in (None, False)
         and account.get("charges_enabled") is True
         and account.get("payouts_enabled") is True
         and account.get("details_submitted") is True
-        and capability_data.get("card_payments") == "active"
+        and capability_data.get("card_payments") in (None, "active")
         and capability_data.get("transfers") == "active"
         and requirement_data.get("currently_due") in (None, [])
         and requirement_data.get("past_due") in (None, [])

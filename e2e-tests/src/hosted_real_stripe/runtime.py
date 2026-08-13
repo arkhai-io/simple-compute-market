@@ -355,6 +355,36 @@ class ComposeStack:
         self._run((*self._base, "up", "-d", "--wait"), env=env, check=True)
         self._started = True
 
+    def bind_existing_account(
+        self,
+        *,
+        account_ref: str,
+        binding_contract: str,
+    ) -> None:
+        if self._runtime_env is None:
+            raise ProcessUnavailable("ordinary hosted account admission is unavailable")
+        self._run(
+            (
+                *self._base,
+                "exec",
+                "-T",
+                "hosted-settlement-api",
+                "/opt/venv/bin/hosted-settlement-admin",
+                "bind-existing-account",
+                "--account-ref",
+                account_ref,
+                "--binding-file",
+                "-",
+                "--actor",
+                "protected-stripe-test",
+                "--reason-code",
+                "maintained-test-account",
+            ),
+            env=self._runtime_env,
+            check=True,
+            input_text=binding_contract,
+        )
+
     def restart(self, role: str) -> None:
         service = {
             "api": "hosted-settlement-api",
@@ -376,23 +406,31 @@ class ComposeStack:
         self._started = False
         self._runtime_env = None
 
-    def _run(self, argv: Sequence[str], *, env: Mapping[str, str], check: bool) -> None:
+    def _run(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        check: bool,
+        input_text: str | None = None,
+    ) -> None:
         try:
             completed = subprocess.run(
                 argv,
                 cwd=self._cwd,
                 env=env,
-                stdin=subprocess.DEVNULL,
+                stdin=None if input_text is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 timeout=900,
                 check=False,
+                input=input_text,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ProcessUnavailable("ordinary hosted Compose operation was unavailable") from exc
         if check and completed.returncode != 0:
-            raise ProcessUnavailable("ordinary hosted Compose startup failed")
+            raise ProcessUnavailable("ordinary hosted Compose operation failed")
 
     def __enter__(self) -> "ComposeStack":
         return self
@@ -508,9 +546,9 @@ class MarketplaceLifecycleSession:
             try:
                 process.stdin.write('{"action":"shutdown"}\n')
                 process.stdin.flush()
+                process.stdin.close()
             except (BrokenPipeError, OSError):
                 pass
-            process.stdin.close()
         if process.poll() is None:
             process.terminate()
             try:

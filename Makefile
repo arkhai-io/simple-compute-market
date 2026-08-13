@@ -196,7 +196,8 @@ hosted-stripe-test: hosted-preflight ## Run one protected Stripe test-mode syste
 	@test -n "$(HOSTED_STRIPE_TEST_ACCOUNT_REF)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_ACCOUNT_REF"; exit 1; }
 	@test -n "$(HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT"; exit 1; }
 	@test -f "$(HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE)" || { echo "ERROR: missing HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE"; exit 1; }
-	uv run --project e2e-tests --extra stripe-test python -m src.hosted_real_stripe.driver \
+	uv run --project e2e-tests --extra stripe-test --find-links "$(DIST_DIR)" \
+		python -m src.hosted_real_stripe.driver \
 		--compose-env "$(HOSTED_COMPOSE_ENV)" \
 		--hosted-manifest-sha256 "$(HOSTED_PRODUCTION_MANIFEST_SHA256)" \
 		--hosted-client-wheel-sha256 "$(HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256)" \

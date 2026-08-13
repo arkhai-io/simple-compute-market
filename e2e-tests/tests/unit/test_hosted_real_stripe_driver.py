@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import base64
+import json
+from pathlib import Path
 import pytest
+from hosted_settlement_client import (
+    AccountOwnerAdmission,
+    verify_account_owner_admission,
+)
 
 from src.hosted_real_stripe.driver import (
     _browser_outcome,
+    _maintained_account_binding,
     _prepared_effect,
     _terminal_projection,
 )
@@ -27,6 +35,36 @@ def _prepared() -> dict[str, object]:
         "transfer_group": "escrow-protected-001",
         "source_relation": "checkout-charge",
     }
+
+
+def test_maintained_account_binding_is_owner_signed_for_opaque_reference(
+    monkeypatch,
+) -> None:
+    credential = base64.urlsafe_b64encode(bytes([17]) * 32).decode().rstrip("=")
+    monkeypatch.setenv(
+        "HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL",
+        credential,
+    )
+    monkeypatch.setattr("src.hosted_real_stripe.driver.time.time", lambda: 2_000_000_000)
+    config = Path(__file__).resolve().parents[2] / "config" / "hosted-storefront.toml"
+
+    raw = _maintained_account_binding(
+        storefront_config=config,
+        authority_id="hosted-test",
+        account_ref="seller-account",
+        provider_account_id="acct_private",
+        run_identity="run-identity-001",
+    )
+
+    payload = json.loads(raw)
+    assert payload["provider_account_id"] == "acct_private"
+    admission = AccountOwnerAdmission.model_validate(payload["admission"])
+    assert admission.account_ref == "seller-account"
+    verify_account_owner_admission(
+        admission,
+        authority_id="hosted-test",
+        now_unix=2_000_000_000,
+    )
 
 
 def test_prepared_effect_binds_public_lifecycle_to_exact_checkout_terms() -> None:

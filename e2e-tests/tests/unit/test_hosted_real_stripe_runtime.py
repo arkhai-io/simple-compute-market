@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tomllib
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from src.hosted_real_stripe.runtime import (
     ComposeStack,
@@ -34,6 +37,61 @@ def test_compose_stack_uses_every_declared_compose_file(tmp_path: Path) -> None:
         "-f",
         str(second),
     ]
+
+
+def test_compose_stack_streams_existing_account_contract_without_provider_argument(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    stack = ComposeStack(
+        compose_env=tmp_path / "compose.env",
+        compose_files=(tmp_path / "compose.yml",),
+        executable="docker",
+        cwd=tmp_path,
+    )
+    stack._runtime_env = {"PATH": "/bin"}
+    captured: dict[str, Any] = {}
+
+    def capture(
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        check: bool,
+        input_text: str | None = None,
+    ) -> None:
+        captured.update(
+            argv=tuple(argv),
+            env=dict(env),
+            check=check,
+            input_text=input_text,
+        )
+
+    monkeypatch.setattr(stack, "_run", capture)
+    contract = json.dumps(
+        {
+            "provider_account_id": "acct_private",
+            "admission": {"protocol": "arkhai.account-owner-admission.v1"},
+        }
+    )
+
+    stack.bind_existing_account(
+        account_ref="seller-account",
+        binding_contract=contract,
+    )
+
+    argv = captured["argv"]
+    assert "acct_private" not in argv
+    assert argv[-8:] == (
+        "--account-ref",
+        "seller-account",
+        "--binding-file",
+        "-",
+        "--actor",
+        "protected-stripe-test",
+        "--reason-code",
+        "maintained-test-account",
+    )
+    assert captured["input_text"] == contract
 
 
 def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None:
