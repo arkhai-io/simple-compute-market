@@ -192,7 +192,8 @@ Typed configuration metadata MUST generate role-appropriate init templates, dott
 Every hosted financial system E2E composition MUST consume one verified signed
 production hosted release by exact manifest digest, client wheel version and
 hash, service image digest, migration schema, OpenAPI/conformance identities,
-provenance, and hosted source commit. It MUST NOT build, mount, import, or
+provenance, signed repository and workflow reference, and hosted source commit.
+It MUST NOT build, mount, import, or
 install sibling hosted source. The composition MUST run the ordinary migration,
 API, and reconciliation worker roles against Stripe test mode and preserve the
 authority store across selected restart scenarios. Production and test
@@ -233,7 +234,7 @@ mutation. Local focused evidence MUST NOT replace a failed prerequisite.
 
 #### Scenario: Release identity is incomplete
 
-- **WHEN** a protected run cannot bind its manifest digest, client wheel hash, service image digest, hosted source commit, or producer workflow/run identity
+- **WHEN** a protected run cannot bind its manifest digest, client wheel hash, service image digest, signed release repository/workflow reference/source commit, or separate protected producer workflow run identity
 - **THEN** startup fails before Compose creates the authority or marketplace services and no partial identity is reported as system evidence
 
 ### Requirement: Hosted test secrets remain role-scoped

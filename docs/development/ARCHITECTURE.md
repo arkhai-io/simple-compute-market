@@ -459,8 +459,10 @@ authority store and original operation identity; arbitrary provider outcomes
 remain provider-port tests and assert only Arkhai behavior.
 
 Each protected report identifies the marketplace repository and exact consumer
-commit separately from the hosted manifest, client wheel, service image, hosted
-source commit, and producer workflow/run identity. Role-scoped preflight and
+commit separately from the hosted manifest, client wheel, service image, and
+signed release repository/workflow reference/source commit, plus the protected
+producer workflow run identity recorded separately as orchestration evidence.
+Role-scoped preflight and
 sanitized evidence boundaries are defined by the deployment and testing
 capabilities. Alkahest E2E remains an independent mechanism lane, while local
 EAS/allowlisted-arbiter checks concern only the condition boundary and do not

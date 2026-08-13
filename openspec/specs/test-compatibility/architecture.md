@@ -78,8 +78,9 @@ idempotency derived from durable operation identity. Retrieval follows the
 exact Checkout, payment, transfer, or refund relations created by that run
 rather than accepting an account's latest object. Reports identify the
 marketplace repository and exact consumer commit separately from the hosted
-manifest digest, client wheel hash, service image digest, hosted source
-commit, and producer workflow/run identity.
+manifest digest, client wheel hash, service image digest, signed release
+repository/workflow reference/source commit, and the separate protected
+producer workflow run identity used as orchestration evidence.
 
 Preflight establishes a verified production release, a test-mode secret
 (`sk_test` or least-privilege `rk_test`), non-live returned objects, Stripe connectivity, an allowlisted capable and

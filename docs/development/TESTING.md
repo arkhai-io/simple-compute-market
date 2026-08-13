@@ -314,8 +314,10 @@ local substitute.
 Preflight completes before publication or financial mutation and requires:
 
 - the exact marketplace commit and signed hosted production manifest, client
-  wheel hash/version, service image digest, hosted source commit, and producer
-  workflow identity;
+  wheel hash/version, service image digest, signed release repository/workflow
+  reference, and hosted source commit;
+- the independently trusted protected producer workflow run identity, recorded
+  as orchestration evidence rather than a signed-manifest field;
 - a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe
   connectivity, and non-live returned objects;
 - the expected allowlisted connected account with the required ownership,
@@ -350,8 +352,10 @@ orchestration, configuration, packaging, and production-release verification
 without provider mutation or protected credentials.
 
 Protected evidence contains only the marketplace repository and exact commit,
-the separately identified hosted manifest/client/image/source/producer-run
-coordinates, scenario and stage, unique run identity, opaque durable operation
+the separately identified hosted manifest/client/image and signed
+repository/workflow-reference/source coordinates, the protected producer
+workflow run identity as orchestration evidence, scenario and stage, unique
+run identity, opaque durable operation
 identity, normalized state/amount/currency/cardinality, failure class, and
 bounded diagnostics. Logs and reports exclude credentials, Checkout or Account
 Link URLs, account/customer/card data, raw webhooks, unrestricted provider

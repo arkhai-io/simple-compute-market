@@ -68,7 +68,8 @@ Typed settlement metadata generates role-appropriate templates, edit validation,
 Hosted financial system E2E follows the production supply-chain boundary.
 Preflight verifies one signed production manifest and its exact client wheel,
 service image, migration schema, OpenAPI/conformance artifacts, provenance,
-hosted source commit, and producer workflow identity. It then emits non-secret
+signed release repository and workflow reference, and hosted source commit. It
+then emits non-secret
 Compose coordinates with a digest-qualified image. A local tag, sibling
 checkout, editable source, alternate service distribution, or compatible-major
 substitution is not equivalent.
@@ -96,8 +97,10 @@ The default and fork workflows receive none of them.
 
 Protected evidence keeps consumer and producer identity independent: the
 marketplace repository and exact commit are reported separately from the
-hosted manifest digest, client wheel hash, image digest, hosted source commit,
-and producer workflow/run identity. Reports are schema-validated allowlists;
+hosted manifest digest, client wheel hash, image digest, signed release
+repository/workflow reference/source commit, and the separate protected
+producer workflow run identity used as orchestration evidence. Reports are
+schema-validated allowlists;
 they exclude secrets, action URLs, provider account/customer/card data, raw
 webhooks, and unrestricted service or provider payloads.
 

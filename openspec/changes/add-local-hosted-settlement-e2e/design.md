@@ -147,5 +147,6 @@ composition, control, or acceptance work. Final disposition is:
 
 No simulator-era manifest or run identity is accepted by this change. Exact
 future protected reports identify the marketplace commit independently from
-the verified production-only hosted manifest, client wheel, service image,
-hosted source, and producer workflow/run identity.
+the verified production-only hosted manifest, client wheel, service image, and
+signed repository/workflow reference/source commit, plus the separate
+protected producer workflow run identity used as orchestration evidence.

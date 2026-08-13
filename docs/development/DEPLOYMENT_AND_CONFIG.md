@@ -242,14 +242,22 @@ Hosted financial system E2E has one operator lane:
 
 ```console
 make hosted-stripe-test \
-  HOSTED_RELEASE_DIR=/path/to/production-release \
+  HOSTED_RELEASE_TRUST=/path/to/release-trust \
+  HOSTED_RELEASE_MANIFEST=/path/to/production-release/release-manifest.json \
+  HOSTED_CLIENT_WHEEL=/path/to/production-release/client.whl \
+  HOSTED_COMPOSE_ENV=.dist/hosted-settlement-compose.env \
   HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
   HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
+  HOSTED_PRODUCTION_IMAGE_DIGEST=sha256:<digest> \
   HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
+  HOSTED_PRODUCTION_WORKFLOW_REF=<signed-producer-workflow-ref> \
   HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
   HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
   HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
-  HOSTED_STRIPE_TEST_SCENARIO=<scenario>
+  HOSTED_STRIPE_TEST_SCENARIO=<scenario> \
+  HOSTED_STRIPE_TEST_ACCOUNT_REF=<allowlisted-account-reference> \
+  HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT=<environment-name> \
+  HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE=/path/to/protected-authority.env
 ```
 
 Supply `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID` only through the
@@ -258,10 +266,21 @@ approved protected Secret/environment boundary, not as command-line literals.
 
 The target uses `hosted-preflight` to verify the signed production manifest,
 trust policy, exact client wheel, service image digest, migration schema,
-OpenAPI/conformance artifacts, provenance, hosted source commit, and producer
-workflow identity. Preflight emits only non-secret Compose coordinates and
-starts no service until the complete release identity agrees. The stack then
-runs the ordinary hosted migration, API, and one reconciliation worker against
+OpenAPI/conformance artifacts, provenance, signed repository and workflow
+reference, and hosted source commit. Preflight emits only the allowlisted
+non-secret coordinates `HOSTED_SETTLEMENT_VERIFIED_IMAGE`,
+`HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256`,
+`HOSTED_SETTLEMENT_VERIFIED_MANIFEST_DIGEST`,
+`HOSTED_SETTLEMENT_VERIFIED_CLIENT_WHEEL_SHA256`,
+`HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR`,
+`HOSTED_SETTLEMENT_VERIFIED_REPOSITORY`,
+`HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF`, and
+`HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT`. The protected gate compares the
+independently trusted signed-release `HOSTED_PRODUCTION_*` assertions to those
+values. `HOSTED_PRODUCTION_WORKFLOW_RUN_ID` remains separate orchestration
+evidence; it is not promoted to a signed-manifest field. No service starts
+until the complete identity agrees. The stack then runs the ordinary hosted
+migration, API, and one reconciliation worker against
 one authority volume; it never builds, mounts, imports, or installs sibling
 hosted source and has no alternate provider, clock, event-control, or test
 service artifact.
@@ -271,23 +290,30 @@ least-privilege `rk_test`), Stripe connectivity and non-live returned objects,
 the expected allowlisted connected account with required
 ownership/capabilities/readiness, the Stripe CLI forwarding to
 `http://127.0.0.1:18080/webhooks/stripe`, and Chromium. Failure stops before
-the relevant publication or financial mutation. The authority API/worker
-receive only their provider and account inputs, the webhook process receives
-only the ephemeral signing secret, Stripe CLI receives only its provider
-credential, and marketplace storefront/buyer profiles receive only public
+the relevant publication or financial mutation. The target derives an
+ephemeral storefront configuration only from the verified release
+authority/manifest coordinates, mounts it for the run, and removes it on every
+outcome. The authority API/worker receive only their provider, account, and
+protected authority-environment inputs; the webhook process receives only the
+ephemeral signing secret, Stripe CLI receives only its provider credential,
+and marketplace storefront/buyer profiles receive only release-pinned public
 consumer coordinates and their own signer credentials.
 
 Selected restart scenarios retain the authority volume and original operation
 identities while restarting only ordinary API/worker roles or webhook
-forwarding. Clean execution and every workflow outcome remove transient
-processes, webhook material, and browser state. Accepted external financial
-objects are recovered, transferred, or refunded through their original durable
-identities rather than being deleted or recreated.
+forwarding. `make hosted-stripe-test-stop` stops the protected stack while
+preserving that volume for maintained connected-account binding and authorized
+recovery. Clean execution and every workflow outcome remove transient
+configuration, processes, webhook material, and browser state. Accepted
+external financial objects are recovered, transferred, or refunded through
+their original durable identities rather than being deleted or recreated.
 
 The sanitized report identifies the marketplace repository and exact commit
 separately from the hosted manifest digest, client wheel hash, service image
-digest, hosted source commit, and producer workflow/run identity. It includes
-only allowlisted scenario/stage, opaque operation identity, normalized
+digest, and signed release repository/workflow reference/source commit. It
+records the protected producer workflow run identity separately as
+orchestration evidence and includes only allowlisted scenario/stage, opaque
+operation identity, normalized
 state/amount/currency/cardinality, failure class, and bounded diagnostics. It
 contains no credentials, action URLs, account/customer/card data, raw
 webhooks, unrestricted provider payloads, or marketplace configuration secrets.
