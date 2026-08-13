@@ -18,6 +18,17 @@ admin_api_key       = "test-api-key"
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"
 
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate — which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) would make a
+# scenario wait that long before it could assert anything. Shortening them here
+# changes nothing about what a loop does, only how soon it notices it has been
+# asked to stop. Production keeps the shipped values.
+negotiation_watchdog_interval     = 2
+claims_sweep_interval             = 2
+fulfillment_resume_sweep_interval = 2
+
 [wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"

@@ -18,6 +18,7 @@ from market_storefront.services.capacity_client import (
     remote_site_clients,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,13 @@ async def site_projection_poller_loop() -> None:
     )
     while True:
         try:
+            if gate(SITE_PROJECTION_POLLER):
+                # A paused storefront serves the projection generation it already
+                # holds. Refreshing it is a state change like any other, and
+                # `POST /api/v1/admin/capacity/projections/refresh` is how a
+                # caller asks for one deliberately.
+                await asyncio.sleep(interval)
+                continue
             if not _caches:
                 await load_site_projections()
             else:

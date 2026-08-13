@@ -2699,6 +2699,10 @@ class SQLiteClient:
     # Stage events
     # ------------------------------------------------------------------
 
+    #: Most rows one stage-event query will return, however many are asked for.
+    #: A caller wanting more pages with `after_id`.
+    STAGE_EVENT_PAGE_LIMIT = 500
+
     async def list_stage_events(
         self,
         *,
@@ -2708,7 +2712,36 @@ class SQLiteClient:
         listing_id: str | None = None,
         negotiation_id: str | None = None,
     ) -> list[dict]:
+        """Rows only, for a caller that does not need to know about truncation.
+
+        Prefer `list_stage_events_page` anywhere the answer is presented as a
+        complete history: this signature cannot tell a caller that it received
+        part of one.
+        """
+        rows, _ = await self.list_stage_events_page(
+            after_id=after_id, limit=limit, stage=stage,
+            listing_id=listing_id, negotiation_id=negotiation_id,
+        )
+        return rows
+
+    async def list_stage_events_page(
+        self,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> tuple[list[dict], bool]:
         """Query stage_events rows with optional filters.
+
+        Returns the rows and whether more matched than were returned. The cap is
+        enforced here rather than trusted from the caller, and reported rather
+        than applied silently: a caller receiving exactly the cap cannot otherwise
+        distinguish a complete result from a truncated one, and one reasoning
+        about a whole history would then reason about part of one. Detection is
+        by reading one row past the cap, so `truncated` means rows were withheld
+        and not merely that the cap was reached exactly.
 
         Parameters
         ----------
@@ -2725,9 +2758,15 @@ class SQLiteClient:
         """
         import json as _json
 
-        limit = min(limit, 500)
+        effective = min(limit, self.STAGE_EVENT_PAGE_LIMIT)
+        if limit > effective:
+            logger.warning(
+                "[STAGE_EVENTS] requested limit %d exceeds the %d-row page cap; "
+                "returning at most %d and reporting the result as truncated",
+                limit, self.STAGE_EVENT_PAGE_LIMIT, effective,
+            )
 
-        def _query() -> list[dict]:
+        def _query() -> tuple[list[dict], bool]:
             conn = sqlite3.connect(self.db_path, timeout=2)
             try:
                 conditions = ["id > ?"]
@@ -2742,7 +2781,10 @@ class SQLiteClient:
                     conditions.append("negotiation_id = ?")
                     params.append(negotiation_id)
                 where = " AND ".join(conditions)
-                params.append(limit)
+                # One past the page, to tell "exactly a full page" from "a full
+                # page and more behind it". The extra row is read and discarded;
+                # a count query instead would be a second scan for one boolean.
+                params.append(effective + 1)
                 cur = conn.execute(
                     f"SELECT id, ts, stage, event, negotiation_id, listing_id, escrow_uid, data "
                     f"FROM stage_events WHERE {where} ORDER BY id ASC LIMIT ?",
@@ -2765,7 +2807,8 @@ class SQLiteClient:
                         "escrow_uid": escrow,
                         "data": data,
                     })
-                return rows
+                truncated = len(rows) > effective
+                return rows[:effective], truncated
             finally:
                 conn.close()
 

@@ -842,3 +842,40 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
         cpu_row = repo.get_cursor_in_session(db, "compute.cpu")
         assert gpu_row.last_pool_id == "pool-a"
         assert cpu_row.last_pool_id == "pool-b"
+
+
+def test_scheduling_records_the_settlement_resource_on_the_reservation(services):
+    """The reservation carries what scheduling bound, including a no-op rebind.
+
+    `CapacityReservation.settlement_resource_id` is documented as null until
+    scheduling persists a concrete assignment. When the policy selects the same
+    resource the reservation is already debited against — the ordinary
+    single-candidate case — the assignment still happened and the field must
+    record it, or the reservation and the settlement record disagree about a fact
+    both carry, and every downstream reader of the reservation sees no placement
+    at all.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+
+    assert ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"] is None
+
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    assert resource.settlement_resource_id == "r1"
+    assert ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"] == "r1"
+
+
+def test_recorded_settlement_resource_follows_a_real_rebind(services):
+    """The paired case: when scheduling picks a different resource, the
+    reservation records that one rather than its initial accounting choice."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "a1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    recorded = ledger.get_reservation(capacity_reservation_id)["settlement_resource_id"]
+    assert recorded == resource.settlement_resource_id

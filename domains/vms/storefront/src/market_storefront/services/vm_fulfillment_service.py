@@ -411,6 +411,11 @@ async def fulfill_vm_obligation(
         # -- removing it from every call site is a larger signature change
         # than stripping it from the API response requires.
         reserved_vm_host = reserved.get("vm_host")
+        # `pool_id` and `member_id` in the stage event below are stripped by the
+        # same boundary and are likewise always None now. They stay as emitted
+        # keys rather than being deleted: a reservation genuinely has no pool of
+        # its own, and an always-absent field states that more usefully to a log
+        # reader than a silently missing one.
         await persist_escrow_fields_with_retry(
             get_sqlite_client,
             escrow_uid=escrow_uid,

@@ -28,8 +28,14 @@ from tombstones import MARKER, is_tombstone, reason  # noqa: F401
 
 #: Directories the vacancy sweep may enter. A deletion utility should not be able
 #: to reach an arbitrary path, and every namespace this convention applies to
-#: lives under a source root.
-SOURCE_ROOTS = ("domains", "kit", "core", "provisioning", "e2e-tests")
+#: is named here.
+#:
+#: ``openspec`` is included because archiving a completed change is the most
+#: common directory-level deletion in this repository: the change's documents move
+#: under ``changes/archive/`` and the active directory must go. Without it a
+#: fileset can tombstone those files and this utility silently leaves every one of
+#: them in place, so ``changes/`` keeps listing a change that is finished.
+SOURCE_ROOTS = ("domains", "kit", "core", "provisioning", "e2e-tests", "openspec")
 
 #: Never walked. Build outputs and dependency trees can contain anything.
 SKIP_DIRS = frozenset({

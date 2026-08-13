@@ -87,8 +87,11 @@ def _bare_metal_bundle(runtime, site_authority):
     return runtime.adapter_bundle(site_authority)
 
 
-def _system_service(runtime, lease_lifecycle_service):
-    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
+def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
+    return runtime.system_service(
+        lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+    )
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
@@ -406,6 +409,10 @@ class Container(containers.DeclarativeContainer):
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
+        # The one-cycle convergence control is only reachable when the service
+        # holds the same watchdog instance the timer drives — a manual cycle must
+        # invoke the production handler, not an alternate path.
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
 

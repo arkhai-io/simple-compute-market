@@ -1170,6 +1170,17 @@ _sqlite_client: SQLiteClient | None = None
 
 
 def get_sqlite_client() -> SQLiteClient:
+    """The process-wide client, addressing ``settings.db_path``.
+
+    Prefer a client the caller was given. This one resolves from configuration
+    rather than from composition, so a caller that already holds a unit of work
+    and reaches for this instead operates on a different database whenever the
+    two differ -- which is every test that seeds its own, and which produces a
+    write that reports success and changes nothing observable. The
+    listing-reconcile path takes its client as a parameter for exactly this
+    reason; other writers reached from a test still mutate the configured
+    database rather than a temporary one.
+    """
     global _sqlite_client
     if _sqlite_client is None:
         _sqlite_client = SQLiteClient(db_path=settings.db_path)

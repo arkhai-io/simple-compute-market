@@ -25,6 +25,14 @@ replace implementation history," not because any of it remains active.
 
 ## 2. Section 2+ (unblocked 2026-08-06; not yet planned)
 
+> **Archival audit, 2026-08-13: this change is not complete and must not be archived on a
+> checkbox count.** Every `- [ ]` in this file is checked, which makes it look finished to
+> any scan that counts them. It is not: Section 0 shipped, Section 1 was reverted in full,
+> and Section 2 — the actual subject of the change, a negotiated resize — is prose with no
+> tasks written yet. A section that has not been planned has nothing to check, so the
+> absence of unchecked boxes here means the opposite of what it means elsewhere. Planning
+> Section 2 is the next step; archiving is not.
+
 Resolutions recorded in `design.md`'s "Section 2 resolutions" section
 (2026-07-29). Placement (child of `proposal`) and core vocabulary (reuse
 `ProvisionTerms`) are settled; the field itself was not to be added until seller

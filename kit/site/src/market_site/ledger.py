@@ -1815,12 +1815,21 @@ class CapacityLedgerService:
     ) -> dict[str, Any]:
         """Shape a probe/reserve result like the embedded adapter's.
 
-        pool/member are storefront (aggregator) concepts the site does not
-        know; they are present-and-None for payload compatibility.
-        ``requested``/``available`` are full per-dimension maps (
-        pass 1); ``allocated_units``/``available_units`` and their
-        ``*_gpu_count`` aliases stay byte-compatible by mirroring the
-        primary (``gpu_count``) dimension.
+        `pool_id`/`member_id` are present-and-None for payload compatibility,
+        for two different reasons. The site authority does own pool
+        membership -- `CapacityBucket.pool_id` is authoritative, both
+        projections group by it, and admission matches on it -- but a
+        reservation deliberately does not commit to a pool, only to this site
+        and the reserved dimensions, so the pool matched here is a placement
+        detail scheduling may change rather than a fact about the
+        reservation. `member_id` is the aggregating storefront's own
+        bookkeeping and has no site-side meaning at all. The reserve route
+        strips both rather than returning either, so no caller can mistake an
+        initial match for a durable placement.
+        ``requested``/``available`` are full per-dimension maps;
+        ``allocated_units``/``available_units`` and their ``*_gpu_count``
+        aliases stay byte-compatible by mirroring the primary (``gpu_count``)
+        dimension.
         """
         attrs = dict(resource.attributes or {})
         allocated_primary = int(requested.get(PRIMARY_DIMENSION, Decimal(0)))

@@ -527,6 +527,46 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    async def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/pause", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    async def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/resume", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    async def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return await self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
+        )
+
     async def admin_interrupt_deal(
         self, escrow_uid: str, *, reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None, dry_run: bool = False,
@@ -1392,6 +1432,46 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/pause", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/resume", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
+        )
+
     def admin_interrupt_deal(
         self, escrow_uid: str, *, reason: str = "operator_interruption",
         interrupted_at_utc: str | None = None, dry_run: bool = False,
@@ -1483,14 +1563,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /admin/portfolio/resources/{resource_id}/release-reservation
         (admin key required).
 
-        Surgical: releases exactly the named reserved resource. Idempotent
-        on already-available rows (returns released_count=0 instead of
-        erroring). 404 if the row doesn't exist.
+        NO STOREFRONT IMPLEMENTS THIS ROUTE. Every call returns FastAPI's
+        unmatched-route 404, which reads as "resource not found" and is not.
+        Use ``patch_resource(resource_id, state="available")`` for a surgical
+        single-row release — that is the route the fleet-wide endpoint's own
+        docstring points to, and the one that exists.
 
-        For an actually-stuck VM, pair this with provisioning's
+        Kept rather than deleted because removing a public client method is a
+        breaking change for callers outside this repository, and a method that
+        names its own absence is more useful to them than an import error.
+        Whether the route should exist server-side is a separate question: the
+        surgical release it describes is already available through PATCH.
+
+        For an actually-stuck VM, pair the PATCH with provisioning's
         ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` — that operation
-        runs real Ansible against the host, while this endpoint only clears
-        the storefront's own bookkeeping.
+        runs real Ansible against the host, while the storefront side only
+        clears its own bookkeeping.
         """
         return ReleaseReservationsResponse.from_dict(
             self._post(

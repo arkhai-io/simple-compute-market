@@ -38,8 +38,16 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
-from market_storefront.server import _set_globally_paused
-from market_storefront.services.capacity_client import remote_site_clients
+from market_storefront.server import _set_globally_paused, _set_loops_paused
+from market_storefront.negotiation_watchdog import _watchdog_tick
+from market_storefront.services.capacity_client import (
+    full_capacity_reconcile,
+    remote_site_clients,
+)
+from market_storefront.services.claims_runtime import build_claims_engine
+from market_storefront.services.fulfillment_resume_runtime import (
+    resume_incomplete_fulfillments_once,
+)
 from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.failure_policy import (
     FulfillmentFailureContext,
@@ -76,6 +84,13 @@ class AdminController:
         summary="Pause new negotiations globally (admin)",
     )
     async def pause(self) -> AdminPauseResponse:
+        """Close the storefront for new business.
+
+        Trading only: timer-driven work continues, so the storefront still
+        finishes what it has already accepted. Use
+        `/admin/lifecycle/pause` to hold the loops idle — the two are separate
+        because a caller may want either without the other.
+        """
         _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True, message="Storefront paused. New negotiations will receive 503."
@@ -87,8 +102,119 @@ class AdminController:
         summary="Resume new negotiations globally (admin)",
     )
     async def resume(self) -> AdminPauseResponse:
+        """Reopen the storefront for new negotiations. Loops are unaffected."""
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
+
+    @router.post(
+        "/lifecycle/pause",
+        response_model=AdminPauseResponse,
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """Stop the storefront changing state on its own.
+
+        Every timer loop — negotiation watchdog, claims engine, fulfillment
+        resume, capacity-events poller, site-projection poller — performs no
+        further cycle. The loops are held idle rather than stopped, so none is
+        interrupted part-way and none loses its position. Each loop's work stays
+        reachable through its own `/lifecycle/{loop}/run-cycle` route, which is
+        how an operator or a scenario advances one step at a time while paused.
+
+        Trading is unaffected: new negotiations are still accepted. That is the
+        point of having two controls — a scenario needs deterministic
+        reconciliation *and* a deal to agree.
+        """
+        loops = await _set_loops_paused(True)
+        return AdminPauseResponse(
+            paused=True,
+            message=(
+                "Timer loops paused. No loop will run a cycle until resumed; "
+                "advance one with /api/v1/admin/lifecycle/{loop}/run-cycle. "
+                "New negotiations are still accepted."
+            ),
+            loops=loops,
+        )
+
+    @router.post(
+        "/lifecycle/resume",
+        response_model=AdminPauseResponse,
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """Return every loop to work.
+
+        Nothing is restarted: the loops were held idle rather than stopped, so
+        each simply performs its next cycle. The capacity-events poller keeps its
+        feed position across the pause and continues from it rather than
+        re-converging from the feed head.
+        """
+        loops = await _set_loops_paused(False)
+        return AdminPauseResponse(
+            paused=False,
+            message="Timer loops resumed. Each will run its next cycle.",
+            loops=loops,
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle advance — run one cycle of a halted loop.
+    #
+    # Each route calls the operation its loop was already invoking, and returns
+    # what that operation returns. None of them drives an iteration of the loop
+    # itself, and none implements a transition the loop does not: a manual cycle
+    # that behaved differently from the timer would prove nothing about
+    # production. Mirrors the provisioning service's `check-leases` and
+    # `fulfillment-convergence/run-cycle` controls, including that they run
+    # while paused — running while paused is the entire purpose.
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/claims/run-cycle",
+        summary="Run one claims sweep now (admin)",
+    )
+    async def run_claims_cycle(self) -> dict:
+        engine = build_claims_engine(self._db)
+        processed = await engine.tick()
+        return {"loop": "claims_engine", "processed": int(processed)}
+
+    @router.post(
+        "/lifecycle/fulfillment-resume/run-cycle",
+        summary="Run one fulfillment-resume sweep now (admin)",
+    )
+    async def run_fulfillment_resume_cycle(self) -> dict:
+        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
+        return {"loop": "fulfillment_resume"}
+
+    @router.post(
+        "/lifecycle/negotiation-watchdog/run-cycle",
+        summary="Run one negotiation-watchdog sweep now (admin)",
+    )
+    async def run_negotiation_watchdog_cycle(self) -> dict:
+        swept = await _watchdog_tick(self._db)
+        return {"loop": "negotiation_watchdog", "swept": int(swept)}
+
+    @router.post(
+        "/lifecycle/capacity-events/run-cycle",
+        summary="Reconcile derived listings against site capacity now (admin)",
+    )
+    async def run_capacity_events_cycle(self) -> dict:
+        """Run the storefront's own listing reconcile.
+
+        The poller's per-event drain has no callable unit — the work is inline in
+        the loop body — so this calls `full_capacity_reconcile`, the reconcile
+        that poller invokes at startup and after a ledger reset. It runs both the
+        close and reopen passes unconditionally, where the delta subscriber runs
+        one or both depending on the delta's kind, so this exercises a superset
+        of the subscriber's reaction rather than an identical path. A caller that
+        needs per-kind routing needs a one-cycle drain extracted from
+        `site_events_poller`, which does not exist yet.
+        """
+        # The controller's own unit of work, not the process-wide client: an
+        # operator control must reconcile the database this storefront is
+        # serving from, which is the same object in production and is what makes
+        # the transition observable in a test at all.
+        await full_capacity_reconcile(self._db)
+        return {"loop": "capacity_events_poller", "reconciled": True}
 
     @router.post(
         "/deals/{escrow_uid}/interrupt",
@@ -679,10 +805,7 @@ class AdminController:
         )
 
         try:
-            return await member_availability_view(
-                self._capacity(),
-                self._db.db_path,
-            )
+            return await member_availability_view(self._capacity())
         except Exception as exc:
             logger.warning(
                 "[ADMIN] Could not snapshot site-authority capacity: %s",
@@ -1008,29 +1131,33 @@ class AdminController:
             set(closed_listing_ids)
             | await self._closed_since_snapshot(open_listing_ids)
         )
+        # Pool and resource identity come from this request's own claim, never
+        # from the reservation. A reservation commits to a site and a shape and
+        # to nothing narrower, so the site reports neither the resource it
+        # matched nor that resource's pool -- reporting either would advertise a
+        # placement scheduling is free to move. A claim that pins one already
+        # carries it; a claim that pins neither correctly reports neither.
+        # See openspec/specs/site-capacity/spec.md#internal-capacity-accounting.
+        claim = body.required_attributes or {}
+        claimed_pool_id = claim.get("pool_id")
+        claimed_resource_id = claim.get("resource_id")
         stage_event(
             "portfolio",
             "capacity_reserved_by_admin",
             capacity_reservation_id=reserved.get("capacity_reservation_id"),
-            pool_id=reserved.get("pool_id"),
-            member_id=reserved.get("member_id"),
-            resource_id=reserved.get("resource_id"),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=reserved.get("allocated_gpu_count"),
             resource_state=reserved.get("state"),
             listing_id=body.listing_id,
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = reserved.get("pool_id") or (reserved.get("attributes") or {}).get(
-            "pool_id"
-        )
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
-            pool_id=str(pool_id) if pool_id else None,
-            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            member_id=None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,

@@ -68,7 +68,7 @@ Phase 9 — Provisioning completion
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
-Phase 10 — Explicit interruption and durable teardown
+Phase 10 — Lease expiry and durable teardown
   10a  Pause automatic lease servicing, arm the provider teardown gate, and
        interrupt the deal through the storefront admin control plane.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
@@ -84,6 +84,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from importlib import resources
 
 import pytest
@@ -94,12 +95,15 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
+    advance_storefront,
+    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_DEAL_HOST,
+    E2E_DEAL_POOL_ID,
     E2E_HOST_GPU_COUNT,
-    E2E_HOST_NAME,
+    provision_e2e_executor,
     refresh_storefront_projections,
-    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -169,12 +173,30 @@ PROV_RULE_ID = "e2e-create-pause"
 REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses provider teardown
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal
 """
 
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
+
+
+class TestStage00_LifecyclePause:
+    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        A named stage rather than a fixture because every later assertion depends
+        on it: with the loops running, a listing status read after a reserve races
+        the capacity poller's next cycle, and a defect that reorders two writes
+        shows up as an intermittent failure instead of a reproducible one.
+
+        Trading is unaffected — this pauses the loops, not the storefront's
+        willingness to negotiate — so the deal stages below still work. Loops are
+        held, not stopped: nothing is torn down and no cycle is cut in half. Work
+        a loop would have done is requested explicitly from here on, through
+        `advance_storefront`.
+        """
+        pause_storefront(storefront_admin_client)
 
 class TestStage00a_StorefrontHealth:
     def test_00a_storefront_is_healthy(
@@ -337,14 +359,22 @@ class TestStage00f_ResourceSeed:
 
 class TestStage00f1_ExecutorHostRegistry:
     def test_00f1_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, deal_state: DealState,
     ):
-        """Register the executor host the seeded resource sits on.
+        """Register this scenario's executor and declare its sellable capacity.
 
-        The site authority projects capacity by iterating host rows, so with no
-        host registered the projection is empty, every later inventory match
-        fails, and the storefront refuses each negotiation with
-        `no_matching_inventory` — several stages from the cause.
+        Two separate stores, and both are required. The host is executor identity;
+        the capacity declaration is what `probe`, `reserve`, and the seller's
+        inventory guard all match against, and only a declaration creates one.
+        With the host alone, every inventory match fails and the storefront refuses
+        each negotiation with `no_matching_inventory` — several stages from the
+        cause. The declaration's categorical attributes mirror the seeded listing,
+        because the guard compares `region` and `gpu_model` by equality.
+
+        The executor is this scenario's own. Sharing one across scenarios is
+        incompatible with one declaration per executor, and previously let one
+        scenario's GPU count decide another's reservation.
 
         Registered through the admin API rather than a mounted inventory file:
         `inventory_path` is docker-compose-specific while the canonical Helm
@@ -355,10 +385,22 @@ class TestStage00f1_ExecutorHostRegistry:
         """
         require_state(deal_state, "_resources_seeded")
 
-        host = register_e2e_host(provisioning_client)
-        assert host.name == E2E_HOST_NAME
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_DEAL_HOST,
+            pool_id=E2E_DEAL_POOL_ID,
+            resource_id="compute-e2e-deal-001",
+            sellable_units=1,
+            attributes={
+                "gpu_model": "RTX 5080",
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        assert host.name == E2E_DEAL_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"executor host {E2E_DEAL_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
         )
 
@@ -367,7 +409,7 @@ class TestStage00f1_ExecutorHostRegistry:
         deal_state._executor_host_registered = True
         log.info(
             "[00f1] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+            E2E_DEAL_HOST, host.gpu_count, sorted(sites),
         )
 
 
@@ -691,14 +733,19 @@ class TestStage05a_EvaluateNegotiate:
             f"{result.our_reference_amount} (seller floor)."
         )
         assert result.decision == "counter", (
-            f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
-            "This means BUYER_INITIAL_PRICE >= seller floor. Lower it so the strategy "
-            "counters at round 0 — otherwise force_accept in 06b will 409 on an "
-            "already-terminal negotiation."
+            f"Round-0 strategy returned {result.decision!r}, expected 'counter'. "
+            "'accept' means BUYER_INITIAL_PRICE >= the seller floor — lower it, or "
+            "force_accept in 06b will 409 on an already-terminal negotiation. "
+            "'reject' is a different failure and price is not involved: the seller's "
+            "guards run before any concession, and the inventory guard vetoes when no "
+            "available capacity declaration matches this listing's region and "
+            "gpu_model. Check that stage 00f1's declaration exists and carries both."
         )
+        # Every stage from 05b onward gates on this. Nothing set it, so the whole
+        # tail of this scenario — negotiation, escrow, settlement, provisioning,
+        # lease, teardown — has been skipping rather than running, and a skip
+        # reports as a pass at the suite level.
         deal_state._evaluate_negotiate_passed = True
-        log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
-                 result.decision, result.decision_reason, result.strategy)
 
 
 class TestStage05b_NegotiationStartsAndVisible:
@@ -1159,6 +1206,11 @@ class TestStage09b_SettlementReadyAndCredentials:
             f"tenant_credentials missing from settlement status: {status_resp}"
         )
 
+        # Advance, then read. The order matters and is easy to get wrong: a
+        # listing fetched before the reconcile reports the state that preceded it,
+        # so the assertion passes or fails on when the row was captured rather
+        # than on what reconciliation did.
+        advance_storefront(storefront_admin_client, "capacity-events")
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing status=closed while capacity is held, got {listing.status!r}"
@@ -1197,6 +1249,68 @@ class TestStage09b_SettlementReadyAndCredentials:
                  listing.status, primary["fulfillment_uid"])
 
 
+class TestStage09bb_ClaimSubmittedForTheFulfilledEscrow:
+    def test_09bb_claims_cycle_registers_the_seller_claim(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Drive one claims sweep and assert the seller's claim exists.
+
+        This path used to be covered by accident: the claims engine's timer fired
+        somewhere during the scenario and swept whatever was due, and no stage
+        asserted on any of it. Holding the loops idle made that coverage
+        conditional on when a scenario happened to resume, which is a worse
+        position than either having the coverage or not — so the sweep is now
+        requested and its effect asserted.
+
+        Asserts submission, not collection. A claim becomes collectable when its
+        on-chain obligation window opens, which this scenario does not control;
+        asserting collection would put a chain condition behind a test assertion
+        and reintroduce exactly the timing dependence the lifecycle controls
+        removed. Submission is entirely the storefront's own act.
+        """
+        require_state(deal_state, "real_escrow_uid", "settlement_status")
+
+        result = advance_storefront(storefront_admin_client, "claims")
+        assert result.get("loop") == "claims_engine", result
+        assert "processed" in result, (
+            f"claims advance returned no sweep count: {result}"
+        )
+
+        # Read the whole claims log, not only what this sweep added. Submission is
+        # the fulfillment path's act and may already have happened; the sweep
+        # services what is due. The assertion that matters either way is that a
+        # fulfilled escrow has a registered seller claim — an empty log here means
+        # a settled deal nobody will ever get paid for.
+        events = storefront_admin_client.get_events(
+            since_id=0, limit=500, stage="claims",
+        )
+        # 500 is the server's page cap; asking for more is rejected outright.
+        # Asserting the flag is what makes "the whole claims log" a checked claim
+        # rather than an assumed one — the filter below proves nothing about a
+        # log it only saw part of.
+        assert not events.truncated, (
+            f"the claims log did not fit in one page ({events.count} rows "
+            "returned); this assertion reads the whole log and would otherwise "
+            "be searching part of it"
+        )
+        # Matched on the indexed `escrow_uid` column rather than on the event
+        # payload. The claims engine is mechanism-neutral and names the escrow
+        # `claim_ref`; the storefront's own claims runtime translates that into
+        # this domain's settlement identity as it records the event, which is
+        # what populates the column. Reading the column here is what proves that
+        # translation happened rather than assuming it.
+        submitted = [
+            e for e in events.events
+            if e.event == "claim_submitted"
+            and e.escrow_uid == deal_state.real_escrow_uid
+        ]
+        assert submitted, (
+            "no claim_submitted event for this fulfilled escrow "
+            f"({deal_state.real_escrow_uid}); claims seen: "
+            f"{[(e.event, e.escrow_uid) for e in events.events]}"
+        )
+        deal_state._claims_swept = True
+
 class TestStage09c_LeaseRegistered:
     def test_09c_provisioning_lease_registered(
         self, provisioning_client, deal_state: DealState
@@ -1224,18 +1338,33 @@ class TestStage09c_LeaseRegistered:
         lease_view = DealLease(provisioning_client, deal_state.real_escrow_uid)
         lease = lease_view.refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == E2E_RESOURCE_ID
+        assert lease.get("settlement_resource_id") == E2E_RESOURCE_ID, (
+            "scheduling bound this deal to "
+            f"{lease.get('settlement_resource_id')!r}, not the resource it was "
+            f"sold as ({E2E_RESOURCE_ID!r})"
+        )
         assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
-        assert lease.get("create_job_id"), (
-            f"Expected a tracked Ansible create job on the admin lease view, "
-            f"got: {lease}"
+        # Not `create_job_id`. That field is the legacy executor-job identity and
+        # is only ever written by a caller registering a lease with an Ansible job
+        # id; a deal that went through the durable fulfillment path has none, by
+        # the same rule that keeps `provisioning_job_id` empty on settle status.
+        # The durable identity is the fulfillment id, captured at 08b.
+        assert deal_state.fulfillment_id, (
+            "no durable fulfillment identity for this deal — 08b should have "
+            f"recorded one. Lease: {lease}"
+        )
+        fulfillment = provisioning_client.get_fulfillment_status(
+            deal_state.fulfillment_id
+        )
+        assert fulfillment.get("state"), (
+            f"fulfillment {deal_state.fulfillment_id} has no state: {fulfillment}"
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
         )
 
         deal_state.deal_lease = lease_view
-        deal_state.reserved_resource_id = lease.get("resource_id")
+        deal_state.reserved_resource_id = lease.get("settlement_resource_id")
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
         log.info(
@@ -1247,18 +1376,47 @@ class TestStage09c_LeaseRegistered:
             "ledger" if lease_view.is_ledger else "legacy",
         )
 
+#: How far back to move a lease end so the watchdog treats it as expired.
+#:
+#: Bounded on both sides, which is why it is not simply "a long time ago". The
+#: lease must be past its end for the watchdog to begin releasing, but it must
+#: NOT be past `lease_watchdog_grace_period_seconds` (300s), because the release
+#: path marks `release_failed` the moment grace elapses with `vm_remove`
+#: unfinished — and stages 11a/11b deliberately hold `vm_remove` at a mock gate.
+#: Back-dating two hours put the lease past grace immediately, so the first cycle
+#: both dispatched the removal and timed it out.
+#:
+#: One minute expires the lease and leaves roughly four minutes for the gated
+#: stages, which is ample for three stages that make no network waits.
+E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
+
+
+def _expired_lease_end() -> str:
+    """A lease end the watchdog reads as expired but still inside its grace."""
+    return (
+        datetime.now(timezone.utc) - E2E_LEASE_EXPIRY_BACKDATE
+    ).isoformat().replace("+00:00", "Z")
+
 # ===========================================================================
-# Phase 10 — Explicit interruption enters durable teardown
+# Phase 10 — Lease expiry enters durable teardown
 # ===========================================================================
 
-class TestStage10a_ExplicitInterruptionSetup:
-    def test_10a_interrupt_deal_and_arm_teardown_gate(
+class TestStage10a_LeaseExpirySetup:
+    def test_10a_expire_lease_and_arm_teardown_gate(
         self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, deal_state: DealState,
+        deal_state: DealState,
     ):
-        """Request external interruption and hold provider teardown at its gate."""
+        """Expire the deal's lease and hold provider teardown at its gate.
+
+        The watchdog is paused first so the expiry sits unobserved until 10b runs
+        one cycle: that keeps the trigger and the reaction as separate, asserted
+        steps rather than one race.
+        """
+        # `deal_lease` is now a dependency: this stage back-dates through it
+        # rather than posting an interrupt, so a missing lease view must skip here
+        # rather than raise an AttributeError two lines down.
         require_state(deal_state, "lease_id", "real_escrow_uid",
-                      "reserved_resource_id")
+                      "reserved_resource_id", "deal_lease")
         assert provisioning_client.pause_lease_watchdog().get("paused") is True
         delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
         provisioning_test_client.add_mock_rule(
@@ -1266,11 +1424,22 @@ class TestStage10a_ExplicitInterruptionSetup:
             match={"vm_action": "vm_remove"},
             pause_before_result=True,
         )
-        interrupted = storefront_admin_client.admin_interrupt_deal(
-            deal_state.real_escrow_uid, reason="e2e_external_interruption"
+        # Expire the lease rather than interrupting the deal. Expiry is what ends
+        # a lease in production; interruption is an operator escape hatch for a
+        # deal sold as interruptible, and driving the main teardown path with the
+        # escape hatch left the ordinary path uncovered — `DealLease.backdate`
+        # was written for exactly this and had never been called by anything.
+        #
+        # The watchdog is paused above, so nothing acts on the expiry until 10b
+        # runs one cycle deliberately.
+        lease = deal_state.deal_lease.backdate(_expired_lease_end())
+        assert lease.get("id") == deal_state.lease_id, (
+            f"back-dated the wrong reservation: {lease}"
         )
-        assert interrupted.get("status") == "interrupted", interrupted
-        assert interrupted.get("capacity_reservation_id") == deal_state.lease_id
+        assert lease.get("status") == "active", (
+            "the lease should still read active until a watchdog cycle observes "
+            f"the expiry — 10b is what advances it: {lease}"
+        )
         deal_state._termination_requested = True
 
 
@@ -1326,6 +1495,19 @@ class TestStage11b_TeardownCompletion:
 
         provisioning_test_client.resume_rule(REMOVE_RULE_ID)
         provisioning_test_client.drain(timeout=30)
+
+        # Clear the claim, then advance. `drain` has made the Ansible `vm_remove`
+        # job terminal, but stage 11a's convergence cycle already read this record
+        # while that job was queued and still holds its claim — a claim lease
+        # outlives the cycle that took it, so no later cycle can re-read the
+        # record until the lease lapses. Clearing it is the deliberate equivalent
+        # of waiting the lease out, and is why this stage needs no timing at all.
+        #
+        # Then the chain in order: convergence sees the finished job and records
+        # the fulfillment `torn_down`; the lease cycle polls that fulfillment —
+        # the VM release port maps its state onto job status — and, seeing it
+        # terminal, finishes the release and returns the units.
+        provisioning_client.clear_fulfillment_convergence_claims()
         provisioning_client.run_fulfillment_convergence_cycle()
         fulfillment = provisioning_client.get_fulfillment_status(deal_state.fulfillment_id)
         assert fulfillment.get("state") == "torn_down", fulfillment
@@ -1347,8 +1529,13 @@ class TestStage11b_TeardownCompletion:
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         assert reserved_again.resource_id == deal_state.reserved_resource_id
-        storefront_admin_client.admin_release_one_reservation(
-            reserved_again.resource_id
+        # `PATCH state=available` is the documented single-row release, and the
+        # only one that exists: `admin_release_one_reservation` posts to
+        # `/portfolio/resources/{id}/release-reservation`, a route no storefront
+        # implements — the client method has always 404'd. The fleet-wide
+        # endpoint's own docstring points here for "surgical single-row release".
+        storefront_admin_client.patch_resource(
+            reserved_again.resource_id, state="available"
         )
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

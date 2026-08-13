@@ -248,3 +248,39 @@ able to reach an arbitrary path.
   CLI scenario that currently fails at stage B4.
 - Start the VM storefront from an image built without `COPY domains/` and
   assert its configured chain resolves.
+
+## E2E capacity setup (added 2026-08-11)
+
+Section 9's verification stalled on scenario setup, and two rounds of fixes missed because
+the diagnosis had one hop wrong. `e2e-inventory-findings.md`'s correction section records
+the trace; this records the decisions Section 11 encodes.
+
+**Capacity is declared, not derived, and the scenarios must declare it.** The host-derived
+fallback in `_project_host` populates the resource-pool projection and creates no
+`CapacityBucket`. Every claim — `probe`, `reserve`, and the negotiation guard's
+`snapshot()` — matches buckets. So a scenario that registers only a host has no sellable
+capacity, whatever the projection reports. Three options were weighed for how the scenarios
+should get one: a mounted capacity-definitions file, the host-to-declaration derivation
+step, or an explicit declaration per scenario. The first two are `capacity-resource-administration`'s
+unstarted work, and coupling this change's verification to a 36-task change was rejected.
+The third uses the endpoint that change promotes to the operator surface anyway, so the
+scenarios exercise the path the design makes authoritative.
+
+**A fungible pool is several executors, not several declarations on one.** `site-capacity`
+records one current bucket per host for the VM domain, and the bucket projection's
+`resource_count` over identically-shaped buckets is what expresses fungibility. Two
+declarations on one host is not a fungible pool — it is the same hardware sold twice, which
+is what the duplicate-correlation guard exists to refuse. The corrected setup is one pool,
+two hosts, one declaration each.
+
+**Each scenario owns its executor.** Every VM scenario seeds one shared host today, which is
+incompatible with one declaration per executor and was already a coupling: a host registered
+with one GPU by one scenario made another fail as though no inventory matched. Per-scenario
+hosts remove the coupling and the incompatibility together.
+
+**A declaration's id stays distinct from its executor's name.** `compute_capacity_claim_from_order`
+pins the listing's own `offer_resource.resource_id` into the claim, so a specific-resource
+listing only matches a declaration carrying that commercial id. Naming declarations after
+their host would have required rewriting every listing's offer, and would couple commercial
+identity to an Ansible alias. The executor attribute carries the correlation instead —
+which is what `load_capacity_resource_inventory` already keys on.

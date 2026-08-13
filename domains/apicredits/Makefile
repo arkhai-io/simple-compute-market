@@ -2,10 +2,15 @@ DIST_DIR ?= ../../.dist
 
 .PHONY: reinit test test-domain test-service test-storefront test-buyer test-sample-app test-middleware check-middleware-toolchains
 
+# This project ships its own modules into its venv (a force-include wheel), so a
+# source edit is invisible until the wheel is replaced -- and uv will not replace
+# a wheel whose version has not changed. Reinstalling itself is what makes
+# `make test` test the working tree rather than whatever was installed first.
 reinit: ## Force-reinstall internal wheel dependencies. Run make dist-* from the monorepo root first.
 	uv sync --dev --find-links $(DIST_DIR) \
 		--upgrade-package arkhai-core        --reinstall-package arkhai-core \
-		--upgrade-package arkhai-kit-policy  --reinstall-package arkhai-kit-policy
+		--upgrade-package arkhai-kit-policy  --reinstall-package arkhai-kit-policy \
+		--upgrade-package arkhai-apicredits-domain --reinstall-package arkhai-apicredits-domain
 
 test: test-domain test-service test-storefront test-buyer test-sample-app test-middleware
 

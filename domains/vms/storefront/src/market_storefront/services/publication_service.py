@@ -23,15 +23,27 @@ from market_storefront.utils.sqlite_client import get_sqlite_client
 logger = logging.getLogger(__name__)
 
 
-async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Close an order locally and in the registry when registry discovery is enabled."""
+async def close_order(
+    parameters: dict[str, Any] | None = None,
+    *,
+    sqlite_client: Any | None = None,
+) -> dict[str, Any]:
+    """Close an order locally and in the registry when registry discovery is enabled.
+
+    ``sqlite_client`` is the unit of work to close against. A caller that already
+    holds one supplies it; the default resolves the process-wide client, which is
+    the same object in a composed storefront. It must be threaded to the *write*
+    and not only to a caller's own reads: a caller reconciling one database while
+    this function mutated another is a defect that reached the end-to-end suite
+    and cost three attempts at a test to find.
+    """
     parameters = parameters or {}
     order_id = parameters.get("listing_id")
     if not isinstance(order_id, str) or not order_id.strip():
         return {"status": "error", "message": "Missing listing_id for close_listing"}
 
     try:
-        sqlite_client = get_sqlite_client()
+        sqlite_client = sqlite_client or get_sqlite_client()
         await sqlite_client.update_listing(
             listing_id=order_id,
             status="closed",
@@ -60,6 +72,7 @@ async def close_stale_compute_listings_after_capacity_change(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
+    sqlite_client: Any | None = None,
 ) -> list[str]:
     """Close open derived compute listings whose GPU slice no longer fits.
 
@@ -69,6 +82,11 @@ async def close_stale_compute_listings_after_capacity_change(
     fully available, and the next delta/reconcile converges.
     ``configured_site_count`` gates whether an unmapped listing may be
     defaulted to ``home_site`` -- see ``reconciler.stale_open_listing_ids``.
+
+    ``sqlite_client`` must address the same database as ``db_path``: this
+    function reads staleness from the path and writes the closure through the
+    client, so two different databases produce a reconcile that reports success
+    and changes nothing.
     """
     closed_listing_ids: list[str] = []
     for listing_id in stale_open_listing_ids(
@@ -79,11 +97,14 @@ async def close_stale_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     ):
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id}, sqlite_client=sqlite_client,
+        )
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
             continue
-        row = await get_sqlite_client().load_listing(listing_id=listing_id)
+        db = sqlite_client or get_sqlite_client()
+        row = await db.load_listing(listing_id=listing_id)
         if row and row.get("status") == "closed":
             closed_listing_ids.append(listing_id)
     mark_derived_listings_closed(
@@ -102,6 +123,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     member_availability: dict[tuple[str | None, str], int] | None = None,
     site_pool_projection: dict[str, list[dict]] | None = None,
     site_capacity_buckets: dict[str, list[dict]] | None = None,
+    sqlite_client: Any | None = None,
 ) -> list[str]:
     """Reopen closed derived listings whose slice fits capacity again.
 
@@ -125,8 +147,9 @@ async def reopen_available_compute_listings_after_capacity_change(
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
     )
+    db = sqlite_client or get_sqlite_client()
     for listing_id in reopened_listing_ids:
-        await get_sqlite_client().update_listing(listing_id=listing_id, status="open")
+        await db.update_listing(listing_id=listing_id, status="open")
     mark_derived_listings_open(db_path, reopened_listing_ids)
     return reopened_listing_ids
 

@@ -368,3 +368,77 @@ class TestEvaluateJob:
             assert resp.get("would_pause") is True
         finally:
             await test_client.delete_mock_rule(rule_id)
+
+
+class TestFulfillmentConvergenceControl:
+    """POST /api/v1/system/fulfillment-convergence/run-cycle.
+
+    An operator one-cycle control is only useful if it drives the same worker the
+    timer drives. The endpoint, the service method, and the watchdog all existed,
+    and nothing passed the watchdog into the service — so every call answered
+    "not initialised" and the control was unreachable in every deployment. No test
+    exercised it, and the end-to-end stage that would have is downstream of stages
+    that were skipping.
+    """
+
+    async def test_running_one_cycle_reports_a_summary_not_an_init_error(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+
+        result = await client.run_fulfillment_convergence_cycle()
+
+        assert "error" not in result, (
+            f"convergence control is not wired to a watchdog: {result}"
+        )
+        assert isinstance(result, dict) and result, (
+            f"expected a cycle summary, got {result!r}"
+        )
+
+    async def test_the_cycle_is_idempotent_on_an_empty_aggregate(
+        self, client_and_queue,
+    ):
+        """Nothing to converge is a normal answer, not a failure."""
+        client, _ = client_and_queue
+
+        first = await client.run_fulfillment_convergence_cycle()
+        second = await client.run_fulfillment_convergence_cycle()
+
+        assert "error" not in first and "error" not in second
+        assert set(first) == set(second), (
+            f"cycle summary shape is not stable: {first} then {second}"
+        )
+
+
+class TestFulfillmentClaimRelease:
+    """A still-running operation must not be put on the failure backoff.
+
+    Claim leases come from `Backoff.delay_seconds(attempt_count)` — 5s doubling to
+    300s. That is right for an operation that failed and wrong for one that has
+    not finished: "the job is still queued" is not a failure, and treating it as
+    one leaves the record unclaimable for the whole window, so a job that
+    completes a moment later is not noticed until the lease lapses — with the
+    reservation's capacity held throughout.
+    """
+
+    async def test_clear_claims_reports_how_many_records_it_freed(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+
+        result = await client.clear_fulfillment_convergence_claims()
+
+        assert "error" not in result, result
+        assert "cleared" in result and isinstance(result["cleared"], int)
+
+    async def test_clearing_claims_is_idempotent(self, client_and_queue):
+        """Nothing claimed is a normal answer, not a failure."""
+        client, _ = client_and_queue
+
+        first = await client.clear_fulfillment_convergence_claims()
+        second = await client.clear_fulfillment_convergence_claims()
+
+        assert first.get("cleared", 0) >= 0
+        assert second.get("cleared", 0) == 0, (
+            "a second clear should find nothing left claimed"
+        )

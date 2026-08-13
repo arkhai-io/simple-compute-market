@@ -167,6 +167,33 @@ clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
 observability seams for e2e-visible behavior accordingly.
 
+**Lifecycle discipline — pause, verify, advance:** A scenario drives
+timer-driven work rather than waiting for it. It pauses the services whose
+loops it depends on, asserts what an action did before anything can react,
+advances one cycle deliberately, and asserts again.
+
+This is the "no sleeps" rule of the integration level seen from the other side.
+A sleep waits for a loop; an advance runs it. Waiting cannot establish ordering
+even when it succeeds, and it turns a defect that reorders two writes into an
+intermittent failure rather than a reproducible one. Polling until an expected
+state appears is the same thing wearing a different name.
+
+The two services expose different control surfaces, and a scenario should not
+assume one from the other. The storefront separates the two questions a pause can answer: `/admin/pause`
+closes it for new negotiations, `/admin/lifecycle/pause` holds all of its timer
+loops idle, and a per-loop control runs one cycle. A scenario wants the second
+without the first — it needs deterministic reconciliation *and* a deal to agree. The compute
+provisioner has no global pause: its lease watchdog has its own pause gate, and
+its other recovery workers expose one-cycle controls without one. In both, a
+manual cycle invokes the same operation the loop invokes.
+
+Resuming is itself a state change, so a scenario resumes in teardown rather than
+between assertions.
+
+Scenarios established this way do not detect race conditions and are not meant
+to. They prove cross-service contracts; concurrency belongs to the levels above
+in this document.
+
 ## Agent-Driven Capacity Harness
 
 The four levels above all run inside this repository against this

@@ -307,10 +307,7 @@ async def _release_capacity(
             reopened = closed_available_listing_ids(
                 db.db_path,
                 home_site=home_site,
-                member_availability=await member_availability_view(
-                    capacity,
-                    db.db_path,
-                ),
+                member_availability=await member_availability_view(capacity),
             )
         for listing_id in reopened:
             await db.update_listing(listing_id=listing_id, status="open")

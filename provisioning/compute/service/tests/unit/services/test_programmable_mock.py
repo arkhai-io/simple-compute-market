@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from vm_provisioning_adapter.services.mock_ansible_service import MockRule, ProgrammableMockAnsibleService
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun
+from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleRun, AnsibleService
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
 
 
@@ -263,3 +263,61 @@ class TestEvaluateJob:
         _ = mock_svc.evaluate_job(self._params(), self._mock_host_service(True))
         # Rule still present, not consumed
         assert len(mock_svc.list_rules()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Interface parity with the service this stands in for
+# ---------------------------------------------------------------------------
+
+class TestAnsibleServiceParity:
+    """The mock must answer every question the real service answers.
+
+    `MockAnsibleService`'s own docstring promises it "implements the same
+    interface as AnsibleService", and `AnsibleJobService` holds either one behind
+    the same attribute. Nothing checked that promise, so `reserved_var_keys` was
+    added to the real service without the mock following, and the gap surfaced
+    only when an end-to-end run first reached `begin_fulfillment` under the mock
+    profile — an `AttributeError` rendered as a 500 and reported to the buyer as
+    "Provisioning failed: Internal Server Error", four layers from its cause.
+    """
+
+    def test_mock_implements_every_public_method_of_the_real_service(self):
+        real = {
+            name for name in vars(AnsibleService)
+            if not name.startswith("_") and callable(getattr(AnsibleService, name))
+        }
+        mock_service = _make_service()
+        missing = sorted(
+            name for name in real if not callable(getattr(mock_service, name, None))
+        )
+        assert not missing, (
+            f"MockAnsibleService is missing {missing} — AnsibleJobService holds "
+            "either implementation behind one attribute, so a method the mock "
+            "lacks fails only under the mock profile, at runtime"
+        )
+
+    def test_reserved_var_keys_agrees_with_the_real_service(self):
+        """Same answer, not merely a present method.
+
+        This is a validation decision: the provider rejects pool `extra_vars`
+        colliding with these keys. A mock computing its own set would accept
+        configuration production refuses.
+        """
+        params = _params(
+            vm_target="tenant-abc",
+            vm_ram=4096,
+            vm_vcpus=2,
+            vm_disk_size="40G",
+            ssh_pubkey="ssh-ed25519 AAAA test",
+        )
+        settings = MagicMock()
+
+        assert _make_service().reserved_var_keys(params) == (
+            AnsibleService(settings=settings).reserved_var_keys(params)
+        )
+
+    def test_reserved_var_keys_contains_the_built_in_job_identity(self):
+        """A concrete floor, so parity cannot be satisfied by two empty sets."""
+        reserved = _make_service().reserved_var_keys(_params())
+
+        assert {"vm_host", "vm_action", "executor_kind"} <= reserved

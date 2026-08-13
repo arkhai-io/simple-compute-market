@@ -44,12 +44,15 @@ from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     delete_mock_rules_if_present,
     require_state,
+    advance_storefront,
+    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_BUY_HOST,
+    E2E_BUY_POOL_ID,
     E2E_HOST_GPU_COUNT,
-    E2E_HOST_NAME,
+    provision_e2e_executor,
     refresh_storefront_projections,
-    register_e2e_host,
 )
 
 log = logging.getLogger(__name__)
@@ -121,6 +124,24 @@ _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 # Phase B0 — readiness
 # ===========================================================================
 
+
+class TestStage00_LifecyclePause:
+    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
+        """Hold the storefront's timer loops idle for the rest of this scenario.
+
+        A named stage rather than a fixture because every later assertion depends
+        on it: with the loops running, a listing status read after a reserve races
+        the capacity poller's next cycle, and a defect that reorders two writes
+        shows up as an intermittent failure instead of a reproducible one.
+
+        Trading is unaffected — this pauses the loops, not the storefront's
+        willingness to negotiate — so the deal stages below still work. Loops are
+        held, not stopped: nothing is torn down and no cycle is cut in half. Work
+        a loop would have done is requested explicitly from here on, through
+        `advance_storefront`.
+        """
+        pause_storefront(storefront_admin_client)
+
 class TestStageB0_Readiness:
     def test_b0_services_ready_for_buy(
         self, storefront_admin_client, provisioning_client, deal_state: DealState
@@ -178,7 +199,8 @@ class TestStageB1_ResourceSeed:
 
 class TestStageB1a_ExecutorHostRegistry:
     def test_b1a_registers_executor_host_and_syncs_projection(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState
+        self, provisioning_client, storefront_admin_client,
+        site_capacity_admin_client, deal_state: DealState,
     ):
         """Register the executor host the seeded buy resource sits on.
 
@@ -196,10 +218,28 @@ class TestStageB1a_ExecutorHostRegistry:
         """
         require_state(deal_state, "_resources_seeded")
 
-        host = register_e2e_host(provisioning_client)
-        assert host.name == E2E_HOST_NAME
+        # The host is executor identity; the capacity declaration is what `probe`,
+        # `reserve`, and the seller's inventory guard match against, and only a
+        # declaration creates one. With the host alone, B4's negotiation is refused
+        # `no_matching_inventory` even though discovery found the listing. The
+        # declared attributes mirror this scenario's listing, since the guard
+        # compares region and gpu_model by equality.
+        host = provision_e2e_executor(
+            provisioning_client,
+            site_capacity_admin_client,
+            host=E2E_BUY_HOST,
+            pool_id=E2E_BUY_POOL_ID,
+            resource_id=BUY_RESOURCE_ID,
+            sellable_units=1,
+            attributes={
+                "gpu_model": BUY_GPU_MODEL,
+                "region": "California, US",
+                "sla": "90.0",
+            },
+        )
+        assert host.name == E2E_BUY_HOST
         assert (host.gpu_count or 0) >= E2E_HOST_GPU_COUNT, (
-            f"executor host {E2E_HOST_NAME} reports {host.gpu_count} GPU(s); "
+            f"executor host {E2E_BUY_HOST} reports {host.gpu_count} GPU(s); "
             f"scenarios reserve up to {E2E_HOST_GPU_COUNT}"
         )
 
@@ -208,7 +248,7 @@ class TestStageB1a_ExecutorHostRegistry:
         deal_state._executor_host_registered = True
         log.info(
             "[B1a] Executor host %s registered (gpus=%s); projections confirmed for %s",
-            E2E_HOST_NAME, host.gpu_count, sorted(sites),
+            E2E_BUY_HOST, host.gpu_count, sorted(sites),
         )
 
 # ===========================================================================
@@ -394,6 +434,7 @@ class TestStageB5_SellerAndLease:
         require_state(deal_state, "real_escrow_uid", "negotiation_id",
                       "seller_listing_id", "settlement_status")
 
+        advance_storefront(storefront_admin_client, "capacity-events")
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status == "closed", (
             f"Expected listing to close while capacity is held, got {listing.status!r}"
@@ -422,9 +463,17 @@ class TestStageB5_SellerAndLease:
         from tests.e2e.roles.scenarios.vms.conftest import DealLease
         lease = DealLease(provisioning_client, deal_state.real_escrow_uid).refresh()
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
-        assert lease.get("resource_id") == BUY_RESOURCE_ID, (
-            f"Lease bound to unexpected resource {lease.get('resource_id')!r}; "
-            f"expected {BUY_RESOURCE_ID!r}. Lease: {lease}"
+        assert lease.get("vm_host") == E2E_BUY_HOST, (
+            f"Lease bound to unexpected executor {lease.get('vm_host')!r}; "
+            f"expected {E2E_BUY_HOST!r}. Lease: {lease}"
+        )
+        assert lease.get("settlement_resource_id") == BUY_RESOURCE_ID, (
+            f"Scheduling bound this deal to {lease.get('settlement_resource_id')!r}, "
+            f"not the resource it was sold as ({BUY_RESOURCE_ID!r}). Lease: {lease}\n"
+            "A different resource here is not a test problem: scheduling considers "
+            "every enabled resource at the site and re-applies no attribute from the "
+            "admitted claim, so it may place a deal outside the region or hardware it "
+            "was negotiated for. That gap is real and separately owned."
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease, got {lease.get('status')!r}: {lease}"

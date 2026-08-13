@@ -13,6 +13,7 @@ directly (same as production).
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import AsyncIterator
 from unittest.mock import patch
@@ -24,6 +25,8 @@ from fastapi import FastAPI
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 import market_storefront.container as _container
+from core_storefront.app_startup import StorefrontBackgroundTask
+from market_storefront import lifecycle
 import market_storefront.server as _server
 from market_storefront.controllers.admin_controller import router as admin_router
 from market_storefront.controllers.system_controller import router as system_router
@@ -78,7 +81,16 @@ def reset_pause_state():
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+    # A healthy loop set is supplied rather than left to the real registry: this
+    # fixture mounts routers without the application lifespan that starts the
+    # timer loops, so the registry is genuinely empty and the storefront is
+    # genuinely not ready. That is correct behaviour, and pinning it belongs in
+    # `TestReadinessAndLiveness` below, which drives the registry directly —
+    # every other test here would otherwise assert against a permanently
+    # degraded storefront for a reason unrelated to what it is testing.
+    _container.resolved_system_service = SystemService(
+        sqlite_client=db, loop_health_provider=lambda: "ok",
+    )
 
     app = FastAPI()
     app.include_router(system_router)
@@ -98,7 +110,16 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
-    _container.resolved_system_service = SystemService(sqlite_client=db)
+    # A healthy loop set is supplied rather than left to the real registry: this
+    # fixture mounts routers without the application lifespan that starts the
+    # timer loops, so the registry is genuinely empty and the storefront is
+    # genuinely not ready. That is correct behaviour, and pinning it belongs in
+    # `TestReadinessAndLiveness` below, which drives the registry directly —
+    # every other test here would otherwise assert against a permanently
+    # degraded storefront for a reason unrelated to what it is testing.
+    _container.resolved_system_service = SystemService(
+        sqlite_client=db, loop_health_provider=lambda: "ok",
+    )
 
     app = FastAPI()
     app.include_router(system_router)
@@ -287,6 +308,253 @@ class TestAdminPause:
         await c.admin_pause()
         status = await c.get_system_status()
         assert status.paused is True
+
+
+class TestPauseHaltsTimerLoops:
+    """Pause holds background work idle as well as refusing negotiations.
+
+    The endpoint returning 200 has never proven the loops stopped working; after
+    this became the substantive half of what pause means, the response reports
+    each loop's state and a caller can verify it.
+    """
+
+    async def test_pause_reports_every_registered_loop_as_paused(self, client):
+        c, _ = client
+
+        async def _forever() -> None:
+            while True:
+                if lifecycle.gate("claims_engine"):
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.01)
+
+        lifecycle.reset_for_tests()
+        try:
+            lifecycle.start_registered_loop(
+                StorefrontBackgroundTask(name="claims_engine", task_factory=_forever)
+            )
+            await asyncio.sleep(0)
+
+            result = await c.admin_pause_lifecycle_loops()
+
+            assert result.paused is True
+            assert result.loops == {"claims_engine": "paused"}
+        finally:
+            lifecycle.reset_for_tests()
+
+    async def test_resume_reports_them_running_again(self, client):
+        c, _ = client
+
+        async def _forever() -> None:
+            while True:
+                if lifecycle.gate("claims_engine"):
+                    await asyncio.sleep(0.001)
+                    continue
+                await asyncio.sleep(0.01)
+
+        lifecycle.reset_for_tests()
+        try:
+            lifecycle.start_registered_loop(
+                StorefrontBackgroundTask(name="claims_engine", task_factory=_forever)
+            )
+            await c.admin_pause_lifecycle_loops()
+
+            result = await c.admin_resume_lifecycle_loops()
+            await asyncio.sleep(0)
+
+            assert result.paused is False
+            assert result.loops == {"claims_engine": "running"}
+        finally:
+            lifecycle.reset_for_tests()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_pause_flags():
+    """Both pause flags are module-level, so they leak between tests.
+
+    Found by the independence tests above: one paused the loops, and the next read
+    `loops_paused=True` before touching anything. Harmless in that pair, but the
+    same leak would let a pause set by one test silently gate an unrelated one.
+    """
+    yield
+    _server._set_globally_paused(False)
+    # Assign rather than call: `_set_loops_paused` is a coroutine (it awaits
+    # quiescence), and an unawaited call here would silently leave the flag set.
+    _server._LOOPS_PAUSED = False
+
+
+class TestTradingPauseAndLoopPauseAreSeparate:
+    """Two controls, because a caller may want either without the other.
+
+    Trading pause must not imply loop pause, and loop pause must never imply
+    trading pause. Collapsing them makes the second unaskable: a caller who wants
+    deterministic reconciliation while still accepting deals — which is what every
+    end-to-end deal scenario wants — would have no way to ask for it.
+    """
+
+    async def test_pausing_the_loops_leaves_trading_open(self, client):
+        c, _ = client
+
+        await c.admin_pause_lifecycle_loops()
+        status = await c.get_system_status()
+
+        assert status.loops_paused is True
+        assert not status.paused, (
+            "pausing the loops closed the storefront for business; a scenario "
+            "that pauses to steady its assertions must still be able to negotiate"
+        )
+
+    async def test_pausing_trading_leaves_the_loops_running(self, client):
+        c, _ = client
+
+        await c.admin_pause()
+        status = await c.get_system_status()
+
+        assert status.paused is True
+        assert not status.loops_paused, (
+            "closing for business also halted background work; a storefront that "
+            "stops accepting deals is still expected to finish the ones it has"
+        )
+
+
+class TestLifecycleAdvance:
+    """Each advance runs one cycle of a loop and works while paused.
+
+    Running while paused is the entire purpose: a scenario pauses once at setup
+    and advances deliberately, so an advance that respected the pause would be
+    unusable.
+    """
+
+    async def test_requires_admin_key(self, client_no_key):
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.admin_run_lifecycle_cycle("claims")
+        assert "403" in str(exc_info.value)
+
+    async def test_claims_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause_lifecycle_loops()
+
+        result = await c.admin_run_lifecycle_cycle("claims")
+
+        assert result["loop"] == "claims_engine"
+        assert "processed" in result
+
+    async def test_fulfillment_resume_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause_lifecycle_loops()
+
+        result = await c.admin_run_lifecycle_cycle("fulfillment-resume")
+
+        assert result["loop"] == "fulfillment_resume"
+
+    async def test_negotiation_watchdog_cycle_runs_while_paused(self, client):
+        c, _ = client
+        await c.admin_pause_lifecycle_loops()
+
+        result = await c.admin_run_lifecycle_cycle("negotiation-watchdog")
+
+        assert result["loop"] == "negotiation_watchdog"
+        assert "swept" in result
+
+    async def test_capacity_events_cycle_runs_the_real_reconcile(self, client):
+        """The advance drives production reconciliation, unpatched.
+
+        Establishes the route resolves, calls the real reconcile with a real site
+        client behind it, and completes while the storefront is paused. The
+        transitions that reconcile produces are asserted below, in
+        `TestCapacityAdvanceMovesListings`.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        await c.admin_pause_lifecycle_loops()
+
+        with site_capacity(_fake_pool_site()):
+            result = await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert result == {"loop": "capacity_events_poller", "reconciled": True}
+
+
+class TestCapacityAdvanceMovesListings:
+    """An advance is asserted by what it changes, not by what it returns.
+
+    A return contract cannot distinguish a control that runs the production
+    handler from one that returns the right shape, and `spec.md`'s requirement is
+    that a manual cycle produces the transitions the timer-driven loop produces.
+
+    Both passes are covered. `full_capacity_reconcile` closes and reopens on every
+    call, where the delta subscriber runs one or both depending on the delta kind,
+    so asserting only the close pass would leave the half where a divergence is
+    least visible unexamined.
+
+    Each case asserts the statuses *before* advancing as well. Reading only
+    afterwards cannot tell a reconcile that moved a listing from a fixture that
+    seeded it that way, and attributing the transition to the advance is the whole
+    point of advancing deliberately.
+    """
+
+    async def _statuses(self, db) -> dict[int, str]:
+        return {
+            n: (await db.load_listing(listing_id=f"listing-{n}x"))["status"]
+            for n in range(1, 5)
+        }
+
+    async def test_advancing_closes_listings_that_no_longer_fit(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        await c.admin_pause_lifecycle_loops()
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            await _ledger_hold(capacity, gpu_count=2)
+
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "open", 4: "open"
+            }, (
+                "capacity was taken and nothing has reconciled yet, so every "
+                "listing should still be open — if one is already closed this "
+                "test cannot attribute the close to the advance"
+            )
+
+            await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert await self._statuses(db) == {
+            1: "open", 2: "open", 3: "closed", 4: "closed"
+        }, (
+            "one advance did not close the slices that no longer fit two "
+            "remaining GPUs"
+        )
+
+    async def test_advancing_reopens_listings_that_fit_again(self, client):
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        await c.admin_pause_lifecycle_loops()
+
+        with site_capacity(_fake_pool_site()) as capacity:
+            reservation_id = await _ledger_hold(capacity, gpu_count=2)
+            await c.admin_run_lifecycle_cycle("capacity-events")
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "closed", 4: "closed"
+            }
+
+            await capacity.release(capacity_reservation_id=reservation_id)
+
+            assert await self._statuses(db) == {
+                1: "open", 2: "open", 3: "closed", 4: "closed"
+            }, (
+                "the capacity came back but nothing has reconciled yet; a reopen "
+                "observed here would not be the advance's doing"
+            )
+
+            await c.admin_run_lifecycle_cycle("capacity-events")
+
+        assert await self._statuses(db) == {
+            1: "open", 2: "open", 3: "open", 4: "open"
+        }, "one advance did not reopen the slices that fit again"
 
 
 # ---------------------------------------------------------------------------
@@ -679,6 +947,76 @@ class TestFulfillmentEvents:
             "listing-4x",
         ]
 
+    async def test_admin_reserve_echoes_a_resource_pinned_claim_and_no_pool(
+        self, client,
+    ):
+        """A resource-pinned claim reports its resource and no pool.
+
+        The reservation response carries neither field -- the site strips both,
+        because a reservation commits to a site and a shape and scheduling may
+        rebind it within that site. So what comes back is the claim's own
+        pinning, and a claim that pinned no pool reports none rather than
+        reporting the pool the site happened to match.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+
+        with site_capacity(_fake_pool_site()):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "resource_id": "pool-h200-1",
+                    "gpu_count": 2,
+                },
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-pinned",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.resource_id == "pool-h200-1"
+        assert response.pool_id is None
+        assert response.member_id is None
+
+    async def test_admin_reserve_echoes_a_pool_scoped_claim_and_no_resource(
+        self, client,
+    ):
+        """A pool-scoped claim reports its pool and no resource.
+
+        The inverse of the test above, and the shape the fungible e2e scenario
+        drives. Reporting a resource here would name the host the site matched,
+        which fulfillment scheduling is free to move.
+        """
+        from tests.fake_site import site_capacity
+
+        c, db = client
+        await _seed_dynamic_listing_pool_rows(db)
+        fake = _fake_pool_site()
+        fake.add_resource(
+            "pool-h200-2",
+            4,
+            attributes={
+                "pool_id": "pool-h200",
+                "gpu_model": "H200",
+                "region": "California, US",
+                "vm_host": "host-2",
+            },
+        )
+
+        with site_capacity(fake):
+            response = await c.admin_reserve_capacity(
+                required_attributes={
+                    "pool_id": "pool-h200",
+                    "gpu_count": 2,
+                },
+                listing_id="listing-2x-manual",
+                escrow_uid="manual-escrow-pooled",
+            )
+
+        assert response.capacity_reservation_id
+        assert response.pool_id == "pool-h200"
+        assert response.resource_id is None
+
     async def test_admin_reserve_capacity_returns_409_when_no_capacity(self, client):
         from tests.fake_site import site_capacity
 
@@ -979,18 +1317,13 @@ class TestRealOrchestrationCacheToReconciliation:
             site_capacity(_fake_pool_site()) as capacity,
             patch.dict(spc._caches, {"default": caches}, clear=True),
             settings_overrides(**{"capacity.use_site_projection_for_listings": True}),
-            patch(
-                "market_storefront.services.publication_service.get_sqlite_client",
-                return_value=db,
-            ),
         ):
-            # close_order (called for each stale listing) is registry-
-            # backed and has no real registry server here -- it falls
-            # back to get_sqlite_client() to confirm the DB-side close
-            # landed even when the registry push failed. That global
-            # singleton defaults to settings.db_path, not this test's
-            # own db fixture, so it must be patched here or the
-            # fallback check silently finds nothing.
+            # No patch of the storefront's sqlite client. The subscriber passes
+            # the unit of work it was built with all the way through to the
+            # close, so the database it reconciles and the database it writes are
+            # the one this test supplies. That was not always true: `close_order`
+            # took a path for its query and mutated through the process-wide
+            # client, and this test used to substitute that client to compensate.
             subscriber = _make_listing_reconcile_subscriber(lambda: db, capacity)
             await subscriber(CapacityDelta(kind="reserved", version=1))
 

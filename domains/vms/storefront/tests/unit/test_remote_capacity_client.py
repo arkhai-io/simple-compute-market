@@ -81,6 +81,11 @@ def _settings(
         ),
         provisioning=SimpleNamespace(service_url="http://prov:8081"),
         admin_api_key="test-key",
+        # Read at `market_storefront.server` module scope, which a loop's pause
+        # gate imports lazily. Without it this file passes in a full run — where
+        # an earlier test has already imported that module — and fails when run
+        # alone, which is the worst way for a test to be wrong.
+        gateway=SimpleNamespace(root_path=""),
     )
 
 
@@ -256,14 +261,14 @@ async def test_subscriber_closes_and_reopens_with_site_availability(
     async def fake_close(
         db_path, *, home_site=None, configured_site_count=0,
         member_availability=None, site_pool_projection=None,
-        site_capacity_buckets=None,
+        site_capacity_buckets=None, sqlite_client=None,
     ):
         calls.append(("close", None, member_availability))
         return ["lst-1"]
 
     async def fake_reopen(
         db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
-        site_capacity_buckets=None,
+        site_capacity_buckets=None, sqlite_client=None,
     ):
         calls.append(("reopen", None, member_availability))
         return []
@@ -301,14 +306,14 @@ async def test_subscriber_runs_both_passes_for_mixed_direction_capacity_change(
     async def fake_close(
         db_path, *, home_site=None, configured_site_count=0,
         member_availability=None, site_pool_projection=None,
-        site_capacity_buckets=None,
+        site_capacity_buckets=None, sqlite_client=None,
     ):
         calls.append("close")
         return []
 
     async def fake_reopen(
         db_path, *, home_site=None, member_availability=None, site_pool_projection=None,
-        site_capacity_buckets=None,
+        site_capacity_buckets=None, sqlite_client=None,
     ):
         calls.append("reopen")
         return []
@@ -573,7 +578,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_close(
             db_path, *, home_site=None, configured_site_count=0,
             member_availability=None, site_pool_projection=None,
-            site_capacity_buckets=None,
+            site_capacity_buckets=None, sqlite_client=None,
         ):
             received["site_pool_projection"] = site_pool_projection
             received["site_capacity_buckets"] = site_capacity_buckets
@@ -632,7 +637,7 @@ class TestReconcileListingsUsesCachedProjectionWhenEnabled:
         async def fake_close(
             db_path, *, home_site=None, configured_site_count=0,
             member_availability=None, site_pool_projection=None,
-            site_capacity_buckets=None,
+            site_capacity_buckets=None, sqlite_client=None,
         ):
             received["site_pool_projection"] = site_pool_projection
             received["site_capacity_buckets"] = site_capacity_buckets

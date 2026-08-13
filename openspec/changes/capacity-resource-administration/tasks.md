@@ -80,6 +80,54 @@ authority.
 - [ ] 4.5 Run the VM e2e scenarios that depend on projected capacity shape, and the
       `kit/site` ledger and router suites.
 
+## 4b. Executor-correlated pool membership and one declaration per executor
+
+Added 2026-08-11 from an e2e capacity trace; see `design.md`'s "Pool membership is
+executor-derived, and one-per-executor is enforced on write". Sequenced immediately after
+the cutover because both defects are about the projection and admission agreeing on one
+record, which is what Section 4 makes true for capacity and attributes.
+
+- [ ] 4b.1 Add an injected executor-correlation provider to `make_capacity_router` in
+      `kit/site/src/market_site/router.py`, alongside the existing
+      `get_resource_inventory`/`get_pool_directory` providers. It answers "which pool does
+      the executor backing this declaration belong to", returning `None` for a declaration
+      that names no executor. `kit/site` gains no knowledge of hosts.
+- [ ] 4b.2 Supply it from `provisioning/compute/service/src/compute_provisioning_service/main.py`
+      beside the two providers already defined there, resolving the `Host` row by the
+      declaration's executor attribute and falling back to the declaration id.
+- [ ] 4b.3 On registration, take the executor's pool when one is resolved. Refuse with a
+      409 when the declaration names a different pool rather than silently overriding
+      either value — the error must name both pools and say which to change.
+- [ ] 4b.4 Reject `attributes["pool_id"]` outright, naming the field to use instead. Do not
+      hoist it into `pool_id`: hoisting leaves two spellings working forever, which is the
+      ambiguity this task exists to remove.
+- [ ] 4b.5 Compose the executor-identity attribute name into `CapacityLedgerService` the
+      way `unit_claim_keys` already is, and route `ledger.py`'s two existing direct reads
+      of `attributes["vm_host"]` (`_executor_ref_for_resource` and the executor-kind
+      branch in `reserve`) through it. This removes a pre-existing domain leak rather than
+      adding a third instance of it.
+- [ ] 4b.6 Enforce one declaration per executor at registration, inside
+      `register_resource`'s existing transaction: refuse when another declaration already
+      claims the same executor identity. Raise the ledger's own conflict error so the
+      route maps it to a 409.
+- [ ] 4b.7 Degrade `load_capacity_resource_inventory`'s duplicate-correlation `ValueError`
+      to a logged warning that omits the ambiguous correlation. State locally why: a read
+      path that raises makes one bad row indistinguishable from an unreachable site and
+      takes every pool at that site down with it, and 4b.6 is what now prevents the row
+      from being written.
+- [ ] 4b.8 Confirm `resource_feasibility_view`'s `pool_id or resource_id` fallback is left
+      intact and document why at the call site — a declaration with no pool is its own
+      single-member pool, which the structural listing-mode default depends on.
+- [ ] 4b.9 Focused tests: declaration inherits its executor's pool; conflicting declared
+      pool refused; `attributes["pool_id"]` refused; second declaration on one executor
+      refused; declaration with no executor keeps its declared pool (API-credits shape);
+      a pre-existing duplicate correlation warns and still serves a projection for every
+      other pool.
+- [ ] 4b.10 Integration test through the real router: register an executor into a pool,
+      declare capacity for it, and assert the resource-pool projection, the capacity-bucket
+      projection, and a pool-scoped `reserve` all report the same pool identity. This is
+      the assertion that would have caught the three-identity divergence.
+
 ## 5. Startup import
 
 - [ ] 5.1 Add `capacity_definitions_path` to `settings.toml` and its
@@ -144,10 +192,15 @@ Per `openspec/README.md#plan-closeout-requirements`.
       validation evidence, and promotion destinations; keep the rejected-alternatives
       analysis in `design.md`.
 - [ ] 8.5 **Roadmap currency.** Update the affected goal's current-state description
-      and gap mapping in `docs/development/ROADMAP.md`. If `add-development-roadmap`
-      has not landed when this change completes, record that disposition explicitly
-      rather than skipping the step.
+      and gap mapping in `docs/development/ROADMAP.md`. The conditional this task
+      originally carried is resolved: `add-development-roadmap` landed and was archived
+      2026-08-13, so the roadmap exists and the step is owed unconditionally.
 - [ ] 8.6 **Promotion.** Complete the design-promotion record below.
+- [ ] 8.7 **Section 4b hygiene.** Read the docstrings 4b touches directly:
+      `_match_payload`'s pool/member comment, `load_capacity_resource_inventory`'s
+      correlation docstring, and `CapacityLedgerService.__init__`'s parameter block all
+      describe the arrangement 4b replaces. A stale docstring asserting an authority the
+      code no longer holds is a defect in this change, not a wording preference.
 
 ## Design promotion record
 
@@ -159,3 +212,6 @@ Per `openspec/README.md#plan-closeout-requirements`.
 | Legacy host capacity is derived into declarations rather than retained as a fallback tier | `openspec/specs/physical-provisioning/spec.md` — "Legacy host capacity is derived into declarations" |
 | Capacity definitions import is unconditional-but-idempotent, after pool definitions | `openspec/specs/physical-provisioning/spec.md` — "Capacity definitions import at startup" |
 | Why capacity declaration is separate from executor inventory, and why splitting dimensions across both was rejected | `openspec/specs/site-capacity/architecture.md` |
+| A declaration correlated to an executor takes that executor's pool membership; a conflicting declared pool is refused | `openspec/specs/site-capacity/spec.md` — "Pool membership follows the executor" |
+| One declaration per executor, enforced when the declaration is written rather than when inventory is read | `openspec/specs/site-capacity/spec.md` — "One capacity declaration per executor" |
+| Why the invariant is enforced on write, and why a projection read path must not raise on one bad row | `openspec/specs/site-capacity/architecture.md` |

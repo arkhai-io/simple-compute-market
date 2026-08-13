@@ -38,19 +38,73 @@ from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Global pause flag
+# Pause flags
+#
+# Two, deliberately. `_GLOBALLY_PAUSED` closes the storefront for business: new
+# negotiations receive 503. `_LOOPS_PAUSED` holds the timer-driven loops idle so
+# the storefront changes no state on its own. They answer different questions and
+# a caller may want either without the other -- an operator stopping background
+# writes while continuing to trade, or a scenario that needs deterministic
+# reconciliation and still has a deal to agree.
+#
+# Trading pause does not imply loop pause, and the converse must never hold: a
+# caller who stops the background work has said nothing about whether to accept
+# business, and one that stops accepting business still expects the deals it has
+# already taken to finish. Collapsing the two makes the second unaskable -- a
+# caller wanting deterministic reconciliation while still trading has no control.
 # ---------------------------------------------------------------------------
 
 _GLOBALLY_PAUSED: bool = False
+_LOOPS_PAUSED: bool = False
 
 
 def is_globally_paused() -> bool:
+    """Whether the storefront is closed for new business."""
     return _GLOBALLY_PAUSED
 
 
+def are_loops_paused() -> bool:
+    """Whether timer-driven loops are held idle. Read once per cycle by each."""
+    return _LOOPS_PAUSED
+
+
 def _set_globally_paused(value: bool) -> None:
+    """Open or close the storefront for new negotiations.
+
+    Trading only: the timer loops are unaffected, and `_set_loops_paused` is how
+    a caller asks for those. This is the meaning the endpoint has always had.
+    """
     global _GLOBALLY_PAUSED
     _GLOBALLY_PAUSED = value
+
+
+async def _set_loops_paused(value: bool) -> dict[str, str]:
+    """Hold every timer loop idle, or return them to work.
+
+    Each loop consults the flag once per cycle, before any work, so a cycle
+    either runs completely or never starts -- nothing is torn down and no
+    loop-local position is lost.
+
+    Pausing waits, bounded, for each loop to reach its gate, and reports what is
+    true of each: `paused` for one sitting at its gate, `pausing` for one whose
+    cycle had already begun and has not come back yet. Resuming does not wait --
+    there is nothing to wait for.
+    """
+    global _LOOPS_PAUSED
+    # Local for the same reason `lifecycle.are_loops_paused` imports this module
+    # locally: the two reference each other, and the loop modules import
+    # `lifecycle` at module scope while this module imports them.
+    from market_storefront import lifecycle
+
+    _LOOPS_PAUSED = value
+    if value:
+        # Wait, bounded, for the loops to reach their gates before reporting. The
+        # flag alone says a pause was requested; only a loop can say it has
+        # stopped, and a caller reads this response to decide whether anything is
+        # still in flight. A loop that has not acknowledged inside the window is
+        # reported `pausing`.
+        await lifecycle.await_quiescence()
+    return lifecycle.loop_states()
 
 
 # ---------------------------------------------------------------------------

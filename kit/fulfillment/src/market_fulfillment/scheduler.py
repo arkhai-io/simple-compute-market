@@ -123,11 +123,17 @@ class PhysicalSettlementScheduler:
                     requirement.resource_kind, last_pool_id=updated_cursor.last_pool_id,
                     last_resource_by_pool=dict(updated_cursor.last_resource_by_pool),
                 )
-            if selected.resource_id != tx.backing_resource_id(request.capacity_reservation_id):
-                tx.rebind_capacity(
-                    capacity_reservation_id=request.capacity_reservation_id,
-                    settlement_resource_id=selected.resource_id,
-                )
+            # Unconditional: the ledger's own assignment is idempotent and takes a
+            # cheap path when the selected resource is the one the reservation is
+            # already debited against — it records the marker and moves no debit,
+            # emits no capacity event. Skipping the call in that case left
+            # `settlement_resource_id` NULL after a scheduling decision that did
+            # happen, so the reservation and the settlement record disagreed about
+            # a fact both are supposed to carry.
+            tx.rebind_capacity(
+                capacity_reservation_id=request.capacity_reservation_id,
+                settlement_resource_id=selected.resource_id,
+            )
             resource = SettlementResource(
                 settlement_resource_id=selected.resource_id, pool_id=selected.pool_id,
                 resource_kind=selected.resource_kind, provider=selected.provider,

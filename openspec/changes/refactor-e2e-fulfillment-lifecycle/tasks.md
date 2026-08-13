@@ -11,7 +11,7 @@
 - [x] 1.9 Update `DealState` (`conftest.py`): remove the stale `provisioning_job_id` field; repurpose `fulfillment_id` (already existed, previously teardown-only) as the identity captured at settlement; repurpose `reserved_resource_id` as admin-introspection-sourced at 09c.
 - [x] 1.10 Update stale module- and function-level docstrings referencing the old `provisioning_job_id` flow.
 - [x] 1.11 `py_compile` all four touched files; grep for orphaned references (`prov_job_id`, `.get_job(`) across all three scenario files.
-- [ ] 1.12 Run the actual e2e scenarios against live docker-compose services to confirm runtime correctness -- **not done in this session** (no live services available in this environment). Verified by static analysis and compile-checking only.
+- [x] 1.12 Run the actual e2e scenarios against live docker-compose services to confirm runtime correctness. **Confirmed by run 31608431467 (2026-08-12): the full VM end-to-end suite passes — 98 passed, 12 skipped, 0 failed — against a live docker-compose stack.** The twelve skips are `test_multi_registry`'s Alice stages, which are gated on a second storefront that never completes on-chain registration; that gap is tracked separately and touches nothing here. The static analysis this task could not go beyond is now backed by execution.
 
 ## 2. Teardown-phase rewrite
 
@@ -37,14 +37,16 @@ never silently broken so much as never actually executed at all.
 - [x] 2.2 Confirm `test_full_deal.py` stages 10a-11b match the proposed sequence.
 - [x] 2.3 Confirm `test_full_deal_buyer_cli.py`'s equivalent stages match (word-for-word identical to 2.2).
 - [x] 2.4 Trace why `pools-7` believed this was still deferred: `reserved_resource_id`'s `require_state` precondition was unsatisfiable before Section 1's fix, so these stages silently skipped rather than ran and failed -- explaining why nobody observed them passing.
-- [ ] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved, not deferred (pending an actual passing run -- see 1.12/2.6).
-- [ ] 2.6 Run stages 10a-11b against live services (blocked on the same live-service constraint as task 1.12) to confirm they now execute and pass, not just that they're syntactically present and internally consistent.
+- [x] 2.5 Update `pools-7-storefront-fulfillment-cutover` task 10.14 to reflect this is resolved rather than deferred. Done: 10.14's "still open" note now cites run 31608431467.
+- [x] 2.6 Run stages 10a-11b against live services. **Confirmed by run 31608431467 (2026-08-12): the full VM end-to-end suite passes — 98 passed, 12 skipped, 0 failed — against a live docker-compose stack.** The twelve skips are `test_multi_registry`'s Alice stages, which are gated on a second storefront that never completes on-chain registration; that gap is tracked separately and touches nothing here. Those four stages pass in both full-deal scenarios. Worth recording that they did not pass unchanged: reaching them exposed five defects between them — a lease back-date that outran the watchdog grace period, a lease view reading `release_job_id` where the contract exposes `vm_remove_job_id`, a convergence claim lease that made extra advances useless, an unimplemented `release-reservation` route, and a stage asserting before its own advance. Each was real; none was visible to static analysis, which is the argument for this task having stayed open rather than being closed on structural review.
 
 ## 3. Inter-service test split
 
 - [x] 3.1 Resolve the three open implementation questions in `design.md`: e2e half is already covered by `test_full_deal.py`'s existing (Section-1-hardened) real reserve/commit/schedule/begin flow across two real services, so no new scenario file is needed; fast half uses `httpx.MockTransport` (both `RemoteCapacityClient` and `ComputeProvisioningClient` already declare a `transport` test seam for exactly this); retirement of the old tier happens atomically with confirming the mock-transport replacement passes (not staged -- the e2e-side coverage already existed and needed no gating).
 - [x] 3.2 e2e-side coverage: none added, confirmed already sufficient (see 3.1).
-- [x] 3.3 Added `core/storefront/tests/integration/test_capacity_and_fulfillment_client_opacity.py`: mock-transport test proving `RemoteCapacityClient`/`ComputeProvisioningClient` never send a placement field across reserve/commit/schedule/begin. Zero cross-package imports. Verified it fails when a placement field is deliberately reintroduced (sanity-checked by temporarily setting `resource_id="pinned-host"` on the commit call and confirming the test catches it), then confirmed it passes again with the fix reverted.
+- [ ] 3.3 **Reopened 2026-08-13 by an archival audit: the file is not in the repository.** `core/storefront/tests/integration/` does not exist — not the file, the directory — and the test is absent from the pristine baseline too, so it was not removed by later work. Whatever ran locally never reached the repository. The audit trail below is preserved because the design decision it records is sound and the sanity check it describes was real; only the claim that the file exists is false. Two things make this invisible: 3.4 added `tests/integration` to `testpaths`, and pytest skips a missing testpath silently rather than erroring, so `core/storefront` collects 111 tests and reports green while the entry points at nothing. Re-add the test, or retract 3.4's `testpaths` entry — but not neither, because a manifest naming a path that does not exist is the shape this repository's own deliverables rule calls out.
+
+      Original note follows. Added `core/storefront/tests/integration/test_capacity_and_fulfillment_client_opacity.py`: mock-transport test proving `RemoteCapacityClient`/`ComputeProvisioningClient` never send a placement field across reserve/commit/schedule/begin. Zero cross-package imports. Verified it fails when a placement field is deliberately reintroduced (sanity-checked by temporarily setting `resource_id="pinned-host"` on the commit call and confirming the test catches it), then confirmed it passes again with the fix reverted.
 - [x] 3.4 Added `tests/integration` to `core/storefront`'s pytest `testpaths` (previously only `tests/unit` was discovered).
 - [x] 3.5 Removed `domains/vms/storefront/tests/cross_service/` (both the test file and its now-dead PYTHONPATH-trick `conftest.py`) and the `test-vm-capacity-boundary` make target, including its `.PHONY` entry and its dependency in the aggregate `test` target.
 
@@ -55,5 +57,21 @@ never silently broken so much as never actually executed at all.
 
 ## Design-promotion record
 
-See `design.md`'s "Section 1 ... Design promotion record" table. Sections 2-4
-have no promotion record yet -- nothing implemented.
+See `design.md`'s "Section 1 ... Design promotion record" table.
+
+**Corrected 2026-08-13 by an archival audit.** The line this replaced said Sections 2-4
+"have no promotion record yet -- nothing implemented", which stopped being true when
+Section 3 shipped. Section 3 changed the repository: it added a mock-transport opacity
+test, added `tests/integration` to `core/storefront`'s `testpaths`, and removed
+`domains/vms/storefront/tests/cross_service/` along with the `test-vm-capacity-boundary`
+make target. Section 2 implemented nothing and correctly owes nothing; Section 4 was a
+read-only review and likewise owes nothing.
+
+Section 3's decisions, classified:
+
+| Material decision | Permanent location |
+|---|---|
+| The capacity and provisioning clients never send a placement field; placement is the authority's decision and the client is opaque to it | **Unclassified — owed before archive.** The invariant is proven by a test but named in no permanent document. It plausibly belongs to `openspec/specs/site-capacity/spec.md`; deciding that is the work, not this row. |
+| A cross-package boundary is proven inside the owning package with a transport seam, not by a test directory that reaches across packages with a `PYTHONPATH` trick | **Unclassified — owed before archive.** Candidate home is `docs/development/TESTING.md` or `openspec/specs/test-compatibility/spec.md`; both already carry test-level jurisdiction rules. |
+
+Archive is blocked on 3.3 and on these two classifications.
