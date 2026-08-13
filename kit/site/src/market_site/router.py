@@ -1,7 +1,7 @@
 """Site-authority capacity API router.
 
 All endpoints are under ``/capacity`` (mount with ``prefix="/api/v1"``)
-and mirror the ``core_storefront.capacity.CapacityClient`` contract verb
+and mirror the ``core_storefront.capacity.SiteCapacityAuthority`` contract verb
 for verb, plus the resource registry and the versioned event feed (pull
 model with snapshot resync).
 
@@ -51,11 +51,16 @@ def make_capacity_router(
     get_ledger: Callable[[], CapacityLedgerService],
     *,
     get_resource_inventory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
+    get_pool_directory: Callable[[], Mapping[str, Mapping[str, Any]]] | None = None,
 ) -> APIRouter:
     """Build the ``/capacity`` router over a ledger provider.
 
     ``get_ledger`` is called per request (FastAPI dependency), so the
     mounting service may resolve the ledger from its own container.
+    ``get_pool_directory``, when supplied, returns allowlisted per-pool
+    metadata (label, enabled, mechanism, policy_tags, pool_views)
+    consumed by the resource-pool projection; omitting it preserves the
+    inventory-only projection shape exactly as before.
     """
     router = APIRouter(prefix="/capacity", tags=["capacity"])
     projection_services: dict[int, SiteProjectionService] = {}
@@ -63,7 +68,11 @@ def make_capacity_router(
     def projections(ledger: CapacityLedgerService) -> SiteProjectionService:
         return projection_services.setdefault(
             id(ledger),
-            SiteProjectionService(ledger, resource_inventory=get_resource_inventory),
+            SiteProjectionService(
+                ledger,
+                resource_inventory=get_resource_inventory,
+                pool_directory=get_pool_directory,
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -145,7 +154,7 @@ def make_capacity_router(
         )
 
     # ------------------------------------------------------------------
-    # CapacityClient verbs
+    # SiteCapacityAuthority verbs
     # ------------------------------------------------------------------
 
     @router.get(
@@ -203,9 +212,26 @@ def make_capacity_router(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         if reservation is not None:
+            # A reservation commits to this site and to the reserved dimensions,
+            # and to nothing narrower. Scheduling may later rebind it to another
+            # resource, in another pool at this site, without touching the deal
+            # (see market_fulfillment's scheduler, which filters candidates on
+            # resource kind, dimensions, and requirement attributes -- never on
+            # the pool the reservation was admitted against). Reporting the
+            # resource or pool matched here would advertise a placement that is
+            # free to change, so a caller needing either reads it from its own
+            # claim, which is the only place it is durable.
+            # See openspec/specs/site-capacity/spec.md#internal-capacity-accounting.
             reservation = {
                 key: value for key, value in reservation.items()
-                if key not in {"resource_id", "capacity_bucket_id", "backing_resource_id"}
+                if key not in {
+                    "resource_id",
+                    "pool_id",
+                    "member_id",
+                    "capacity_bucket_id",
+                    "backing_resource_id",
+                    "vm_host",
+                }
             }
         return ReservationResponse(reservation=reservation)
 

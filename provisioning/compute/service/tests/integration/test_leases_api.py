@@ -67,6 +67,76 @@ async def _register(client, escrow_uid: str, **overrides) -> dict:
     return await client.register_lease(**body)
 
 
+def _create_active_fulfillment(capacity_reservation_id: str, *, fulfillment_id: str | None = None) -> str:
+    """Persist a `SettlementRecord` in `active` state for a reservation.
+
+    VM release now begins durable fulfillment teardown rather than
+    submitting an Ansible job straight from the reservation's own
+    `vm_host`/`vm_target` — it needs a fulfillment aggregate to resolve a
+    `fulfillment_id` from. This file's tests exercise the lease API as an
+    opaque surface over the ledger (see module docstring), so this helper
+    fabricates the minimum aggregate release needs rather than running a
+    full schedule/begin-fulfillment flow.
+    """
+
+    from market_fulfillment import SettlementRecord, SettlementRecordState
+
+    fulfillment_id = fulfillment_id or f"fulfillment-{capacity_reservation_id[:8]}"
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        db.add(
+            SettlementRecord(
+                capacity_reservation_id=capacity_reservation_id,
+                fulfillment_id=fulfillment_id,
+                market="vms",
+                scheduling_requirements={"resource_kind": "vm"},
+                settlement_resource_id="kvm1",
+                pool_id="pool-1",
+                provider="ansible",
+                resource_attributes={"vm_host": "kvm1"},
+                fulfillment_request={
+                    "kind": "vm.fulfillment.request",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                prepared_teardown_operation={
+                    "kind": "vm.ansible.teardown.v1",
+                    "schema_version": 1,
+                    "payload": {},
+                },
+                provider_metadata={"current_job_id": "job-1"},
+                state=SettlementRecordState.active.value,
+            )
+        )
+        db.commit()
+    return fulfillment_id
+
+
+def _converge_fulfillment_teardown(fulfillment_id: str, *, failed: bool = False) -> None:
+    """Simulate `FulfillmentConvergenceWatchdog` having confirmed teardown.
+
+    That worker (dispatch/retry/status convergence) has its own test
+    suite; these tests only need its end state.
+    """
+
+    from market_fulfillment import SettlementRecord, SettlementRecordState
+
+    session_factory = _container_module.resolved_session_factory
+    with session_factory() as db:
+        record = (
+            db.query(SettlementRecord)
+            .filter(SettlementRecord.fulfillment_id == fulfillment_id)
+            .one()
+        )
+        if failed:
+            record.state = SettlementRecordState.teardown_failed.value
+            record.failure_reason = "provider_reported_failure"
+            record.failure_message = "cleanup script missing"
+        else:
+            record.state = SettlementRecordState.torn_down.value
+        db.commit()
+
+
 class TestCreateLease:
     async def test_create_attaches_to_the_reservation(self, client_and_queue):
         client, _ = client_and_queue
@@ -150,14 +220,22 @@ class TestGetLease:
 
 class TestCheckLeasesEndpoint:
     async def test_check_leases_releases_expired_ledger_lease(self, client_and_queue):
-        """The on-demand cycle releases an expired lease in the ledger and
-        emits the capacity event (deal notification is best-effort and the
-        test storefront is unreachable — that must not block the release)."""
+        """The on-demand cycle submits release for an expired lease, and a
+        second cycle -- after the fulfillment aggregate converges to
+        `torn_down` (simulated here; `FulfillmentConvergenceWatchdog` is
+        covered by its own tests) -- releases it in the ledger and emits
+        the capacity event (deal notification is best-effort and the test
+        storefront is unreachable — that must not block the release)."""
         client, _ = client_and_queue
         lease = await _register(
             client, "escrow-expired-1", lease_end_utc=_past_dt(),
         )
+        fulfillment_id = _create_active_fulfillment(lease["capacity_reservation_id"])
 
+        first = await client.check_leases()
+        assert first.get("checked", 0) >= 1
+
+        _converge_fulfillment_teardown(fulfillment_id)
         result = await client.check_leases()
         assert result.get("released", 0) >= 1
 
@@ -239,6 +317,7 @@ class TestUpdateLease:
         directly in test mode)."""
         client, _ = client_and_queue
         lease = await _register(client, "escrow-patch-backdate")
+        _create_active_fulfillment(lease["capacity_reservation_id"])
 
         await client.update_lease(lease["id"], lease_end_utc=_past_dt())
         result = await client.check_leases()
@@ -306,6 +385,7 @@ class TestAdminLeaseRepair:
     async def test_retry_release_moves_release_failed_back_to_releasing(self, client_and_queue):
         client, _ = client_and_queue
         lease = await _register(client, "escrow-retry-release", lease_end_utc=_past_dt())
+        fulfillment_id = _create_active_fulfillment(lease["capacity_reservation_id"])
         ledger = _container_module.resolved_capacity_ledger_service
         ledger.update_reservation_state(
             lease["capacity_reservation_id"],
@@ -319,7 +399,7 @@ class TestAdminLeaseRepair:
         assert retried["status"] == "releasing"
         reservation = ledger.get_reservation(lease["capacity_reservation_id"])
         assert reservation["state"] == "releasing"
-        assert reservation["vm_remove_job_id"] == "direct-release"
+        assert reservation["vm_remove_job_id"] == fulfillment_id
 
     async def test_retry_release_non_failed_returns_409(self, client_and_queue):
         client, _ = client_and_queue

@@ -11,8 +11,6 @@ from typing import Any
 import pytest
 from alkahest_py import AlkahestClient
 from eth_account.signers.local import LocalAccount
-from web3 import Web3
-
 from market_alkahest.alkahest import (
     Erc1155DefaultEscrowCodec,
     NativeTokenDefaultEscrowCodec,
@@ -22,12 +20,19 @@ from market_alkahest.alkahest import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
+from web3 import Web3
+
 from src.settings import settings
 from tests.e2e.roles.scenarios.vms.conftest import (
     delete_mock_rules_if_present,
     wait_for_stage_event,
 )
 from tests.e2e.roles.scenarios.vms.escrow_helper import _ensure_ws_rpc_url
+from tests.e2e.roles.scenarios.vms.host_registry import (
+    E2E_NON_ERC20_POOL_ID,
+    provision_e2e_executor,
+    refresh_storefront_projections,
+)
 
 log = logging.getLogger(__name__)
 
@@ -158,17 +163,28 @@ def _settlement_cases() -> list[SettlementCase]:
     ]
 
 
+def _case_host(case: SettlementCase) -> str:
+    """This case's own executor.
+
+    One declaration per executor is the site authority's accounting boundary, and
+    each parametrized case declares its own resource — so cases cannot share a
+    machine. The previous `kvm{index}` was always `kvm1`, since every run passes a
+    single case.
+    """
+    return f"kvm-{case.name}"
+
+
 def _resource_csv(cases: list[SettlementCase]) -> str:
     lines = [
         "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
         "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
         "attribute.vm_host"
     ]
-    for index, case in enumerate(cases, start=1):
+    for case in cases:
         lines.append(
             f'{case.resource_id},compute.gpu,rtx5080,count,1,available,'
             f'{_SELLER_RATE},{_MOCK_ERC20_A},,RTX 5080,90.0,'
-            f'"California, US",kvm{index}'
+            f'"California, US",{_case_host(case)}'
         )
     return "\n".join(lines) + "\n"
 
@@ -297,6 +313,7 @@ def test_scalar_non_erc20_settlement_reaches_ready(
     storefront_admin_client,
     provisioning_client,
     provisioning_test_client,
+    site_capacity_admin_client,
     buyer_config,
     seller_wallet,
 ):
@@ -308,6 +325,26 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         filename=f"{case.name}-settlement-resource.csv",
     )
     assert import_result.failed_count == 0, import_result
+
+    # Two stores, both required: the host is executor identity, and the capacity
+    # declaration is what `probe`, `reserve`, and the inventory guard match
+    # against. Only a declaration creates one, so with the host alone every
+    # inventory match fails. Registration used to happen in an autouse fixture,
+    # which made it setup no scenario named.
+    provision_e2e_executor(
+        provisioning_client,
+        site_capacity_admin_client,
+        host=_case_host(case),
+        pool_id=E2E_NON_ERC20_POOL_ID,
+        resource_id=case.resource_id,
+        sellable_units=1,
+        attributes={
+            "gpu_model": "RTX 5080",
+            "region": "California, US",
+            "sla": "90.0",
+        },
+    )
+    refresh_storefront_projections(storefront_admin_client)
 
     listing_resp = storefront_admin_client.create_listing(
         agent_wallet_address=seller_wallet,
@@ -442,11 +479,17 @@ def test_scalar_non_erc20_settlement_reaches_ready(
         escrow_uid,
         buyer_address=buyer_config["wallet_address"],
     )
-    assert status.provisioning_job_id
+    # provisioning_job_id is always None for a fulfillment on the durable
+    # path; fulfillment_id is that path's durable identity. See
+    # core_storefront.models.settle_models.SettleStatusResponse.
+    fulfillment_id = status.fulfillment_id
+    assert fulfillment_id, status
 
     provisioning_test_client.resume_rule(case.rule_id)
-    job = provisioning_test_client.wait_for_job(status.provisioning_job_id, timeout=30)
-    assert job["status"] == "succeeded", job
+    provisioning_test_client.drain(timeout=30)
+    provisioning_client.run_fulfillment_convergence_cycle()
+    fulfillment_status = provisioning_client.get_fulfillment_status(fulfillment_id)
+    assert fulfillment_status.get("state") == "active", fulfillment_status
 
     wait = storefront_admin_client.wait_for_settlement(escrow_uid, timeout=60.0)
     assert wait.ready is True, wait

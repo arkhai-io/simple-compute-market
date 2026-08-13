@@ -1,0 +1,286 @@
+## Context
+
+`domains/vms/{listings,negotiation,settlement}` is a namespace with no owning
+distribution. Its storefront consumer obtains it by source-tree copy plus
+`PYTHONPATH`; its buyer consumer, which ships as a wheel and as a frozen
+binary, reassembles it through a per-file `force-include` table that drifted
+and broke `market buy`.
+
+The manifest cannot simply be corrected. Directory-level mapping was tried and
+rejected on evidence: `force-include` ignores `exclude`, so a directory mapping
+ships whatever is present at build time — verified by placing a scratch file in
+the source directory and finding it in the wheel, with and without `exclude`
+patterns configured. That trades a missing-module defect for an
+unbounded-contents defect.
+
+The manifest exists because two things force it. The buyer's dependency is
+inflated from two modules to twenty-four by eager cross-package facades. And
+negotiation policies resolve through a mutable module-level registry whose
+contents depend on import order, which is the reason the storefront needs the
+source tree present at all.
+
+`domains/bare_metal` is the counter-example already in the repository: it
+imports middlewares as modules, composes them as a literal list, and consults
+no registry.
+
+## Goals
+
+- One distribution owns every shipped module; no namespace is assembled from
+  another project's files.
+- Policy names resolve against a value composed once at startup, not a global
+  mutated by import side effects and by resolution itself.
+- A broken install, an unknown policy name, and a duplicated policy name each
+  fail loudly, before a role serves requests.
+- Kit acquires no knowledge of domains. Domains choose their own discovery.
+- A future domain's negotiation module is kit imports plus its own guards plus
+  an ordering.
+
+## Decisions
+
+### Kit owns the source protocol; the domain owns the choice of sources
+
+Kit defines `NegotiationPolicySource` — `describe()` and
+`load() -> Mapping[str, NegotiationMiddleware]` — plus concrete
+implementations: an inline source for policies known at build time, an
+entry-point source, and a directory source. Implementations are values that
+return mappings; they mutate nothing.
+
+The protocol lives in kit rather than core because the vocabulary being loaded
+(`NegotiationMiddleware`, `NegotiationContext`, `NegotiationDecision`) is
+kit's. Core owning it would require core to depend on `arkhai-kit-policy`,
+which it does not today.
+
+A domain returns the sources it permits. A domain that never wants filesystem
+loading returns no directory source, and no operator setting can introduce
+one. An external team wanting policies from a remote store implements the
+protocol; kit gains an implementation and the protocol is unchanged.
+
+### The catalogue is immutable, built once, and validated at build
+
+A builder accumulates loaders; `build()` loads every source, validates that
+each offered value is callable, rejects duplicate names with both providers
+named, and returns a frozen catalogue. Resolution is then a pure lookup that
+mutates nothing.
+
+`build()` is the single point where the failure modes that hid the packaging
+defect become visible. Load failure is fatal: a distribution that declares a
+policy and cannot supply it is a broken install, not a policy to skip.
+
+### The catalogue is injected, not a module-level singleton
+
+The composition root builds one catalogue and injects it. A static singleton
+was considered and rejected. This subsystem already carries three global flags
+(`_FILE_DISCOVERY_TRIGGERED`, `_FILE_POLICIES_DISCOVERED`, and a `force`
+parameter) that exist only to defeat the caching global state made necessary,
+and the E2E suite composes buyer and storefront paths in one process, so one
+global catalogue would have to be the union of two roles' policies — which
+silently defeats strict conflict detection. Tests must also be able to compose
+deliberately invalid catalogues to assert the new errors.
+
+`default_seller_round_hook` already takes four injected collaborators. The
+catalogue becomes the fifth and replaces `extra_policy_paths`, which moves up
+into composition where sources are chosen. Net signature width is unchanged.
+
+### Name conflicts are strict, with no override mechanism
+
+Two providers offering one name is an error naming both providers. There is no
+`overrides` field. A domain that wants different behaviour composes different
+sources — including omitting kit's own set — which is a more honest escape
+hatch than shadowing, and keeps every error message accurate about provenance.
+
+### `NEGOTIATION` is optional and means one specific thing
+
+The capability declares: *this domain offers named policies that operator
+configuration may reference*. It does not mean "this domain negotiates".
+`bare_metal` negotiates and declares nothing, because its chain is fixed and
+exposes no names. `market-composition` already requires that capability
+absence be valid and require no placeholder implementation.
+
+### The namespace is split by consumer, not relocated wholesale
+
+Moving `domains/vms/{listings,negotiation,settlement}` into one shared wheel
+would preserve the shape that caused the defect: a shared distribution
+containing modules with exactly one consumer. Traced consumption instead
+shows roughly fifteen modules used only by the storefront, three used by the
+buyer, and `listings/models` used by three consumers. Storefront-only modules
+move into `market_storefront`; the buyer's formatting helpers move into the
+buyer; genuinely shared models move into `arkhai_vms`. `force-include`
+disappears rather than shrinking, and the eager facades disappear because
+after the split nothing re-exports across a package boundary.
+
+## Alternatives Rejected
+
+- **Add the five missing manifest entries:** rejected as the resolution,
+  though viable as a stopgap. It fixes the symptom and leaves the manifest a
+  defect generator, the namespace unowned, and the storefront dependent on a
+  copied source tree.
+- **Directory-level `force-include` mapping:** rejected on measured evidence.
+  `force-include` bypasses `exclude`, so the mapping ships arbitrary files
+  present at build time.
+- **A test asserting the manifest matches the source tree:** rejected as the
+  resolution. It converts a runtime import error into a named test failure,
+  which is a real improvement, but it institutionalises the manifest rather
+  than removing the need for one.
+- **Making the facades lazy via module `__getattr__`:** rejected. It would
+  have stopped the buyer importing `reconciler` without shipping fewer
+  modules, and it would have silently broken the `market_policy`
+  compatibility monkey-patch and any other import side effect. Hiding a
+  packaging problem behind deferred instantiation is the same category of
+  error as importing functions instead of modules.
+- **Carrying policies on `MarketDomainContract` with kit resolving through
+  it:** rejected. That requires `arkhai-kit-policy` to import `arkhai-core`,
+  teaching kit that domains exist, which `market-composition`'s from-below
+  requirement forbids. Structural typing achieves the same startup validation
+  with no new dependency in either direction.
+- **Declaring the existing entry-point group and stopping there:** rejected as
+  the whole answer. It removes import-order dependence but leaves one global
+  registry, no conflict detection, and no answer for directory discovery. The
+  entry-point mechanism is retained as one source implementation.
+- **A static singleton catalogue:** rejected for test isolation and for
+  multi-role processes; see the injection decision above.
+- **Relocating the namespace into one shared wheel:** rejected; see the split
+  decision above.
+- **Loading the torch strategy unconditionally at composition:** rejected;
+  see the reinforcement-learning decision above.
+- **Deleting `determine_strategy_from_resources` and `resource_is_compute` as
+  dead code:** rejected on inspection. Each has exactly one caller — in its own
+  module — and was reachable publicly only through a facade re-export. They are
+  over-exported internal helpers, not dead code, and deleting them would break
+  their callers. They become private and leave the facade instead.
+- **Keeping `_add_checkout_root_to_path()` in the storefront package
+  initializer:** rejected. It inserted the monorepo checkout root into `sys.path`
+  so `domains.vms.*` would resolve outside Docker. After the split the storefront
+  imports no `domains.*` module, and leaving the insertion would let an
+  undeclared dependency or an omitted wheel module work in a checkout and fail
+  once installed — the defect this layout exists to prevent.
+- **Proving packaging correctness by installing the whole internal wheel set:**
+  rejected as sufficient; retained as one of two checks. See the closure decision
+  above.
+- **Folding this into `remove-relative-uv-sources`:** rejected. That change
+  targets parent-path `tool.uv.sources` entries and is unstarted; this targets
+  an unowned namespace assembled by file manifests. Different mechanisms.
+
+### The reinforcement-learning strategy is a separate source
+
+Importing the torch strategy imports torch and reads model checkpoints. It was
+previously registered by a lazy import triggered while resolving a chain, which
+is the import-order dependence this change removes; loading it unconditionally
+at composition would make every storefront pay for a strategy most never use.
+
+It is therefore its own source, and the domain offers it only when the chain
+being composed names one of its aliases. The domain knows which of its own
+policies are expensive; the role only asks for what the domain permits. A chain
+that asks for it and cannot load it fails, because negotiating under a silently
+substituted strategy is worse than failing.
+
+### A wheel must stand on its own dependency metadata
+
+Installing the whole internal set and importing everything proves the set is
+consistent. It cannot prove any single distribution is self-describing: a package
+whose metadata omits a dependency still imports, because a sibling installed it.
+
+That is not hypothetical. Moving the listing models and the negotiation policies
+into `arkhai_vms` gave it module-scope imports of `market_alkahest` and
+`market_policy` while its metadata still declared only `pydantic` and
+`arkhai-core`. Every suite passed and an aggregate install imported cleanly.
+
+So closure is checked per wheel: one distribution installed alone, resolving only
+what it declares, then every module it ships imported. A module that cannot be
+imported that way names a dependency the package is not declaring.
+
+Internal dependencies are supplied as explicit file paths rather than resolved
+from the wheelhouse by name, because several internal distributions are also
+published publicly at the same version numbers — a resolver given an index and a
+version cannot distinguish a fresh local build from a stale published one, and
+would report a defect that is really a stale artifact or hide one behind a fresher
+published copy.
+
+### Deletions are tombstones, and pruning them is a repository operation
+
+A tombstone records why a file went, at the path it went from, which is what makes
+a deletion reviewable in a diff. It also means a fileset carrying a tombstone
+restores the tombstone rather than the deletion, so a tree can hold tombstones a
+reviewer has already actioned. `make prune-tombstones` makes that idempotent.
+
+Recognising one is deliberately strict: the whole file must be the comment. A file
+beginning with the marker above live code is not deleted, and the documents that
+define this convention show a tombstone inside a fenced example. One predicate
+serves both the manifest audit and the prune utility, because they diverged on
+exactly that case — one treated such a file as deleted, the other retained it.
+
+Pruning also removes directories left holding no source, recursively and scoped to
+the source roots. A package whose modules were all tombstoned is a deleted
+package, not an empty one; and a utility that deletes directories should not be
+able to reach an arbitrary path.
+
+## Risks
+
+- The split touches 143 import sites across two Dockerfiles, `compose.yml`,
+  and four packages. Mechanical, but broad, and the storefront's policy
+  discovery currently depends on the source tree the split removes.
+- Strict composition will surface any policy name a domain resolves but does
+  not own. `apicredits` was verified independent — all four of its guards are
+  its own and its three shared names come from kit — but the check must be
+  repeated after the split rather than trusted from this audit.
+- `configured_buyer_policy` deliberately tolerates an unknown policy name when
+  rendering `market --help` and is strict when loading a chain, because
+  "silently negotiating under a policy the user never chose is worse than
+  failing." Converting that registry must preserve both modes; a uniform
+  strict conversion would break `--help` on a bad config.
+- Removing unconditional scanning of `~/.config/arkhai/policies` is a
+  behaviour change for any operator relying on it. No repository
+  configuration sets `extra_policy_paths` and its declared default is empty,
+  but the path is scanned today regardless of that setting.
+
+## Verification Strategy
+
+- Build `arkhai-vms-buyer` and assert every module its shipped code imports
+  resolves inside the wheel, with no file present that no distribution owns.
+- Compose a catalogue from two sources offering one name and assert the error
+  names both providers.
+- Compose with a source that raises and assert startup fails rather than
+  logging and continuing.
+- Configure a chain naming an unavailable policy and assert the error lists
+  what is available, without instructing the reader to import any package.
+- Compose buyer and storefront catalogues in one process and assert they are
+  independent values.
+- Run the VM and API-credit storefront negotiation suites and the E2E buyer
+  CLI scenario that currently fails at stage B4.
+- Start the VM storefront from an image built without `COPY domains/` and
+  assert its configured chain resolves.
+
+## E2E capacity setup (added 2026-08-11)
+
+Section 9's verification stalled on scenario setup, and two rounds of fixes missed because
+the diagnosis had one hop wrong. `e2e-inventory-findings.md`'s correction section records
+the trace; this records the decisions Section 11 encodes.
+
+**Capacity is declared, not derived, and the scenarios must declare it.** The host-derived
+fallback in `_project_host` populates the resource-pool projection and creates no
+`CapacityBucket`. Every claim — `probe`, `reserve`, and the negotiation guard's
+`snapshot()` — matches buckets. So a scenario that registers only a host has no sellable
+capacity, whatever the projection reports. Three options were weighed for how the scenarios
+should get one: a mounted capacity-definitions file, the host-to-declaration derivation
+step, or an explicit declaration per scenario. The first two are `capacity-resource-administration`'s
+unstarted work, and coupling this change's verification to a 36-task change was rejected.
+The third uses the endpoint that change promotes to the operator surface anyway, so the
+scenarios exercise the path the design makes authoritative.
+
+**A fungible pool is several executors, not several declarations on one.** `site-capacity`
+records one current bucket per host for the VM domain, and the bucket projection's
+`resource_count` over identically-shaped buckets is what expresses fungibility. Two
+declarations on one host is not a fungible pool — it is the same hardware sold twice, which
+is what the duplicate-correlation guard exists to refuse. The corrected setup is one pool,
+two hosts, one declaration each.
+
+**Each scenario owns its executor.** Every VM scenario seeds one shared host today, which is
+incompatible with one declaration per executor and was already a coupling: a host registered
+with one GPU by one scenario made another fail as though no inventory matched. Per-scenario
+hosts remove the coupling and the incompatibility together.
+
+**A declaration's id stays distinct from its executor's name.** `compute_capacity_claim_from_order`
+pins the listing's own `offer_resource.resource_id` into the claim, so a specific-resource
+listing only matches a declaration carrying that commercial id. Naming declarations after
+their host would have required rewriting every listing's offer, and would couple commercial
+identity to an Ansible alias. The executor attribute carries the correlation instead —
+which is what `load_capacity_resource_inventory` already keys on.

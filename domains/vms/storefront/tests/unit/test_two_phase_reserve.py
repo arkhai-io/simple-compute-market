@@ -61,6 +61,7 @@ def _hold(**overrides) -> dict:
 # Settlement half: commit the hold before provisioning
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_valid_hold_commits_before_provisioning():
     capacity = FakeCapacity()
@@ -123,13 +124,16 @@ async def test_lapsed_hold_falls_back_to_fresh_reserve():
     _, stage_event = _events()
 
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-    assert await _commit_capacity_hold(
-        capacity=capacity,
-        held_reservation=_hold(hold_expires_at=past),
-        escrow_uid="0xesc",
-        duration_seconds=3600,
-        stage_event=stage_event,
-    ) is None
+    assert (
+        await _commit_capacity_hold(
+            capacity=capacity,
+            held_reservation=_hold(hold_expires_at=past),
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
+        is None
+    )
     assert capacity.commit_calls == []
 
 
@@ -140,32 +144,39 @@ async def test_ledger_refusal_falls_back_to_fresh_reserve():
     capacity = FakeCapacity(commit_error=RuntimeError("409 conflict"))
     _, stage_event = _events()
 
-    assert await _commit_capacity_hold(
-        capacity=capacity,
-        held_reservation=_hold(),
-        escrow_uid="0xesc",
-        duration_seconds=3600,
-        stage_event=stage_event,
-    ) is None
+    assert (
+        await _commit_capacity_hold(
+            capacity=capacity,
+            held_reservation=_hold(),
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
 async def test_no_hold_means_no_commit():
     capacity = FakeCapacity()
     _, stage_event = _events()
-    assert await _commit_capacity_hold(
-        capacity=capacity,
-        held_reservation=None,
-        escrow_uid="0xesc",
-        duration_seconds=3600,
-        stage_event=stage_event,
-    ) is None
+    assert (
+        await _commit_capacity_hold(
+            capacity=capacity,
+            held_reservation=None,
+            escrow_uid="0xesc",
+            duration_seconds=3600,
+            stage_event=stage_event,
+        )
+        is None
+    )
     assert capacity.commit_calls == []
 
 
 # ---------------------------------------------------------------------------
 # Acceptance half: place the hold and remember it
 # ---------------------------------------------------------------------------
+
 
 def _settings(ttl: float):
     return SimpleNamespace(capacity=SimpleNamespace(hold_ttl_seconds=ttl))
@@ -174,7 +185,9 @@ def _settings(ttl: float):
 ORDER = {
     "listing_id": "lst-1",
     "offer_resource": {
-        "resource_id": "res-1", "gpu_model": "H200", "gpu_count": 2,
+        "resource_id": "res-1",
+        "gpu_model": "H200",
+        "gpu_count": 2,
     },
 }
 
@@ -185,7 +198,8 @@ def test_claim_survives_listing_model_validation():
     after such a validation, and an un-pinned claim makes the hold grab
     whatever resource is first in line (the e2e caught this as a deal
     provisioned on the wrong machine)."""
-    from domains.vms.listings.models import Listing
+    from arkhai_vms.listing_models import Listing
+
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -195,8 +209,11 @@ def test_claim_survives_listing_model_validation():
         "status": "open",
         "seller": "http://seller:8001",
         "offer_resource": {
-            "resource_id": "res-pin", "gpu_model": "H200", "gpu_count": 2,
-            "sla": 99.0, "region": "California, US",
+            "resource_id": "res-pin",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 99.0,
+            "region": "California, US",
         },
         "accepted_escrows": [],
     }
@@ -210,8 +227,7 @@ def test_claim_survives_listing_model_validation():
 def test_claim_prefers_resource_id_over_pool_id():
     """A listing carrying both pool_id and resource_id is an intentionally
     specific-resource listing: resource_id wins and pool_id is dropped from
-    the claim, rather than requiring both to match (POOLS-4 design review,
-    2026-07-16)."""
+    the claim, rather than requiring both to match."""
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -219,8 +235,12 @@ def test_claim_prefers_resource_id_over_pool_id():
     row = {
         "listing_id": "lst-both",
         "offer_resource": {
-            "pool_id": "pool-A", "resource_id": "res-pin", "gpu_model": "H200",
-            "gpu_count": 2, "sla": 99.0, "region": "California, US",
+            "pool_id": "pool-A",
+            "resource_id": "res-pin",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 99.0,
+            "region": "California, US",
         },
     }
     claim = compute_capacity_claim_from_order(row)
@@ -231,6 +251,7 @@ def test_claim_prefers_resource_id_over_pool_id():
 # ----------------------------------------------------------------------
 # multidimensional claim building
 # ----------------------------------------------------------------------
+
 
 def test_claim_carries_dimensions_when_listing_declares_a_shape():
     """gpu_count/vcpu_count/ram_gb/disk_gb move into a dimensions map,
@@ -244,14 +265,22 @@ def test_claim_carries_dimensions_when_listing_declares_a_shape():
     row = {
         "listing_id": "lst-shaped",
         "offer_resource": {
-            "resource_id": "res-shaped", "gpu_model": "H200", "gpu_count": 2,
-            "sla": 99.0, "region": "California, US",
-            "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+            "resource_id": "res-shaped",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 99.0,
+            "region": "California, US",
+            "vcpu_count": 8,
+            "ram_gb": 64,
+            "disk_gb": 500,
         },
     }
     claim = compute_capacity_claim_from_order(row)
     assert claim["dimensions"] == {
-        "gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 500,
+        "gpu_count": 2,
+        "vcpu_count": 8,
+        "ram_gb": 64,
+        "disk_gb": 500,
     }
     # gpu_count moved off the top level entirely -- it's a dimensions-only
     # key now, not also an exact-match attribute.
@@ -262,7 +291,8 @@ def test_claim_carries_dimensions_when_listing_declares_a_shape():
 def test_claim_omits_undeclared_dimensions_for_older_listings():
     """A listing published before vcpu_count/ram_gb/disk_gb existed (or
     that simply never set them) still produces a valid claim -- gpu_count
-    alone, exactly like every claim before this change."""
+    alone, the same shape any claim without a declared multidimensional
+    shape produces."""
     from market_storefront.services.vm_job_spec_service import (
         compute_capacity_claim_from_order,
     )
@@ -270,8 +300,11 @@ def test_claim_omits_undeclared_dimensions_for_older_listings():
     row = {
         "listing_id": "lst-unshaped",
         "offer_resource": {
-            "resource_id": "res-unshaped", "gpu_model": "H200", "gpu_count": 1,
-            "sla": 99.0, "region": "California, US",
+            "resource_id": "res-unshaped",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.0,
+            "region": "California, US",
         },
     }
     claim = compute_capacity_claim_from_order(row)
@@ -321,8 +354,10 @@ def test_claim_raises_when_neither_pool_id_nor_resource_id_present():
     row = {
         "listing_id": "lst-under-specified",
         "offer_resource": {
-            "gpu_model": "H200", "gpu_count": 2,
-            "sla": 99.0, "region": "California, US",
+            "gpu_model": "H200",
+            "gpu_count": 2,
+            "sla": 99.0,
+            "region": "California, US",
         },
     }
     with pytest.raises(ValueError, match="lst-under-specified"):
@@ -334,14 +369,21 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    with patch(
-        "market_storefront.utils.config.settings", _settings(900),
-    ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
-        return_value=capacity,
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(900),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=capacity,
+        ),
     ):
         await _place_capacity_hold(
-            db, negotiation_id="neg-1", listing_id="lst-1", order_dict=ORDER,
+            db,
+            negotiation_id="neg-1",
+            listing_id="lst-1",
+            order_dict=ORDER,
         )
 
     reserve = capacity.reserve_calls[0]
@@ -355,31 +397,153 @@ async def test_acceptance_places_and_records_the_hold(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
+    """A listing already mapped to a site (derived_compute_listings)
+    must place its acceptance-time hold there -- proves site_id
+    resolution reaches _place_capacity_hold's reserve() call, not just
+    that reserve() itself honors a site kwarg when given one."""
+    from market_storefront.listings.reconciler import record_derived_listing
+
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    record_derived_listing(
+        db.db_path,
+        listing_id="lst-1",
+        site_id="dc-mapped",
+        resource_id="res-1",
+        gpu_count=2,
+    )
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(900),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=capacity,
+        ),
+    ):
+        await _place_capacity_hold(
+            db,
+            negotiation_id="neg-mapped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["site"] == "dc-mapped"
+
+
+@pytest.mark.asyncio
 async def test_acceptance_survives_hold_refusal_and_zero_ttl(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
 
     # No capacity: acceptance proceeds, nothing recorded.
     refused = FakeCapacity(reserve_result=None)
-    with patch(
-        "market_storefront.utils.config.settings", _settings(900),
-    ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
-        return_value=refused,
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(900),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=refused,
+        ),
     ):
         await _place_capacity_hold(
-            db, negotiation_id="neg-2", listing_id="lst-1", order_dict=ORDER,
+            db,
+            negotiation_id="neg-2",
+            listing_id="lst-1",
+            order_dict=ORDER,
         )
     assert await db.load_capacity_hold(negotiation_id="neg-2") is None
 
     # ttl 0 disables the feature entirely.
     disabled = FakeCapacity(reserve_result=_hold())
-    with patch(
-        "market_storefront.utils.config.settings", _settings(0),
-    ), patch(
-        "market_storefront.services.capacity_client.build_capacity_client",
-        return_value=disabled,
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(0),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=disabled,
+        ),
     ):
         await _place_capacity_hold(
-            db, negotiation_id="neg-3", listing_id="lst-1", order_dict=ORDER,
+            db,
+            negotiation_id="neg-3",
+            listing_id="lst-1",
+            order_dict=ORDER,
         )
     assert disabled.reserve_calls == []
+
+
+@pytest.mark.asyncio
+async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_preference(
+    tmp_path,
+):
+    """The full acceptance-hold sequence as one real orchestration:
+    lookup_pool_policy_tags -> capped_hold_seconds -> reserve(ttl_seconds=...),
+    not just each piece proven independently. A requested TTL of 900s,
+    capped by a mapped pool's max_reservation_hold_seconds=30, must reach
+    reserve() as 30, not 900.
+    """
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(900),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=capacity,
+        ),
+        patch(
+            "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+            return_value={"max_reservation_hold_seconds": 30},
+        ),
+    ):
+        await _place_capacity_hold(
+            db,
+            negotiation_id="neg-capped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["ttl_seconds"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
+    """The other side of the same sequence: an empty/absent policy_tags
+    result (the ordinary case -- no mapped pool, or one with no hold
+    preference) must leave the storefront's own configured TTL untouched,
+    not silently zero it or something else unintended."""
+    db = SQLiteClient(db_path=str(tmp_path / "hold.db"))
+    capacity = FakeCapacity(reserve_result=_hold())
+
+    with (
+        patch(
+            "market_storefront.utils.config.settings",
+            _settings(900),
+        ),
+        patch(
+            "market_storefront.services.capacity_client.build_capacity_client",
+            return_value=capacity,
+        ),
+        patch(
+            "market_storefront.utils.sync_negotiation.lookup_pool_policy_tags",
+            return_value={},
+        ),
+    ):
+        await _place_capacity_hold(
+            db,
+            negotiation_id="neg-uncapped",
+            listing_id="lst-1",
+            order_dict=ORDER,
+        )
+
+    assert capacity.reserve_calls[0]["ttl_seconds"] == 900

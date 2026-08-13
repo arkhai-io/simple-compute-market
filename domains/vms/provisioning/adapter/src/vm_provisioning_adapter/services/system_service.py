@@ -182,6 +182,7 @@ class SystemService:
         session_factory: "Optional[sessionmaker[Session]]" = None,
         job_queue_provider: "Optional[Callable[[], AsyncJobQueue]]" = None,
         lease_lifecycle_service: "Optional[LeaseLifecycleService]" = None,
+        fulfillment_convergence_watchdog: Any | None = None,
     ) -> None:
         self._ansible = ansible_service
         self._settings = settings
@@ -189,6 +190,7 @@ class SystemService:
         self._session_factory = session_factory
         self._job_queue_provider = job_queue_provider
         self._lease_lifecycle_service = lease_lifecycle_service
+        self._fulfillment_convergence_watchdog = fulfillment_convergence_watchdog
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -394,6 +396,27 @@ class SystemService:
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
+    async def force_fulfillment_convergence(self) -> dict:
+        """Run one production fulfillment convergence cycle."""
+        if self._fulfillment_convergence_watchdog is None:
+            return {"error": "fulfillment_convergence_watchdog not initialised"}
+        return await self._fulfillment_convergence_watchdog.run_cycle()
+
+    async def clear_fulfillment_claims(self) -> dict:
+        """Free every claimed settlement record so the next cycle re-reads it.
+
+        Exists because a claim lease outlives the cycle that took it. A caller who
+        has just made an operation finish cannot observe that by running another
+        cycle — the record is still leased — and waiting out the lease is the only
+        other way. That makes an end-to-end scenario wait on a timer for something
+        it caused, which is precisely what deliberate advance controls exist to
+        avoid. Also useful against a fulfillment an operator believes is stuck.
+        """
+        if self._fulfillment_convergence_watchdog is None:
+            return {"error": "fulfillment_convergence_watchdog not initialised"}
+        cleared = self._fulfillment_convergence_watchdog.clear_all_claims()
+        return {"cleared": int(cleared)}
+
     async def force_check_leases(self) -> dict:
         """Run one lease lifecycle cycle, bypassing the pause gate."""
         if self._lease_lifecycle_service is None:

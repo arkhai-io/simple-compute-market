@@ -11,14 +11,18 @@ dependencies = [
 	"arkhai-core-registry-client>=0.7.0",
     "arkhai-core-storefront-client>=0.16.0",
     "arkhai-core-storefront>=0.2.0",
+    "arkhai-kit-site-client>=0.1.0",
+    "arkhai-kit-resource-pools>=0.1.0",
     "arkhai-core>=0.2.0",
     "arkhai-kit-identity",
     "arkhai-kit-alkahest",
     "arkhai-kit-config",
     "arkhai-kit-policy",
+    "arkhai-kit-site>=0.2.0",
     "arkhai-bare-metal>=0.2.0",
     "arkhai-vms>=0.2.0",
     "arkhai-compute-provisioning>=0.3.0",
+    "arkhai-kit-fulfillment>=0.1.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
@@ -150,6 +154,9 @@ build-backend = "hatchling.build"
 pythonpath = ["src", "../../.."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "torch: requires the [rl] extra; exercises the torch negotiation strategy",
+]
 
 [tool.hatch.metadata]
 allow-direct-references=true

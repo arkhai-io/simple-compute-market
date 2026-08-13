@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from vm_provisioning_adapter.bundle import build_vm_adapter_bundle
 from vm_provisioning_adapter.compute_adapter import VmComputeAdapter
-from vm_provisioning_adapter.release import VmReleaseExecutor
+from vm_provisioning_adapter.release import VmFulfillmentReleaseJobPort, VmReleaseExecutor
 from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
     AnsibleFulfillmentProvider,
 )
@@ -35,11 +35,12 @@ class VmProvisioningRuntime:
     job_service: AnsibleJobService
     vm_operations_service: VmOperationsService
     host_operations_service: HostOperationsService
+    settlement_repository: Any
+    teardown_port: Any
 
     def fulfillment_provider(self, resource_pool_service):
         return AnsibleFulfillmentProvider(
             job_service=self.job_service,
-            resource_pool_service=resource_pool_service,
             job_queue_provider=self.job_queue_provider,
         )
 
@@ -53,14 +54,20 @@ class VmProvisioningRuntime:
                 self.vm_operations_service,
             ),
             release_executor=VmReleaseExecutor(
-                job_service=self.job_service,
-                job_queue_provider=self.job_queue_provider,
+                settlement_repository=self.settlement_repository,
+                session_factory=self.session_factory,
+                teardown_port=self.teardown_port,
             ),
             fulfillment_provider=self.fulfillment_provider(resource_pool_service),
             readiness_check=self.readiness,
         )
 
-    def system_service(self, *, lease_lifecycle_service):
+    def release_job_port(self) -> VmFulfillmentReleaseJobPort:
+        return VmFulfillmentReleaseJobPort(self.teardown_port)
+
+    def system_service(
+        self, *, lease_lifecycle_service, fulfillment_convergence_watchdog=None,
+    ):
         from vm_provisioning_adapter.services.system_service import SystemService
 
         return SystemService(
@@ -70,7 +77,29 @@ class VmProvisioningRuntime:
             session_factory=self.session_factory,
             job_queue_provider=self.job_queue_provider,
             lease_lifecycle_service=lease_lifecycle_service,
+            fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
         )
+
+
+def project_ansible_pool_defaults(raw_view: Mapping[str, Any]) -> dict[str, Any]:
+    """Shape an Ansible pool's configured VM size defaults for the
+    site-authority resource-pool projection's `pool_views` field.
+
+    Mirrors `bare_metal_provisioning_adapter.runtime.project_bare_metal_resource`'s
+    placement (the domain adapter shapes its own view; the generic
+    composer only calls out to it) but not its pydantic-validation
+    mechanism -- three optional scalars with no cross-field validation
+    need (the handler already enforces value constraints at write time)
+    don't warrant a dedicated model. Only present (non-`None`) fields are
+    included, so a pool with no configured defaults produces an empty
+    dict -- the caller omits `pool_views` entirely in that case rather
+    than emitting an empty view.
+    """
+    return {
+        key: raw_view[key]
+        for key in ("default_vm_ram", "default_vm_vcpus", "default_vm_disk_size")
+        if raw_view.get(key) is not None
+    }
 
 
 def build_vm_runtime(
@@ -78,6 +107,8 @@ def build_vm_runtime(
     config,
     session_factory,
     job_queue_provider: Callable[[], Any],
+    settlement_repository,
+    teardown_port: Any,
 ) -> VmProvisioningRuntime:
     active = [
         profile.strip()
@@ -122,4 +153,6 @@ def build_vm_runtime(
             job_service=job_service,
             job_queue_provider=job_queue_provider,
         ),
+        settlement_repository=settlement_repository,
+        teardown_port=teardown_port,
     )

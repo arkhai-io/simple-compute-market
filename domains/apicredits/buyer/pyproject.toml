@@ -14,7 +14,7 @@ dependencies = [
   "alkahest-py==1.1.2",
   "arkhai-core-buyer>=0.2.0",
   "arkhai-core>=0.2.0",
-  "arkhai-apicredits-domain",
+  "arkhai-apicredits-domain>=0.1.0",
   "arkhai-kit-alkahest",
   "arkhai-kit-config",
   "arkhai-kit-policy",
@@ -44,7 +44,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 only-include = ["__init__.py"]
-dev-mode-dirs = ["../../.."]
 
 # Shared schema, listing, negotiation, settlement, and contract modules are
 # owned by arkhai-apicredits-domain; this wheel owns only buyer-role modules.
@@ -59,4 +58,4 @@ dev-mode-dirs = ["../../.."]
 "settle_cli.py" = "domains/apicredits/buyer/settle_cli.py"
 
 [tool.pytest.ini_options]
-pythonpath = ["../../..", "."]
+pythonpath = ["."]

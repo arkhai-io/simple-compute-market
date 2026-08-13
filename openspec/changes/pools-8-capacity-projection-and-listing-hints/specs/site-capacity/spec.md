@@ -1,18 +1,18 @@
 ## ADDED Requirements
 
-### Requirement: Durable independent projection generations
+### Requirement: Per-site projection load-state visibility
 
-A storefront MUST persist the last accepted complete resource-pool and capacity-bucket projection generations independently for each operator-configured site binding. Each stored generation MUST retain its authority-local revision, digest, freshness, and stale state; refresh failure MUST NOT replace it with an empty or partial value.
+A storefront MUST report, per configured site and per independent projection family (resource-pool, capacity-bucket), whether that projection has ever successfully loaded, is currently loaded, is stale, or is unavailable. This state MUST be visible on the storefront's existing operator status surface. A storefront MUST NOT persist projection generations durably across restart; retry-until-success plus this observable status is the accepted mechanism for a site being unreachable at storefront startup.
 
-#### Scenario: Storefront restarts with cached projections
+#### Scenario: A configured site is unreachable at storefront startup
 
-- **WHEN** a storefront restarts after accepting complete generations from several sites
-- **THEN** it restores each family and site independently as stale until polling confirms or replaces that generation
+- **WHEN** the storefront starts and one configured site's projection load has not yet succeeded
+- **THEN** operator status reports that site/family as not-yet-loaded rather than presenting an empty projection as authoritative, and the storefront continues retrying without blocking readiness for other configured sites
 
-#### Scenario: One projection family fails to refresh
+#### Scenario: One projection family fails to refresh after a successful load
 
 - **WHEN** a resource-pool refresh fails while the capacity-bucket family advances
-- **THEN** the storefront retains the previous resource-pool generation as stale and commits the capacity-bucket replacement independently
+- **THEN** the storefront retains the previous resource-pool generation in memory as stale, reports that state on the status surface, and commits the capacity-bucket replacement independently
 
 ### Requirement: Publication-safe resource-pool metadata
 

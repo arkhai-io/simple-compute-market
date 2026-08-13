@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
+
+from arkhai_bare_metal import BareMetalResourceProjection
 
 from bare_metal_provisioning_adapter.bundle import build_bare_metal_adapter_bundle
 from bare_metal_provisioning_adapter.compute_adapter import BareMetalComputeAdapter
@@ -37,6 +39,11 @@ class BareMetalProvisioningRuntime:
             ),
             readiness_check=self.readiness,
         )
+
+
+def project_bare_metal_resource(raw_view: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and serialize the public bare-metal resource projection."""
+    return BareMetalResourceProjection.model_validate(raw_view).model_dump(mode="json")
 
 
 def build_bare_metal_runtime(

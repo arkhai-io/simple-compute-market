@@ -77,6 +77,8 @@ This change owns this bare-metal-specific producer/interpreter contract so compo
 
 A URL or admin key embedded in buyer-controlled terms or copied through opaque deal metadata is not an ownership authority. Reverse delivery and credential lookup remain separately owned by the result-delivery change.
 
+**Addendum (2026-08-03, during POOLS-8 Section 5 discussion):** POOLS-8's Section 4 design now gives `core_storefront.aggregation.AggregateCapacityClient.reserve()` an explicit `site:` parameter, dispatching to `_reserve_at_site` (exactly one site, no fan-out fallback) versus `_reserve_by_placement` (today's multi-site trial order, for claims with no known site mapping). The underlying principle matches this section's own design exactly: the storefront commits to a *site*; the provisioning service commits to a *physical resource*, whether via its own ledger admission match or its fulfillment provider's placement. This section's `physical_resource_id`/`physical_host_id`/`machine_id` non-inference rule ("None may be inferred from another") is the bare-metal-specific instance of the same boundary. Section 3.2 should consume `reserve(site=...)` directly rather than reinvent equivalent routing.
+
 ### Reuse shared storefront persistence and versioned envelopes
 
 Negotiation, agreement, settlement, and lifecycle correlation use the shared storefront persistence contracts and versioned domain envelopes. Domain-specific physical/access payloads remain opaque serialized values or references owned by the bare-metal codec. Any new table must represent a bare-metal authority that cannot be represented by the shared lifecycle and requires an explicit migration.
@@ -124,7 +126,7 @@ The bare-metal composition will import shared behavior directly from these `core
 - advisory capacity and publication primitives: `capacity.py`, `capacity_remote.py`, `aggregation.py`, `site_projections.py`, and the `publication_*` and `registry_publication.py` modules;
 - generic protocol carriers and SQLite base/migration utilities where their contracts are sufficient.
 
-`AggregateCapacityClient` is reusable for independent site snapshots, but it is not durable selected-site fulfillment routing. The bare-metal composition will retain site choice through its own injected lifecycle port until POOLS-7 supplies the production contract.
+`AggregateCapacityClient` is reusable for independent site snapshots and, as of POOLS-8's Section 4 design (2026-08-03), for durable site-*reservation* routing too — its `reserve(site=...)` parameter dispatches to a site-targeted path with no fan-out fallback, populating the same `_reservation_sites` cache the class's fulfillment-side sibling (`AggregateFulfillmentClient`) already reads to route `schedule_resource` calls to the owning site. This does not by itself make site choice durable across a process restart (`_reservation_sites` remains an in-memory, re-learnable cache, not a ledger — see its own docstring), so the bare-metal composition still needs task 3.3's persisted selected-site record for restart durability; but the routing correctness gap this section flagged is closed at the aggregator level, and Section 3.2 should build on `reserve(site=...)` directly rather than extracting or reinventing equivalent logic. This closes only the *reservation*-step routing gap. The *fulfillment*-step contract itself (schedule/status/result/teardown calls) is unaffected and remains POOLS-7's dependency exactly as before.
 
 ### Keep VM semantics in the VM composition
 
@@ -144,6 +146,7 @@ Bare-metal buyer provision input uses the versioned `{kind: "bare_metal.v1", ver
 
 - Does the initial deployment use a dedicated bare-metal storefront image or one shared storefront image with separate composition entry points? Packaging evidence should decide before implementation tasks for deployment begin.
 - What buyer-visible representation should carry short-lived access results once POOLS-7 finalizes credential/result retrieval semantics?
+- **Added 2026-08-03:** this change's Section 3 now has a real dependency on POOLS-8's Section 4 (the `reserve(site=...)` routing fix), not just POOLS-7 — should `proposal.md`'s "Dependencies and Related Changes" name that explicitly, and does Section 3.2 block on POOLS-8 landing in production, or is it safe to build against POOLS-8's design/interface before its own implementation is merged (mirroring how this change already builds POOLS-7-dependent work behind injected ports)?
 
 ## Permanent Documentation Promotion
 

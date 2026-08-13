@@ -24,6 +24,7 @@ from compute_provisioning_service.config import settings
 from compute_provisioning_service.middleware.auth import StorefrontAuthMiddleware
 from compute_provisioning_service.middleware.rate_limit import AgentRateLimitMiddleware
 from compute_provisioning_service.services.capacity_inventory import (
+    load_capacity_pool_metadata,
     load_capacity_resource_inventory,
 )
 
@@ -40,6 +41,7 @@ from vm_provisioning_adapter.routers import vm_mock_router, vm_router_mounts  # 
 from bare_metal_provisioning_adapter.routers import bare_metal_router_mounts  # noqa: E402
 from compute_provisioning_service.controllers.compute_contract_controller import ComputeContractController  # noqa: E402
 from compute_provisioning_service.controllers.pools_controller import PoolController  # noqa: E402
+from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController  # noqa: E402
 from market_site.router import make_capacity_router  # noqa: E402
 
 
@@ -166,6 +168,10 @@ def _capacity_resource_inventory() -> list[dict[str, object]]:
     )
 
 
+def _capacity_pool_directory() -> dict[str, dict[str, object]]:
+    return load_capacity_pool_metadata(container.session_factory())
+
+
 app = build_compute_provisioning_app(
     config=ComputeProvisioningAppConfig(
         title="Provisioning Service",
@@ -202,10 +208,12 @@ app = build_compute_provisioning_app(
         *bare_metal_router_mounts(),
         ComputeProvisioningRouterMount(ComputeContractController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(PoolController.make_router(), "/api/v1"),
+        ComputeProvisioningRouterMount(FulfillmentController.make_router(), "/api/v1"),
         ComputeProvisioningRouterMount(
             make_capacity_router(
                 lambda: _container_module.resolved_capacity_ledger_service,
                 get_resource_inventory=_capacity_resource_inventory,
+                get_pool_directory=_capacity_pool_directory,
             ),
             "/api/v1",
         ),

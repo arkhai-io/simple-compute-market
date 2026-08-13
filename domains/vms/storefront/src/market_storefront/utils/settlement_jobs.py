@@ -29,7 +29,9 @@ from market_core.schemas import EscrowProposal
 logger = logging.getLogger(__name__)
 
 
-def _resolve_duration_seconds(thread: dict[str, Any], order_dict: dict[str, Any]) -> int:
+def _resolve_duration_seconds(
+    thread: dict[str, Any], order_dict: dict[str, Any]
+) -> int:
     """Duration the buyer's lease was negotiated for.
 
     Falls back through the negotiation thread, the listing's advertised
@@ -108,9 +110,7 @@ async def start_settlement_job(
 
     chain_cfg = CHAINS.get(chain_name)
     if chain_cfg is None:
-        raise ValueError(
-            f"chain {chain_name!r} is not configured on this storefront"
-        )
+        raise ValueError(f"chain {chain_name!r} is not configured on this storefront")
 
     thread = await sqlite_client.load_negotiation_thread_row(
         negotiation_id=negotiation_id,
@@ -126,7 +126,11 @@ async def start_settlement_job(
         raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
 
     our_listing_id = thread.get("our_listing_id")
-    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id) if our_listing_id else None
+    our_order_dict = (
+        await sqlite_client.load_listing(listing_id=our_listing_id)
+        if our_listing_id
+        else None
+    )
     if not our_order_dict:
         raise ValueError(
             f"Seller's order {our_listing_id!r} (from negotiation {negotiation_id}) "
@@ -186,7 +190,9 @@ async def start_settlement_job(
     if proposal_chain and proposal_chain != chain_name:
         logger.warning(
             "[SETTLE_JOB] Proposal chain %r diverges from request chain %r; "
-            "using proposal chain.", proposal_chain, chain_name,
+            "using proposal chain.",
+            proposal_chain,
+            chain_name,
         )
 
     inserted = await sqlite_client.insert_escrow(
@@ -202,7 +208,8 @@ async def start_settlement_job(
         existing = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
         logger.info(
             "[SETTLE_JOB] Job already exists for escrow %s: status=%s",
-            escrow_uid, (existing or {}).get("status"),
+            escrow_uid,
+            (existing or {}).get("status"),
         )
         return existing or {}
 
@@ -257,10 +264,12 @@ async def _run_settlement_job_bg(
 ) -> None:
     """Background coroutine: run fulfillment, patch the job row."""
     from market_storefront.domain_runtime import get_market_domain_contract
-    from market_storefront.utils.config import settings
+    from market_storefront.listings.reconciler import site_id_for_listing
 
     fulfillment = get_market_domain_contract().fulfillment
     assert fulfillment is not None
+
+    site_id = site_id_for_listing(sqlite_client.db_path, listing_id)
 
     try:
         result = await fulfillment.fulfill(
@@ -272,9 +281,12 @@ async def _run_settlement_job_bg(
             start_utc=provision.start_utc,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
+            site_id=site_id,
         )
     except Exception as exc:
-        logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)
+        logger.exception(
+            "[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid
+        )
         await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="failed",
@@ -290,7 +302,8 @@ async def _run_settlement_job_bg(
             fulfillment_uid=result.get("fulfillment_uid"),
             connection_details=result.get("connection_details"),
             tenant_credentials=json.dumps(result.get("tenant_credentials"))
-                if result.get("tenant_credentials") is not None else None,
+            if result.get("tenant_credentials") is not None
+            else None,
         )
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", escrow_uid)
         # Hand the fulfilled deal to the claims engine: arbitration (when
@@ -324,7 +337,8 @@ async def _run_settlement_job_bg(
         )
         logger.warning(
             "[SETTLE_JOB] Escrow %s provisioning did not succeed: %s",
-            escrow_uid, reason,
+            escrow_uid,
+            reason,
         )
 
 
@@ -343,6 +357,7 @@ def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
     }
     for field in (
         "fulfillment_uid",
+        "fulfillment_id",
         "chain_name",
         "escrow_address",
         "provisioning_job_id",

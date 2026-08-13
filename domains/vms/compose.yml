@@ -118,9 +118,10 @@ services:
       # e2e-mock-happy). Wired into the storefront runtime via TOML override.
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
-      # The storefront's policy discovery needs `domains/` on PYTHONPATH
-      # so it can find domains.vms.negotiation.rl callables.
-      - PYTHONPATH=/app:/app/src
+      # /app/src carries the market_storefront package. The domains/ tree is no
+      # longer on the path: negotiation policies come from the installed
+      # arkhai-vms wheel, not from a source tree.
+      - PYTHONPATH=/app/src
     volumes:
       # Chain-/seller-specific config is the one environment-supplied mount;
       # override $VMS_BOB_STOREFRONT_CONFIG to point at a different chain's
@@ -133,8 +134,12 @@ services:
       resources:
         limits:
           memory: 512m
+    # /ready, not /health: `docker compose up -d --wait` gates the e2e run on
+    # this, and /health passes as soon as the routes are mounted — which is
+    # earlier than the timer loops begin cycling. A scenario that paused a
+    # storefront in that window was told loops had stopped that had not started.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/ready')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -166,7 +171,7 @@ services:
       - XDG_CONFIG_HOME=/etc
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
-      - PYTHONPATH=/app:/app/src
+      - PYTHONPATH=/app/src
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
       # Reuses Bob's seed CSV — the multi-registry test seeds inventory
@@ -178,8 +183,9 @@ services:
       resources:
         limits:
           memory: 512m
+    # /ready for the same reason as Bob's, immediately above.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/ready')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6

@@ -24,9 +24,13 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 	--upgrade-package arkhai-kit-alkahest            --reinstall-package arkhai-kit-alkahest \
 	--upgrade-package arkhai-kit-config              --reinstall-package arkhai-kit-config \
 	--upgrade-package arkhai-kit-policy              --reinstall-package arkhai-kit-policy \
+	--upgrade-package arkhai-kit-site                --reinstall-package arkhai-kit-site \
+	--upgrade-package arkhai-kit-resource-pools       --reinstall-package arkhai-kit-resource-pools \
+	--upgrade-package arkhai-kit-fulfillment         --reinstall-package arkhai-kit-fulfillment \
 	--upgrade-package arkhai-vms              --reinstall-package arkhai-vms \
 	--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 	--upgrade-package arkhai-core-storefront-client  --reinstall-package arkhai-core-storefront-client \
+	--upgrade-package arkhai-kit-site-client         --reinstall-package arkhai-kit-site-client \
 	--upgrade-package arkhai-core-registry-client    --reinstall-package arkhai-core-registry-client
 
 # build deliberately does NOT depend on reinit. reinit drives a host-side

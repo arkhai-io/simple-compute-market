@@ -5,6 +5,7 @@ from typing import Any
 from dependency_injector import containers, providers
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
+from compute_provisioning.release import ReleaseJobDispatcher
 from market_resource_pools import ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
@@ -19,9 +20,15 @@ from compute_provisioning_service.composition import compose_adapter_bundles
 from compute_provisioning_service.services.compute_contract_service import ComputeContractService
 from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink, notify_storefront_capacity_released
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
+from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
-from market_fulfillment import PhysicalSettlementScheduler
-from compute_provisioning_service.services.fulfillment_service import FulfillmentService
+from market_fulfillment import (
+    PhysicalSettlementScheduler,
+    SettlementRepository,
+    SqlAlchemySchedulingUnitOfWork,
+    FulfillmentOrchestrator,
+    SqlAlchemyFulfillmentUnitOfWork,
+)
 
 DEFAULT_EXECUTOR_KIND = "vm"
 
@@ -30,6 +37,30 @@ def _resolved_job_queue():
     if resolved_job_queue is None:
         raise RuntimeError("Job queue is not initialised")
     return resolved_job_queue
+
+
+class DeferredFulfillmentTeardownPort:
+    """Cycle-safe narrow port bound once the fulfillment service is composed."""
+
+    def __init__(self) -> None:
+        self._service = None
+
+    def bind(self, service) -> None:
+        if self._service is not None and self._service is not service:
+            raise RuntimeError("fulfillment teardown port is already bound")
+        self._service = service
+
+    def _require_service(self):
+        if self._service is None:
+            raise RuntimeError("fulfillment teardown port is not bound")
+        return self._service
+
+    async def begin_teardown(self, fulfillment_id: str) -> str:
+        accepted = await self._require_service().begin_fulfillment_teardown(fulfillment_id)
+        return accepted.fulfillment_id
+
+    def get_status(self, fulfillment_id: str):
+        return self._require_service().get_fulfillment_status(fulfillment_id)
 
 
 def _make_engine():
@@ -56,8 +87,11 @@ def _bare_metal_bundle(runtime, site_authority):
     return runtime.adapter_bundle(site_authority)
 
 
-def _system_service(runtime, lease_lifecycle_service):
-    return runtime.system_service(lease_lifecycle_service=lease_lifecycle_service)
+def _system_service(runtime, lease_lifecycle_service, fulfillment_convergence_watchdog):
+    return runtime.system_service(
+        lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
+    )
 
 
 def _compose_adapters(vm_bundle, bare_metal_bundle):
@@ -75,6 +109,26 @@ def _release_dispatcher(composed_adapters):
     return composed_adapters.release_dispatcher
 
 
+def _make_release_job_dispatcher(vm_runtime, job_service):
+    """Route release-job status reads: VM through the fulfillment
+    aggregate, bare-metal through the shared job queue, unchanged.
+
+    ``vm_runtime.release_job_port()`` is used rather than reading it off
+    ``composed_adapters`` because ``ReleaseJobPort`` has no place in the
+    generic ``ExecutorAdapterBundle`` contract -- it is specific to
+    ``LeaseLifecycleService``'s polling loop, not a fulfillment-provider or
+    executor-adapter concern the bundle already models.
+    """
+
+    return ReleaseJobDispatcher(
+        {
+            "vm": vm_runtime.release_job_port(),
+            "bare_metal": job_service,
+        },
+        default_executor_kind=DEFAULT_EXECUTOR_KIND,
+    )
+
+
 def _make_compute_contract_service(site_authority, job_service, composed_adapters):
     return ComputeContractService(
         site_authority=site_authority,
@@ -84,13 +138,13 @@ def _make_compute_contract_service(site_authority, job_service, composed_adapter
 
 
 def _make_lease_lifecycle(
-    cfg, site_authority, release_dispatcher, job_service, lifecycle_event_sink
+    cfg, site_authority, release_dispatcher, release_jobs, lifecycle_event_sink
 ):
     return LeaseLifecycleService(
         cfg,
         site_authority,
         executor_release=release_dispatcher,
-        release_jobs=job_service,
+        release_jobs=release_jobs,
         default_executor_kind=DEFAULT_EXECUTOR_KIND,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
@@ -129,11 +183,26 @@ class Container(containers.DeclarativeContainer):
     # Domain runtimes are loaded through adapter entry points. Generic
     # composition never imports concrete request/action/provider models.
     # ------------------------------------------------------------------
+
+    # Declared here, ahead of vm_runtime, because VmReleaseExecutor and
+    # VmFulfillmentReleaseJobPort (built inside vm_runtime) need it to
+    # resolve a reservation's fulfillment_id. Also supplies the concrete
+    # SettlementAbandonmentHook implementation the ledger calls when it
+    # reclaims capacity that might belong to a not-yet-dispatched
+    # settlement assignment (a lapsed hold, a terminal release, or a
+    # negotiation-driven resize) -- market_site defines the hook protocol
+    # but cannot import market_fulfillment to implement it.
+    settlement_repository = providers.Singleton(SettlementRepository)
+
+    fulfillment_teardown_port = providers.Singleton(DeferredFulfillmentTeardownPort)
+
     vm_runtime = providers.Singleton(
         build_vm_runtime,
         config=config,
         session_factory=session_factory,
         job_queue_provider=providers.Object(_resolved_job_queue),
+        settlement_repository=settlement_repository,
+        teardown_port=fulfillment_teardown_port,
     )
 
     ansible_service = providers.Callable(
@@ -180,6 +249,18 @@ class Container(containers.DeclarativeContainer):
         # key — kept explicit here rather than hardcoded in kit/site so the
         # ledger stays domain-neutral.
         unit_claim_keys=("units", "gpu_count"),
+        settlement_abandonment_hook=providers.Callable(
+            lambda repository: repository.abandon_if_assigned,
+            repository=settlement_repository,
+        ),
+    )
+
+    scheduling_unit_of_work = providers.Singleton(
+        SqlAlchemySchedulingUnitOfWork,
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+        capacity_ledger=capacity_ledger_service,
+        repository=settlement_repository,
     )
 
     physical_settlement_scheduler = providers.Singleton(
@@ -192,10 +273,12 @@ class Container(containers.DeclarativeContainer):
         # supplies it explicitly here to keep existing scheduling behavior
         # unchanged.
         default_resource_kind="compute.gpu",
+        repository=settlement_repository,
+        unit_of_work=scheduling_unit_of_work,
     )
 
     # ------------------------------------------------------------------
-    # FulfillmentService takes an already-selected SettlementResource as
+    # Fulfillment orchestration takes an already-selected SettlementResource as
     # input and never calls the scheduler itself.
     # ------------------------------------------------------------------
     ansible_fulfillment_provider = providers.Singleton(
@@ -268,6 +351,12 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
+    release_job_dispatcher = providers.Singleton(
+        _make_release_job_dispatcher,
+        vm_runtime=vm_runtime,
+        job_service=job_service,
+    )
+
     compute_contract_service = providers.Factory(
         _make_compute_contract_service,
         site_authority=site_authority,
@@ -275,10 +364,17 @@ class Container(containers.DeclarativeContainer):
         composed_adapters=composed_adapters,
     )
 
+    fulfillment_unit_of_work = providers.Singleton(
+        SqlAlchemyFulfillmentUnitOfWork,
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+        repository=settlement_repository,
+    )
+
     fulfillment_service = providers.Singleton(
-        FulfillmentService,
+        FulfillmentOrchestrator,
         provider_registry=provider_registry,
-        capacity_ledger=capacity_ledger_service,
+        unit_of_work=fulfillment_unit_of_work,
     )
 
     lifecycle_event_sink = providers.Singleton(
@@ -291,7 +387,7 @@ class Container(containers.DeclarativeContainer):
         cfg=config,
         site_authority=site_authority,
         release_dispatcher=release_dispatcher,
-        job_service=job_service,
+        release_jobs=release_job_dispatcher,
         lifecycle_event_sink=lifecycle_event_sink,
     )
 
@@ -301,10 +397,22 @@ class Container(containers.DeclarativeContainer):
         settings=config,
     )
 
+    fulfillment_convergence_watchdog = providers.Singleton(
+        FulfillmentConvergenceWatchdog,
+        session_factory=session_factory,
+        repository=settlement_repository,
+        provider_registry=provider_registry,
+        settings=config,
+    )
+
     system_service = providers.Singleton(
         _system_service,
         runtime=vm_runtime,
         lease_lifecycle_service=lease_lifecycle_service,
+        # The one-cycle convergence control is only reachable when the service
+        # holds the same watchdog instance the timer drives — a manual cycle must
+        # invoke the production handler, not an alternate path.
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
 
@@ -330,6 +438,7 @@ resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
 resolved_lease_watchdog: "LeaseWatchdog | None" = None
+resolved_fulfillment_convergence_watchdog: "FulfillmentConvergenceWatchdog | None" = None
 resolved_capacity_ledger_service: "CapacityLedgerService | None" = None
 resolved_bare_metal_lease_service: Any | None = None
 resolved_bare_metal_operations_service: Any | None = None
@@ -337,5 +446,5 @@ resolved_executor_lease_service: "ExecutorLeaseService | None" = None
 resolved_compute_contract_service = None
 resolved_resource_pool_service: "ResourcePoolService | None" = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
-resolved_fulfillment_service: "FulfillmentService | None" = None
+resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None

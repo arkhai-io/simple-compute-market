@@ -1,7 +1,7 @@
 """Capacity API: the full reserve→commit→release lifecycle over HTTP.
 
 Exercises the /api/v1/capacity surface the storefront's remote
-CapacityClient will speak — payload shapes here are the wire contract.
+SiteCapacityClient will speak — payload shapes here are the wire contract.
 """
 
 from __future__ import annotations
@@ -116,7 +116,13 @@ async def test_reserve_commit_release_lifecycle(capacity: CapacityApi):
         {"gpu_count": 3, "vm_host": "kvm1"},
         {"listing_id": "lst-1", "escrow_uid": "0xesc"},
     )
-    assert reserved["vm_host"] == "kvm1"
+    # vm_host is intentionally opaque across this boundary (see
+    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
+    # private to the site authority" requirement) -- the claim above
+    # already proves vm_host-attribute matching selected the right
+    # resource, evidenced by the unit counts below, not by reading a
+    # physical-placement field back off the reservation.
+    assert "vm_host" not in reserved
     assert reserved["available_gpu_count"] == 5
     assert (await capacity.snapshot())[0]["available_units"] == 5
 
@@ -175,7 +181,7 @@ async def test_vm_and_bare_metal_claims_use_domain_attributes(capacity: Capacity
 
     assert reserved is not None
     assert "resource_id" not in reserved
-    assert reserved["vm_host"] is None
+    assert "vm_host" not in reserved
 
 
 @pytest.mark.asyncio
@@ -296,3 +302,278 @@ async def test_commit_unknown_reservation_404s(capacity: CapacityApi):
             json={"resource_id": "r", "lease_end_utc": "2099-01-01 00:00"},
         )
         assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_surfaces_pool_metadata(
+    capacity: CapacityApi, client_and_queue,
+):
+    """Proves the full path, through both canonical typed clients rather
+    than a direct DB insert on the write side or a raw HTTP call on the
+    read side:
+
+    ProvisioningClient.create_pool(default_vm_* in provider_config)
+        -> real /api/v1/pools API -> real AnsiblePoolConfigHandler -> DB
+        -> resource-pool projection
+        -> SiteCapacityClient.resource_pool_projection()
+
+    default_vm_* must be settable through the admin API and visible
+    through the storefront's actual projection consumer, not only
+    reachable by writing directly to the database or reading an HTTP
+    route by hand.
+    """
+    from compute_provisioning import PoolCreate
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.db.models import Host
+    from compute_provisioning_service.container import container
+
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(
+        PoolCreate(
+            id="hetzner-eu",
+            label="Hetzner EU",
+            provider="ansible",
+            provider_config={
+                "playbook_path": "playbooks/vm-operations.yaml",
+                "default_vm_ram": 65536,
+                "default_vm_vcpus": 16,
+                "default_vm_disk_size": "500G",
+            },
+        )
+    )
+
+    # The resource-pool projection is built from Host rows (see
+    # capacity_inventory.load_capacity_resource_inventory), not directly
+    # from the ledger's registered resources -- a Host row is required
+    # for anything to appear here at all. No typed client covers Host
+    # creation against an arbitrary pool in this fixture set, so this
+    # part still goes through the DB directly.
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+            pool_id="hetzner-eu",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+
+    assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
+    assert pool_row["pool_metadata"]["enabled"] is True
+    assert pool_row["pool_metadata"]["mechanism"] == "ansible"
+    assert pool_row["pool_metadata"]["pool_views"] == {
+        "vm.ansible_pool_defaults.v1": {
+            "default_vm_ram": 65536,
+            "default_vm_vcpus": 16,
+            "default_vm_disk_size": "500G",
+        },
+    }
+    # Host.gpu_model -> capacity_inventory._project_host -> resource-pool
+    # projection's per-resource attributes -> the real SiteCapacityClient
+    # response. Distinct from the ledger resource's own attributes dict
+    # (registered above) -- proves the Host column specifically survives
+    # the full producer -> client path, not just the ledger-side value.
+    resource_row = next(
+        r for r in pool_row["resources"] if r["physical_resource_id"] == "compute-kvm1-001"
+    )
+    assert resource_row["attributes"]["gpu_model"] == "H200"
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy_tags(
+    capacity: CapacityApi, client_and_queue,
+):
+    """`region`/`sla`/`pricing` need no new wire shape -- they're just
+    more keys inside the already-projected `policy_tags` dict (see the
+    pool-metadata test above). Proves the full path:
+
+    ProvisioningClient.create_pool(policy_tags={region, sla, pricing})
+        -> real /api/v1/pools API -> real ResourcePoolService -> DB
+        -> resource-pool projection
+        -> SiteCapacityClient.resource_pool_projection()
+    """
+    from compute_provisioning import PoolCreate
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.db.models import Host
+    from compute_provisioning_service.container import container
+
+    provisioning_client, _ = client_and_queue
+    await provisioning_client.create_pool(
+        PoolCreate(
+            id="hetzner-eu",
+            label="Hetzner EU",
+            provider="ansible",
+            policy_tags={
+                "region": "California, US",
+                "sla": 99.9,
+                "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
+            },
+            provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
+        )
+    )
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, gpu_model="H200",
+            pool_id="hetzner-eu",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    pool_row = next(row for row in rows if row["resource_pool_id"] == "hetzner-eu")
+
+    assert pool_row["pool_metadata"]["policy_tags"] == {
+        "region": "California, US",
+        "sla": 99.9,
+        "pricing": {"gpu": {"H200": {"min_price": "5.00"}}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_site_resource_pools_projection_omits_pool_views_with_no_defaults(
+    capacity: CapacityApi,
+):
+    """A pool with no configured VM size defaults gets pool_metadata (from
+    ResourcePool's own columns) but no pool_views key at all -- read
+    through the real SiteCapacityClient, not a raw HTTP call."""
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.container import container
+    from compute_provisioning_service.db.models import Host
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=8, pool_id="default",
+        ))
+        db.commit()
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="default",
+        total_units=8,
+        attributes={"vm_host": "kvm1"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.resource_pool_projection()
+    rows = data["resource_pools"]
+    default_row = next(row for row in rows if row["resource_pool_id"] == "default")
+
+    assert "pool_views" not in default_row["pool_metadata"]
+
+
+@pytest.mark.asyncio
+async def test_site_capacity_projection_version_endpoints_through_the_real_client(
+    capacity: CapacityApi,
+):
+    """The one gap left after the four projection-data tests above: the
+    `_version()` siblings (a cheap poll-for-change check, not the full
+    payload) had no real-client coverage of their own. Proves both
+    through a real in-process app, and that each version's revision
+    advances when the corresponding projection's own content changes."""
+    from market_site_client import SiteCapacityClient
+    from compute_provisioning_service.container import container
+    from compute_provisioning_service.db.models import Host
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+
+    pool_version_before = await remote.resource_pool_projection_version()
+    bucket_version_before = await remote.capacity_bucket_projection_version()
+    assert "revision" in pool_version_before
+    assert "digest" in pool_version_before
+    assert "revision" in bucket_version_before
+    assert "digest" in bucket_version_before
+
+    with container.session_factory()() as db:
+        db.add(Host(
+            name="kvm-version-test", kvm_host="10.0.0.2", ssh_user="root",
+            ssh_key_value="/dev/null", gpu_count=4, pool_id="version-pool",
+        ))
+        db.commit()
+    await capacity.register(
+        "compute-version-test-001",
+        pool_id="version-pool",
+        total_units=4,
+        attributes={"vm_host": "kvm-version-test"},
+    )
+
+    pool_version_after = await remote.resource_pool_projection_version()
+    bucket_version_after = await remote.capacity_bucket_projection_version()
+    assert pool_version_after != pool_version_before
+    assert bucket_version_after != bucket_version_before
+
+
+@pytest.mark.asyncio
+async def test_site_capacity_buckets_projection_through_the_real_client(
+    capacity: CapacityApi,
+):
+    """Proves the real `SiteCapacityClient.capacity_bucket_projection()`
+    wire contract end to end, mirroring `resource_pool_projection()`'s own
+    proof above -- capacity buckets are a first-class fungible-mode
+    publication input and need the same real-client coverage. Proves the
+    full path:
+
+    two registered resources with different availability
+        -> real /api/v1/capacity/site-capacity-buckets route
+        -> real SiteCapacityClient.capacity_bucket_projection()
+
+    and that the response has the exact shape reconciler.py's
+    `_fungible_availability_from_buckets` actually consumes
+    (`resource_pool_id`, `available.gpu_count`, `resource_count`,
+    `grouping_attributes`).
+    """
+    from market_site_client import SiteCapacityClient
+
+    await capacity.register(
+        "compute-kvm1-001",
+        pool_id="hetzner-eu",
+        total_units=8,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1", "gpu_model": "H200"},
+    )
+    await capacity.register(
+        "compute-kvm1-002",
+        pool_id="hetzner-eu",
+        total_units=6,
+        resource_subtype="h200",
+        attributes={"vm_host": "kvm1-b", "gpu_model": "H200"},
+    )
+
+    remote = SiteCapacityClient("http://test", transport=ASGITransport(app=app))
+    data = await remote.capacity_bucket_projection()
+    buckets = [
+        b for b in data["capacity_buckets"] if b.get("resource_pool_id") == "hetzner-eu"
+    ]
+
+    # Two freshly-registered resources with different capacity (hence
+    # different current availability) form two distinct buckets, each
+    # resource_count=1 -- not one bucket summing to 14, which is exactly
+    # the shape `_fungible_availability_from_buckets` relies on to
+    # compute a per-member ceiling rather than a pool total.
+    by_available = {b["available"]["gpu_count"]: b for b in buckets}
+    assert set(by_available) == {8, 6}
+    assert by_available[8]["resource_count"] == 1
+    assert by_available[6]["resource_count"] == 1
+    assert by_available[8]["grouping_attributes"].get("gpu_model") == "H200"

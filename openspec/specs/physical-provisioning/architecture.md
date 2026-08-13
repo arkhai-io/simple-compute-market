@@ -34,16 +34,20 @@ Operational inventory is authoritative service state, not a checked-in Ansible i
 
 ## Proof-driven release
 
-Lease expiry or early termination dispatches teardown through the recorded executor identity. The site authority releases capacity only after teardown succeeds. Failure retains the reservation and records a retryable release state. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
+Release is proof-driven and split across two cooperating owners. Lease lifecycle decides when a reservation should release and owns the final capacity-return decision; it never dispatches a second teardown operation. Fulfillment convergence (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`) owns teardown dispatch, provider polling, and recovery through `torn_down`/`teardown_failed`. A kind-routed `ReleaseJobPort` connects the two: VM-backed reservations resolve release status by reading the fulfillment aggregate's teardown state; other executor kinds continue reading the shared job queue. The site authority releases capacity only after the fulfillment aggregate reaches `torn_down`, or an operator explicitly force-releases. Failure retains the reservation and records a retryable release state (`teardown_failed`), which convergence requeues on its own without an operator prompting it. An explicit force release is an operator override with distinct audit meaning, not fabricated proof of executor success.
 
 Readiness checks use local service dependencies. Slower outbound provider or storefront diagnostics belong to operator surfaces so an external failure does not unnecessarily make a healthy API/worker process unready.
 
 ## Current limits
 
-The compute service does not yet provide a durable generic fulfillment recovery aggregate, infer provider-to-executor linkage, or establish universal multi-storefront event routing. Optional notification adapters are delivery mechanisms, not ownership authorities.
+The compute service does not yet infer provider-to-executor linkage or establish universal multi-storefront event routing. Optional notification adapters are delivery mechanisms, not ownership authorities.
 
 ## Related contracts
 
 - [Fulfillment](../fulfillment/spec.md)
 - [Site capacity](../site-capacity/spec.md)
 - [Resource-pool management](../resource-pool-management/spec.md)
+
+## Preserving provider operations across schema cutover
+
+A provider job identifier is the durable correlation point for an in-flight Ansible run. Losing that correlation does not prove that creation failed or never occurred, so migration cannot safely compensate by launching another create playbook. The adapter remains the owner of provider metadata interpretation and teardown-envelope construction during both normal operation and cutover.

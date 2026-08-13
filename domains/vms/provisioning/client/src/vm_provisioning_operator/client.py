@@ -590,6 +590,28 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/system/check-leases — run one lifecycle cycle now."""
         return await self._post("/api/v1/system/check-leases", {})
 
+    async def get_fulfillment_status(self, fulfillment_id: str) -> dict:
+        """GET the durable fulfillment lifecycle state."""
+        return await self._get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    async def run_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/run-cycle."""
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/run-cycle", {}
+        )
+
+    async def clear_fulfillment_convergence_claims(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/clear-claims.
+
+        Frees claimed settlement records so the next convergence cycle re-reads
+        them. Needed after making an operation finish: the cycle that last read
+        that record still holds its claim, so another cycle alone would not
+        observe the change.
+        """
+        return await self._post(
+            "/api/v1/system/fulfillment-convergence/clear-claims", {}
+        )
+
     async def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
         return await self._post("/api/v1/system/lease-watchdog/pause", {})
@@ -1065,6 +1087,24 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         checked, released, release_failed, skipped counts.
         """
         return self._post("/api/v1/system/check-leases", {})
+
+    def get_fulfillment_status(self, fulfillment_id: str) -> dict:
+        """GET the durable fulfillment lifecycle state."""
+        return self._get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+
+    def run_fulfillment_convergence_cycle(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/run-cycle."""
+        return self._post("/api/v1/system/fulfillment-convergence/run-cycle", {})
+
+    def clear_fulfillment_convergence_claims(self) -> dict:
+        """POST /api/v1/system/fulfillment-convergence/clear-claims.
+
+        Frees claimed settlement records so the next convergence cycle re-reads
+        them. Needed after making an operation finish: the cycle that last read
+        that record still holds its claim, so another cycle alone would not
+        observe the change.
+        """
+        return self._post("/api/v1/system/fulfillment-convergence/clear-claims", {})
 
     def pause_lease_watchdog(self) -> dict:
         """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""

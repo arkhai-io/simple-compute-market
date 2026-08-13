@@ -20,8 +20,9 @@ domain packages and self-register when those packages are imported.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class NegotiationContext:
     # Round-0 opening when it differs from the bound (a haggler opens low
     # and concedes toward the bound). None means "open at the bound" —
     # the listed_price default, where the two coincide.
-    our_opening_amount: Optional[float] = None
+    our_opening_amount: float | None = None
     listing: dict[str, Any] = field(default_factory=dict)
     our_escrow_proposal: dict[str, Any] | None = None
     available_resources: dict[str, Any] = field(default_factory=dict)
@@ -80,7 +81,7 @@ class NegotiationContext:
     intermediate: dict[str, Any] = field(default_factory=dict)
 
 
-NegotiationStep = tuple[Optional[NegotiationDecision], NegotiationContext]
+NegotiationStep = tuple[NegotiationDecision | None, NegotiationContext]
 
 
 class NegotiationChainExhausted(RuntimeError):
@@ -95,13 +96,14 @@ class NegotiationChainExhausted(RuntimeError):
     chain than the one configured.
     """
 
+
 NegotiationMiddleware = Callable[
     [list[NegotiationRound], NegotiationContext],
     NegotiationStep,
 ]
 
 
-def their_last_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
+def their_last_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
     """Most recent full proposal from the other side. None if not yet."""
     for round_ in reversed(history):
         if round_.sender == "them" and round_.proposal is not None:
@@ -109,7 +111,7 @@ def their_last_proposal(history: list[NegotiationRound]) -> Optional[dict[str, A
     return None
 
 
-def our_first_proposal(history: list[NegotiationRound]) -> Optional[dict[str, Any]]:
+def our_first_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
     """Our earliest proposal in the transcript."""
     for round_ in history:
         if round_.sender == "us" and round_.proposal is not None:
@@ -142,83 +144,6 @@ def run_negotiation_chain_with_context(
         "The chain's last middleware must always decide — check the "
         "[negotiation] policies/policy configuration."
     )
-
-
-_REGISTRY: dict[str, NegotiationMiddleware] = {}
-
-
-def register_negotiation_middleware(name: str):
-    """Decorator. Registers a middleware function under a stable name."""
-
-    def _decorator(fn: NegotiationMiddleware) -> NegotiationMiddleware:
-        _REGISTRY[name] = fn
-        return fn
-
-    return _decorator
-
-
-_FILE_DISCOVERY_TRIGGERED = False
-
-
-def _discover_file_middlewares() -> None:
-    """One-shot hook for local extension discovery.
-
-    File discovery is still a follow-up. Entry points and explicit imports
-    cover current in-repo policy packages.
-    """
-
-    global _FILE_DISCOVERY_TRIGGERED
-    if _FILE_DISCOVERY_TRIGGERED:
-        return
-    _FILE_DISCOVERY_TRIGGERED = True
-
-
-def load_negotiation_chain(
-    names: list[str] | None,
-    *,
-    per_middleware_config: dict[str, dict[str, Any]] | None = None,
-) -> list[NegotiationMiddleware]:
-    """Resolve a list of middleware names to a chain of callables."""
-    if not names:
-        raise ValueError(
-            "load_negotiation_chain requires a non-empty list of middleware names. "
-            "Configure [negotiation].chain in your TOML."
-        )
-
-    _discover_file_middlewares()
-    chain: list[NegotiationMiddleware] = []
-    for name in names:
-        if name in _REGISTRY:
-            chain.append(_REGISTRY[name])
-            continue
-        try:
-            import importlib.metadata as md
-
-            eps = md.entry_points(group="market_policy.negotiation_middlewares")
-        except Exception:
-            eps = []
-        found = False
-        for ep in eps:
-            if ep.name == name:
-                loaded = ep.load()
-                _REGISTRY[name] = loaded
-                chain.append(loaded)
-                found = True
-                break
-        if not found:
-            available = sorted(_REGISTRY.keys())
-            raise KeyError(
-                f"Unknown negotiation middleware: {name!r}. "
-                f"Registered: {available}. "
-                f"For built-ins, ensure the VM policy package is imported."
-            )
-
-    return chain
-
-
-def list_negotiation_middlewares() -> list[str]:
-    """Names of all registered middlewares."""
-    return sorted(_REGISTRY)
 
 
 def _plain_mapping(value: Any) -> dict[str, Any] | None:
@@ -262,7 +187,6 @@ def normalize_policies_by_escrow_kind_config(value: Any) -> dict[str, list[str]]
     return out
 
 
-@register_negotiation_middleware("max_rounds_guard")
 def max_rounds_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,

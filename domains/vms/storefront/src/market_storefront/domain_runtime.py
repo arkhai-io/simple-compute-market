@@ -1,12 +1,14 @@
 """Storefront composition root for the VM market-domain contract."""
 
 from __future__ import annotations
+
 from dataclasses import replace
 
 from market_core import (
     DomainCapability,
     ImmutableComputeProvisioningCapability,
     ImmutableFulfillmentCapability,
+    ImmutableNegotiationCapability,
     ImmutableSettlementCapability,
     ImmutableStorefrontCapability,
     MarketDomainContract,
@@ -17,8 +19,10 @@ from market_core import (
 def get_market_domain_contract() -> MarketDomainContract:
     """Return the validated VM contract injected into this storefront."""
     from arkhai_vms.domain_runtime import market_domain
+    from arkhai_vms.negotiation.policy_sources import vm_policy_sources
     from core_storefront.escrow_verification import verify_escrow_for_settlement
-    from domains.vms.negotiation.storefront_round import default_seller_round_hook
+
+    from market_storefront.negotiation.storefront_round import default_seller_round_hook
     from market_storefront.services.fulfillment_service import (
         fulfill_compute_obligation,
     )
@@ -32,22 +36,27 @@ def get_market_domain_contract() -> MarketDomainContract:
         DomainCapability.SETTLEMENT,
         DomainCapability.FULFILLMENT,
         DomainCapability.COMPUTE_PROVISIONING,
+        DomainCapability.NEGOTIATION,
     }
-    return validate_domain_contract(replace(
-        base,
-        declared_capabilities=base.declared_capabilities | capabilities,
-        storefront=ImmutableStorefrontCapability(
-            run_negotiation_policy=default_seller_round_hook,
-        ),
-        settlement=ImmutableSettlementCapability(
-            verify=verify_escrow_for_settlement,
-            build_plan=_accepted_escrow_artifacts,
-        ),
-        fulfillment=ImmutableFulfillmentCapability(
-            fulfill=fulfill_compute_obligation,
-        ),
-        compute_provisioning=ImmutableComputeProvisioningCapability(
-            provision=fulfill_compute_obligation,
-        ),
-    ))
-
+    return validate_domain_contract(
+        replace(
+            base,
+            declared_capabilities=base.declared_capabilities | capabilities,
+            storefront=ImmutableStorefrontCapability(
+                run_negotiation_policy=default_seller_round_hook,
+            ),
+            negotiation=ImmutableNegotiationCapability(
+                policy_sources=vm_policy_sources,
+            ),
+            settlement=ImmutableSettlementCapability(
+                verify=verify_escrow_for_settlement,
+                build_plan=_accepted_escrow_artifacts,
+            ),
+            fulfillment=ImmutableFulfillmentCapability(
+                fulfill=fulfill_compute_obligation,
+            ),
+            compute_provisioning=ImmutableComputeProvisioningCapability(
+                provision=fulfill_compute_obligation,
+            ),
+        )
+    )

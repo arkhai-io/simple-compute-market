@@ -1,8 +1,8 @@
 """Dependency-direction guardrail for the core/kit/domain split.
 
 The target graph (docs/development/ARCHITECTURE.md, "Organizing Principle"):
-kit packages and the VM domain *concept* modules (listings, negotiation,
-settlement) are composed from below — they implement core hook shapes without
+kit packages and the VM domain *concept* modules (the shared listing models and
+the negotiation policies both roles reach) are composed from below — they implement core hook shapes without
 importing core. Storefront-owned provisioning orchestration lives under the VM
 storefront composition root, while the executable provisioning service and its
 client facade live under ``domains/vms/provisioning``. Only composition roots
@@ -51,16 +51,25 @@ DOMAIN_PREFIXES = ("domains",)
 
 KIT_ROOTS = sorted(REPO.glob("kit/*/src"))
 
-# Concept modules: from-below hook/implementation homes. Storefront-owned VM
-# provisioning orchestration is now under the storefront composition root, and
-# ``domains/vms/provisioning`` is the provisioning-service client/executable
-# namespace rather than a concept-module home.
+# Concept modules: from-below hook/implementation homes. These live in the shared
+# VM domain distribution, which both roles depend on and which therefore must not
+# reach upward into core or a composition root.
+#
+# Listing, settlement, and storefront-side negotiation code is not here: it has
+# exactly one consumer and lives inside that role's own package, where depending
+# on core is permitted. ``domains/vms/provisioning`` is the provisioning-service
+# client namespace rather than a concept-module home.
 CONCEPT_ROOTS = [
-    REPO / "domains/vms/listings",
-    REPO / "domains/vms/negotiation",
-    REPO / "domains/vms/settlement",
+    REPO / "domains/vms/domain/src/arkhai_vms",
 ]
-CONCEPT_EXCLUDES: tuple[str, ...] = ()
+# Two modules in that distribution are composition-facing by definition and are
+# not concept modules: the domain runtime builds the market-domain contract, so
+# it must name core's contract vocabulary, and the storefront adapter exists to
+# satisfy a core storefront interface. Both predate this boundary rule.
+CONCEPT_EXCLUDES: tuple[str, ...] = (
+    "arkhai_vms/domain_runtime.py",
+    "arkhai_vms/storefront_adapter.py",
+)
 
 SKIP_PARTS = {"__pycache__", "tests", "build", ".venv", "dist"}
 

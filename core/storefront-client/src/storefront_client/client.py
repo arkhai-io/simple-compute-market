@@ -527,6 +527,72 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    async def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/pause", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    async def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = await self._post("/api/v1/admin/lifecycle/resume", {},
+                                extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    async def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return await self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
+        )
+
+    async def admin_interrupt_deal(
+        self, escrow_uid: str, *, reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None, dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Interrupt an active interruptible deal through the admin control plane."""
+        body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interrupted_at_utc is not None:
+            body["interrupted_at_utc"] = interrupted_at_utc
+        return await self._post(
+            f"/api/v1/admin/deals/{escrow_uid}/interrupt",
+            body, extra_headers=self._admin_headers(),
+        )
+
+    async def admin_refresh_site_projections(self) -> dict[str, Any]:
+        """POST /admin/capacity/projections/refresh  (admin key required).
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just changed inventory at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return await self._post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {}, extra_headers=self._admin_headers(),
+        )
+
     async def admin_import_resources(
         self, csv_content: bytes, filename: str = "resources.csv"
     ) -> ImportResourcesResponse:
@@ -609,6 +675,88 @@ class StorefrontClient(_StorefrontClientBase):
             body["released_at"] = released_at
         return await self._post(
             "/api/v1/admin/fulfillment/events/capacity-released",
+            body,
+            extra_headers=self._admin_headers(),
+        )
+
+    async def notify_usage_started(
+        self,
+        capacity_reservation_id: str,
+        *,
+        escrow_uid: "str | None" = None,
+        provider_id: "str | None" = None,
+        provider_lease_id: "str | None" = None,
+        resource_id: "str | None" = None,
+        vm_host: "str | None" = None,
+        vm_target: "str | None" = None,
+        gpu_count: "int | None" = None,
+        lease_end_utc: "str | None" = None,
+    ) -> dict:
+        """POST /api/v1/admin/fulfillment/events/usage-started  (admin key required).
+
+        Deal-scoped progress event: the reservation moved from held to
+        actually leased/in-use. Progress events carry no capacity effect
+        of their own (the reservation stays held throughout), but do
+        reconcile derived listings against current availability.
+        """
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        if escrow_uid is not None:
+            body["escrow_uid"] = escrow_uid
+        if provider_id is not None:
+            body["provider_id"] = provider_id
+        if provider_lease_id is not None:
+            body["provider_lease_id"] = provider_lease_id
+        if resource_id is not None:
+            body["resource_id"] = resource_id
+        if vm_host is not None:
+            body["vm_host"] = vm_host
+        if vm_target is not None:
+            body["vm_target"] = vm_target
+        if gpu_count is not None:
+            body["gpu_count"] = gpu_count
+        if lease_end_utc is not None:
+            body["lease_end_utc"] = lease_end_utc
+        return await self._post(
+            "/api/v1/admin/fulfillment/events/usage-started",
+            body,
+            extra_headers=self._admin_headers(),
+        )
+
+    async def notify_fulfillment_failed(
+        self,
+        capacity_reservation_id: str,
+        *,
+        escrow_uid: "str | None" = None,
+        provider_id: "str | None" = None,
+        provider_job_id: "str | None" = None,
+        resource_id: "str | None" = None,
+        reason: "str | None" = None,
+        message: "str | None" = None,
+        logs_ref: "str | None" = None,
+    ) -> dict:
+        """POST /api/v1/admin/fulfillment/events/failed  (admin key required).
+
+        Deal-scoped event: provisioning failed for this reservation.
+        Releases the held capacity through the site authority and
+        applies the storefront's own fulfillment failure policy.
+        """
+        body: dict = {"capacity_reservation_id": capacity_reservation_id}
+        if escrow_uid is not None:
+            body["escrow_uid"] = escrow_uid
+        if provider_id is not None:
+            body["provider_id"] = provider_id
+        if provider_job_id is not None:
+            body["provider_job_id"] = provider_job_id
+        if resource_id is not None:
+            body["resource_id"] = resource_id
+        if reason is not None:
+            body["reason"] = reason
+        if message is not None:
+            body["message"] = message
+        if logs_ref is not None:
+            body["logs_ref"] = logs_ref
+        return await self._post(
+            "/api/v1/admin/fulfillment/events/failed",
             body,
             extra_headers=self._admin_headers(),
         )
@@ -1284,6 +1432,72 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
+    def admin_pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/pause  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/pause", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    def admin_resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """POST /admin/lifecycle/resume  (admin key required).
+
+        Holds every timer-driven loop idle, or returns them to work. Distinct from
+        `admin_pause`, which closes the storefront for new negotiations: a caller
+        may want either without the other, and pausing the loops leaves trading
+        open.
+        """
+        data = self._post("/api/v1/admin/lifecycle/resume", {},
+                          extra_headers=self._admin_headers())
+        return AdminPauseResponse.from_dict(data)
+
+    def admin_run_lifecycle_cycle(self, loop: str) -> dict:
+        """POST /admin/lifecycle/{loop}/run-cycle  (admin key required)
+
+        Runs one cycle of a storefront timer loop, calling the same operation the
+        loop invokes. Deliberately usable while the storefront is paused — that
+        is when a caller advances an idle loop one step at a time.
+
+        `loop` is one of `claims`, `fulfillment-resume`,
+        `negotiation-watchdog`, `capacity-events`.
+        """
+        return self._post(
+            f"/api/v1/admin/lifecycle/{loop}/run-cycle",
+            {},
+            extra_headers=self._admin_headers(),
+        )
+
+    def admin_interrupt_deal(
+        self, escrow_uid: str, *, reason: str = "operator_interruption",
+        interrupted_at_utc: str | None = None, dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Interrupt an active interruptible deal through the admin control plane."""
+        body: dict[str, Any] = {"reason": reason, "dry_run": dry_run}
+        if interrupted_at_utc is not None:
+            body["interrupted_at_utc"] = interrupted_at_utc
+        return self._post(
+            f"/api/v1/admin/deals/{escrow_uid}/interrupt",
+            body, extra_headers=self._admin_headers(),
+        )
+
+    def admin_refresh_site_projections(self) -> dict[str, Any]:
+        """POST /admin/capacity/projections/refresh  (admin key required).
+
+        Pull every site-authority projection now instead of waiting out the
+        poller interval, and return the per-site load state. A caller that has
+        just changed inventory at the site authority uses this rather than
+        sleeping: the response says whether the pull actually landed.
+        """
+        return self._post(
+            "/api/v1/admin/capacity/projections/refresh",
+            {}, extra_headers=self._admin_headers(),
+        )
+
     def admin_import_resources(
         self, csv_content: bytes, filename: str = "resources.csv"
     ) -> ImportResourcesResponse:
@@ -1349,14 +1563,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /admin/portfolio/resources/{resource_id}/release-reservation
         (admin key required).
 
-        Surgical: releases exactly the named reserved resource. Idempotent
-        on already-available rows (returns released_count=0 instead of
-        erroring). 404 if the row doesn't exist.
+        NO STOREFRONT IMPLEMENTS THIS ROUTE. Every call returns FastAPI's
+        unmatched-route 404, which reads as "resource not found" and is not.
+        Use ``patch_resource(resource_id, state="available")`` for a surgical
+        single-row release — that is the route the fleet-wide endpoint's own
+        docstring points to, and the one that exists.
 
-        For an actually-stuck VM, pair this with provisioning's
+        Kept rather than deleted because removing a public client method is a
+        breaking change for callers outside this repository, and a method that
+        names its own absence is more useful to them than an import error.
+        Whether the route should exist server-side is a separate question: the
+        surgical release it describes is already available through PATCH.
+
+        For an actually-stuck VM, pair the PATCH with provisioning's
         ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` — that operation
-        runs real Ansible against the host, while this endpoint only clears
-        the storefront's own bookkeeping.
+        runs real Ansible against the host, while the storefront side only
+        clears its own bookkeeping.
         """
         return ReleaseReservationsResponse.from_dict(
             self._post(

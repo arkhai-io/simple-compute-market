@@ -14,6 +14,7 @@ from compute_provisioning import (
     LeaseRetryRelease,
     LeaseTermination,
     LeaseView,
+    lease_state_for_reservation_state,
     ProvisioningJob,
     UnsupportedExecutorActionError,
 )
@@ -37,6 +38,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
             return value
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
+    raw_state = str(reservation.get("state"))
     executor_ref = dict(reservation.get("executor_ref") or {})
     return LeaseView(
         capacity_reservation_id=str(reservation["capacity_reservation_id"]),
@@ -52,7 +54,7 @@ def _lease_view(reservation: dict[str, Any]) -> LeaseView:
         lease_start_utc=parsed(reservation.get("lease_start_utc")),
         lease_end_utc=parsed(reservation.get("lease_end_utc")),
         create_job_id=reservation.get("create_job_id"),
-        status=str(reservation.get("state")),
+        status=lease_state_for_reservation_state(raw_state).value,
         release_job_id=reservation.get("release_job_id"),
         failure_reason=reservation.get("failure_reason"),
         failure_message=reservation.get("failure_message"),

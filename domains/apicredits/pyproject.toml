@@ -32,21 +32,20 @@ only-include = ["__init__.py"]
 "negotiation/__init__.py" = "domains/apicredits/negotiation/__init__.py"
 "negotiation/buyer_policies.py" = "domains/apicredits/negotiation/buyer_policies.py"
 "negotiation/policies.py" = "domains/apicredits/negotiation/policies.py"
+"negotiation/policy_sources.py" = "domains/apicredits/negotiation/policy_sources.py"
 "negotiation/storefront_round.py" = "domains/apicredits/negotiation/storefront_round.py"
 "negotiation/terms.py" = "domains/apicredits/negotiation/terms.py"
 "settlement/__init__.py" = "domains/apicredits/settlement/__init__.py"
+"settlement/credits_client.py" = "domains/apicredits/settlement/credits_client.py"
 "settlement/fulfillment.py" = "domains/apicredits/settlement/fulfillment.py"
-"settlement/issuance.py" = "domains/apicredits/settlement/issuance.py"
-
-[tool.uv.sources]
-arkhai-core = { path = "../../core", editable = true }
-arkhai-kit-policy = { path = "../../kit/policy", editable = true }
 
 [tool.pytest.ini_options]
-pythonpath = ["../.."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.23.8,<1.0.0",
 ]

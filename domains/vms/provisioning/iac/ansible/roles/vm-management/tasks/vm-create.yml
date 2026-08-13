@@ -57,6 +57,7 @@
 - name: Generate random password for tenant user
   set_fact:
     tenant_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  no_log: true
   when: vm_action == "create"
 
 - name: Set tenant user Name
@@ -118,6 +119,7 @@
 - name: Generate random password for root user
   set_fact:
     root_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+  no_log: true
   when:
     - vm_action == "create" and vm_image_type == "scratch"
 
@@ -400,7 +402,7 @@
         GPU_DEVICES=$(virsh dumpxml "$vm" 2>/dev/null | grep -A 5 "hostdev.*pci" | grep "address.*domain" | sed "s/.*domain='\([^']*\)'.*bus='\([^']*\)'.*slot='\([^']*\)'.*function='\([^']*\)'.*/\1:\2:\3:\4/" || echo "")
         if [ -n "$GPU_DEVICES" ]; then
           while read -r pci_addr; do
-            [ -z "$pci_addr" ] && continueThen remove all task that contains installation of GPU driver that is not
+            [ -z "$pci_addr" ] && continue
             normalized_pci=$(echo "$pci_addr" | sed 's/0x//g' | awk -F: '{printf "%04s:%02s:%02s.%s", $1, $2, $3, $4}' | sed 's/ /0/g')
             ATTACHED_GPUS_LIST="$ATTACHED_GPUS_LIST $normalized_pci"
             GPU_MODEL=$(lspci -s ${normalized_pci#0000:} 2>/dev/null | grep -i "vga\|3d\|display" | cut -d: -f3- || echo "Unknown GPU")
@@ -1393,6 +1395,7 @@
 - name: Set root password available for Golden VMs
   set_fact:
     root_password: "{{ vm_image_root_pword | default('') }}"
+  no_log: true
   when:
     - vm_action == "create" and vm_image_type == "golden"
 
@@ -2391,6 +2394,7 @@
     done
   when: vm_action == "create" and vm_ip is defined
   delegate_to: "{{ target_host }}"
+  no_log: true
 
 - name: Set up SSH key for tenant user (with provided public key)
   shell: |
@@ -2571,6 +2575,7 @@
       system:
         random_string: "{{ random_string }}"
         cloud_init_method: "basic-networking-only"
+  no_log: true
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 
@@ -2582,8 +2587,8 @@
     msg: 
       - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}{% if external_ssh_port is defined %}:{{ external_ssh_port }}{% endif %}"
       - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
-      - "Root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (pwd: {{ root_password }})"
-      - "Tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (pwd: {{ tenant_password }})"
+      - "Root: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: retrieve via credentials API)"
+      - "Tenant: ssh -i keys/{{ vm_name }}_tenant_private_key {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: retrieve via credentials API)"
       - "{% if frp_server_addr is defined %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i keys/{{ vm_name }}_tenant_private_key -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 
@@ -2640,6 +2645,7 @@
       system:
         random_string: "{{ random_string }}"
         cloud_init_method: "basic-networking-only"
+  no_log: true
   when: 
     - vm_action == "create" 
     - vm_create_result is defined 
@@ -2652,8 +2658,8 @@
     msg: 
       - "VM {{ vm_name }} created successfully - IP: {{ vm_ip }}{% if external_ssh_port is defined %}:{{ external_ssh_port }}{% endif %}"
       - "{% if frp_server_addr is defined %}FRP Mode: Subdomain {{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}, Remote Port {{ frp_remote_port }}{% else %}Direct Port Forwarding: {{ external_ssh_port }}{% endif %}"
-      - "Root access: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: {{ root_password }})"
-      - "Tenant access: ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: {{ tenant_password }})"
+      - "Root access: ssh -i ~/.ssh/{{ vm_root_ssh_filename }} root@{{ vm_ip }} (password: retrieve via credentials API)"
+      - "Tenant access: ssh -i <your_private_key> {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ vm_ip }} (password: retrieve via credentials API)"
       - "{% if frp_server_addr is defined %}External SSH: ssh -i <your_private_key> -p {{ frp_remote_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ frp_subdomain }}.{{ frp_domain | default('vm.arkhai.io') }}{% else %}External SSH: ssh -i <your_private_key> -p {{ external_ssh_port }} {{ vm_name | regex_replace('[^a-zA-Z0-9]', '') | lower }}@{{ tenant_ssh_host }}{% endif %}"
   when: 
     - vm_action == "create" 

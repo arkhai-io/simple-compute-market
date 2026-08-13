@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from domains.vms.negotiation.policies import (
-    buyer_counter_guard,
-    round_zero_opening_guard,
-)
+from arkhai_vms.negotiation.policies import round_zero_opening_guard
 from market_alkahest.schemas import EscrowProposal
 from market_policy.negotiation_middleware import NegotiationContext, NegotiationRound
+from market_policy.scalar_policies import buyer_counter_guard
 
 
 def _round_zero(proposal: EscrowProposal) -> list[NegotiationRound]:
@@ -76,7 +74,9 @@ def test_out_of_set_escrow_proposal_is_not_rejected_by_protocol_layer():
         expiration_unix=1_800_000_000,
     )
 
-    decision, context = round_zero_opening_guard(_round_zero(proposal), _context(listing))
+    decision, context = round_zero_opening_guard(
+        _round_zero(proposal), _context(listing)
+    )
 
     assert decision is None
     assert context.intermediate["accepted_escrow_proposal"] == proposal.model_dump()
@@ -105,14 +105,14 @@ def test_matching_escrow_proposal_is_canonicalized_from_listing():
         expiration_unix=1_800_000_000,
     )
 
-    decision, context = round_zero_opening_guard(_round_zero(proposal), _context(listing))
+    decision, context = round_zero_opening_guard(
+        _round_zero(proposal), _context(listing)
+    )
     normalized = context.intermediate["accepted_escrow_proposal"]
 
     assert decision is None
     assert normalized["literal_fields"] == {"token": token}
-    assert normalized["rates"] == [
-        {"field": "amount", "per": "hour", "value": "1000"}
-    ]
+    assert normalized["rates"] == [{"field": "amount", "per": "hour", "value": "1000"}]
 
 
 def test_round_zero_guard_rejects_non_positive_duration():

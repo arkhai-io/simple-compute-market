@@ -33,7 +33,12 @@ from unittest.mock import MagicMock
 
 from vm_provisioning_adapter.models.ansible import ConnectivityResult, InventoryHost, InventoryResponse
 from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams, AnsibleRunResult
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleResult, AnsibleRun
+from vm_provisioning_adapter.services.ansible_service import (
+    AnsibleError,
+    AnsibleResult,
+    AnsibleRun,
+    AnsibleService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +105,25 @@ class MockAnsibleService:
     def build_vars_file(self, params: AnsibleJobParams) -> Path:
         """Return a dummy path — no file is written."""
         return Path(f"/tmp/mock_vars_{params.vm_action}.yml")
+
+    def reserved_var_keys(self, params: AnsibleJobParams) -> frozenset[str]:
+        """Delegate to the real implementation — the answer must not differ.
+
+        `AnsibleFulfillmentProvider` calls this before dispatch to reject pool
+        `extra_vars` that would shadow a built-in job variable. That is a
+        validation decision, not I/O, so a mock returning its own answer would
+        accept configuration the real service refuses and reject configuration it
+        accepts. Borrowed rather than reimplemented for the same reason: the two
+        cannot drift if there is only one implementation.
+
+        Reaches the real method with this instance as `self`, which is sound
+        because the computation reads only `params` and `self._settings` — both of
+        which this class has — and performs no Ansible I/O.
+        """
+        return AnsibleService.reserved_var_keys(self, params)
+
+    _build_builtin_var_lines = AnsibleService._build_builtin_var_lines
+    _inject_golden_image_credentials = AnsibleService._inject_golden_image_credentials
 
     def start_playbook(
         self,
@@ -180,6 +204,14 @@ class MockAnsibleService:
 
     def lookup_host_ip(self, vm_host: str) -> Optional[str]:
         return self._host_ip
+
+    lookup_public_host = AnsibleService.lookup_public_host
+    """Borrowed: reads only this instance's own `parse_inventory`.
+
+    Reached today through `parse_playbook_result`, which delegates to a real
+    instance, so the mock's absence of it was latent rather than live. Present
+    here so the two implementations answer the same question either way.
+    """
 
     # ------------------------------------------------------------------
     # Connectivity check

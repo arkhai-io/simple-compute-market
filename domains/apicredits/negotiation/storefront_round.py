@@ -13,26 +13,27 @@ the domain's policy seam — and runs the configured middleware chain.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable, Mapping
 from decimal import Decimal
-from typing import Any, Awaitable, Callable, Mapping, Protocol
+from typing import Any, Protocol
 
-import domains.apicredits.negotiation.policies  # noqa: F401 — registers the guards
-from domains.apicredits.listings.pricing import (
-    determine_strategy_from_order,
-    extract_unit_price_from_order,
+from market_policy.negotiation_middleware import (
+    NegotiationContext,
+    NegotiationMiddleware,
+    NegotiationRound,
+    normalize_policies_by_escrow_kind_config,
+    run_negotiation_chain_with_context,
 )
 from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
 )
 from market_policy.seller_round import SellerRoundResult
-from market_policy.negotiation_middleware import (
-    NegotiationContext,
-    NegotiationMiddleware,
-    NegotiationRound,
-    load_negotiation_chain,
-    normalize_policies_by_escrow_kind_config,
-    run_negotiation_chain_with_context,
+
+import domains.apicredits.negotiation.policies  # noqa: F401 — registers the guards
+from domains.apicredits.listings.pricing import (
+    determine_strategy_from_order,
+    extract_unit_price_from_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,12 +64,12 @@ class ApiCreditsSellerRoundHook(Protocol):
         key_id: str | None = None,
         buyer_wallet: str | None = None,
         strategy_label: str | None = None,
-    ) -> SellerRoundResult:
-        ...
+    ) -> SellerRoundResult: ...
 
 
 def _load_chain(
     *,
+    policy_catalogue: NegotiationCatalogue,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
 ) -> list[NegotiationMiddleware]:
@@ -78,6 +79,11 @@ def _load_chain(
     ``policies`` list, a ``policy_mode`` terminal default, or a
     per-escrow-kind dispatch table. (File-policy discovery and the RL
     strategies are VM-storefront features this domain doesn't ship.)
+
+    Names resolve against the catalogue the composing role built, so a name
+    this role was not composed with fails here naming what is available,
+    rather than resolving against whatever a module import happened to
+    register.
     """
     raw_policies = getattr(negotiation_config, "policies", None)
     policies_by_kind = normalize_policies_by_escrow_kind_config(raw_policies)
@@ -86,9 +92,10 @@ def _load_chain(
             name: chain.alkahest_address_config_path
             for name, chain in (chains or {}).items()
         }
-        return load_negotiation_chain(_DEFAULT_GUARDS) + [
+        return policy_catalogue.resolve(_DEFAULT_GUARDS) + [
             make_escrow_kind_dispatch_middleware(
                 policies_by_kind,
+                resolve=policy_catalogue.resolve,
                 chain_config_paths=chain_config_paths,
             )
         ]
@@ -96,14 +103,13 @@ def _load_chain(
     policy_names = list(raw_policies or [])
     if not policy_names:
         policy_mode = (
-            (getattr(negotiation_config, "policy_mode", "") or "").strip()
-            or _DEFAULT_TERMINAL
-        )
+            getattr(negotiation_config, "policy_mode", "") or ""
+        ).strip() or _DEFAULT_TERMINAL
         policy_names = [policy_mode]
     for guard in reversed(_DEFAULT_GUARDS):
         if guard not in policy_names:
             policy_names.insert(0, guard)
-    return load_negotiation_chain(policy_names)
+    return policy_catalogue.resolve(policy_names)
 
 
 def _seller_reference_amount(
@@ -113,12 +119,14 @@ def _seller_reference_amount(
     default_min_price: Any = None,
 ) -> int:
     """quantity × per-token rate, in base units."""
-    unit = Decimal(str(
-        extract_unit_price_from_order(
-            dict(listing),
-            default_min_price=default_min_price,
+    unit = Decimal(
+        str(
+            extract_unit_price_from_order(
+                dict(listing),
+                default_min_price=default_min_price,
+            )
         )
-    ))
+    )
     count = int(quantity) if quantity is not None else 1
     return int(unit * count)
 
@@ -136,6 +144,7 @@ async def _run_seller_round(
     negotiation_config: Any,
     chains: Mapping[str, Any] | None,
     default_min_price: Any,
+    policy_catalogue: NegotiationCatalogue,
 ) -> SellerRoundResult:
     listing_dict = dict(listing)
     if not strategy_label:
@@ -158,10 +167,15 @@ async def _run_seller_round(
             requested_quantity,
             default_min_price=default_min_price,
         )
-        if uses_scalar_amount else 0
+        if uses_scalar_amount
+        else 0
     )
 
-    chain = _load_chain(negotiation_config=negotiation_config, chains=chains)
+    chain = _load_chain(
+        policy_catalogue=policy_catalogue,
+        negotiation_config=negotiation_config,
+        chains=chains,
+    )
     context = NegotiationContext(
         direction="maximize",
         our_reference_amount=float(reference_amount),
@@ -201,12 +215,14 @@ class _DefaultSellerRoundHook:
         capacity: Any,
         key_lookup: KeyLookup | None,
         *,
+        policy_catalogue: NegotiationCatalogue,
         negotiation_config: Any = None,
         chains: Mapping[str, Any] | None = None,
         default_min_price: Any = None,
     ) -> None:
         self._capacity = capacity
         self._key_lookup = key_lookup
+        self._policy_catalogue = policy_catalogue
         self._negotiation_config = negotiation_config
         self._chains = chains
         self._default_min_price = default_min_price
@@ -235,7 +251,9 @@ class _DefaultSellerRoundHook:
                 # claims — the guard sees no record and rejects early;
                 # issuance would have re-checked (and failed) anyway.
                 logger.warning(
-                    "[NEGOTIATION] key lookup failed for %r: %s", key_id, exc,
+                    "[NEGOTIATION] key lookup failed for %r: %s",
+                    key_id,
+                    exc,
                 )
                 policy_inputs["key_record"] = None
         return await _run_seller_round(
@@ -250,6 +268,7 @@ class _DefaultSellerRoundHook:
             negotiation_config=self._negotiation_config,
             chains=self._chains,
             default_min_price=self._default_min_price,
+            policy_catalogue=self._policy_catalogue,
         )
 
 
@@ -257,6 +276,7 @@ def default_seller_round_hook(
     capacity: Any,
     key_lookup: KeyLookup | None = None,
     *,
+    policy_catalogue: NegotiationCatalogue,
     negotiation_config: Any = None,
     chains: Mapping[str, Any] | None = None,
     default_min_price: Any = None,
@@ -271,6 +291,7 @@ def default_seller_round_hook(
     return _DefaultSellerRoundHook(
         capacity,
         key_lookup,
+        policy_catalogue=policy_catalogue,
         negotiation_config=negotiation_config,
         chains=chains,
         default_min_price=default_min_price,

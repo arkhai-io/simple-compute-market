@@ -4,6 +4,7 @@ require_admin_key is applied via __init__ Depends (not router-level) to avoid
 a fastapi_utils @cbv + router-level dependencies interaction issue that causes
 routes to return 404.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from core_storefront.models.system_models import AdminPauseResponse
+from core_storefront.stage_log import stage_event
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
-from core_storefront.models.system_models import AdminPauseResponse
 from market_storefront.models.capacity_admin_models import (
     CapacityReleasedEventRequest,
     FulfillmentEventResponse,
@@ -36,14 +38,22 @@ from market_storefront.models.capacity_admin_models import (
     ResourcePatchResponse,
     UsageStartedEventRequest,
 )
+from market_storefront.server import _set_globally_paused, _set_loops_paused
+from market_storefront.negotiation_watchdog import _watchdog_tick
+from market_storefront.services.capacity_client import (
+    full_capacity_reconcile,
+    remote_site_clients,
+)
+from market_storefront.services.claims_runtime import build_claims_engine
+from market_storefront.services.fulfillment_resume_runtime import (
+    resume_incomplete_fulfillments_once,
+)
+from market_storefront.utils.config import ESCROW_TEMPLATES
 from market_storefront.utils.failure_policy import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
     configured_failure_actions,
 )
-from market_storefront.server import _set_globally_paused
-from market_storefront.utils.config import ESCROW_TEMPLATES
-from core_storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +68,7 @@ _INTERRUPTIBLE_HELD_STATES = frozenset(
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
+
 @cbv(router)
 class AdminController:
     def __init__(
@@ -67,19 +78,143 @@ class AdminController:
     ) -> None:
         self._db = db
 
-    @router.post("/pause", response_model=AdminPauseResponse,
-                 summary="Pause new negotiations globally (admin)")
+    @router.post(
+        "/pause",
+        response_model=AdminPauseResponse,
+        summary="Pause new negotiations globally (admin)",
+    )
     async def pause(self) -> AdminPauseResponse:
+        """Close the storefront for new business.
+
+        Trading only: timer-driven work continues, so the storefront still
+        finishes what it has already accepted. Use
+        `/admin/lifecycle/pause` to hold the loops idle — the two are separate
+        because a caller may want either without the other.
+        """
         _set_globally_paused(True)
         return AdminPauseResponse(
             paused=True, message="Storefront paused. New negotiations will receive 503."
         )
 
-    @router.post("/resume", response_model=AdminPauseResponse,
-                 summary="Resume new negotiations globally (admin)")
+    @router.post(
+        "/resume",
+        response_model=AdminPauseResponse,
+        summary="Resume new negotiations globally (admin)",
+    )
     async def resume(self) -> AdminPauseResponse:
+        """Reopen the storefront for new negotiations. Loops are unaffected."""
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
+
+    @router.post(
+        "/lifecycle/pause",
+        response_model=AdminPauseResponse,
+        summary="Hold every timer-driven loop idle (admin)",
+    )
+    async def pause_lifecycle_loops(self) -> AdminPauseResponse:
+        """Stop the storefront changing state on its own.
+
+        Every timer loop — negotiation watchdog, claims engine, fulfillment
+        resume, capacity-events poller, site-projection poller — performs no
+        further cycle. The loops are held idle rather than stopped, so none is
+        interrupted part-way and none loses its position. Each loop's work stays
+        reachable through its own `/lifecycle/{loop}/run-cycle` route, which is
+        how an operator or a scenario advances one step at a time while paused.
+
+        Trading is unaffected: new negotiations are still accepted. That is the
+        point of having two controls — a scenario needs deterministic
+        reconciliation *and* a deal to agree.
+        """
+        loops = await _set_loops_paused(True)
+        return AdminPauseResponse(
+            paused=True,
+            message=(
+                "Timer loops paused. No loop will run a cycle until resumed; "
+                "advance one with /api/v1/admin/lifecycle/{loop}/run-cycle. "
+                "New negotiations are still accepted."
+            ),
+            loops=loops,
+        )
+
+    @router.post(
+        "/lifecycle/resume",
+        response_model=AdminPauseResponse,
+        summary="Return every timer-driven loop to work (admin)",
+    )
+    async def resume_lifecycle_loops(self) -> AdminPauseResponse:
+        """Return every loop to work.
+
+        Nothing is restarted: the loops were held idle rather than stopped, so
+        each simply performs its next cycle. The capacity-events poller keeps its
+        feed position across the pause and continues from it rather than
+        re-converging from the feed head.
+        """
+        loops = await _set_loops_paused(False)
+        return AdminPauseResponse(
+            paused=False,
+            message="Timer loops resumed. Each will run its next cycle.",
+            loops=loops,
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle advance — run one cycle of a halted loop.
+    #
+    # Each route calls the operation its loop was already invoking, and returns
+    # what that operation returns. None of them drives an iteration of the loop
+    # itself, and none implements a transition the loop does not: a manual cycle
+    # that behaved differently from the timer would prove nothing about
+    # production. Mirrors the provisioning service's `check-leases` and
+    # `fulfillment-convergence/run-cycle` controls, including that they run
+    # while paused — running while paused is the entire purpose.
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/lifecycle/claims/run-cycle",
+        summary="Run one claims sweep now (admin)",
+    )
+    async def run_claims_cycle(self) -> dict:
+        engine = build_claims_engine(self._db)
+        processed = await engine.tick()
+        return {"loop": "claims_engine", "processed": int(processed)}
+
+    @router.post(
+        "/lifecycle/fulfillment-resume/run-cycle",
+        summary="Run one fulfillment-resume sweep now (admin)",
+    )
+    async def run_fulfillment_resume_cycle(self) -> dict:
+        await resume_incomplete_fulfillments_once(sqlite_client=self._db)
+        return {"loop": "fulfillment_resume"}
+
+    @router.post(
+        "/lifecycle/negotiation-watchdog/run-cycle",
+        summary="Run one negotiation-watchdog sweep now (admin)",
+    )
+    async def run_negotiation_watchdog_cycle(self) -> dict:
+        swept = await _watchdog_tick(self._db)
+        return {"loop": "negotiation_watchdog", "swept": int(swept)}
+
+    @router.post(
+        "/lifecycle/capacity-events/run-cycle",
+        summary="Reconcile derived listings against site capacity now (admin)",
+    )
+    async def run_capacity_events_cycle(self) -> dict:
+        """Run the storefront's own listing reconcile.
+
+        The poller's per-event drain has no callable unit — the work is inline in
+        the loop body — so this calls `full_capacity_reconcile`, the reconcile
+        that poller invokes at startup and after a ledger reset. It runs both the
+        close and reopen passes unconditionally, where the delta subscriber runs
+        one or both depending on the delta's kind, so this exercises a superset
+        of the subscriber's reaction rather than an identical path. A caller that
+        needs per-kind routing needs a one-cycle drain extracted from
+        `site_events_poller`, which does not exist yet.
+        """
+        # The controller's own unit of work, not the process-wide client: an
+        # operator control must reconcile the database this storefront is
+        # serving from, which is the same object in production and is what makes
+        # the transition observable in a test at all.
+        await full_capacity_reconcile(self._db)
+        return {"loop": "capacity_events_poller", "reconciled": True}
 
     @router.post(
         "/deals/{escrow_uid}/interrupt",
@@ -87,7 +222,9 @@ class AdminController:
         summary="Interrupt an active interruptible compute deal (admin)",
     )
     async def interrupt_deal(
-        self, escrow_uid: str, body: InterruptDealRequest,
+        self,
+        escrow_uid: str,
+        body: InterruptDealRequest,
     ) -> InterruptDealResponse:
         """End an interruptible deal's capacity lease early.
 
@@ -100,11 +237,10 @@ class AdminController:
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
         if escrow is None:
             raise HTTPException(
-                status_code=404, detail=f"Unknown escrow {escrow_uid!r}",
+                status_code=404,
+                detail=f"Unknown escrow {escrow_uid!r}",
             )
-        listing_id = await self._db.get_listing_id_by_escrow_uid(
-            escrow_uid=escrow_uid
-        )
+        listing_id = await self._db.get_listing_id_by_escrow_uid(escrow_uid=escrow_uid)
         if not listing_id:
             raise HTTPException(
                 status_code=404,
@@ -113,7 +249,8 @@ class AdminController:
         listing = await self._db.load_listing(listing_id=listing_id)
         if listing is None:
             raise HTTPException(
-                status_code=404, detail=f"Listing {listing_id!r} not found",
+                status_code=404,
+                detail=f"Listing {listing_id!r} not found",
             )
         thread = await self._db.load_negotiation_thread_row(
             negotiation_id=escrow["negotiation_id"]
@@ -156,7 +293,8 @@ class AdminController:
                 reason=body.reason or "interruptible_preemption",
             )
             stage_event(
-                "admin", "deal_interrupted",
+                "admin",
+                "deal_interrupted",
                 escrow_uid=escrow_uid,
                 listing_id=listing_id,
                 capacity_reservation_id=capacity_reservation_id,
@@ -179,6 +317,37 @@ class AdminController:
             refund_amount=body.refund_amount,
             reservation=truncated or reservation,
         )
+
+    @router.post(
+        "/capacity/projections/refresh",
+        summary="Pull site-authority projections now (admin)",
+    )
+    async def refresh_site_projections(self) -> dict[str, Any]:
+        """Reload every site projection and report what each site now holds.
+
+        Projections are pull-synchronized on a poller interval. A caller that has
+        just changed inventory at the site authority — registering a host, say —
+        would otherwise have to wait out that interval or sleep, and a test that
+        sleeps is a test that is slow when it passes and flaky when it does not.
+
+        Returns the per-site load state so a caller can assert the pull happened
+        rather than assuming it. A site reporting `not_loaded`, `unavailable`, or
+        `invalid` has not confirmed its projection and must not be read as an
+        authoritative empty.
+        """
+        from market_storefront.services.site_projection_cache import (
+            load_site_projections,
+            projection_status_summary,
+        )
+
+        await load_site_projections()
+        summary = projection_status_summary()
+        logger.info(
+            "[ADMIN] Site projections refreshed on demand: %s",
+            {site: {k: v.get("state") for k, v in families.items()}
+             for site, families in summary.items()},
+        )
+        return {"sites": summary}
 
     @router.post(
         "/portfolio/resources/import",
@@ -211,7 +380,9 @@ class AdminController:
         try:
             csv_content = (await file.read()).decode("utf-8")
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
+            raise HTTPException(
+                status_code=400, detail=f"Could not read uploaded file: {exc}"
+            )
         try:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_content,
@@ -230,7 +401,9 @@ class AdminController:
         # Surface up to 50 per-row failures so operators can see what's
         # wrong without shell access. The full report.rows[] is also
         # logged below, capped lower per line.
-        failed_rows = [row for row in report.get("rows") or [] if not row.get("imported")]
+        failed_rows = [
+            row for row in report.get("rows") or [] if not row.get("imported")
+        ]
         errors_payload = [
             ImportRowError(
                 row_number=int(row.get("row_number") or 0),
@@ -384,13 +557,16 @@ class AdminController:
             set_state=new_state if state_changed else None,
             set_attribute=(
                 {f"$.{k}": v for k, v in body.attributes.items()}
-                if body.attributes is not None else None
+                if body.attributes is not None
+                else None
             ),
         )
         applied = bool(result.get("applied"))
 
         if state_changed and applied:
-            logger.info("[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state)
+            logger.info(
+                "[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state
+            )
         if attrs_changed and applied:
             logger.info("[ADMIN] Resource %s attributes patched", resource_id)
 
@@ -401,7 +577,12 @@ class AdminController:
         # /lifecycle/check-leases response returns. Other state
         # transitions (manual ops, init bookkeeping) don't produce this
         # event — it's specifically the leased→available edge.
-        if applied and state_changed and old_state == "leased" and new_state == "available":
+        if (
+            applied
+            and state_changed
+            and old_state == "leased"
+            and new_state == "available"
+        ):
             stage_event(
                 "lease_lifecycle",
                 "resource_released",
@@ -475,7 +656,8 @@ class AdminController:
         if not isinstance(proposal, dict):
             return False
         try:
-            from domains.vms.settlement.proposals import proposal_is_splitter_gated
+            from market_alkahest.proposals import proposal_is_splitter_gated
+
             from market_storefront.utils.config import CHAINS
 
             chain_config_paths = {
@@ -483,7 +665,8 @@ class AdminController:
                 for name, chain in CHAINS.items()
             }
             return proposal_is_splitter_gated(
-                proposal, chain_config_paths=chain_config_paths,
+                proposal,
+                chain_config_paths=chain_config_paths,
             )
         except Exception as exc:
             logger.warning(
@@ -493,9 +676,9 @@ class AdminController:
             return False
 
     async def _find_live_reservation_for_escrow(
-        self, escrow_uid: str,
+        self,
+        escrow_uid: str,
     ) -> dict[str, Any] | None:
-        from market_storefront.services.capacity_client import remote_site_clients
 
         capacity = self._capacity()
         for client in remote_site_clients(capacity).values():
@@ -504,12 +687,12 @@ class AdminController:
             except Exception as exc:
                 logger.warning(
                     "[ADMIN] Could not list reservations for escrow %s: %s",
-                    escrow_uid, exc,
+                    escrow_uid,
+                    exc,
                 )
                 continue
             held = [
-                row for row in rows
-                if row.get("state") in _INTERRUPTIBLE_HELD_STATES
+                row for row in rows if row.get("state") in _INTERRUPTIBLE_HELD_STATES
             ]
             if held:
                 return held[0]
@@ -564,7 +747,7 @@ class AdminController:
                 raise HTTPException(
                     status_code=502,
                     detail=f"Could not release reservation {capacity_reservation_id!r} "
-                           f"at the site authority: {exc}",
+                    f"at the site authority: {exc}",
                 )
             if released is not None:
                 result = released
@@ -599,6 +782,17 @@ class AdminController:
 
         return build_capacity_client(lambda: self._db)
 
+    def _site_topology(self) -> tuple[str | None, int]:
+        """(home_site, configured_site_count) as of right now.
+
+        Computed fresh on every call rather than cached -- the count is
+        load-bearing for whether an unmapped listing's site may be
+        defaulted or must be left ambiguous, so it must reflect the
+        actual current configuration, not a value that could go stale.
+        """
+        sites = remote_site_clients(self._capacity())
+        return next(iter(sites), None), len(sites)
+
     async def _member_availability(self) -> dict | None:
         """Aggregated site availability, or None when unobtainable.
 
@@ -611,27 +805,33 @@ class AdminController:
         )
 
         try:
-            return await member_availability_view(
-                self._capacity(), self._db.db_path,
-            )
+            return await member_availability_view(self._capacity())
         except Exception as exc:
             logger.warning(
-                "[ADMIN] Could not snapshot site-authority capacity: %s", exc,
+                "[ADMIN] Could not snapshot site-authority capacity: %s",
+                exc,
             )
             return None
 
     async def _close_oversized_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             mark_derived_listings_closed,
             record_derived_listing,
+            site_id_for_listing,
             stale_open_listing_ids,
         )
 
+        home_site, configured_site_count = self._site_topology()
+        if home_site is None:
+            return []
         availability = await self._member_availability()
         if availability is None:
             return []
         closed_listing_ids = stale_open_listing_ids(
-            self._db.db_path, member_availability=availability,
+            self._db.db_path,
+            home_site=home_site,
+            configured_site_count=configured_site_count,
+            member_availability=availability,
         )
         if closed_listing_ids:
             conn = sqlite3.connect(
@@ -662,9 +862,20 @@ class AdminController:
                 pool_id = offer.get("pool_id")
                 if not resource_id and not pool_id:
                     continue
+                # stale_open_listing_ids resolved a site for this listing
+                # either from its own mapping or (only with exactly one
+                # configured site) the home_site fallback -- re-derive
+                # the same way here rather than assuming a prior mapping
+                # row exists.
+                listing_site_id = site_id_for_listing(self._db.db_path, str(listing_id))
+                if listing_site_id is None:
+                    if configured_site_count != 1:
+                        continue
+                    listing_site_id = home_site
                 record_derived_listing(
                     self._db.db_path,
                     listing_id=str(listing_id),
+                    site_id=listing_site_id,
                     resource_id=str(resource_id) if resource_id else None,
                     pool_id=str(pool_id) if pool_id else None,
                     gpu_count=int(offer["gpu_count"]),
@@ -672,20 +883,30 @@ class AdminController:
                 )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="closed")
-        mark_derived_listings_closed(self._db.db_path, closed_listing_ids)
+        mark_derived_listings_closed(
+            self._db.db_path,
+            closed_listing_ids,
+            home_site=home_site,
+            configured_site_count=configured_site_count,
+        )
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self) -> list[str]:
-        from domains.vms.listings.reconciler import (
+        from market_storefront.listings.reconciler import (
             closed_available_listing_ids,
             mark_derived_listings_open,
         )
 
+        home_site, _ = self._site_topology()
+        if home_site is None:
+            return []
         availability = await self._member_availability()
         if availability is None:
             return []
         reopened_listing_ids = closed_available_listing_ids(
-            self._db.db_path, member_availability=availability,
+            self._db.db_path,
+            home_site=home_site,
+            member_availability=availability,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(listing_id=listing_id, status="open")
@@ -698,7 +919,8 @@ class AdminController:
         summary="Record provisioning fulfillment start (admin)",
     )
     async def fulfillment_started(
-        self, body: FulfillmentStartedEventRequest,
+        self,
+        body: FulfillmentStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -716,7 +938,8 @@ class AdminController:
         summary="Record compute usage start (admin)",
     )
     async def usage_started(
-        self, body: UsageStartedEventRequest,
+        self,
+        body: UsageStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -737,7 +960,8 @@ class AdminController:
         summary="Record compute release start (admin)",
     )
     async def release_started(
-        self, body: ReleaseStartedEventRequest,
+        self,
+        body: ReleaseStartedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -754,7 +978,8 @@ class AdminController:
         summary="Record compute capacity release (admin)",
     )
     async def capacity_released(
-        self, body: CapacityReleasedEventRequest,
+        self,
+        body: CapacityReleasedEventRequest,
     ) -> FulfillmentEventResponse:
         return await self._apply_fulfillment_event(
             capacity_reservation_id=body.capacity_reservation_id,
@@ -774,7 +999,8 @@ class AdminController:
         summary="Record provisioning fulfillment failure (admin)",
     )
     async def fulfillment_failed(
-        self, body: FulfillmentFailedEventRequest,
+        self,
+        body: FulfillmentFailedEventRequest,
     ) -> FulfillmentEventResponse:
         result = await apply_fulfillment_failure_policy(
             self._db,
@@ -797,7 +1023,8 @@ class AdminController:
                 detail=f"Reservation {body.capacity_reservation_id!r} not found",
             )
         return FulfillmentEventResponse(
-            capacity_reservation_id=result.capacity_reservation_id or body.capacity_reservation_id,
+            capacity_reservation_id=result.capacity_reservation_id
+            or body.capacity_reservation_id,
             state=result.state or "unchanged",
             resource_id=result.resource_id,
             gpu_count=result.gpu_count,
@@ -842,7 +1069,8 @@ class AdminController:
         summary="Reserve compute capacity without negotiation (admin)",
     )
     async def reserve_capacity(
-        self, body: ReserveCapacityRequest,
+        self,
+        body: ReserveCapacityRequest,
     ) -> ReserveCapacityResponse:
         """Force-reserve compute capacity using the reservation model.
 
@@ -851,15 +1079,44 @@ class AdminController:
         every other reservation, so partial GPU capacity accounting and
         derived-listing reconciliation stay consistent across consumers.
         """
+        from market_storefront.listings.reconciler import site_id_for_listing
+
         open_listing_ids = self._open_derived_compute_listing_ids()
-        reserved = await self._capacity().reserve(
-            claim=body.required_attributes or None,
-            deal_ref={
-                "listing_id": body.listing_id,
-                "escrow_uid": body.escrow_uid,
-                "reserved_by": "admin",
-            },
+        site_id = (
+            site_id_for_listing(self._db.db_path, body.listing_id)
+            if body.listing_id
+            else None
         )
+        try:
+            reserved = await self._capacity().reserve(
+                claim=body.required_attributes or None,
+                deal_ref={
+                    "listing_id": body.listing_id,
+                    "escrow_uid": body.escrow_uid,
+                    "reserved_by": "admin",
+                },
+                site=site_id,
+            )
+        except KeyError:
+            # The listing's own recorded site_id doesn't match any
+            # currently configured site -- a stale mapping, not a
+            # capacity answer. Distinct from "no capacity" so an
+            # operator debugging this doesn't chase the wrong problem.
+            raise HTTPException(
+                status_code=500,
+                detail=f"Listing {body.listing_id!r} is mapped to site "
+                f"{site_id!r}, which is not currently configured",
+            )
+        except Exception as exc:
+            if site_id is None:
+                raise
+            # The mapped site itself could not be reached -- also
+            # distinct from a live "no capacity" refusal.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not reach site {site_id!r} for listing "
+                f"{body.listing_id!r}: {exc}",
+            )
         if not reserved:
             raise HTTPException(
                 status_code=409,
@@ -874,30 +1131,33 @@ class AdminController:
             set(closed_listing_ids)
             | await self._closed_since_snapshot(open_listing_ids)
         )
+        # Pool and resource identity come from this request's own claim, never
+        # from the reservation. A reservation commits to a site and a shape and
+        # to nothing narrower, so the site reports neither the resource it
+        # matched nor that resource's pool -- reporting either would advertise a
+        # placement scheduling is free to move. A claim that pins one already
+        # carries it; a claim that pins neither correctly reports neither.
+        # See openspec/specs/site-capacity/spec.md#internal-capacity-accounting.
+        claim = body.required_attributes or {}
+        claimed_pool_id = claim.get("pool_id")
+        claimed_resource_id = claim.get("resource_id")
         stage_event(
             "portfolio",
             "capacity_reserved_by_admin",
             capacity_reservation_id=reserved.get("capacity_reservation_id"),
-            pool_id=reserved.get("pool_id"),
-            member_id=reserved.get("member_id"),
-            resource_id=reserved.get("resource_id"),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=reserved.get("allocated_gpu_count"),
             resource_state=reserved.get("state"),
             listing_id=body.listing_id,
             escrow_uid=body.escrow_uid,
             closed_listing_ids=closed_listing_ids,
         )
-        # Pools are the aggregator's concept, not the ledger's — surface
-        # the membership from the resource attributes the sync mirrored.
-        pool_id = (
-            reserved.get("pool_id")
-            or (reserved.get("attributes") or {}).get("pool_id")
-        )
         return ReserveCapacityResponse(
             capacity_reservation_id=str(reserved["capacity_reservation_id"]),
-            pool_id=str(pool_id) if pool_id else None,
-            member_id=str(reserved["member_id"]) if reserved.get("member_id") else None,
-            resource_id=str(reserved["resource_id"]),
+            pool_id=str(claimed_pool_id) if claimed_pool_id else None,
+            member_id=None,
+            resource_id=str(claimed_resource_id) if claimed_resource_id else None,
             gpu_count=int(reserved.get("allocated_gpu_count") or 1),
             resource_state=reserved.get("state") or "available",
             closed_listing_ids=closed_listing_ids,
@@ -952,7 +1212,8 @@ class AdminController:
         if released:
             logger.info(
                 "[ADMIN] Released %d held resource(s): %s",
-                len(released), released,
+                len(released),
+                released,
             )
         return ReleaseReservationsResponse(
             released_count=len(released),
@@ -971,7 +1232,9 @@ class AdminController:
                 for state in ("reserved", "provisioning", "leased", "releasing"):
                     for reservation in await client.list_reservations(state=state):
                         done = await client.release(
-                            capacity_reservation_id=reservation.get("capacity_reservation_id"),
+                            capacity_reservation_id=reservation.get(
+                                "capacity_reservation_id"
+                            ),
                         )
                         if done:
                             released.append(
@@ -980,6 +1243,7 @@ class AdminController:
                             )
         except Exception as exc:
             logger.warning(
-                "[ADMIN] Could not release site-ledger holds: %s", exc,
+                "[ADMIN] Could not release site-ledger holds: %s",
+                exc,
             )
         return released

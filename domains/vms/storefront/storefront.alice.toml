@@ -21,6 +21,17 @@ log_file_path       = "./logs/alice.log"
 admin_api_key       = "test-api-key"
 resources_csv_path  = "/app/resources.csv"
 
+# Timer-loop intervals, shortened for this stack only. A scenario pauses the
+# storefront and then advances each loop deliberately, and a pause is observed
+# when a loop next reaches its gate — which it can only do at the end of an
+# interval. The shipped defaults (60s watchdog, 30s sweeps) would make a
+# scenario wait that long before it could assert anything. Shortening them here
+# changes nothing about what a loop does, only how soon it notices it has been
+# asked to stop. Production keeps the shipped values.
+negotiation_watchdog_interval     = 2
+claims_sweep_interval             = 2
+fulfillment_resume_sweep_interval = 2
+
 [wallet]
 address     = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 private_key = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"

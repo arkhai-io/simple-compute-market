@@ -3,18 +3,30 @@
 Scheduling owns placement and returns an already-selected SettlementResource.
 Providers execute against that resource and do not perform independent
 placement. See ``openspec/specs/fulfillment/spec.md#scheduling-and-assignment``.
+
+``schedule_resource`` is one atomic database transaction: it locks and
+validates the reservation, enumerates eligible candidates, applies
+scheduling policy (advancing durable round-robin fairness state when
+automatic selection is used), performs any fair capacity rebind, and
+creates or returns the settlement assignment -- committing or rolling back
+all of it together. This exists so a caller (ordinarily the storefront)
+never has to build compensating error handling for a partially-completed
+schedule the way it would if these were separate calls.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import threading
 from typing import Any
 
 from market_resource_pools import ResourcePoolService
 from market_site import resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 
+from .settlement_repository import SettlementRepository
+from .scheduling_persistence import SchedulingUnitOfWork, SqlAlchemySchedulingUnitOfWork
+from .round_robin_policy import DeterministicRoundRobinPolicy
+from .scheduling import SchedulingCursorState, SettlementSchedulingPolicy
 from .settlement_types import (
     CapacityReservationExpiredError,
     NoEligibleSettlementResourceError,
@@ -25,8 +37,6 @@ from .settlement_types import (
     SettlementRequirement,
     SettlementResource,
 )
-from .scheduling import SettlementSchedulingPolicy
-from .round_robin_policy import DeterministicRoundRobinPolicy
 
 
 class MissingResourceKindError(SettlementRequestMismatchError):
@@ -34,14 +44,19 @@ class MissingResourceKindError(SettlementRequestMismatchError):
     scheduler's configured ``default_resource_kind``."""
 
 
-class PhysicalSettlementScheduler:
-    """Creates one Capacity Settlement Assignment per unchanged reservation.
+def _resource_from_record(record: Any) -> SettlementResource:
+    return SettlementResource(
+        settlement_resource_id=record.settlement_resource_id,
+        pool_id=record.pool_id,
+        resource_kind=record.scheduling_requirements.get("resource_kind"),
+        provider=record.provider,
+        attributes=dict(record.resource_attributes or {}),
+        dimensions=dict((record.scheduling_requirements or {}).get("dimensions") or {}),
+    )
 
-    The in-memory assignment and cursor repositories are an intermediate
-    implementation boundary. They are deliberately named for the domain
-    concepts they approximate so durable repositories can replace them
-    without changing scheduler policy or public contracts.
-    """
+
+class PhysicalSettlementScheduler:
+    """Creates one Capacity Settlement Assignment per unchanged reservation."""
 
     _ACTIVE_STATES = {"reserved", "committed", "leased", "unmanaged"}
 
@@ -49,71 +64,91 @@ class PhysicalSettlementScheduler:
         self,
         pool_service: ResourcePoolService,
         capacity_ledger: CapacityLedgerService,
-        session_factory: Any | None = None,
+        session_factory: Any,
         policy: SettlementSchedulingPolicy | None = None,
         default_resource_kind: str | None = None,
+        repository: SettlementRepository | None = None,
+        unit_of_work: SchedulingUnitOfWork | None = None,
     ) -> None:
-        del session_factory
         self._pool_service = pool_service
         self._capacity_ledger = capacity_ledger
         self._policy = policy or DeterministicRoundRobinPolicy()
         self._default_resource_kind = default_resource_kind
-        self._lock = threading.Lock()
-        self._capacity_settlement_assignments: dict[str, SettlementResource] = {}
+        self._repository = repository or SettlementRepository()
+        self._unit_of_work = unit_of_work or SqlAlchemySchedulingUnitOfWork(
+            session_factory, pool_service, capacity_ledger, self._repository
+        )
 
-    def get_settlement_assignment(self, capacity_reservation_id: str) -> SettlementResource | None:
-        with self._lock:
-            return self._capacity_settlement_assignments.get(capacity_reservation_id)
-
-    def record_settlement_assignment(
-        self, capacity_reservation_id: str, resource: SettlementResource
-    ) -> SettlementResource:
-        self._capacity_settlement_assignments[capacity_reservation_id] = resource
-        return resource
-
-    def select_resource(self, request: PhysicalSettlementRequest) -> SettlementResource:
-        with self._lock:
-            reservation = self._require_valid_reservation(request)
-            existing = self._capacity_settlement_assignments.get(request.capacity_reservation_id)
-            if existing is not None:
-                if request.resource_id and request.resource_id != existing.settlement_resource_id:
-                    raise SettlementRequestMismatchError(
-                        "explicit resource does not match the existing Capacity Settlement Assignment"
-                    )
-                return existing
-
-            requirement = self._requirement(reservation, request)
-            candidates = self._eligible_candidates(requirement, reservation)
-            if request.resource_id is not None:
-                selected = next(
-                    (item for item in candidates if item.resource_id == request.resource_id),
-                    None,
+    def schedule_resource(self, request: PhysicalSettlementRequest) -> SettlementResource:
+        """Schedule ``request`` through the narrow atomic persistence boundary."""
+        with self._unit_of_work.transaction() as tx:
+            reservation_row = tx.lock_reservation(request.capacity_reservation_id)
+            if reservation_row is None:
+                raise SettlementEntityNotFoundError(
+                    f"capacity reservation '{request.capacity_reservation_id}' does not exist"
                 )
+            reservation = self._require_valid_reservation_payload(
+                tx.reservation_payload(reservation_row), request
+            )
+            requirement = self._requirement(reservation, request)
+            existing = tx.get_assignment(request.capacity_reservation_id)
+            if existing is not None:
+                record = tx.schedule_assignment(
+                    capacity_reservation_id=request.capacity_reservation_id,
+                    market=request.market, scheduling_requirements=requirement,
+                    resource=_resource_from_record(existing),
+                    resource_id_constraint=request.resource_id,
+                )
+                return _resource_from_record(record)
+
+            candidates = self._eligible_candidates_in_transaction(
+                tx, requirement, request.capacity_reservation_id
+            )
+            if request.resource_id is not None:
+                selected = next((c for c in candidates if c.resource_id == request.resource_id), None)
                 if selected is None:
                     raise NoEligibleSettlementResourceError(
                         f"resource '{request.resource_id}' is not eligible for settlement"
                     )
             else:
-                selected = self._policy.select(
-                    requirement=requirement,
-                    candidates=candidates,
+                cursor_row = tx.load_cursor(requirement.resource_kind)
+                selected, updated_cursor = self._policy.select(
+                    requirement=requirement, candidates=candidates,
+                    cursor=SchedulingCursorState(
+                        last_pool_id=cursor_row.last_pool_id,
+                        last_resource_by_pool=dict(cursor_row.last_resource_by_pool or {}),
+                    ),
                 )
-
-            resource = SettlementResource(
+                tx.save_cursor(
+                    requirement.resource_kind, last_pool_id=updated_cursor.last_pool_id,
+                    last_resource_by_pool=dict(updated_cursor.last_resource_by_pool),
+                )
+            # Unconditional: the ledger's own assignment is idempotent and takes a
+            # cheap path when the selected resource is the one the reservation is
+            # already debited against — it records the marker and moves no debit,
+            # emits no capacity event. Skipping the call in that case left
+            # `settlement_resource_id` NULL after a scheduling decision that did
+            # happen, so the reservation and the settlement record disagreed about
+            # a fact both are supposed to carry.
+            tx.rebind_capacity(
+                capacity_reservation_id=request.capacity_reservation_id,
                 settlement_resource_id=selected.resource_id,
-                pool_id=selected.pool_id,
-                resource_kind=selected.resource_kind,
-                provider=selected.provider,
+            )
+            resource = SettlementResource(
+                settlement_resource_id=selected.resource_id, pool_id=selected.pool_id,
+                resource_kind=selected.resource_kind, provider=selected.provider,
                 attributes=selected.attributes,
             )
-            return self.record_settlement_assignment(request.capacity_reservation_id, resource)
-
-    def _require_valid_reservation(self, request: PhysicalSettlementRequest) -> dict[str, Any]:
-        reservation = self._capacity_ledger.get_reservation(request.capacity_reservation_id)
-        if reservation is None:
-            raise SettlementEntityNotFoundError(
-                f"capacity reservation '{request.capacity_reservation_id}' does not exist"
+            record = tx.schedule_assignment(
+                capacity_reservation_id=request.capacity_reservation_id, market=request.market,
+                scheduling_requirements=requirement, resource=resource,
+                resource_id_constraint=request.resource_id,
             )
+            return _resource_from_record(record)
+
+    def _require_valid_reservation_payload(
+        self, reservation: dict[str, Any], request: PhysicalSettlementRequest
+    ) -> dict[str, Any]:
         if reservation.get("state") not in self._ACTIVE_STATES:
             raise SettlementRequestMismatchError(
                 f"capacity reservation '{request.capacity_reservation_id}' is not active"
@@ -153,7 +188,7 @@ class PhysicalSettlementScheduler:
         attributes = dict(request.requirements.get("attributes") or {})
         # dimensions is authoritative when the reservation carries one.
         # Otherwise fall back to the reservation's own dimensions, which
-        # ledger.get_reservation() always populates -- even for a
+        # reservation_payload_in_session() always populates -- even for a
         # pre-migration reservation that only ever had "units"
         # (CapacityLedgerService._reservation_dimensions applies that
         # fallback once, centrally, before this dict ever reaches the
@@ -190,67 +225,34 @@ class PhysicalSettlementScheduler:
             attributes=attributes,
         )
 
-    def _eligible_candidates(
-        self,
-        requirement: SettlementRequirement,
-        reservation: dict[str, Any],
+    def _eligible_candidates_in_transaction(
+        self, tx: Any, requirement: SettlementRequirement,
+        capacity_reservation_id: str,
     ) -> list[SettlementCandidate]:
-        pools = {pool.id: pool for pool in self._pool_service.list_pools(enabled_only=True)}
-        # Guaranteed non-empty by CapacityLedgerService.get_reservation() --
-        # see the comment in _requirement().
-        reservation_dimensions = dict(reservation["dimensions"])
-        backing_resource_id = self._capacity_ledger.get_reservation_backing_resource_id(
-            reservation["capacity_reservation_id"]
-        )
+        pools = {pool.id: pool for pool in tx.list_enabled_pools()}
         candidates: list[SettlementCandidate] = []
-        for payload in self._capacity_ledger.list_resources():
-            attributes = dict(payload.get("attributes") or {})
-            # Prefer the real pool_id column; the attributes JSON fallback
-            # covers resources registered before a caller passed the real
-            # column explicitly, and any resource type that still relies
-            # on attributes-only registration.
-            pool_id = payload.get("pool_id") or attributes.get("pool_id")
-            if not isinstance(pool_id, str) or pool_id not in pools:
+        for payload in tx.list_candidates(
+            resource_kind=requirement.resource_kind,
+            exclude_reservation_id=capacity_reservation_id,
+        ):
+            pool_id = payload.pool_id
+            pool = pools.get(pool_id)
+            if pool is None:
                 continue
-            if not payload.get("enabled"):
-                continue
-            # Cheap early exit before the credit-back computation below;
-            # resource_satisfies_requirement is still the sole source of
-            # truth for the eligibility decision itself.
-            if payload.get("resource_type") != requirement.resource_kind:
-                continue
-            available = dict(payload.get("available") or {})
-            # The ledger reserves against a concrete line item before
-            # scheduling runs. Credit this reservation's own held
-            # dimensions back during eligibility evaluation so the
-            # resource it already holds capacity against can still be
-            # selected; durable assignment persistence will move this
-            # bookkeeping into the assignment transaction instead.
-            if payload.get("resource_id") == backing_resource_id:
-                for key, amount in reservation_dimensions.items():
-                    available[key] = available.get(key, 0) + amount
             if not resource_satisfies_requirement(
-                resource_kind=payload["resource_type"],
-                available=available,
-                attributes=attributes,
+                resource=payload,
                 required_resource_kind=requirement.resource_kind,
                 required_dimensions=requirement.dimensions,
                 required_attributes=requirement.attributes,
             ):
                 continue
-            pool = pools[pool_id]
-            candidates.append(
-                SettlementCandidate(
-                    resource_id=payload["resource_id"],
-                    pool_id=pool_id,
-                    resource_kind=payload["resource_type"],
-                    available=available,
-                    provider=pool.provider,
-                    attributes=attributes,
-                )
-            )
+            candidates.append(SettlementCandidate(
+                resource_id=payload.resource_id, pool_id=pool_id,
+                resource_kind=payload.resource_kind, provider=pool.provider,
+                available=dict(payload.available),
+                attributes=dict(payload.attributes or {}),
+            ))
         if not candidates:
-            raise NoEligibleSettlementResourceError(
-                "no enabled pooled resource can satisfy the capacity reservation"
-            )
+            raise NoEligibleSettlementResourceError("no eligible settlement resource exists")
         return candidates
+

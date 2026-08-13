@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arkhai-kit-site>=0.2.0",
     "arkhai-kit-resource-pools>=0.1.0",
+    "arkhai-kit-fulfillment>=0.1.0",
     "httpx>=0.27",
     "pydantic>=2",
 ]
@@ -20,7 +21,7 @@ packages = ["src/compute_provisioning"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [

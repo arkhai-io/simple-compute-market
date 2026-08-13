@@ -28,5 +28,7 @@ provisioning/compute/
   contracts/    # shared DTOs/contracts, if split out
 ```
 
-See `docs/development/provisioning-migration-plan.md` for the migration map and
-extraction sequence.
+See the [physical provisioning specification](../../openspec/specs/physical-provisioning/spec.md)
+for the current scheduling, fulfillment, job, and lease contracts, and the
+[site capacity specification](../../openspec/specs/site-capacity/spec.md) for the
+shared authority and reservation contracts.

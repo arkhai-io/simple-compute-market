@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from domains.vms.listings import extract_compute_from_order
-from domains.vms.settlement import (
+from market_storefront.listings import extract_compute_from_order
+from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
+from market_storefront.services.vm_job_spec_service import (
+    compute_capacity_claim_from_order,
+)
+from market_storefront.settlement import (
     encode_compute_lease,
     token_resource_from_accepted_escrow,
 )
-from market_storefront.models.vm_fulfillment_models import VmFulfillmentPlan
-from market_storefront.services.vm_job_spec_service import compute_capacity_claim_from_order
 
 
 def build_vm_fulfillment_plan(

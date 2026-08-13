@@ -19,7 +19,6 @@ import copy
 import dataclasses
 import logging
 import os
-import re
 import signal
 import uuid
 from datetime import datetime, timedelta
@@ -48,7 +47,11 @@ from vm_provisioning_operator.models import (
     JobStatusResponse,
     JobSubmitResponse,
 )
-from vm_provisioning_adapter.services.ansible_service import AnsibleError, AnsibleService
+from vm_provisioning_adapter.services.ansible_service import (
+    AnsibleError,
+    AnsibleService,
+    redact_ansible_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -724,21 +727,15 @@ class AnsibleJobService:
         return self._settings.resolved_playbook_path
 
     def _redact_logs(self, logs: str) -> str:
-        if not logs:
-            return logs
-        redacted = re.sub(
-            r'("(?:password|ssh_key_path_host)":\s*)"[^"]*"',
-            r'\1"[REDACTED]"',
-            logs,
-        )
-        redacted = re.sub(
-            r"(password:\s*)(?!\[REDACTED\]).+",
-            r"\1[REDACTED]",
-            redacted,
-        )
-        redacted = re.sub(r"-i\s+\S+\.ssh/\S+", "-i [REDACTED]", redacted)
-        redacted = re.sub(r"sshpass\s+-p\s+\S+", "sshpass -p [REDACTED]", redacted)
-        return redacted
+        """Delegate to the shared scrubber both this module's persisted
+        ``job.logs`` and ``ansible_service.py``'s real-time debug stream
+        use, so there is exactly one place defining what
+        "credential-shaped" means. See ``redact_ansible_output``'s
+        docstring for why this is defense in depth, not the primary
+        control.
+        """
+        return redact_ansible_output(logs)
+
 
     def _extract_and_store_credentials(
         self, db: Session, job: AnsibleJob, result_payload: dict

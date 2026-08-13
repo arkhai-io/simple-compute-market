@@ -150,23 +150,43 @@ class HealthResponse:
     status: str = "ok"          # "ok" | "degraded"
     checks: dict[str, str] = field(default_factory=dict)
     paused: bool | None = None  # present on /api/v1/system/status only
+    # Whether timer loops are held idle — a different question from `paused`,
+    # which is about accepting new negotiations.
+    loops_paused: bool | None = None
+    # Per timer loop: "starting", "running", "pausing", "paused", "cancelled",
+    # or "exited". Present on /api/v1/system/status and /api/v1/system/ready.
+    # Read this rather than `paused` to confirm a pause halted the background
+    # work: the flag says what was requested, this says what actually stopped —
+    # and `starting` says the loop has not begun cycling, so it could not have
+    # observed the request at all.
+    loops: dict[str, str] | None = None
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
     resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
+    site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
+    listing_mode_explanations: dict[str, Any] | None = None  # per-site/pool listing_mode fallback reasons; present on /api/v1/system/status
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
-        known = {"status", "checks", "paused", "agent_id", "chain_id", "resource_count"}
+        known = {
+            "status", "checks", "paused", "loops_paused", "loops", "agent_id",
+            "chain_id",
+            "resource_count", "site_projections", "listing_mode_explanations",
+        }
         raw_chain_id = d.get("chain_id")
         raw_resource_count = d.get("resource_count")
         return cls(
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
             paused=d.get("paused"),
+            loops_paused=d.get("loops_paused"),
+            loops=d.get("loops"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
             resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
+            site_projections=d.get("site_projections"),
+            listing_mode_explanations=d.get("listing_mode_explanations"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -308,16 +328,24 @@ class StageEvent:
 
 @dataclass
 class StageEventListResponse:
-    """Response from GET /api/v1/system/events (non-streaming)."""
+    """Response from GET /api/v1/system/events (non-streaming).
+
+    `truncated` reports that more rows matched than were returned. It is not
+    derivable from `count`: a caller receiving exactly the server's page cap
+    cannot otherwise tell a complete result from a partial one. A caller treating
+    the result as a whole history should check it.
+    """
 
     events: list[StageEvent] = field(default_factory=list)
     count: int = 0
+    truncated: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "StageEventListResponse":
         return cls(
             events=[StageEvent.from_dict(e) for e in d.get("events", [])],
             count=d.get("count", 0),
+            truncated=bool(d.get("truncated", False)),
         )
 
 
@@ -503,18 +531,26 @@ class NegotiationActionResponse:
 
 @dataclass
 class AdminPauseResponse:
-    """Response from POST /admin/pause or /admin/resume."""
+    """Response from POST /admin/pause or /admin/resume.
+
+    `loops` maps each timer loop's name to its state after the call. Pause halts
+    the storefront's background work as well as refusing new negotiations, so a
+    caller confirming a pause took effect reads this rather than `paused`.
+    """
 
     paused: bool = False
     message: str = ""
+    loops: dict[str, str] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AdminPauseResponse":
-        known = {"paused", "message"}
+        known = {"paused", "message", "loops"}
+        loops = d.get("loops")
         return cls(
             paused=bool(d.get("paused", False)),
             message=d.get("message", ""),
+            loops=dict(loops) if isinstance(loops, dict) else {},
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -539,12 +575,19 @@ class ReleaseReservationsResponse:
 
 @dataclass
 class ReserveCapacityResponse:
-    """Response from POST /api/v1/admin/portfolio/reservations."""
+    """Response from POST /api/v1/admin/portfolio/reservations.
+
+    `pool_id` and `resource_id` echo whichever the request's claim pinned, and
+    are `None` when the claim pinned neither -- absent, not empty. The site
+    authority reports neither the resource it matched nor that resource's pool,
+    because a reservation commits to a site and a shape and scheduling may
+    rebind it within that site.
+    """
 
     capacity_reservation_id: str = ""
     pool_id: str | None = None
     member_id: str | None = None
-    resource_id: str = ""
+    resource_id: str | None = None
     gpu_count: int = 0
     resource_state: str | None = None
     closed_listing_ids: list[str] = field(default_factory=list)
@@ -565,7 +608,7 @@ class ReserveCapacityResponse:
             capacity_reservation_id=str(d.get("capacity_reservation_id") or ""),
             pool_id=d.get("pool_id"),
             member_id=d.get("member_id"),
-            resource_id=str(d.get("resource_id") or ""),
+            resource_id=str(d["resource_id"]) if d.get("resource_id") else None,
             gpu_count=int(d.get("gpu_count") or 0),
             resource_state=d.get("resource_state"),
             closed_listing_ids=list(d.get("closed_listing_ids") or []),
@@ -633,10 +676,22 @@ class SettleResponse:
 
 @dataclass
 class SettleStatusResponse:
-    """Response from GET /api/v1/settle/{escrow_uid}/status."""
+    """Response from GET /api/v1/settle/{escrow_uid}/status.
+
+    Carries two different identities, and they are not interchangeable.
+    `fulfillment_id` is the durable fulfillment aggregate's identity and is the
+    field a caller should prefer; `fulfillment_uid` is the on-chain settlement
+    claim identity the storefront's settlement mechanism issues for escrow
+    arbitration. One escrow row legitimately carries both, meaning two different
+    things — see `docs/development/ARCHITECTURE.md`'s identifier table.
+
+    `provisioning_job_id` is the legacy ephemeral executor-job identity and is
+    always absent for a fulfillment that took the durable path.
+    """
 
     status: str = ""
     escrow_uid: str = ""
+    fulfillment_id: str | None = None
     fulfillment_uid: str | None = None
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
@@ -645,13 +700,14 @@ class SettleStatusResponse:
     @classmethod
     def from_dict(cls, d: dict) -> "SettleStatusResponse":
         known = {
-            "status", "escrow_uid", "fulfillment_uid",
+            "status", "escrow_uid", "fulfillment_id", "fulfillment_uid",
             "provisioning_job_id", "tenant_credentials",
         }
         creds = d.get("tenant_credentials")
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
+            fulfillment_id=d.get("fulfillment_id"),
             fulfillment_uid=d.get("fulfillment_uid"),
             provisioning_job_id=d.get("provisioning_job_id"),
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,

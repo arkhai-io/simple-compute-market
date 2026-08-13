@@ -8,6 +8,12 @@ from typing import Any, Callable, Mapping, Optional
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
+from .hints import (
+    MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,
+    SLA_POLICY_TAG,
+    validate_hold_preference,
+    validate_sla_preference,
+)
 from .pool_config_handler import PoolConfigHandler
 from .pools import (
     PoolCreate,
@@ -106,6 +112,22 @@ class ResourcePoolService:
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
 
+    def _require_valid_policy_tag_hints(self, policy_tags: Mapping[str, Any]) -> None:
+        """Reject an invalid `max_reservation_hold_seconds` or `sla` before
+        any write.
+
+        Shared by every individual-pool write path (`create_pool`,
+        `replace_pool`, `update_pool`) so these hints are enforced
+        identically regardless of which one an operator uses -- the bulk
+        YAML pool-document path (`_validate_document`) enforces the same
+        rules via the same `hints.validate_hold_preference`/
+        `validate_sla_preference`, independently, since it reports problems
+        rather than raising.
+        """
+        problems = validate_hold_preference(policy_tags) + validate_sla_preference(policy_tags)
+        if problems:
+            raise PoolValidationError("; ".join(problems))
+
     def list_pools(
         self, tag_filter: Optional[dict[str, str]] = None, enabled_only: bool = False
     ) -> list[ResourcePool]:
@@ -127,6 +149,22 @@ class ResourcePoolService:
                 db.expunge(pool)
             return pools
 
+    def list_pools_in_session(
+        self, db: Session, *, enabled_only: bool = True
+    ) -> list[ResourcePool]:
+        """Session-scoped pool enumeration for a caller composing one transaction.
+
+        Unlike ``list_pools``, this does not attach ``provider_config``
+        (which requires a per-pool handler round trip) and does not expunge
+        rows from the session: a caller such as scheduling only needs
+        ``id``/``provider``/``enabled`` and is already inside its own
+        transaction boundary, so the rows stay attached to that session.
+        """
+        query = db.query(ResourcePool)
+        if enabled_only:
+            query = query.filter(ResourcePool.enabled.is_(True))
+        return query.order_by(ResourcePool.id).all()
+
     def get_pool(self, pool_id: str) -> Optional[ResourcePool]:
         with self._session_factory() as db:
             pool = (
@@ -137,6 +175,13 @@ class ResourcePoolService:
                 db.expunge(pool)
             return pool
 
+    def get_pool_in_session(self, db: Session, pool_id: str) -> Optional[ResourcePool]:
+        """Load a pool and provider configuration in the caller's transaction."""
+        pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
+        if pool is not None:
+            self._attach_provider_config(db, pool)
+        return pool
+
     def _require_pool(self, db: Session, pool_id: str) -> ResourcePool:
         pool = db.query(ResourcePool).filter(ResourcePool.id == pool_id).one_or_none()
         if pool is None:
@@ -144,6 +189,7 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
+        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -161,6 +207,7 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
+        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -175,6 +222,8 @@ class ResourcePoolService:
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
+        if data.policy_tags is not None:
+            self._require_valid_policy_tag_hints(data.policy_tags)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             provider = data.provider or pool.provider
@@ -351,6 +400,25 @@ class ResourcePoolService:
                     )
                 )
                 entry_valid = False
+            else:
+                for hold_problem in validate_hold_preference(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG}",
+                            code="invalid_hold_preference",
+                            message=hold_problem,
+                        )
+                    )
+                    entry_valid = False
+                for sla_problem in validate_sla_preference(tags):
+                    problems.append(
+                        PoolValidationProblem(
+                            path=f"{base}.policy_tags.{SLA_POLICY_TAG}",
+                            code="invalid_sla_preference",
+                            message=sla_problem,
+                        )
+                    )
+                    entry_valid = False
             if not isinstance(config, Mapping):
                 problems.append(
                     PoolValidationProblem(

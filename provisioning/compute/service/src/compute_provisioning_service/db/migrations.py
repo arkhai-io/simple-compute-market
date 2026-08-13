@@ -7,8 +7,11 @@ persisted service databases across image upgrades.
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Callable
+import re
+import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, inspect, text
@@ -134,6 +137,178 @@ def _column_exists(engine: Engine, table_name: str, column_name: str) -> bool:
     }
 
 
+_SQLITE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_sql_identifier(name: str) -> str:
+    """Reject anything that isn't a bare SQLite identifier before it is
+    interpolated into raw SQL. ``table_name``/``columns_to_drop`` are
+    ordinary Python arguments, not user input, on every caller this
+    helper has today — this validates them anyway so the helper stays
+    provably safe to call generically rather than safe only by every
+    caller happening to pass a literal.
+    """
+    if not _SQLITE_IDENTIFIER.match(name):
+        raise ValueError(f"Not a safe SQL identifier: {name!r}")
+    return name
+
+
+def _drop_columns_via_table_rebuild(
+    engine: Engine, table_name: str, columns_to_drop: Sequence[str],
+) -> None:
+    """Deterministically drop columns from a SQLite table via a full
+    create/copy/drop/rename cycle, instead of ``ALTER TABLE ... DROP
+    COLUMN`` (unavailable before SQLite 3.35, and this repository
+    supports SQLite only — so there is no reason to accept a silent
+    partial migration rather than doing the rebuild every version
+    actually supports).
+
+    A no-op if none of ``columns_to_drop`` are present. Introspects the
+    table's current columns via ``PRAGMA table_info`` rather than a
+    hardcoded column list, so this stays correct as the model gains
+    columns rather than needing to be kept in sync by hand; preserves
+    every other column's type, nullability, default, and primary-key
+    flag, and recreates every named index that doesn't reference a
+    dropped column. Every identifier this function interpolates into raw
+    SQL — the table name, the columns to drop, and every column name
+    read back from ``PRAGMA table_info`` — is validated against a strict
+    ``[A-Za-z_][A-Za-z0-9_]*`` rule first.
+
+    Follows SQLite's documented offline-schema-change procedure for a
+    table other rows may reference by foreign key: the whole rebuild runs
+    on one dedicated connection with foreign-key enforcement disabled for
+    its duration (dropping the original table would otherwise cascade-delete
+    every referencing child row if the caller's database has
+    ``PRAGMA foreign_keys=ON`` — those rows are never touched by this
+    function, but a plain ``DROP TABLE`` under FK enforcement would delete
+    them as a side effect of the rebuild, not preserve them), verifies with
+    ``PRAGMA foreign_key_check`` before committing, and restores whatever
+    the connection's foreign-key setting was before this function ran.
+
+    Does not preserve triggers, views, or outbound foreign-key constraints
+    *defined on this table* — ``capacity_reservations`` (this helper's
+    only caller today) has none of those, confirmed by inspection, and
+    this function refuses to run against a table that does rather than
+    silently dropping them unnoticed. Extend it deliberately if a future
+    caller needs that.
+    """
+    _validate_sql_identifier(table_name)
+    for column in columns_to_drop:
+        _validate_sql_identifier(column)
+
+    present = {
+        column for column in columns_to_drop
+        if _column_exists(engine, table_name, column)
+    }
+    if not present:
+        return
+
+    with engine.connect() as connection:
+        triggers_and_views = connection.execute(text(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE tbl_name = :table_name AND type IN ('trigger', 'view')"
+        ), {"table_name": table_name}).fetchall()
+        if triggers_and_views:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"triggers/views, but {table_name!r} has: "
+                f"{sorted(f'{kind}:{name}' for kind, name in triggers_and_views)}. "
+                "Extend this helper before using it on this table."
+            )
+        outbound_fks = connection.execute(
+            text(f"PRAGMA foreign_key_list({table_name})")
+        ).fetchall()
+        if outbound_fks:
+            raise NotImplementedError(
+                f"_drop_columns_via_table_rebuild does not preserve "
+                f"outbound foreign key constraints, but {table_name!r} "
+                f"has some. Extend this helper before using it on this "
+                "table."
+            )
+
+        # PRAGMA foreign_keys can only be changed with no transaction
+        # open -- read and set it before starting the rebuild's own
+        # transaction, using exec_driver_sql + an explicit commit to
+        # close out SQLAlchemy's autobegin rather than assuming none is
+        # open.
+        prior_foreign_keys = connection.exec_driver_sql(
+            "PRAGMA foreign_keys"
+        ).scalar()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+
+        try:
+            with connection.begin():
+                columns = connection.execute(
+                    text(f"PRAGMA table_info({table_name})")
+                ).fetchall()
+                keep = [c for c in columns if c[1] not in present]
+                if not keep:
+                    raise ValueError(
+                        f"Refusing to drop every column of {table_name!r}"
+                    )
+                keep_names = [_validate_sql_identifier(c[1]) for c in keep]
+
+                # Captured before the table is dropped -- once the
+                # rebuilt table is renamed into place, a query for
+                # tbl_name = table_name would find the *new*, index-less
+                # table instead of the original's indexes.
+                indexes = connection.execute(text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'index' AND tbl_name = :table_name "
+                    "AND sql IS NOT NULL"
+                ), {"table_name": table_name}).fetchall()
+
+                def _column_def(col) -> str:
+                    _cid, name, col_type, notnull, default, pk = col
+                    parts = [name, col_type or ""]
+                    if pk:
+                        parts.append("PRIMARY KEY")
+                    if notnull and not pk:
+                        parts.append("NOT NULL")
+                    if default is not None:
+                        parts.append(f"DEFAULT {default}")
+                    return " ".join(part for part in parts if part)
+
+                rebuild_table = f"{table_name}__rebuild"
+                connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_table}"))
+                connection.execute(text(
+                    f"CREATE TABLE {rebuild_table} "
+                    f"({', '.join(_column_def(c) for c in keep)})"
+                ))
+                column_list = ", ".join(keep_names)
+                connection.execute(text(
+                    f"INSERT INTO {rebuild_table} ({column_list}) "
+                    f"SELECT {column_list} FROM {table_name}"
+                ))
+                connection.execute(text(f"DROP TABLE {table_name}"))
+                connection.execute(text(
+                    f"ALTER TABLE {rebuild_table} RENAME TO {table_name}"
+                ))
+
+                for (index_sql,) in indexes:
+                    if any(dropped in index_sql for dropped in present):
+                        continue
+                    connection.execute(text(index_sql))
+
+                violations = connection.execute(text(
+                    "PRAGMA foreign_key_check"
+                )).fetchall()
+                if violations:
+                    raise ValueError(
+                        f"{table_name!r} rebuild left dangling foreign-key "
+                        f"references: {violations!r}"
+                    )
+        finally:
+            # Restored even if the rebuild raised, and outside any
+            # transaction (the `with connection.begin()` block above has
+            # already committed or rolled back by the time we get here).
+            connection.exec_driver_sql(
+                f"PRAGMA foreign_keys={'ON' if prior_foreign_keys else 'OFF'}"
+            )
+            connection.commit()
+
+
 def _add_column_if_missing(
     engine: Engine,
     table_name: str,
@@ -242,6 +417,211 @@ def _migrate_multidimensional_capacity(engine: Engine) -> None:
     _add_column_if_missing(engine, "site_resources", "capacity", "JSON")
     _add_column_if_missing(engine, "site_allocations", "dimensions", "JSON")
     _add_column_if_missing(engine, "capacity_events", "dimensions", "JSON")
+
+
+
+def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
+    """Atomically preserve nonterminal VM leases in the fulfillment aggregate.
+
+    A tracked provider job is authoritative during cutover. Per-candidate
+    derivation and provider-envelope preparation are delegated to
+    ``compile_legacy_vm_fulfillment_backfill``, a pure function with no
+    database session; this function owns only enumeration, cross-candidate
+    identity/target deduplication, comparison against already-persisted
+    rows, and the single atomic write.
+    """
+    if not _table_exists(engine, "vm_leases"):
+        return
+
+    from market_fulfillment.db import Base as FulfillmentBase
+
+    FulfillmentBase.metadata.create_all(engine)
+
+    with engine.begin() as connection:
+        _apply_legacy_vm_lease_backfill(connection)
+
+
+def _normalize_json_column(value):
+    """Return a JSON column's value as a Python object regardless of whether
+    the driver already decoded it or returned the stored text."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _existing_settlement_row_conflicts(existing, draft) -> bool:
+    """Compare an already-persisted settlement row against a compiled draft.
+
+    Equivalence covers every field a provider operation depends on for
+    correctness, not only coarse placement fields: provider metadata
+    (including the tracked create job), teardown provider metadata
+    (including the active teardown job), the prepared teardown envelope,
+    and resource attributes. A row matching on state/resource/pool/provider
+    alone but differing in tracked job identity is a conflict, not an
+    equivalent rerun.
+    """
+    expected = (
+        draft.state,
+        draft.settlement_resource_id,
+        draft.pool_id,
+        draft.provider,
+        draft.resource_attributes,
+        draft.provider_metadata,
+        draft.teardown_provider_metadata,
+        draft.prepared_teardown_operation,
+    )
+    actual = (
+        existing["state"],
+        existing["settlement_resource_id"],
+        existing["pool_id"],
+        existing["provider"],
+        _normalize_json_column(existing["resource_attributes"]),
+        _normalize_json_column(existing["provider_metadata"]),
+        _normalize_json_column(existing["teardown_provider_metadata"]),
+        _normalize_json_column(existing["prepared_teardown_operation"]),
+    )
+    return actual != expected
+
+
+def _existing_provisioned_resources_conflict(connection, capacity_reservation_id, expected_ref) -> bool:
+    """Compare already-persisted ``ProvisionedResource`` rows against a draft.
+
+    A candidate with no live target expects zero provisioned-resource rows;
+    a candidate with a live target expects exactly one, whose
+    ``provisioned_resource_id`` equals ``expected_ref`` -- the same
+    deterministic derivation ``compile_legacy_vm_fulfillment_backfill`` used
+    to compute it, so a genuine re-run always recomputes the identical value.
+    Zero, several, or a differently-identified row are all conflicts:
+    silently accepting any of them could mean losing track of, or
+    overwriting, which VM a reservation actually owns. Row count alone is
+    not sufficient here -- a single row with the wrong identity must still
+    be rejected, not treated as equivalent.
+    """
+    rows = connection.execute(text(
+        "SELECT provisioned_resource_id FROM provisioned_resources WHERE capacity_reservation_id=:id"
+    ), {"id": capacity_reservation_id}).mappings().all()
+    ids = [row["provisioned_resource_id"] for row in rows]
+    if expected_ref is None:
+        return len(ids) != 0
+    return ids != [expected_ref]
+
+
+def _apply_legacy_vm_lease_backfill(connection) -> None:
+    """Enumerate all historical VM lease candidates, compile them before
+    writing, reject conflicts, and persist the population atomically.
+
+    Takes an open connection rather than an engine: the caller owns the
+    transaction boundary this enumeration and write run inside.
+    """
+    from market_fulfillment.backfill import LegacyBackfillValidationError
+    from vm_provisioning_adapter.legacy_backfill import (
+        LegacyVmLeaseCandidate,
+        compile_legacy_vm_fulfillment_backfill,
+    )
+
+    rows = connection.execute(text(
+        """
+        SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
+               vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
+               vl.vm_remove_job_id, cr.capacity_reservation_id,
+               cr.executor_target, h.pool_id, rp.provider,
+               apc.playbook_path, apc.inventory_group, apc.extra_vars
+        FROM vm_leases vl
+        LEFT JOIN capacity_reservations cr
+          ON cr.capacity_reservation_id = vl.allocation_id
+        LEFT JOIN hosts h ON h.name = vl.vm_host
+        LEFT JOIN resource_pools rp ON rp.id = h.pool_id
+        LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
+        WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
+        ORDER BY vl.id
+        """
+    )).mappings().all()
+
+    seen_reservations: set[str] = set()
+    seen_targets: set[str] = set()
+    drafts = []
+    for row in rows:
+        reservation_id = row["capacity_reservation_id"] or row["allocation_id"]
+        if not reservation_id:
+            raise SchemaDriftError(f"legacy VM lease {row['lease_id']} has no reservation identity")
+        if reservation_id in seen_reservations:
+            raise SchemaDriftError(f"duplicate legacy VM leases for reservation {reservation_id}")
+        seen_reservations.add(reservation_id)
+
+        extra_vars = row["extra_vars"] or {}
+        if isinstance(extra_vars, str):
+            extra_vars = json.loads(extra_vars)
+        candidate = LegacyVmLeaseCandidate(
+            lease_id=str(row["lease_id"]),
+            capacity_reservation_id=reservation_id,
+            status=row["status"],
+            vm_host=row["vm_host"],
+            pool_id=row["pool_id"],
+            provider=row["provider"],
+            playbook_path=row["playbook_path"],
+            inventory_group=row["inventory_group"],
+            extra_vars=extra_vars,
+            vm_target=row["vm_target"],
+            executor_target=row["executor_target"],
+            create_job_id=row["create_job_id"],
+            vm_remove_job_id=row["vm_remove_job_id"],
+        )
+        try:
+            draft = compile_legacy_vm_fulfillment_backfill(
+                candidate, fulfillment_id=str(uuid.uuid4())
+            )
+        except LegacyBackfillValidationError as exc:
+            raise SchemaDriftError(str(exc)) from exc
+
+        target = draft.provisioned_resource_id
+        if target and target in seen_targets:
+            raise SchemaDriftError(f"duplicate legacy VM target {target}")
+        if target:
+            seen_targets.add(target)
+        drafts.append(draft)
+
+    for draft in drafts:
+        existing = connection.execute(text(
+            "SELECT capacity_reservation_id, state, settlement_resource_id, pool_id, provider, "
+            "resource_attributes, provider_metadata, teardown_provider_metadata, "
+            "prepared_teardown_operation "
+            "FROM settlement_records WHERE capacity_reservation_id=:id"
+        ), {"id": draft.capacity_reservation_id}).mappings().one_or_none()
+        if existing:
+            if _existing_settlement_row_conflicts(existing, draft) or _existing_provisioned_resources_conflict(
+                connection, draft.capacity_reservation_id, draft.provisioned_resource_id
+            ):
+                raise SchemaDriftError(
+                    f"conflicting settlement aggregate for reservation {draft.capacity_reservation_id}"
+                )
+            continue
+
+        connection.execute(text(
+            """INSERT INTO settlement_records (
+                capacity_reservation_id, fulfillment_id, market, scheduling_requirements,
+                settlement_resource_id, pool_id, provider, resource_attributes,
+                prepared_teardown_operation, provider_metadata, teardown_provider_metadata, state, attempt_count
+            ) VALUES (:rid,:fid,'vms',:requirements,:resource_id,:pool_id,:provider,:attributes,
+                      :prepared_teardown,:metadata,:teardown_metadata,:state,0)"""
+        ), {
+            "rid": draft.capacity_reservation_id, "fid": draft.fulfillment_id,
+            "requirements": json.dumps({"resource_kind": "vm"}), "resource_id": draft.settlement_resource_id,
+            "pool_id": draft.pool_id, "provider": draft.provider,
+            "attributes": json.dumps(draft.resource_attributes),
+            "prepared_teardown": json.dumps(draft.prepared_teardown_operation) if draft.prepared_teardown_operation is not None else None,
+            "metadata": json.dumps(draft.provider_metadata),
+            "teardown_metadata": json.dumps(draft.teardown_provider_metadata) if draft.teardown_provider_metadata is not None else None,
+            "state": draft.state,
+        })
+        if draft.provisioned_resource_id:
+            connection.execute(text(
+                """INSERT INTO provisioned_resources
+                (provisioned_resource_id, capacity_reservation_id, fulfillment_id, status)
+                VALUES (:id,:rid,:fid,'active')"""
+            ), {
+                "id": draft.provisioned_resource_id, "rid": draft.capacity_reservation_id,
+                "fid": draft.fulfillment_id,
+            })
 
 
 def _migrate_drop_vm_leases_table(engine: Engine) -> None:
@@ -552,12 +932,142 @@ def _migrate_retire_site_resources(engine: Engine) -> None:
 
 
 def _migrate_capacity_model_cutover(engine: Engine) -> None:
-    """Apply the reservation and private capacity-accounting cutover."""
+    """Apply the full reservation and capacity-accounting cutover.
+
+    A single migration ID rather than several sequential ones: nothing
+    built on this cutover has been deployed anywhere, so there is no
+    intermediate, partially-migrated database to preserve compatibility
+    with. Folding every related schema change in here (rather than
+    registering each as its own dated migration) keeps the migration list
+    reflecting only states a real database has actually been in.
+    """
     _migrate_rename_site_allocations_to_capacity_reservations(engine)
     _migrate_capacity_reservations_settlement_resource_id(engine)
     _migrate_site_resources_pool_id(engine)
     _migrate_capacity_buckets_and_current_debits(engine)
     _migrate_retire_site_resources(engine)
+    _migrate_remove_provisioned_resource_domain_ref(engine)
+    _migrate_ansible_pool_requirement_delegate(engine)
+    _migrate_capacity_reservations_vm_host_to_executor_ref(engine)
+    _migrate_capacity_reservations_vm_target_to_executor_target(engine)
+
+
+def _migrate_remove_provisioned_resource_domain_ref(engine: Engine) -> None:
+    """Remove the redundant provider-domain identifier from fulfillment outputs."""
+    if not _table_exists(engine, "provisioned_resources") or not _column_exists(
+        engine, "provisioned_resources", "domain_resource_ref"
+    ):
+        return
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE provisioned_resources_new (
+                provisioned_resource_id VARCHAR PRIMARY KEY,
+                capacity_reservation_id VARCHAR NOT NULL,
+                fulfillment_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(capacity_reservation_id) REFERENCES settlement_records(capacity_reservation_id) ON DELETE CASCADE
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO provisioned_resources_new (
+                provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                status, created_at, updated_at
+            )
+            SELECT provisioned_resource_id, capacity_reservation_id, fulfillment_id,
+                   status, created_at, updated_at
+            FROM provisioned_resources
+        """))
+        connection.execute(text("DROP TABLE provisioned_resources"))
+        connection.execute(text("ALTER TABLE provisioned_resources_new RENAME TO provisioned_resources"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_capacity_reservation_id ON provisioned_resources (capacity_reservation_id)"))
+        connection.execute(text("CREATE INDEX ix_provisioned_resources_fulfillment_id ON provisioned_resources (fulfillment_id)"))
+
+
+def _migrate_ansible_pool_requirement_delegate(engine: Engine) -> None:
+    _add_column_if_missing(
+        engine,
+        "ansible_pool_configs",
+        "requirement_delegate",
+        "VARCHAR NOT NULL DEFAULT 'vm_management_v1'",
+    )
+
+
+def _migrate_capacity_reservations_vm_host_to_executor_ref(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_host`` in favor of the generic
+    ``executor_ref`` JSON field.
+
+    ``kit/site`` carries no VM-domain-specific column names on the shared,
+    domain-neutral reservation table -- physical placement identity lives
+    uniformly in ``executor_ref`` across every domain, matching
+    bare-metal's ``physical_host_id`` pattern (which was never given its
+    own column). Backfills any existing ``vm_host`` value into
+    ``executor_ref`` (merged via ``json_set``, not overwritten -- a row
+    may already carry other ``executor_ref`` keys) before dropping the
+    column. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_host"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_ref = json_set(COALESCE(executor_ref, '{}'), '$.vm_host', vm_host) "
+            "WHERE vm_host IS NOT NULL "
+            "AND (executor_ref IS NULL OR json_extract(executor_ref, '$.vm_host') IS NULL)"
+        ))
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_host"])
+
+
+def _migrate_capacity_reservations_vm_target_to_executor_target(engine: Engine) -> None:
+    """Retire ``capacity_reservations.vm_target`` in favor of the generic
+    ``executor_target`` field.
+
+    Unlike ``vm_host``, ``vm_target`` was never actually distinct from
+    ``executor_target`` -- every reservation-binding write site sets both
+    columns to the same value at the same time. This backfill exists only
+    for defensiveness against a row where the two happened to diverge; on
+    every row this repository's own code could have produced, it is a
+    no-op. A no-op on a database created fresh from the current ORM
+    model, which never had this column.
+    """
+    if not _table_exists(engine, "capacity_reservations"):
+        return
+    if not _column_exists(engine, "capacity_reservations", "vm_target"):
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "UPDATE capacity_reservations "
+            "SET executor_target = vm_target "
+            "WHERE vm_target IS NOT NULL AND executor_target IS NULL"
+        ))
+    _drop_columns_via_table_rebuild(engine, "capacity_reservations", ["vm_target"])
+
+
+def _migrate_ansible_pool_config_vm_size_defaults(engine: Engine) -> None:
+    """Add ``ansible_pool_configs``' optional VM size default columns.
+
+    These back the fulfillment-time three-tier precedence's final
+    fallback tier (see ``AnsiblePoolConfig.default_vm_ram`` and siblings);
+    a NULL value on an existing row simply means that pool contributes
+    nothing at that tier, matching its pre-migration behavior exactly.
+    """
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_ram", "INTEGER")
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_vcpus", "INTEGER")
+    _add_column_if_missing(engine, "ansible_pool_configs", "default_vm_disk_size", "VARCHAR")
+
+
+def _migrate_hosts_gpu_model(engine: Engine) -> None:
+    """Add ``hosts``' optional descriptive GPU model column.
+
+    NULL on an existing row means the operator hasn't recorded a model
+    yet, matching pre-migration behavior exactly -- it is not treated as
+    "no GPU", which is what ``gpu_count`` already reports independently.
+    """
+    _add_column_if_missing(engine, "hosts", "gpu_model", "VARCHAR")
 
 
 _MIGRATIONS: tuple[Migration, ...] = (
@@ -578,15 +1088,27 @@ _MIGRATIONS: tuple[Migration, ...] = (
         _migrate_resource_pools_and_hosts_pool_id,
     ),
     Migration(
-        "20260718_001_drop_vm_leases_table",
-        _migrate_drop_vm_leases_table,
-    ),
-    Migration(
         "20260720_001_multidimensional_capacity",
         _migrate_multidimensional_capacity,
     ),
     Migration(
         "20260722_001_pools7_capacity_model_cutover",
         _migrate_capacity_model_cutover,
+    ),
+    Migration(
+        "20260724_001_legacy_vm_leases_to_fulfillment",
+        _migrate_legacy_vm_leases_to_fulfillment,
+    ),
+    Migration(
+        "20260724_002_drop_vm_leases_table",
+        _migrate_drop_vm_leases_table,
+    ),
+    Migration(
+        "20260803_001_ansible_pool_config_vm_size_defaults",
+        _migrate_ansible_pool_config_vm_size_defaults,
+    ),
+    Migration(
+        "20260804_001_hosts_gpu_model",
+        _migrate_hosts_gpu_model,
     ),
 )

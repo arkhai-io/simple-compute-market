@@ -13,6 +13,7 @@ from domains.apicredits.negotiation import make_api_credits_provision_terms
 from market_core import (
     DomainCapability,
     ImmutableBuyerCapability,
+    ImmutableNegotiationCapability,
     MarketDomainContract,
 )
 
@@ -42,16 +43,28 @@ def register(app: typer.Typer) -> None:
 
 def _buyer_market_domain() -> MarketDomainContract:
     base = market_domain()
+    from domains.apicredits.negotiation.policy_sources import (
+        api_credits_policy_sources,
+    )
+
     return replace(
         base,
         declared_capabilities=(
-            base.declared_capabilities | {DomainCapability.BUYER}
+            base.declared_capabilities
+            | {DomainCapability.BUYER, DomainCapability.NEGOTIATION}
         ),
         buyer=ImmutableBuyerCapability(
             register_commands=register,
             build_provision_terms=make_api_credits_provision_terms,
             select_policy=configured_buyer_policy,
             decode_result=base.codecs.result,
+        ),
+        # Declared on the buyer contract as well as the storefront's: this
+        # domain's key-challenge responder is buyer-side, and the buyer role
+        # composes its catalogue from the contracts its own plugin discovery
+        # returns.
+        negotiation=ImmutableNegotiationCapability(
+            policy_sources=api_credits_policy_sources,
         ),
     )
 

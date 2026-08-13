@@ -20,10 +20,15 @@ reinit: ## Refresh local internal packages and adapters
 		--upgrade-package arkhai-compute-provisioning --reinstall-package arkhai-compute-provisioning \
 		--upgrade-package arkhai-compute-provisioning-service --reinstall-package arkhai-compute-provisioning-service \
 		--upgrade-package arkhai-vms-provisioning-adapter --reinstall-package arkhai-vms-provisioning-adapter \
+		--upgrade-package arkhai-vms-provisioning-operator-client --reinstall-package arkhai-vms-provisioning-operator-client \
+		--upgrade-package arkhai-vms --reinstall-package arkhai-vms \
+		--upgrade-package arkhai-bare-metal --reinstall-package arkhai-bare-metal \
 		--upgrade-package arkhai-bare-metal-provisioning-adapter --reinstall-package arkhai-bare-metal-provisioning-adapter \
 		--upgrade-package arkhai-kit-site --reinstall-package arkhai-kit-site \
 		--upgrade-package arkhai-kit-resource-pools --reinstall-package arkhai-kit-resource-pools \
-		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment
+		--upgrade-package arkhai-kit-fulfillment --reinstall-package arkhai-kit-fulfillment \
+		--upgrade-package arkhai-kit-site-client --reinstall-package arkhai-kit-site-client \
+		--upgrade-package arkhai-core-storefront-client --reinstall-package arkhai-core-storefront-client
 
 serve: ## Start the compute provisioning API and in-process workers
 	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/hosts" \
@@ -52,6 +57,10 @@ clean: ## Remove generated files
 
 IMAGE_NAME ?= arkhai
 IMAGE_TAG ?= compute-provisioning
+# The push target tags by commit, so the local build must produce that tag too.
+# Without it, push-images fails on a missing image rather than on anything wrong
+# with the build.
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 APPUSER_UID ?= 1000
 APPUSER_GID ?= 1000
 
@@ -65,6 +74,7 @@ build-image: ## Build the wheel-only destination image
 		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-f Dockerfile ../../..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 deploy: ## Run the destination image with mock provisioning
 	docker run -d --rm --name compute-provisioning \

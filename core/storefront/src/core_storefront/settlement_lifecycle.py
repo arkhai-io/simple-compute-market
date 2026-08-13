@@ -159,12 +159,34 @@ class ClaimsEngine:
 
     # -- sweep ----------------------------------------------------------
 
-    async def run(self, interval_seconds: float = 30.0) -> None:
-        """Watchdog loop: sweep until cancelled, never let a sweep crash it."""
+    async def run(
+        self,
+        interval_seconds: float = 30.0,
+        *,
+        paused: Callable[[], bool] | None = None,
+    ) -> None:
+        """Watchdog loop: sweep until cancelled, never let a sweep crash it.
+
+        ``paused``, when supplied, is consulted once per cycle before the
+        sweep. A paused cycle performs no sweep, so no claim is submitted,
+        collected, or reclaimed while it holds. ``tick`` remains the unit of
+        work either way, so a caller driving one sweep on demand exercises
+        exactly what this loop exercises.
+
+        The predicate is consulted at the top of the cycle and the interval is
+        slept at the bottom. A caller may use the predicate to observe that this
+        loop has stopped, and one that sleeps first cannot be observed for a
+        whole interval after a pause is requested. Consequently the first sweep
+        runs at startup rather than one interval in; the engine's own work is
+        idempotent by claim reference, so an earlier first sweep changes when a
+        due claim is serviced and not whether it is serviced twice.
+        """
         logger.info("[CLAIMS] engine started (interval=%ss)", interval_seconds)
         while True:
             try:
-                await asyncio.sleep(interval_seconds)
+                if paused is not None and paused():
+                    await asyncio.sleep(interval_seconds)
+                    continue
                 n = await self.tick()
                 if n:
                     logger.info("[CLAIMS] sweep processed %d claim(s)", n)
@@ -173,6 +195,7 @@ class ClaimsEngine:
                 break
             except Exception:
                 logger.exception("[CLAIMS] sweep failed; continuing")
+            await asyncio.sleep(interval_seconds)
 
     async def tick(self) -> int:
         """Process every due claim once. Returns the number processed."""

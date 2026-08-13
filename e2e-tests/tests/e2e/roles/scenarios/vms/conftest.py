@@ -44,6 +44,7 @@ class DealState:
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
     _provisioning_mock_mode: bool = False
+    _executor_host_registered: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
     _alkahest_configured: bool = False
@@ -55,6 +56,7 @@ class DealState:
     resume_confirmed: bool = False
     # Phase 5 — negotiation
     _evaluate_negotiate_passed: bool = False
+    _claims_swept: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
     agreed_amount: Optional[int] = None
@@ -82,8 +84,6 @@ class DealState:
     _provision_job_evaluated: bool = False
     # Phase 8 — settlement
     settlement_submitted: bool = False
-    provisioning_job_id: Optional[str] = None
-    reserved_resource_id: Optional[str] = None
     # Phase 9 — provisioning completion
     provisioning_result_injected: bool = False
     lease_id: Optional[str] = None
@@ -95,9 +95,23 @@ class DealState:
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
-    # Phase 10-11 — lease expiry lifecycle
-    _lease_expiry_armed: bool = False
-    remove_job_id: Optional[str] = None
+    # Phase 10-11 — explicit interruption and fulfillment teardown lifecycle
+    _termination_requested: bool = False
+    # Durable fulfillment identity, captured at settlement (stage 08b) from
+    # the settle-status response's ``fulfillment_id`` -- the buyer-facing
+    # path no longer surfaces a raw Ansible ``provisioning_job_id`` (always
+    # None for a fulfillment on the durable path; see
+    # ``core_storefront.models.settle_models.SettleStatusResponse``).
+    # Reused through phases 9-11 for status polling and teardown.
+    fulfillment_id: Optional[str] = None
+    # Reserved resource, captured at stage 09c from the admin-only
+    # DealLease view (``get_capacity_reservation``), never from a
+    # buyer-facing response -- ``resource_id``/``vm_host`` are
+    # intentionally opaque across the ordinary reservation boundary (see
+    # openspec/specs/site-capacity/spec.md's "Capacity accounting is
+    # private to the site authority" requirement). Admin introspection is
+    # a legitimate, separate channel from that opacity guarantee.
+    reserved_resource_id: Optional[str] = None
     # Mode-agnostic lease view (DealLease) resolved in 09c: a vm_leases
     # row in embedded-capacity mode, a site-ledger reservation in remote
     # mode. Phases 10-11 drive the expiry lifecycle through it.
@@ -196,6 +210,23 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
+def site_capacity_admin_client():
+    """Canonical sync capacity-admin client for the provisioning site authority.
+
+    The site ledger is a separate store from the host registry: `probe` and
+    `reserve` match against `CapacityBucket` rows, which only
+    `register_resource` creates. A scenario that reserves capacity has to put a
+    resource there, and does it through the same typed client an operator would
+    rather than a wrapper around the async one.
+    """
+    from market_site_client import SyncSiteCapacityAdminClient
+
+    url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
+    admin_key = str(settings.SELLER.ADMIN_API_KEY or "")
+    return SyncSiteCapacityAdminClient(url, admin_key)
+
+
+@pytest.fixture(scope="module")
 def provisioning_client():
     """Canonical SyncProvisioningClient.
 
@@ -224,53 +255,6 @@ def provisioning_test_client():
     admin_key = str(settings.SELLER.ADMIN_API_KEY or "") or None
     with ProvisioningTestClient(base_url=url, timeout=20.0, admin_key=admin_key) as client:
         yield client
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _ensure_provisioning_host_registered(provisioning_client):
-    """Idempotently register the e2e ``kvm1`` host in the provisioning service.
-
-    The scenario's seeded resource row declares ``attribute.vm_host=kvm1``,
-    so phase 08c's ``/test/evaluate-job`` lookup requires a matching row
-    in the provisioning ``hosts`` table. Compose-launched provisioning
-    starts with an empty inventory (no ``inventory_ini``/``inventory_path``
-    configured); production deployments seed the table via Helm secret
-    or a bind-mounted IaC inventory. Inserting the row here keeps the
-    e2e scenario hermetic and idempotent across re-runs.
-
-    The credentials are stub values (path-type, fake path) - mock
-    provisioning never SSHes into the host, so they never get used.
-    Real-host integration tests use a real key path; this fixture is
-    only relevant when ``ACTIVE_PROFILES=mock``.
-    """
-    from vm_provisioning_operator import ProvisioningError
-    from vm_provisioning_operator import HostCreate
-
-    host_name = "kvm1"
-
-    try:
-        provisioning_client.get_host(host_name)
-    except ProvisioningError as exc:
-        if exc.status_code != 404:
-            pytest.skip(f"Could not probe provisioning host {host_name!r}: {exc}")
-    else:
-        log.info("[conftest] Provisioning host %r already registered", host_name)
-        return
-
-    body = HostCreate(
-        name=host_name,
-        kvm_host="127.0.0.1",
-        ssh_user="stub",
-        ssh_key_type="path",
-        ssh_key_value="/tmp/stub-e2e-key",
-        gpu_count=1,
-        enabled=True,
-    )
-    try:
-        provisioning_client.register_host(body)
-    except ProvisioningError as exc:
-        pytest.skip(f"Could not register provisioning host {host_name!r}: {exc}")
-    log.info("[conftest] Registered provisioning host %r", host_name)
 
 
 @pytest.fixture(scope="module")
@@ -312,20 +296,125 @@ def seller_wallet() -> str:
 # Teardown — ensure global pause is cleared after each test module run
 # ---------------------------------------------------------------------------
 
+def pause_storefront(storefront_admin_client) -> dict[str, str]:
+    """Hold the storefront's timer loops idle, and prove they are.
+
+    Pauses the *loops* only — trading stays open, so a scenario can pause at its
+    readiness stage and still agree a deal.
+
+    Called from a scenario's own readiness stage rather than an autouse fixture:
+    a scenario should name the state it depends on, and pausing a service is a
+    dependency as much as registering a host is. It also keeps the pause with
+    the scenario that wants it — the API-credits scenario shares this module and
+    drives a different storefront, which has no such control.
+
+    Every side effect a scenario asserts on should be one the scenario asked
+    for. While the timer loops run, a stage's observation races them: a listing
+    reconciled a second later reads differently than one reconciled a second
+    earlier. Waiting for the system to settle instead is what
+    `docs/development/TESTING.md` forbids, and it cannot establish ordering even
+    when it passes.
+
+    Loops are held idle, not stopped: nothing is torn down, no cycle is cut in
+    half, and the capacity poller keeps its feed position. Resume belongs in
+    teardown all the same — a resumed loop runs its next cycle whenever it
+    likes, and no assertion should sit behind that.
+    """
+    # Asserted, not waited for. The stack's own healthcheck is on the
+    # storefront's readiness route, which fails until every loop has reached its
+    # gate once, so `docker compose up --wait` has already established this by
+    # the time any scenario runs. A poll here would restate that as a wait, which
+    # `docs/development/TESTING.md`'s async discipline forbids and which would
+    # also mask a regression by absorbing it.
+    #
+    # `running` is the load-bearing word: it means the loop has completed a gate
+    # call and will therefore observe the pause about to be requested. A loop
+    # reported `starting` has a task but has not begun cycling, and pausing on
+    # the strength of that reports loops stopped that never started.
+    status = storefront_admin_client.get_system_status()
+    loops = dict(getattr(status, "loops", None) or {})
+    not_running = {n: st for n, st in loops.items() if st != "running"}
+    assert loops and not not_running, (
+        f"storefront loops were not all running before the pause: "
+        f"{loops or 'none registered'}. The stack's readiness gate should have "
+        "made this impossible, so this is a regression in the gate wiring rather "
+        "than a slow start: a loop that has not reached its gate cannot see the "
+        "pause, and the scenario would assert against a storefront still "
+        "changing state on its own."
+    )
+
+    result = storefront_admin_client.admin_pause_lifecycle_loops()
+    not_at_gate = {
+        name: state for name, state in (result.loops or {}).items()
+        if state != "paused"
+    }
+    assert not not_at_gate, (
+        f"these loops had not reached a gate when the pause returned: "
+        f"{not_at_gate}. `pausing` means a cycle that began before the request is "
+        "still running, so an assertion made now would race it; `exited` means the "
+        "loop died. Either way the scenario cannot rely on what it reads next."
+    )
+    log.info("[lifecycle] storefront paused; loops=%s", result.loops)
+    return result.loops or {}
+
+
+def advance_storefront(storefront_admin_client, loop: str) -> dict:
+    """Run one cycle of a paused storefront loop and return what it reports.
+
+    `loop` is one of `claims`, `fulfillment-resume`, `negotiation-watchdog`,
+    `capacity-events`. Each calls the operation the timer was already invoking,
+    so a stage advances production behaviour rather than a test-only path.
+    """
+    result = storefront_admin_client.admin_run_lifecycle_cycle(loop)
+    log.info("[lifecycle] advanced %s: %s", loop, result)
+    return result
+
+
+# No fleet-wide reservation release runs after a module.
+#
+# One used to: a module-scoped autouse fixture called
+# `POST /api/v1/admin/portfolio/release-reservations`, releasing every held
+# reservation on the storefront. It existed because mocked provisioning never
+# expired a lease, so capacity stayed held forever and a repeat run against the
+# same stack starved at stage 05b.
+#
+# Both halves of that premise are gone. Leases now expire on the production path
+# — a scenario back-dates its lease end and drives the watchdog through it — so
+# the workaround duplicated a path that works, and being fleet-wide it raced it:
+# it cleared one scenario's reservation in the same second the lease lifecycle
+# submitted that reservation's release job, and cleared another's between its
+# registration and the stage that asserts on it. Every scenario also declares its
+# own resource now, so leftover capacity in one cannot starve another.
+#
+# A scenario that needs its capacity released asks for it, in a named stage. If a
+# repeat run against a long-lived stack ever needs a sweep again, it belongs in
+# that stack's reset rather than in a test teardown that can reach across
+# scenarios.
+
+
 @pytest.fixture(scope="module", autouse=True)
 def ensure_storefront_resumed(storefront_admin_client):
-    """Yield to let the module run; then unconditionally clear global pause if set.
+    """Yield to let the module run; then resume the storefront if it is paused.
 
-    Safety net in case an unexpected error leaves the storefront paused between
-    runs. Admin pause/resume is no longer tested in this module (moved to the
-    smoke suite), so this fixture should rarely need to act.
+    This is the resume half of `pause_storefront`, and the only place resuming
+    belongs: a resumed loop runs its next cycle whenever it likes, so no
+    assertion should sit behind one. It also covers a module that failed partway
+    and left the storefront paused for the next one.
+
+    Pause/resume semantics themselves are proven in the storefront's own
+    integration suite, not here and not in the smoke suite: a smoke test runs
+    against a deployed stack, and pausing one halts its background work for
+    real, which is not a side effect a wiring check should have.
     """
     yield
     try:
         status = storefront_admin_client.get_system_status()
         if status.paused:
             storefront_admin_client.admin_resume()
-            log.info("[teardown] Cleared residual global pause on storefront")
+            log.info("[teardown] Cleared residual trading pause on storefront")
+        if getattr(status, "loops_paused", False):
+            storefront_admin_client.admin_resume_lifecycle_loops()
+            log.info("[teardown] Returned storefront timer loops to work")
     except Exception as exc:
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
 
@@ -347,31 +436,6 @@ def reap_buyer_settle_subprocess(deal_state: DealState):
         run.terminate()
     except Exception as exc:
         log.warning("[teardown] could not terminate settle subprocess: %s", exc)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def release_reserved_resources(storefront_admin_client):
-    """Release any leftover reserved compute resources after the module runs.
-
-    Stage 09 reserves a compute VM for the deal but mocked provisioning never
-    expires the lease, so the resource stays in ``reserved`` state forever.
-    Without this teardown, a second back-to-back e2e_deal run against the
-    same stack hits ``no_matching_inventory`` at stage 05b.
-
-    Production storefronts release reservations via ``resource_poller`` once
-    the lease expires; this fixture is the test-only equivalent for the
-    short-circuited mock flow.
-    """
-    yield
-    try:
-        result = storefront_admin_client.admin_release_reservations()
-        if result.released_count:
-            log.info(
-                "[teardown] Released %d reserved resource(s): %s",
-                result.released_count, result.resource_ids,
-            )
-    except Exception as exc:
-        log.warning("[teardown] Could not release reserved resources: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -433,11 +497,10 @@ class DealLease:
     in the ledger with a deal-scoped capacity-released event to the
     storefront.
 
-    ``status`` uses the lease vocabulary:
-    active / releasing / released / forced.
+    ``status`` and ``release_job_id`` come from the authoritative compute
+    provisioning lease contract.  For VM release, ``release_job_id`` is the
+    durable fulfillment id rather than an Ansible queue job id.
     """
-
-    _LEASE_STATUS = {"leased": "active"}
 
     def __init__(self, provisioning_client, escrow_uid: str) -> None:
         self._client = provisioning_client
@@ -450,24 +513,43 @@ class DealLease:
         live = [a for a in reservations if a.get("lease_end_utc")]
         assert live, (
             f"No ledger reservation with a lease tail for escrow "
-            f"{escrow_uid!r} — was the lease registered after fulfillment?"
+            f"{escrow_uid!r} — was the lease registered after fulfillment? "
+            f"Reservations seen for this escrow: {reservations!r}. An empty list "
+            "means none was ever registered; entries without a lease_end_utc mean "
+            "one was registered and its lease tail has since been cleared, which "
+            "is a different problem with a different cause."
         )
         self.lease_id = str(live[0]["capacity_reservation_id"])
 
     def refresh(self) -> dict:
-        """Current lease fields in lease vocabulary."""
+        """Current lease fields from the public compute lease contract."""
+        lease = self._client.get_lease(self.lease_id)
         row = self._client.get_capacity_reservation(self.lease_id)
+        data = lease.model_dump(mode="json") if hasattr(lease, "model_dump") else dict(lease)
         return {
-            "id": row.get("capacity_reservation_id"),
+            "id": data.get("capacity_reservation_id") or self.lease_id,
             "escrow_uid": row.get("escrow_uid"),
-            "resource_id": row.get("resource_id"),
+            # The reservation exposes no `resource_id`: its initial capacity
+            # accounting is private to the site authority, and the physical
+            # resource a deal ends up on is the scheduler's choice, recorded as
+            # `settlement_resource_id` once it binds one. Reading `resource_id`
+            # here returned None on every call — the key does not exist in the
+            # reservation contract.
+            "settlement_resource_id": row.get("settlement_resource_id"),
             "vm_host": row.get("vm_host"),
             "vm_target": row.get("vm_target"),
-            "status": self._LEASE_STATUS.get(
-                str(row.get("state")), str(row.get("state")),
+            "status": data.get("status"),
+            # `LeaseResponse` names this `vm_remove_job_id`, never
+            # `release_job_id`. The ledger writes the release job id to both
+            # columns (`_sync_release_job_fields`), but only the vm-flavoured one
+            # is on the lease contract, so reading `release_job_id` here returned
+            # None however healthy the release was. Falls back to the reservation
+            # row, which does carry `release_job_id`, so this keeps working if a
+            # non-VM executor ever populates one without the vm alias.
+            "fulfillment_id": (
+                data.get("vm_remove_job_id") or row.get("release_job_id")
             ),
-            "vm_remove_job_id": row.get("vm_remove_job_id"),
-            "create_job_id": row.get("create_job_id"),
+            "create_job_id": data.get("create_job_id"),
         }
 
     def backdate(self, lease_end_utc: str) -> dict:

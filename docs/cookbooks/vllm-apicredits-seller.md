@@ -96,7 +96,12 @@ fail_on_unreachable = true
 
 [capacity]
 poll_interval = 1
-hold_ttl_seconds = 900
+# 0 (the shipped default) places no capacity hold before the buyer's
+# escrow settles. Holds are not billed, so a buyer can acquire one with
+# two signed requests and never settle; leaving them enabled lets a
+# single actor hold your entire quota at no cost. Only raise this on a
+# deployment whose buyers you trust.
+hold_ttl_seconds = 0
 
 [negotiation]
 policies = []

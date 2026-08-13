@@ -16,8 +16,11 @@ objects are registered by domain packages (the VM domain registers
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+
+from market_policy.catalogue import CatalogueBuilder, CatalogueItemTypeError
 
 
 @dataclass(frozen=True)
@@ -63,36 +66,34 @@ class BuyerPolicy:
     compatible: Callable[[dict[str, Any]], bool] = field(
         default=lambda entry: True,
     )
-    derive_prices: Optional[
-        Callable[..., tuple[Optional[int], Optional[int]]]
-    ] = None
+    derive_prices: Callable[..., tuple[int | None, int | None]] | None = None
 
-
-_REGISTRY: dict[str, BuyerPolicy] = {}
 
 DEFAULT_BUYER_POLICY = "listed_price"
 
-
-def register_buyer_policy(policy: BuyerPolicy) -> BuyerPolicy:
-    """Register a policy under its name (last registration wins)."""
-    _REGISTRY[policy.name] = policy
-    return policy
+#: Names a buyer policy catalogue in errors.
+BUYER_POLICY_KIND = "buyer policy"
 
 
-def get_buyer_policy(name: str) -> BuyerPolicy:
-    try:
-        return _REGISTRY[name]
-    except KeyError:
-        known = ", ".join(sorted(_REGISTRY)) or "<none registered>"
-        raise KeyError(
-            f"Unknown buyer policy {name!r}. Registered: {known}. "
-            f"Policies register on domain-package import — is the "
-            f"domain plugin installed?"
-        ) from None
+def require_buyer_policy(name: str, item: object) -> None:
+    """Reject an offering that is not a :class:`BuyerPolicy`."""
+    if not isinstance(item, BuyerPolicy):
+        raise CatalogueItemTypeError(
+            f"{name!r} is {type(item).__name__}, not a BuyerPolicy"
+        )
 
 
-def buyer_policy_names() -> list[str]:
-    return sorted(_REGISTRY)
+def buyer_policy_catalogue_builder() -> CatalogueBuilder[BuyerPolicy]:
+    """A builder that validates buyer policies and names them in errors.
+
+    Replaces a module-level registry whose registration was last-write-wins and
+    whose lookup failure told the reader to check whether a domain plugin was
+    installed — a domain reference inside the generic policy layer, and a guess
+    at the cause. A composed catalogue names what it was composed with.
+    """
+    return CatalogueBuilder[BuyerPolicy](
+        kind=BUYER_POLICY_KIND, validate=require_buyer_policy
+    )
 
 
 def inject_policy_cli_params(fn: Any, policy: BuyerPolicy) -> Any:
@@ -110,31 +111,38 @@ def inject_policy_cli_params(fn: Any, policy: BuyerPolicy) -> Any:
 
     sig = inspect.signature(fn)
     params = [
-        p for p in sig.parameters.values()
+        p
+        for p in sig.parameters.values()
         if p.kind is not inspect.Parameter.VAR_KEYWORD
     ]
     taken = {p.name for p in params}
     for pp in policy.cli_params:
         if pp.name in taken:
             continue
-        params.append(inspect.Parameter(
-            pp.name,
-            inspect.Parameter.KEYWORD_ONLY,
-            default=typer.Option(pp.default, pp.cli_flag, help=pp.help),
-            annotation=pp.annotation,
-        ))
+        params.append(
+            inspect.Parameter(
+                pp.name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=typer.Option(pp.default, pp.cli_flag, help=pp.help),
+                annotation=pp.annotation,
+            )
+        )
     if "policy_param" not in taken:
-        params.append(inspect.Parameter(
-            "policy_param",
-            inspect.Parameter.KEYWORD_ONLY,
-            default=typer.Option(
-                None, "--policy-param", "-P",
-                help="Extra negotiation-policy parameter as name=value. "
-                     "Repeatable — the escape hatch for policy knobs "
-                     "without a named flag; values reach the policy "
-                     "chain's context verbatim.",
-            ),
-            annotation=Optional[list[str]],
-        ))
+        params.append(
+            inspect.Parameter(
+                "policy_param",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=typer.Option(
+                    None,
+                    "--policy-param",
+                    "-P",
+                    help="Extra negotiation-policy parameter as name=value. "
+                    "Repeatable — the escape hatch for policy knobs "
+                    "without a named flag; values reach the policy "
+                    "chain's context verbatim.",
+                ),
+                annotation=Optional[list[str]],
+            )
+        )
     fn.__signature__ = sig.replace(parameters=params)
     return fn

@@ -228,15 +228,36 @@ def db_engine():
     # Site-ledger tables ride market_site's own metadata.
     from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
+    # Durable fulfillment tables (settlement_records, provisioned_resources,
+    # scheduling_cursors) ride market_fulfillment's own metadata.
+    from market_fulfillment.db import Base as FulfillmentBase
+    FulfillmentBase.metadata.create_all(bind=engine)
     # HostService requires pool_id to reference an existing pool. The real
     # migration always seeds "default" before hosts.pool_id can be NOT
     # NULL (see db/migrations.py); mirror that guarantee here since this
     # fixture builds schema directly rather than through the migration.
-    from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
+    #
+    # The migration seeds the default pool's provider configuration in the same
+    # transaction, from the service's own active settings, so the pool is usable
+    # as a provider-config template. Seeding only the pool row left this fixture
+    # a half-mirror: a caller reading the default pool's `provider_config` saw an
+    # empty mapping here and a populated one in every deployment.
+    from compute_provisioning_service.db.models import (
+        AnsiblePoolConfig,
+        DEFAULT_POOL_ID,
+        ResourcePool,
+    )
     with Session(engine) as session:
         session.add(ResourcePool(
             id=DEFAULT_POOL_ID, label="Default Pool", provider="ansible",
             enabled=True, policy_tags={},
+        ))
+        session.flush()
+        session.add(AnsiblePoolConfig(
+            pool_id=DEFAULT_POOL_ID,
+            playbook_path="playbooks/vm-operations.yaml",
+            inventory_group="__unused__",
+            extra_vars={},
         ))
         session.commit()
     return engine
@@ -408,8 +429,39 @@ async def client_and_queue(
         host_service=host_service,
     )
 
-    from compute_provisioning.release import ExecutorReleaseDispatcher
-    from vm_provisioning_adapter.release import VM_EXECUTOR_KIND, VmReleaseExecutor
+    from market_fulfillment import (
+        FulfillmentOrchestrator,
+        ProviderRegistry,
+        SettlementRepository,
+        SqlAlchemyFulfillmentUnitOfWork,
+    )
+    from vm_provisioning_adapter.services.ansible_fulfillment_provider import (
+        AnsibleFulfillmentProvider,
+    )
+
+    # Fresh queue per test — caller can inject on_job_started via fixture params
+    job_queue = AsyncJobQueue(max_concurrent=2)
+
+    ansible_fulfillment_provider = AnsibleFulfillmentProvider(
+        job_service=job_service,
+        job_queue_provider=lambda: job_queue,
+    )
+    fulfillment_unit_of_work = SqlAlchemyFulfillmentUnitOfWork(
+        session_factory=session_factory,
+        pool_service=resource_pool_service,
+    )
+    fulfillment_service = FulfillmentOrchestrator(
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        unit_of_work=fulfillment_unit_of_work,
+    )
+
+    from compute_provisioning.release import ExecutorReleaseDispatcher, ReleaseJobDispatcher
+    from vm_provisioning_adapter.release import (
+        VM_EXECUTOR_KIND,
+        FulfillmentServiceTeardownPort,
+        VmFulfillmentReleaseJobPort,
+        VmReleaseExecutor,
+    )
     from bare_metal_provisioning_adapter.release import (
         BARE_METAL_EXECUTOR_KIND,
         BareMetalReleaseExecutor,
@@ -419,7 +471,20 @@ async def client_and_queue(
             BARE_METAL_EXECUTOR_KIND: BareMetalReleaseExecutor(
                 release_delegate=bare_metal_operations_service.reclaim_access_for_reservation,
             ),
-            VM_EXECUTOR_KIND: VmReleaseExecutor(job_service=None),
+            VM_EXECUTOR_KIND: VmReleaseExecutor(
+                settlement_repository=SettlementRepository(),
+                session_factory=session_factory,
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+            ),
+        },
+        default_executor_kind=VM_EXECUTOR_KIND,
+    )
+    release_job_dispatcher = ReleaseJobDispatcher(
+        {
+            VM_EXECUTOR_KIND: VmFulfillmentReleaseJobPort(
+                teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+            ),
+            BARE_METAL_EXECUTOR_KIND: job_service,
         },
         default_executor_kind=VM_EXECUTOR_KIND,
     )
@@ -429,7 +494,7 @@ async def client_and_queue(
     lease_lifecycle_service = LeaseLifecycleService(
         settings=mock_settings,
         site_authority=site_authority,
-        release_jobs=None,
+        release_jobs=release_job_dispatcher,
         executor_release=release_dispatcher,
         capacity_released_notifier=(
             lambda reservation: notify_storefront_capacity_released(
@@ -437,9 +502,6 @@ async def client_and_queue(
             )
         ),
     )
-
-    # Fresh queue per test — caller can inject on_job_started via fixture params
-    job_queue = AsyncJobQueue(max_concurrent=2)
 
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.host_operations_service import (
@@ -466,6 +528,23 @@ async def client_and_queue(
             job_service=job_service,
             job_queue_provider=lambda: job_queue,
         ),
+        settlement_repository=SettlementRepository(),
+        teardown_port=FulfillmentServiceTeardownPort(lambda: fulfillment_service),
+    )
+
+    # The convergence watchdog is passed for the same reason production passes it:
+    # the one-cycle operator control must drive the same worker the timer drives.
+    # Omitting it here left the control answering "not initialised" under test while
+    # looking wired, which is how it shipped unreachable.
+    from compute_provisioning_service.services.fulfillment_convergence import (
+        FulfillmentConvergenceWatchdog,
+    )
+
+    fulfillment_convergence_watchdog = FulfillmentConvergenceWatchdog(
+        session_factory=session_factory,
+        repository=SettlementRepository(),
+        provider_registry=ProviderRegistry({"ansible": ansible_fulfillment_provider}),
+        settings=mock_settings,
     )
 
     system_service = SystemService(
@@ -475,6 +554,7 @@ async def client_and_queue(
         session_factory=session_factory,
         job_queue_provider=lambda: job_queue,
         lease_lifecycle_service=lease_lifecycle_service,
+        fulfillment_convergence_watchdog=fulfillment_convergence_watchdog,
     )
 
     # Override container providers
@@ -492,6 +572,10 @@ async def client_and_queue(
     app.container.resource_pool_service.override(resource_pool_service)
     app.container.physical_settlement_scheduler.override(physical_settlement_scheduler)
     app.container.capacity_reservation_watchdog.override(capacity_reservation_watchdog)
+    app.container.fulfillment_service.override(fulfillment_service)
+    app.container.fulfillment_convergence_watchdog.override(
+        fulfillment_convergence_watchdog
+    )
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -510,6 +594,7 @@ async def client_and_queue(
     _container_module.resolved_capacity_reservation_watchdog = (
         capacity_reservation_watchdog
     )
+    _container_module.resolved_fulfillment_service = fulfillment_service
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()
@@ -580,6 +665,7 @@ async def client_and_queue(
     app.container.bare_metal_operations_service.reset_override()
     app.container.lease_lifecycle_service.reset_override()
     app.container.capacity_ledger_service.reset_override()
+    app.container.fulfillment_service.reset_override()
 
 
 @pytest_asyncio.fixture

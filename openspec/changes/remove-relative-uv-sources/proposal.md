@@ -4,12 +4,30 @@ Earlier buyer/registry/storefront projects now consume internal wheels correctly
 
 ## What Changes
 
-- Remove internal path sources from API-credit domain, bare-metal provisioning adapter, VM provisioning adapter, compute-provisioning contract, and compute-provisioning service projects.
+- Remove internal path sources from the projects that still carry them.
+
+  **Re-inventoried 2026-08-06; the original list is substantially complete and one entry
+  is wrong.** Verified against current code:
+
+  | Project | Internal path sources |
+  |---|---|
+  | `domains/apicredits` | none remaining |
+  | `domains/vms/provisioning/adapter` | none remaining |
+  | `provisioning/compute/service` | none remaining |
+  | `provisioning/compute/contracts` | **path does not exist** — re-identify the project before planning |
+  | `domains/bare_metal/provisioning` | **4 remaining** — the only confirmed target |
+
+  The VM provisioning adapter was cleaned by `fix-vm-fulfillment-capacity-boundary`
+  (2026-07-29), six days after this proposal was last revised. That change also
+  root-caused a related lockfile defect worth reading before touching the remaining
+  project: an absolute `DIST_DIR` propagated from a Make target baked machine-specific
+  paths into `uv.lock` on every regeneration. Re-verify this table at implementation
+  time rather than trusting it; it moved once already.
 - Add or repair local init/reinit targets so changed internal wheels are built into `.dist` and explicitly upgraded/reinstalled.
 - Regenerate only affected locks against built wheels and preserve unrelated external index sources such as PyTorch CPU selection.
 - Add a repository check rejecting parent-directory internal `tool.uv.sources` entries in consumable projects.
 - Correct release documentation to match wheel-only internal dependency policy.
-- State: **Planned and first in the release-readiness campaign.**
+- State: **Planned and first in the release-readiness campaign; scope reduced 2026-08-06 to one confirmed project plus one to re-identify.**
 
 ## Capabilities
 
@@ -34,4 +52,4 @@ None.
 
 ## Impact
 
-Touches five project/lock pairs, local Make/build orchestration, repository packaging checks, CI, and `docs/development/RELEASING.md`. Runtime APIs are unchanged.
+Touches the remaining project/lock pairs (see the re-inventory above — one confirmed, one to re-identify, not five), local Make/build orchestration, repository packaging checks, CI, and `docs/development/RELEASING.md`. Runtime APIs are unchanged. The repository check rejecting parent-directory internal sources remains full-scope and is what keeps the already-clean projects clean.

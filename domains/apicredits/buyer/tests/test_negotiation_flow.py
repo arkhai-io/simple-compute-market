@@ -13,16 +13,19 @@ import json
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from market_policy.negotiation_middleware import load_negotiation_chain
-
 from core_buyer.negotiation_client import negotiate_with_seller
+from market_alkahest.schemas import EscrowProposal
+from market_policy import (
+    InlineSource,
+    negotiation_catalogue_builder,
+    scalar_escrow_policies,
+)
+
 from domains.apicredits.negotiation import make_api_credits_provision_terms
-from domains.apicredits.negotiation.buyer_policies import (  # noqa: F401 — registers the middleware
+from domains.apicredits.negotiation.buyer_policies import (
     APICREDITS_BUYER_GUARDS,
     answer_key_challenge,
 )
-from market_alkahest.schemas import EscrowProposal
-
 
 _BUYER_PK = "0x" + "11" * 32
 _BUYER_ADDR = "0x" + "cc" * 20
@@ -33,10 +36,22 @@ _ESCROW = "0x" + "cd" * 20
 def _chain():
     """The credits CLI's deterministic default chain (listed_price terminal).
 
-    Built explicitly instead of through ``_load_buyer_chain`` so the
-    test never reads the developer's buyer.toml.
+    Composed explicitly rather than through ``_load_buyer_chain`` so the test
+    never reads the developer's buyer.toml, and offers the buyer responder
+    directly rather than relying on an import having registered it somewhere.
     """
-    return load_negotiation_chain([*APICREDITS_BUYER_GUARDS, "listed_price"])
+    names = [*APICREDITS_BUYER_GUARDS, "listed_price"]
+    return (
+        negotiation_catalogue_builder()
+        .add_loader(scalar_escrow_policies())
+        .add_loader(
+            InlineSource(
+                {"answer_key_challenge": answer_key_challenge}, label="apicredits-buyer"
+            )
+        )
+        .build()
+        .resolve(names)
+    )
 
 
 def _escrow_proposal() -> EscrowProposal:
@@ -84,8 +99,17 @@ def _urlopen_fake(responses, captured=None):
     return _fn
 
 
-def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
-               key_mode="new", key_id=None, max_rounds=10):
+def _negotiate(
+    *,
+    responses,
+    captured=None,
+    quantity=100,
+    initial=3,
+    ceiling=3,
+    key_mode="new",
+    key_id=None,
+    max_rounds=10,
+):
     with patch("core_buyer.negotiation_client.urllib.request.urlopen") as mock_urlopen:
         mock_urlopen.side_effect = _urlopen_fake(responses, captured)
         return negotiate_with_seller(
@@ -97,7 +121,9 @@ def _negotiate(*, responses, captured=None, quantity=100, initial=3, ceiling=3,
             max_price=ceiling,
             unit_count=float(quantity),
             provision_terms=make_api_credits_provision_terms(
-                quantity=quantity, key_mode=key_mode, key_id=key_id,
+                quantity=quantity,
+                key_mode=key_mode,
+                key_id=key_id,
             ),
             escrow_proposal=_escrow_proposal(),
             max_rounds=max_rounds,
@@ -111,12 +137,18 @@ def test_round0_payload_carries_quantity_key_and_scaled_amount():
     captured: list[dict] = []
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-1", "action": "accept",
-             "proposal": _seller_proposal(300)},
+            {
+                "negotiation_id": "neg-1",
+                "action": "accept",
+                "proposal": _seller_proposal(300),
+            },
         ],
         captured=captured,
-        quantity=100, initial=3, ceiling=3,
-        key_mode="existing", key_id="ak_42",
+        quantity=100,
+        initial=3,
+        ceiling=3,
+        key_mode="existing",
+        key_id="ak_42",
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 300
@@ -137,12 +169,17 @@ def test_seller_counter_above_scaled_ceiling_exits():
     ends the negotiation."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-2", "action": "counter",
-             "proposal": _seller_proposal(500)},
+            {
+                "negotiation_id": "neg-2",
+                "action": "counter",
+                "proposal": _seller_proposal(500),
+            },
             # The buyer's exit is POSTed; the seller echoes.
             {"negotiation_id": "neg-2", "action": "exit"},
         ],
-        quantity=100, initial=3, ceiling=3,
+        quantity=100,
+        initial=3,
+        ceiling=3,
     )
     assert outcome.status == "exited"
     assert outcome.reason == "price_above_bound"
@@ -153,12 +190,20 @@ def test_answer_key_challenge_is_inert_against_v1_sellers():
     and listed_price accepts at the bound."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-3", "action": "counter",
-             "proposal": _seller_proposal(300)},
-            {"negotiation_id": "neg-3", "action": "accept",
-             "proposal": _seller_proposal(300)},
+            {
+                "negotiation_id": "neg-3",
+                "action": "counter",
+                "proposal": _seller_proposal(300),
+            },
+            {
+                "negotiation_id": "neg-3",
+                "action": "accept",
+                "proposal": _seller_proposal(300),
+            },
         ],
-        quantity=100, initial=3, ceiling=3,
+        quantity=100,
+        initial=3,
+        ceiling=3,
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_amount == 300
@@ -170,13 +215,19 @@ def test_answer_key_challenge_exits_cleanly_when_challenged():
     exhaustion, never a silent pass."""
     outcome = _negotiate(
         responses=[
-            {"negotiation_id": "neg-4", "action": "counter",
-             "proposal": _seller_proposal(300, key_challenge={"nonce": "abc123"})},
+            {
+                "negotiation_id": "neg-4",
+                "action": "counter",
+                "proposal": _seller_proposal(300, key_challenge={"nonce": "abc123"}),
+            },
             # The buyer's exit is POSTed; the seller acknowledges.
             {"negotiation_id": "neg-4", "action": "exit"},
         ],
-        quantity=100, initial=3, ceiling=3,
-        key_mode="existing", key_id="ak_42",
+        quantity=100,
+        initial=3,
+        ceiling=3,
+        key_mode="existing",
+        key_id="ak_42",
     )
     assert outcome.status == "exited"
     assert outcome.reason is not None

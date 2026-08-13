@@ -8,11 +8,11 @@ from datetime import datetime
 import httpx
 import pytest
 
-from core_storefront.capacity_remote import RemoteCapacityClient
+from market_site_client import SiteCapacityClient
 
 
-def _quota_remote(available_by_resource: dict[str, int]) -> RemoteCapacityClient:
-    """A RemoteCapacityClient whose snapshot is served from a dict."""
+def _quota_remote(available_by_resource: dict[str, int]) -> SiteCapacityClient:
+    """A SiteCapacityClient whose snapshot is served from a dict."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/capacity/snapshot":
@@ -29,7 +29,7 @@ def _quota_remote(available_by_resource: dict[str, int]) -> RemoteCapacityClient
             })
         return httpx.Response(404, json={})
 
-    return RemoteCapacityClient(
+    return SiteCapacityClient(
         "http://tokens:8082", transport=httpx.MockTransport(handler),
     )
 

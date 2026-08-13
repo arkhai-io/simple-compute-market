@@ -105,6 +105,20 @@ class TestParseIni:
         names = {r["name"] for r in result}
         assert names == {"kvm1", "ww2"}
 
+    def test_parses_gpu_model(self):
+        ini = (
+            "[kvm_hosts]\n"
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  gpus=8  gpu_model=H100\n"
+        )
+        result = _parse_ini(ini)
+        assert result[0]["gpu_count"] == 8
+        assert result[0]["gpu_model"] == "H100"
+
+    def test_gpu_model_absent_when_not_specified(self):
+        ini = "[kvm_hosts]\nkvm1  ansible_host=10.0.0.1  ansible_user=ubuntu\n"
+        result = _parse_ini(ini)
+        assert result[0]["gpu_model"] is None
+
     def test_skips_group_headers_and_comments(self):
         ini = (
             "# this is a comment\n"
@@ -168,6 +182,15 @@ class TestSeedFromIni:
         kvm1 = next(h for h in hosts if h.name == "kvm1")
         assert kvm1.ssh_key_value == "/home/user/.ssh/id_ed25519"
         assert kvm1.ssh_key_type == "path"
+
+    def test_gpu_model_persists_through_seed(self, svc):
+        ini = (
+            "[kvm_hosts]\n"
+            "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  gpus=8  gpu_model=H100\n"
+        )
+        hosts = svc.seed_from_ini(ini, ssh_key_type="path")
+        assert hosts[0].gpu_count == 8
+        assert hosts[0].gpu_model == "H100"
 
     def test_idempotent_on_repeat_call(self, svc):
         svc.seed_from_ini(self._INI, ssh_key_type="path")
@@ -400,3 +423,36 @@ class TestHostPoolAssignment:
         ))
         with pytest.raises(ValueError):
             svc.update_host("kvm1", HostUpdate(pool_id="does-not-exist"))
+
+
+class TestGpuModel:
+    def test_register_host_stores_gpu_model(self, svc):
+        host = svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+            gpu_count=8, gpu_model="H100",
+        ))
+        assert host.gpu_model == "H100"
+
+    def test_register_host_gpu_model_defaults_to_none(self, svc):
+        host = svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+        ))
+        assert host.gpu_model is None
+
+    def test_update_host_sets_gpu_model(self, svc):
+        svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key",
+        ))
+        updated = svc.update_host("kvm1", HostUpdate(gpu_model="A100"))
+        assert updated.gpu_model == "A100"
+
+    def test_update_host_omitting_gpu_model_leaves_it_unchanged(self, svc):
+        svc.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/key", gpu_model="H100",
+        ))
+        updated = svc.update_host("kvm1", HostUpdate(kvm_host="10.0.0.2"))
+        assert updated.gpu_model == "H100"

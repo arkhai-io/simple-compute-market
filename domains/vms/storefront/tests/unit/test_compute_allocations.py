@@ -4,7 +4,10 @@ import sqlite3
 
 import pytest
 
-from domains.vms.listings.reconciler import available_compute_slices
+from market_storefront.listings.reconciler import (
+    available_compute_slices,
+    listing_pool_key,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 
@@ -101,9 +104,7 @@ def test_sqlite_schema_includes_compute_allocation_correlation_fields(client):
     try:
         cols = {
             row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(compute_allocations)").fetchall()
         }
     finally:
         conn.close()
@@ -166,9 +167,7 @@ def test_sqlite_migration_backfills_compute_allocation_correlation_fields(tmp_pa
     try:
         cols = {
             row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(compute_allocations)").fetchall()
         }
         migration_ids = {
             row[0]
@@ -236,9 +235,7 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
         }
         allocation_cols = {
             row[1]
-            for row in conn.execute(
-                "PRAGMA table_info(compute_allocations)"
-            ).fetchall()
+            for row in conn.execute("PRAGMA table_info(compute_allocations)").fetchall()
         }
         migration_ids = {
             row[0]
@@ -259,27 +256,19 @@ def test_sqlite_migration_accepts_pre_compute_inventory_schema(tmp_path):
     assert "20260604_001_compute_allocation_callback_metadata" in migration_ids
 
 
-
-
-
-
-
 @pytest.mark.asyncio
 async def test_fungible_pool_derives_one_listing_set_across_members(client):
     await _seed_fungible_compute_pool(client)
 
-    rows = available_compute_slices(client.db_path)
+    rows = available_compute_slices(client.db_path, home_site="home-site")
 
     assert [row["gpu_count"] for row in rows] == [1, 2, 3, 4]
     assert {row["resource_key"] for row in rows} == {
-        "pool:pool-h200-shared:gpus:1",
-        "pool:pool-h200-shared:gpus:2",
-        "pool:pool-h200-shared:gpus:3",
-        "pool:pool-h200-shared:gpus:4",
+        listing_pool_key("home-site", "pool-h200-shared", n) for n in (1, 2, 3, 4)
     }
     assert {row["resource_id"] for row in rows} == {None}
     assert {row["pool_id"] for row in rows} == {"pool-h200-shared"}
-
+    assert {row["site_id"] for row in rows} == {"home-site"}
 
 
 @pytest.mark.asyncio
@@ -293,6 +282,7 @@ async def test_member_availability_view_governs_slices(client):
     # Site ledgers say one member is fully consumed, the other has 2 free.
     rows = available_compute_slices(
         client.db_path,
+        home_site="home-site",
         member_availability={
             (None, "pool-h200-a"): 0,
             (None, "pool-h200-b"): 2,
@@ -306,8 +296,9 @@ async def test_member_availability_view_governs_slices(client):
     # member is not reservable anywhere — it counts as 0.
     rows = available_compute_slices(
         client.db_path,
+        home_site="home-site",
         member_availability={
-            (None, "pool-h200-a"): 99,   # capped to the member's 4
+            (None, "pool-h200-a"): 99,  # capped to the member's 4
             # pool-h200-b not covered → 0
         },
     )
@@ -339,17 +330,17 @@ async def test_member_at_another_site_keys_by_site_name(client):
 
     wrong_site_only = available_compute_slices(
         client.db_path,
+        home_site="home-site",
         member_availability={(None, "pool-h200-1"): 4},  # wrong site
     )
     assert wrong_site_only == []  # the member's own site says nothing → 0
 
     free_at_dc_b = available_compute_slices(
         client.db_path,
+        home_site="home-site",
         member_availability={("dc-b", "pool-h200-1"): 3},
     )
     assert [row["gpu_count"] for row in free_at_dc_b] == [1, 2, 3]
-
-
 
 
 @pytest.mark.asyncio

@@ -11,16 +11,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from domains.apicredits.settlement.issuance import get_key
+from apicredits_storefront.services.credits_service_client import (
+    get_credits_service_client,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def lookup_key_record(key_id: str) -> dict[str, Any] | None:
-    from apicredits_storefront.utils import config
-
-    return await get_key(
-        service_url=config.credits_service_url(),
-        admin_key=config.credits_admin_key(),
-        key_id=key_id,
-    )
+    return await get_credits_service_client().get_key(key_id)

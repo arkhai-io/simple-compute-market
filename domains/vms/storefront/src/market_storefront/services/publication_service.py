@@ -5,38 +5,53 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from arkhai_vms.listing_models import Listing
 from core_storefront.registry_publication import (
     close_listing_in_registries,
     publish_listing_to_registries,
 )
 from core_storefront.stage_log import stage_event
-from domains.vms.listings.models import Listing
-from domains.vms.listings.reconciler import (
+from registry_client import ListingRequest, UpdateListingRequest
+
+from market_storefront.listings.reconciler import (
     mark_derived_listings_closed,
     stale_open_listing_ids,
 )
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from registry_client import ListingRequest, UpdateListingRequest
 
 logger = logging.getLogger(__name__)
 
 
-async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Close an order locally and in the registry when registry discovery is enabled."""
+async def close_order(
+    parameters: dict[str, Any] | None = None,
+    *,
+    sqlite_client: Any | None = None,
+) -> dict[str, Any]:
+    """Close an order locally and in the registry when registry discovery is enabled.
+
+    ``sqlite_client`` is the unit of work to close against. A caller that already
+    holds one supplies it; the default resolves the process-wide client, which is
+    the same object in a composed storefront. It must be threaded to the *write*
+    and not only to a caller's own reads: a caller reconciling one database while
+    this function mutated another is a defect that reached the end-to-end suite
+    and cost three attempts at a test to find.
+    """
     parameters = parameters or {}
     order_id = parameters.get("listing_id")
     if not isinstance(order_id, str) or not order_id.strip():
         return {"status": "error", "message": "Missing listing_id for close_listing"}
 
     try:
-        sqlite_client = get_sqlite_client()
+        sqlite_client = sqlite_client or get_sqlite_client()
         await sqlite_client.update_listing(
             listing_id=order_id,
             status="closed",
         )
     except Exception as exc:
-        logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
+        logger.warning(
+            "[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc
+        )
 
     return await close_listing_in_registries(
         order_id,
@@ -52,7 +67,12 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 async def close_stale_compute_listings_after_capacity_change(
     db_path: str,
     *,
+    home_site: str,
+    configured_site_count: int,
     member_availability: dict[tuple[str | None, str], int] | None = None,
+    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_capacity_buckets: dict[str, list[dict]] | None = None,
+    sqlite_client: Any | None = None,
 ) -> list[str]:
     """Close open derived compute listings whose GPU slice no longer fits.
 
@@ -60,26 +80,50 @@ async def close_stale_compute_listings_after_capacity_change(
     ``(site, resource_id)``. ``None`` (availability unknown — the
     authority was unreachable) closes nothing: members are assumed
     fully available, and the next delta/reconcile converges.
+    ``configured_site_count`` gates whether an unmapped listing may be
+    defaulted to ``home_site`` -- see ``reconciler.stale_open_listing_ids``.
+
+    ``sqlite_client`` must address the same database as ``db_path``: this
+    function reads staleness from the path and writes the closure through the
+    client, so two different databases produce a reconcile that reports success
+    and changes nothing.
     """
     closed_listing_ids: list[str] = []
     for listing_id in stale_open_listing_ids(
-        db_path, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        configured_site_count=configured_site_count,
+        member_availability=member_availability,
+        site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     ):
-        result = await close_order({"listing_id": listing_id})
+        result = await close_order(
+            {"listing_id": listing_id}, sqlite_client=sqlite_client,
+        )
         if str(result.get("status", "?")) in ("closed", "skipped", "queued"):
             closed_listing_ids.append(listing_id)
             continue
-        row = await get_sqlite_client().load_listing(listing_id=listing_id)
+        db = sqlite_client or get_sqlite_client()
+        row = await db.load_listing(listing_id=listing_id)
         if row and row.get("status") == "closed":
             closed_listing_ids.append(listing_id)
-    mark_derived_listings_closed(db_path, closed_listing_ids)
+    mark_derived_listings_closed(
+        db_path,
+        closed_listing_ids,
+        home_site=home_site,
+        configured_site_count=configured_site_count,
+    )
     return closed_listing_ids
 
 
 async def reopen_available_compute_listings_after_capacity_change(
     db_path: str,
     *,
+    home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
+    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_capacity_buckets: dict[str, list[dict]] | None = None,
+    sqlite_client: Any | None = None,
 ) -> list[str]:
     """Reopen closed derived listings whose slice fits capacity again.
 
@@ -89,7 +133,7 @@ async def reopen_available_compute_listings_after_capacity_change(
     reopens nothing: with no consumption information everything would
     look free, and reopening on ignorance over-sells.
     """
-    from domains.vms.listings.reconciler import (
+    from market_storefront.listings.reconciler import (
         closed_available_listing_ids,
         mark_derived_listings_open,
     )
@@ -97,19 +141,28 @@ async def reopen_available_compute_listings_after_capacity_change(
     if member_availability is None:
         return []
     reopened_listing_ids = closed_available_listing_ids(
-        db_path, member_availability=member_availability,
+        db_path,
+        home_site=home_site,
+        member_availability=member_availability,
+        site_pool_projection=site_pool_projection,
+        site_capacity_buckets=site_capacity_buckets,
     )
+    db = sqlite_client or get_sqlite_client()
     for listing_id in reopened_listing_ids:
-        await get_sqlite_client().update_listing(listing_id=listing_id, status="open")
+        await db.update_listing(listing_id=listing_id, status="open")
     mark_derived_listings_open(db_path, reopened_listing_ids)
     return reopened_listing_ids
 
 
-def _make_registry_client() -> "MultiRegistryClient":
+def _make_registry_client() -> MultiRegistryClient:
     """Construct a multi-registry client wrapping every configured URL."""
     from market_storefront.utils.multi_registry_client import MultiRegistryClient
 
-    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
+    urls = (
+        list(settings.registry.urls)
+        if settings.registry.urls
+        else ["http://localhost:8080"]
+    )
     return MultiRegistryClient(
         urls,
         timeout=settings.registry.discovery_timeout,
@@ -148,7 +201,8 @@ def _record_listing_published_stage_event(
     max_duration_seconds: int | None,
 ) -> None:
     stage_event(
-        "discovery", "order_published",
+        "discovery",
+        "order_published",
         order_id=listing_id,
         agent_url=BASE_URL_OVERRIDE,
         offer=offer_resource,
@@ -159,7 +213,8 @@ def _record_listing_published_stage_event(
 
 
 async def _registries_to_target(
-    listing_id: str, fallback_urls: list[str],
+    listing_id: str,
+    fallback_urls: list[str],
 ) -> list[str]:
     """Return registry URLs that should receive update/delete for ``listing_id``."""
     try:
@@ -172,7 +227,8 @@ async def _registries_to_target(
 
 
 async def _record_publications(
-    listing_id: str, results: list[dict[str, Any]],
+    listing_id: str,
+    results: list[dict[str, Any]],
 ) -> None:
     """Persist one ``publications`` row per per-registry write result."""
     try:
@@ -194,5 +250,7 @@ async def _record_publications(
         except Exception as exc:
             logger.warning(
                 "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
-                listing_id, result.get("registry_url"), exc,
+                listing_id,
+                result.get("registry_url"),
+                exc,
             )

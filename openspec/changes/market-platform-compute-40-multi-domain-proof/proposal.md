@@ -1,17 +1,45 @@
 ## Why
 
-The repository now has shared domain contracts, an extracted compute service, concurrent VM/bare-metal adapters, and multi-site capacity aggregation, but those pieces have not been proven as one seller-to-site topology. A deterministic proof must show that separately composed VM and bare-metal storefronts can each use several provisioning authorities, that each authority can serve both storefronts, and that selected-site, executor, and Physical Resource ownership survive the full lifecycle without global defaults.
+**Rewritten 2026-08-06.** The original change proposed a 2×2 storefront-to-site topology
+proving both one-storefront/many-sites and one-site/many-storefronts. Two things
+invalidated it. Multi-domain storefront composition supersedes separately composed
+single-domain storefronts, collapsing one axis; and there are no plans to support
+many-to-many storefront-to-site ownership, so the other axis proves a capability the
+product does not want. Re-grounding the rest against current code found that most of what
+the change would have *implemented* has since shipped, leaving a smaller change that is
+almost entirely proof. The original documents are preserved in Git history; completed
+prerequisite evidence is preserved in `tasks.md`.
+
+What has shipped since the original was written:
+
+- **Site-pinned claim routing with no fallback** — implemented in
+  `AggregateCapacityClient.reserve` and already promoted to
+  `storefront-publication`'s "Site-pinned claim routing" requirement, with evidence.
+- **Cross-mode conflict rejection** — implemented in `kit/site` through
+  `allocation_mode`, and normative as `site-capacity`'s "Cross-mode physical accounting".
+- **Concurrent VM and bare-metal adapters in one provisioner** — implemented through
+  `compose_adapter_bundles(vm_bundle=..., bare_metal_bundle=...)`.
+- **Explicit executor identity** — `pool-declared-offering-modes` supplies the requested
+  mode explicitly and removes both implicit `"vm"` fallbacks.
+
+What remains is what a proof change is for: none of it has ever been exercised together,
+against running services, across more than one authority. Every end-to-end scenario in
+the repository is a single-site VM deal.
 
 ## What Changes
 
-- Add a deterministic 2×2 topology with VM and bare-metal storefronts connected to two compute provisioning authorities.
-- Exercise all four storefront-to-site edges through reservation, scheduling, fulfillment, result observation, teardown, and capacity restoration.
-- Require dispatch and release from recorded executor identity; remove or reject the remaining implicit `"vm"` fallback when durable executor identity is absent.
-- Verify selected-site routing survives storefront restart and never falls back to another authority after reservation.
-- Verify each provisioner concurrently loads VM and bare-metal adapters without provider/executor conflation.
-- Exercise VM-shareable and bare-metal-exclusive claims against one Physical Resource within an authority and reject conflicts before executor work.
-- Use pull-based status/result reconciliation as the correctness baseline; authenticated reverse delivery remains a separate follow-on.
-- State: **Blocked on `pools-7-storefront-fulfillment-cutover` and `market-platform-bare-metal-10-storefront-composition`; already-landed prerequisite evidence is recorded in `tasks.md`.**
+- Add a deterministic topology of one multi-domain compute storefront against two
+  provisioning authorities, exercising VM and bare-metal lifecycles at each — four
+  domain-to-authority edges through reservation, scheduling, fulfillment, result
+  observation, teardown, and capacity restoration.
+- Verify durable selected-site ownership survives storefront restart and that no
+  state-changing operation reaches another authority after reservation.
+- Verify cross-mode conflicts on one Physical Resource are rejected before executor work
+  in both directions, within an authority.
+- Verify no default executor is ever substituted: a missing, unknown, or conflicting
+  executor identity fails before adapter or infrastructure work.
+- Verify identities that are only authority-local — pool, resource, and access aliases —
+  are never treated as globally unique across authorities.
 
 ## Capabilities
 
@@ -21,28 +49,63 @@ None.
 
 ### Modified Capabilities
 
-- `site-capacity`: Prove trusted selected-site ownership and no post-reservation fallback across a many-to-many storefront/site topology.
-- `physical-provisioning`: Require durable executor identity without VM fallback and prove both provisioners serve both compute domains concurrently.
-- `test-compatibility`: Add a deterministic 2×2 topology scenario covering all storefront/provisioner relationships and lifecycle isolation.
+- `test-compatibility`: a deterministic multi-authority topology exercises every
+  domain-to-authority edge of a multi-domain storefront through the full lifecycle,
+  including restart, isolation, and cross-mode rejection, without timing sleeps.
 
 ## Non-Goals
 
-- Do not host VM and bare-metal market contracts in one storefront process.
-- Do not add another resource domain, a third provisioning API, or cross-seller capacity markets.
-- Do not implement the bare-metal storefront, POOLS-7 lifecycle, or result-push delivery inside this proof.
-- Do not require provider-backed fulfillment for every executor or infer executor identity from a fulfillment provider.
-- Do not use real hardware timing as the sole acceptance evidence.
-
-## Dependencies and Related Changes
-
-- Archived Market Platform domain/compute changes and POOLS-3/4/6 provide the shared contracts, extracted service, adapters, capacity identity, and cross-mode admission foundation.
-- `market-platform-bare-metal-10-storefront-composition` provides the second complete storefront composition.
-- `pools-7-storefront-fulfillment-cutover` provides durable selected-site scheduling, fulfillment status/result, restart recovery, and teardown.
-- `provisioning-result-push-delivery` may later add authenticated reverse delivery, but this proof uses pull reconciliation and does not block on it.
-- `pools-8-capacity-projection-and-listing-hints` may improve publication inputs but is not required if deterministic proof listings are created from authoritative fixtures.
+- **Do not prove or support many-to-many storefront-to-authority ownership.** Removed
+  2026-08-06: there are no plans to support it, one authority binds to one storefront
+  today, and proving it would require per-storefront identity that does not exist.
+- ~~Do not host VM and bare-metal market contracts in one storefront process.~~
+  **Superseded 2026-08-06** by `multi-domain-storefront-composition`; this change now
+  depends on that composition rather than excluding it.
+- Do not implement selected-site routing, cross-mode admission, adapter composition, or
+  explicit executor identity. All four are implemented or owned elsewhere; this change
+  proves them together.
+- Do not own the legacy-row migration for durable reservations lacking executor
+  identity. Moved 2026-08-06 to `pool-declared-offering-modes`, which removes the
+  fallback those rows depend on and should own the migration for what depended on it.
+- Do not add another resource domain, a third provisioning API, or cross-seller capacity
+  markets.
+- Do not use real hardware timing as acceptance evidence, or add proof-only production
+  APIs.
+- Do not prove authenticated reverse delivery. Pull reconciliation is the correctness
+  baseline; push remains `replace-polling-with-authenticated-push`'s.
 
 ## Impact
 
-- Affected tests/topology: two storefront applications, two compute provisioning services, VM and bare-metal adapters, site-capacity fixtures, fulfillment clients, and lifecycle result polling.
-- Runtime behavior changes only where the proof exposes invalid VM-default dispatch or missing durable selected-site routing; those fixes belong to the owning capability rather than test-only branches.
-- Deployment/test configuration gains explicit per-storefront site bindings for the deterministic 2×2 scenario.
+- Affected tests and topology: one multi-domain storefront application, two compute
+  provisioning services with both adapter bundles, site-capacity fixtures, fulfillment
+  clients, and lifecycle result polling.
+- Runtime behavior changes only where the proof exposes a defect in an existing
+  capability; such a fix belongs to the owning capability rather than to a test-only
+  branch.
+- Deployment and test configuration gains explicit multi-authority bindings for the
+  deterministic scenario.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md` — the accepted topology map.
+- [x] Existing subsystem specification — `openspec/specs/test-compatibility/spec.md`.
+- [ ] New subsystem specification — none.
+
+### Knowledge to promote
+
+- A deterministic multi-authority topology proves every domain-to-authority edge,
+  including restart and cross-mode rejection — `openspec/specs/test-compatibility/spec.md`.
+- The accepted topology map — `docs/development/ARCHITECTURE.md`.
+
+## Dependencies and Related Changes
+
+- Depends on `multi-domain-storefront-composition` for the storefront under test, and on
+  `market-platform-bare-metal-10-storefront-composition` and `bare-metal-buyer-domain`
+  for a complete bare-metal deal path.
+- Depends on `pools-7-storefront-fulfillment-cutover` for durable selected-site
+  scheduling, fulfillment status and result, restart recovery, and teardown.
+- Depends on `pool-declared-offering-modes` for explicit executor identity and the legacy
+  -row policy this change no longer owns.
+- Complements `bare-metal-and-credits-domain-stacks`, which proves a complete deal per
+  domain at one authority. This change adds the multi-authority dimension and should
+  reuse its fixtures rather than build a parallel harness.

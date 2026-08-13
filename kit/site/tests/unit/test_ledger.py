@@ -252,6 +252,27 @@ def test_generic_ledger_has_no_attribute_requirement():
         generic.probe(claim={"units": 0})
 
 
+def test_reserve_derives_executor_ref_from_resource_vm_host(seeded: CapacityLedgerService):
+    """reserve() writes executor_ref (not a dedicated vm_host column) from
+    the matched resource's vm_host attribute, and derives executor_kind
+    alongside it.
+
+    reserve()'s own return payload is assembled from _match_payload (the
+    resource's live attributes at match time), not _reservation_payload,
+    so it never includes executor_ref/executor_kind directly. The durable
+    row itself, read back via get_reservation (which does use
+    _reservation_payload), is where the write actually lands.
+    """
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xn"})
+    assert reserved is not None
+    assert reserved["vm_host"] == "kvm1"  # _match_payload, from the resource's own attributes
+
+    row = seeded.get_reservation(reserved["capacity_reservation_id"])
+    assert row["executor_ref"] == {"vm_host": "kvm1"}
+    assert row["executor_kind"] == "vm"
+    assert row["vm_host"] == "kvm1"  # _reservation_payload, now sourced from executor_ref
+
+
 def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     reserved = seeded.reserve(
         claim={"gpu_count": 3},
@@ -276,6 +297,90 @@ def test_reserve_decrements_and_releases_restore(seeded: CapacityLedgerService):
     _, version_after = seeded.events_after(0)
     assert duplicate == released
     assert version_after == version_before
+
+
+def test_reserve_is_idempotent_by_escrow_uid(seeded: CapacityLedgerService):
+    """A repeat reserve() call for the same escrow_uid (e.g. a caller
+    retrying after a crash, before it durably recorded the first
+    reservation's identity elsewhere) must return the existing held
+    reservation rather than minting a second one and double-consuming
+    capacity."""
+    first = seeded.reserve(
+        claim={"gpu_count": 3},
+        deal_ref={"listing_id": "lst-1", "escrow_uid": "0xidempotent"},
+    )
+    assert first is not None
+    assert seeded.snapshot()[0]["available_units"] == 5
+
+    second = seeded.reserve(
+        claim={"gpu_count": 3},
+        deal_ref={"listing_id": "lst-1", "escrow_uid": "0xidempotent"},
+    )
+    assert second is not None
+    assert second["capacity_reservation_id"] == first["capacity_reservation_id"]
+    # Capacity was not consumed a second time.
+    assert seeded.snapshot()[0]["available_units"] == 5
+
+
+def test_reserve_idempotent_hit_includes_resource_id(seeded: CapacityLedgerService):
+    """The idempotent-hit payload must be byte-compatible with a fresh
+    reservation's payload for callers that read resource_id directly
+    (e.g. vm_fulfillment_service.py)."""
+    first = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xres"})
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xres"})
+    assert second["resource_id"] == first["resource_id"] == "compute-kvm1-001"
+    assert second["vm_host"] == first["vm_host"] == "kvm1"
+
+
+def test_reserve_idempotency_finds_a_committed_reservation_too(
+    seeded: CapacityLedgerService,
+):
+    """Idempotency must not be limited to the TTL-hold (``reserved``)
+    state -- a caller retrying after the first attempt already progressed
+    to a committed lease must still find it, not double-reserve."""
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xcommitted"})
+    seeded.commit(
+        resource_id=reserved["resource_id"],
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_end_utc="2099-01-01 00:00",
+    )
+    retried = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xcommitted"})
+    assert retried["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+    assert retried["state"] == "leased"
+
+
+def test_reserve_without_escrow_uid_is_never_idempotent(seeded: CapacityLedgerService):
+    """No escrow_uid means no idempotency key -- every call reserves
+    fresh, matching pre-existing behavior for callers that don't supply
+    one."""
+    first = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={})
+    assert first["capacity_reservation_id"] != second["capacity_reservation_id"]
+    assert seeded.snapshot()[0]["available_units"] == 6
+
+
+def test_reserve_after_hold_expiry_reserves_fresh_for_the_same_escrow_uid(
+    seeded: CapacityLedgerService,
+):
+    """An escrow_uid whose prior hold already expired (moved out of
+    HELD_RESERVATION_STATES by _expire_stale_holds) must not be treated
+    as an idempotent hit -- a genuinely new attempt after expiry reserves
+    fresh, exactly as it did before this idempotency check existed."""
+    from market_site.db import CapacityReservation
+
+    first = seeded.reserve(
+        claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xexpired"}, ttl_seconds=60,
+    )
+    with seeded._session_factory() as db:
+        row = db.get(CapacityReservation, first["capacity_reservation_id"])
+        row.hold_expires_at = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        db.commit()
+
+    second = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xexpired"})
+    assert second is not None
+    assert second["capacity_reservation_id"] != first["capacity_reservation_id"]
 
 
 def test_future_reservation_ignores_non_overlapping_current_lease(seeded: CapacityLedgerService):
@@ -328,6 +433,55 @@ def test_commit_marks_leased_and_sets_window(seeded: CapacityLedgerService):
             capacity_reservation_id=reserved["capacity_reservation_id"],
             lease_end_utc="2099-01-01 00:00",
         )
+
+
+def test_commit_with_no_resource_id_behaves_identically_to_supplying_it(
+    seeded: CapacityLedgerService,
+):
+    """commit() already ignores resource_id whenever capacity_reservation_id
+    is supplied -- confirms that holds for every caller, not just callers
+    that omit it explicitly, and stays true if it is ever omitted entirely
+    rather than passed as None."""
+    with_resource_id = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb1"})
+    without_resource_id = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb2"})
+
+    committed_with = seeded.commit(
+        resource_id=with_resource_id["resource_id"],
+        capacity_reservation_id=with_resource_id["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb1",
+    )
+    committed_without = seeded.commit(
+        resource_id=None,
+        capacity_reservation_id=without_resource_id["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb2",
+    )
+
+    assert committed_with["state"] == committed_without["state"] == "leased"
+    assert (
+        committed_with["lease_start_utc"]
+        == committed_without["lease_start_utc"]
+        == "2099-01-01T00:00:00+00:00"
+    )
+    assert (
+        committed_with["lease_end_utc"]
+        == committed_without["lease_end_utc"]
+        == "2099-01-01T01:00:00Z"
+    )
+
+    # And omitting the keyword argument entirely (not even passing None)
+    # is the same call, since resource_id already defaults to None.
+    third = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xb3"})
+    committed_omitted = seeded.commit(
+        capacity_reservation_id=third["capacity_reservation_id"],
+        lease_start_utc="2099-01-01T00:00:00Z",
+        lease_end_utc="2099-01-01T01:00:00Z",
+        idempotency_ref="0xb3",
+    )
+    assert committed_omitted["state"] == "leased"
 
 
 def test_ttl_hold_expires_without_commit(seeded: CapacityLedgerService):
@@ -437,16 +591,22 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
 
 
 def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService):
+    """CapacityReservation carries no VM-domain-specific column names --
+    callers pass executor_kind/executor_target/executor_ref directly (as
+    kit/site/authority.py's adapter already does); attach_lease no longer
+    accepts or self-heals a vm_host/vm_target kwarg.
+    """
     reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xl"})
     attached = seeded.attach_lease(
         capacity_reservation_id=reserved["capacity_reservation_id"],
-        vm_host="kvm1",
-        vm_target="tenant-abcd",
+        executor_kind="vm",
+        executor_target="tenant-abcd",
+        executor_ref={"vm_host": "kvm1"},
         lease_end_utc="2099-01-01 00:00",
         create_job_id="job-1",
     )
     assert attached["state"] == "leased"
-    assert attached["vm_target"] == "tenant-abcd"
+    assert attached["vm_target"] == "tenant-abcd"  # payload key, sourced from executor_target
     assert attached["executor_kind"] == "vm"
     assert attached["executor_target"] == "tenant-abcd"
     assert attached["executor_ref"] == {"vm_host": "kvm1"}
@@ -457,6 +617,32 @@ def test_attach_lease_records_tail_on_reservation(seeded: CapacityLedgerService)
 
     # Unknown / no-longer-held reservations fall back to the legacy table.
     assert seeded.attach_lease(capacity_reservation_id="missing") is None
+
+
+def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
+    """vm_host is matched through executor_ref's JSON payload
+    (func.json_extract) and vm_target through executor_target -- neither
+    is a dedicated column. Previously untested -- this is new coverage,
+    not just a migration of an existing test."""
+    reserved = seeded.reserve(claim={"gpu_count": 1}, deal_ref={"escrow_uid": "0xm"})
+    seeded.attach_lease(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        executor_kind="vm",
+        executor_target="tenant-find-me",
+        executor_ref={"vm_host": "kvm1"},
+        lease_end_utc="2099-01-01 00:00",
+    )
+
+    found = seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me")
+    assert found is not None
+    assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+
+    # A different vm_host must not match, even with the same vm_target --
+    # proves the filter actually discriminates on the JSON value rather
+    # than matching any row with a non-null executor_ref.
+    assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
+    # A different vm_target must not match either.
+    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-someone-else") is None
     seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
     assert seeded.attach_lease(capacity_reservation_id=reserved["capacity_reservation_id"]) is None
 
@@ -977,5 +1163,158 @@ def test_attribute_view_falls_back_to_resource_id_when_pool_id_unset():
     ledger.register_resource(resource_id="r1", total_units=4)
     match = ledger.probe(claim={"pool_id": "r1", "gpu_count": 1})
     assert match is not None
+
+
+# ----------------------------------------------------------------------
+# resize_reservation
+# ----------------------------------------------------------------------
+
+def test_resize_reservation_supersedes_with_a_new_id():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id,
+        new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert resized["capacity_reservation_id"] != old_id
+    assert resized["superseded_capacity_reservation_id"] == old_id
+
+    old_after = ledger.get_reservation(old_id)
+    assert old_after["state"] == "released"
+    assert old_after["failure_reason"] == "superseded"
+
+
+def test_resize_reservation_sees_capacity_the_old_hold_was_consuming():
+    """The new shape's availability is evaluated as if the old hold had
+    already cleared: a single 4-unit resource can resize a 4-unit
+    reservation up to a claim that still only needs 4 units total, even
+    though the old hold is nominally still "using" all 4 until this call."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 4},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert resized["settlement_resource_id"] is None  # not yet scheduled
+    assert ledger.get_reservation(resized["capacity_reservation_id"])["units"] == 4
+
+
+def test_resize_reservation_rolls_back_fully_when_new_shape_is_unavailable():
+    """If the new shape has no eligible candidate, the whole transaction
+    rolls back: the old reservation is left exactly as it was, still held,
+    never actually released -- not two independently-reversible steps."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id,
+        new_claim={"gpu_count": 5},  # exceeds the only resource's total capacity
+        deal_ref={"market": "vms"},
+    )
+    assert resized is None
+
+    old_after = ledger.get_reservation(old_id)
+    assert old_after["state"] == "reserved"
+    assert old_after["failure_reason"] is None
+
+
+def test_resize_reservation_of_unknown_or_unheld_reservation_is_a_no_op():
+    ledger = _make_ledger()
+    assert ledger.resize_reservation(
+        old_capacity_reservation_id="missing", new_claim={"gpu_count": 1},
+    ) is None
+
+
+# ----------------------------------------------------------------------
+# settlement-abandonment hook
+# ----------------------------------------------------------------------
+
+def test_release_invokes_the_abandonment_hook_unconditionally():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref={"market": "vms"})
+    assert result is not None
+    reservation_id = result["capacity_reservation_id"]
+
+    ledger.release(capacity_reservation_id=reservation_id)
+    assert calls == [reservation_id]
+
+    # Idempotent re-release does not duplicate capacity mutations, but it
+    # still gives fulfillment a chance to reconcile stranded assigned state.
+    ledger.release(capacity_reservation_id=reservation_id)
+    assert calls == [reservation_id, reservation_id]
+
+
+def test_expired_hold_lapse_invokes_the_abandonment_hook():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(
+        claim={"gpu_count": 1}, deal_ref={"market": "vms"}, ttl_seconds=-1,
+    )
+    assert result is not None
+    reservation_id = result["capacity_reservation_id"]
+
+    ledger.expire_due_holds()
+    assert calls == [reservation_id]
+
+
+def test_resize_reservation_invokes_the_abandonment_hook_for_the_old_reservation():
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 2}, deal_ref={"market": "vms"})
+    assert old is not None
+    old_id = old["capacity_reservation_id"]
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old_id, new_claim={"gpu_count": 3},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is not None
+    assert calls == [old_id]
+
+
+def test_resize_reservation_rollback_does_not_invoke_the_abandonment_hook():
+    """The hook only fires on the transaction that actually commits: a
+    resize that rolls back because the new shape is unavailable must not
+    report the old reservation as abandoned."""
+    calls = []
+    ledger = _make_ledger(settlement_abandonment_hook=lambda db, rid: calls.append(rid))
+    ledger.register_resource(resource_id="r1", total_units=4)
+    old = ledger.reserve(claim={"gpu_count": 4}, deal_ref={"market": "vms"})
+    assert old is not None
+
+    resized = ledger.resize_reservation(
+        old_capacity_reservation_id=old["capacity_reservation_id"],
+        new_claim={"gpu_count": 5},
+        deal_ref={"market": "vms"},
+    )
+    assert resized is None
+    assert calls == []
+
+
+def test_no_hook_configured_is_a_silent_no_op():
+    """The default (no hook wired) must not raise -- most tests in this
+    file construct a ledger with no hook at all."""
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", total_units=4)
+    result = ledger.reserve(claim={"gpu_count": 1}, deal_ref={"market": "vms"})
+    assert result is not None
+    ledger.release(capacity_reservation_id=result["capacity_reservation_id"])
 
 

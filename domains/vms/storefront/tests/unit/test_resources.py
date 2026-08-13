@@ -1,21 +1,21 @@
 """Unit tests for the resource adapter registry (resources.py)."""
 
 import pytest
-
-from domains.vms.listings.models import (
+from arkhai_vms.listing_models import (
     ComputeResource,
     ERC20TokenMetadata,
     GPUModel,
     Region,
     TokenResource,
 )
-from domains.vms.listings.resources import (
+
+from market_storefront.listings import resources as _resource_registry
+from market_storefront.listings.resources import (
     adapt_db_resource_to_domain_resource,
     adapt_domain_resource_to_db_resource,
     parse_resource_from_dict,
     register_resource_adapter,
 )
-from domains.vms.listings import resources as _resource_registry
 
 USDT = ERC20TokenMetadata(
     symbol="USDT",
@@ -37,6 +37,7 @@ TOKEN = TokenResource(token=USDT, amount=5_000_000)
 # parse_resource_from_dict
 # ---------------------------------------------------------------------------
 
+
 class TestParseResourceFromDict:
     def test_compute_via_resource_type(self):
         data = {
@@ -53,14 +54,23 @@ class TestParseResourceFromDict:
 
     def test_compute_via_discriminator_key_fallback(self):
         """No resource_type in payload — falls back to gpu_model discriminator."""
-        data = {"gpu_model": "H200", "gpu_count": 1, "sla": 90.0, "region": "California, US"}
+        data = {
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 90.0,
+            "region": "California, US",
+        }
         result = parse_resource_from_dict(data)
         assert isinstance(result, ComputeResource)
 
     def test_token_via_resource_type(self):
         data = {
             "resource_type": "token.erc20",
-            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
+            "token": {
+                "symbol": "USDT",
+                "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "decimals": 6,
+            },
             "amount": 5_000_000,
         }
         result = parse_resource_from_dict(data)
@@ -71,7 +81,11 @@ class TestParseResourceFromDict:
     def test_token_via_discriminator_key_fallback(self):
         """No resource_type — falls back to token discriminator."""
         data = {
-            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
+            "token": {
+                "symbol": "USDT",
+                "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "decimals": 6,
+            },
             "amount": 1_000_000,
         }
         result = parse_resource_from_dict(data)
@@ -94,6 +108,7 @@ class TestParseResourceFromDict:
 # ---------------------------------------------------------------------------
 # DB round-trip: from_domain_resource / to_domain_resource
 # ---------------------------------------------------------------------------
+
 
 class TestDbRoundTrip:
     def test_compute_round_trip(self):
@@ -138,6 +153,7 @@ class TestDbRoundTrip:
 # Third-party / generic adapter registration
 # ---------------------------------------------------------------------------
 
+
 class InformationResource:
     """A plain note/document resource from the information domain."""
 
@@ -157,7 +173,9 @@ class InformationNoteAdapter:
     discriminator_key: str = "content"
 
     def from_dict(self, data: dict[str, _Any]) -> InformationResource:
-        return InformationResource(content=data["content"], format=data.get("format", "plaintext"))
+        return InformationResource(
+            content=data["content"], format=data.get("format", "plaintext")
+        )
 
     def to_domain_resource(self, db_resource: dict[str, _Any]) -> InformationResource:
         attrs = db_resource.get("attributes") or {}
@@ -184,7 +202,11 @@ class InformationNoteAdapter:
         }
 
     def to_dict(self, resource: InformationResource) -> dict[str, _Any]:
-        return {"resource_type": self.resource_type, "content": resource.content, "format": resource.format}
+        return {
+            "resource_type": self.resource_type,
+            "content": resource.content,
+            "format": resource.format,
+        }
 
 
 class TestThirdPartyAdapterRegistration:
@@ -200,7 +222,11 @@ class TestThirdPartyAdapterRegistration:
         _resource_registry._DOMAIN_TYPE_TO_ADAPTER.update(domain_type_snapshot)
 
     def test_parse_from_dict_via_resource_type(self):
-        data = {"resource_type": "information.note", "content": "hello", "format": "markdown"}
+        data = {
+            "resource_type": "information.note",
+            "content": "hello",
+            "format": "markdown",
+        }
         result = parse_resource_from_dict(data)
         assert isinstance(result, InformationResource)
         assert result.content == "hello"
@@ -214,7 +240,9 @@ class TestThirdPartyAdapterRegistration:
 
     def test_db_round_trip(self):
         resource = InformationResource(content="meeting notes", format="markdown")
-        db_row = adapt_domain_resource_to_db_resource(resource, resource_id="res-3", state="active")
+        db_row = adapt_domain_resource_to_db_resource(
+            resource, resource_id="res-3", state="active"
+        )
         assert db_row["resource_type"] == "information.note"
         assert db_row["attributes"]["content"] == "meeting notes"
 

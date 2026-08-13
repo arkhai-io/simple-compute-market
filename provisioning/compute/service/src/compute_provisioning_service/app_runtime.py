@@ -49,6 +49,9 @@ def resolve_request_path_services() -> None:
     # machinery on the request path (prevents asyncio.get_event_loop()
     # errors in AnyIO worker threads).
     _container_module.resolved_job_service = container.job_service()
+    fulfillment_service = container.fulfillment_service()
+    container.fulfillment_teardown_port().bind(fulfillment_service)
+    _container_module.resolved_fulfillment_service = fulfillment_service
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
@@ -57,6 +60,9 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_host_operations_service = container.host_operations_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()
     _container_module.resolved_lease_watchdog = container.lease_watchdog()
+    _container_module.resolved_fulfillment_convergence_watchdog = (
+        container.fulfillment_convergence_watchdog()
+    )
     _container_module.resolved_capacity_ledger_service = container.capacity_ledger_service()
     _container_module.resolved_bare_metal_lease_service = container.bare_metal_lease_service()
     _container_module.resolved_bare_metal_operations_service = (
@@ -68,7 +74,6 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_physical_settlement_scheduler = (
         container.physical_settlement_scheduler()
     )
-    _container_module.resolved_fulfillment_service = container.fulfillment_service()
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )
@@ -262,6 +267,33 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
         logger.info(
             "Capacity reservation watchdog disabled "
             "(capacity_reservation_watchdog_enabled=false)"
+        )
+
+    # Fulfillment convergence watchdog retries durable dispatch work and
+    # converges provider operations without holding database transactions
+    # across provider calls.
+    fulfillment_convergence_enabled = bool(
+        getattr(settings, "fulfillment_convergence_watchdog_enabled", True)
+    )
+    if fulfillment_convergence_enabled:
+        tasks.append(
+            ComputeProvisioningBackgroundTask(
+                "fulfillment-convergence-watchdog",
+                lambda: _container_module.resolved_fulfillment_convergence_watchdog.run(),
+                "Fulfillment convergence watchdog started (interval=%ds)",
+                (
+                    getattr(
+                        settings,
+                        "fulfillment_convergence_watchdog_poll_interval_seconds",
+                        30,
+                    ),
+                ),
+            )
+        )
+    else:
+        logger.info(
+            "Fulfillment convergence watchdog disabled "
+            "(fulfillment_convergence_watchdog_enabled=false)"
         )
 
     return tuple(tasks)

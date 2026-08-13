@@ -10,6 +10,7 @@ SERVICE_PACKAGE = (
 ALLOWED_ADAPTER_ENTRYPOINTS = {
     "vm_provisioning_adapter.runtime",
     "vm_provisioning_adapter.routers",
+    "vm_provisioning_adapter.legacy_backfill",
     "bare_metal_provisioning_adapter.runtime",
     "bare_metal_provisioning_adapter.routers",
 }

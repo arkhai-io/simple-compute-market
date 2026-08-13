@@ -23,7 +23,7 @@ packages = ["src/core_storefront"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]

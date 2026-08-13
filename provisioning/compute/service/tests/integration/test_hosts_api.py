@@ -82,6 +82,24 @@ class TestRegisterHost:
         assert host.name == _SAMPLE_HOST.name
         assert host.kvm_host == _SAMPLE_HOST.kvm_host
 
+    async def test_register_with_gpu_model_round_trips_through_the_real_api(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        host = await client.register_host(HostCreate(
+            name="kvm1", kvm_host="10.0.0.1", ssh_user="ubuntu",
+            ssh_key_type="path", ssh_key_value="/home/appuser/.ssh/id_ed25519",
+            gpu_count=8, gpu_model="H100",
+        ))
+        assert host.gpu_model == "H100"
+        fetched = await client.get_host("kvm1")
+        assert fetched.gpu_model == "H100"
+
+    async def test_register_without_gpu_model_leaves_it_absent(self, client_and_queue):
+        client, _ = client_and_queue
+        host = await _register(client)  # _SAMPLE_HOST sets no gpu_model
+        assert host.gpu_model is None
+
 
 class TestGetHost:
     async def test_get_registered_host(self, client_and_queue):
@@ -112,6 +130,14 @@ class TestUpdateHost:
         await client.update_host("kvm1", HostUpdate(ssh_user="root"))
         host = await client.get_host("kvm1")
         assert host.ssh_user == "root"
+
+    async def test_update_gpu_model_round_trips_through_the_real_api(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client)
+        updated = await client.update_host("kvm1", HostUpdate(gpu_model="A100"))
+        assert updated.gpu_model == "A100"
+        fetched = await client.get_host("kvm1")
+        assert fetched.gpu_model == "A100"
 
     async def test_update_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue

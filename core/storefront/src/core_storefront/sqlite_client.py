@@ -609,11 +609,33 @@ class SQLiteClient:
                   connection_details TEXT,
                   tenant_credentials TEXT,
                   reason TEXT,
+                  -- Durable physical-fulfillment identity, so a caller can
+                  -- resume checking progress after a storefront restart
+                  -- without redispatching. Distinct from fulfillment_uid
+                  -- above (the on-chain settlement-claim identity) --
+                  -- see ARCHITECTURE.md's "Shared vocabulary and identities".
+                  capacity_reservation_id TEXT,
+                  settlement_resource_id TEXT,
+                  fulfillment_id TEXT,
+                  fulfillment_context TEXT,
+                  fulfillment_phase TEXT,
+                  processing_owner TEXT,
+                  processing_lease_until TEXT,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 )
                 """
             )
+            # Add columns if they don't exist (for existing databases)
+            for _escrow_column in (
+                "capacity_reservation_id", "settlement_resource_id", "fulfillment_id",
+                "fulfillment_context", "fulfillment_phase",
+                "processing_owner", "processing_lease_until",
+            ):
+                try:
+                    cur.execute(f"ALTER TABLE escrows ADD COLUMN {_escrow_column} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)"
             )
@@ -1343,6 +1365,13 @@ class SQLiteClient:
         "connection_details",
         "tenant_credentials",
         "reason",
+        "capacity_reservation_id",
+        "settlement_resource_id",
+        "fulfillment_id",
+        "fulfillment_context",
+        "fulfillment_phase",
+        "processing_owner",
+        "processing_lease_until",
         "created_at",
         "updated_at",
     )
@@ -1606,8 +1635,23 @@ class SQLiteClient:
         connection_details: str | None = None,
         tenant_credentials: str | None = None,
         reason: str | None = None,
+        capacity_reservation_id: str | None = None,
+        settlement_resource_id: str | None = None,
+        fulfillment_id: str | None = None,
+        fulfillment_context: str | None = None,
+        fulfillment_phase: str | None = None,
+        processing_owner: str | None = None,
+        processing_lease_until: str | None = None,
     ) -> None:
-        """Patch an escrows row. Any None field is skipped."""
+        """Patch an escrows row. Any None field is skipped.
+
+        ``capacity_reservation_id``/``settlement_resource_id``/``fulfillment_id``
+        are the durable physical-fulfillment identity -- persisted so a
+        caller can resume checking fulfillment progress by escrow after a
+        storefront restart, without redispatching. Distinct from
+        ``fulfillment_uid`` (the on-chain settlement-claim identity); both
+        may legitimately be set on the same row.
+        """
         def _update() -> None:
             updates: list[str] = []
             values: list[Any] = []
@@ -1624,6 +1668,13 @@ class SQLiteClient:
             add("connection_details", connection_details)
             add("tenant_credentials", tenant_credentials)
             add("reason", reason)
+            add("capacity_reservation_id", capacity_reservation_id)
+            add("settlement_resource_id", settlement_resource_id)
+            add("fulfillment_id", fulfillment_id)
+            add("fulfillment_context", fulfillment_context)
+            add("fulfillment_phase", fulfillment_phase)
+            add("processing_owner", processing_owner)
+            add("processing_lease_until", processing_lease_until)
             if not updates:
                 return
             updates.append("updated_at = ?")
@@ -1640,6 +1691,67 @@ class SQLiteClient:
                 conn.close()
 
         await asyncio.to_thread(_update)
+
+    async def list_incomplete_primary_escrows(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return bounded primary escrows whose commercial delivery is unfinished."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows
+                    WHERE is_primary = 1 AND status NOT IN ('ready', 'failed', 'refunded')
+                    ORDER BY updated_at ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                return [self._escrow_row_to_dict(row) for row in rows]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def claim_escrow_convergence(
+        self, *, escrow_uid: str, owner: str, lease_until: str
+    ) -> bool:
+        """Atomically claim unfinished escrow convergence until ``lease_until``."""
+        def _claim() -> bool:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE escrows
+                    SET processing_owner = ?, processing_lease_until = ?, updated_at = ?
+                    WHERE escrow_uid = ?
+                      AND status NOT IN ('ready', 'failed', 'refunded')
+                      AND (processing_lease_until IS NULL OR processing_lease_until < ?
+                           OR processing_owner = ?)
+                    """,
+                    (owner, lease_until, now, escrow_uid, now, owner),
+                )
+                conn.commit()
+                return cur.rowcount == 1
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_claim)
+
+    async def release_escrow_convergence(self, *, escrow_uid: str, owner: str) -> None:
+        """Release a convergence claim owned by ``owner``."""
+        def _release() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """UPDATE escrows SET processing_owner = NULL,
+                       processing_lease_until = NULL, updated_at = ?
+                       WHERE escrow_uid = ? AND processing_owner = ?""",
+                    (datetime.now().isoformat(), escrow_uid, owner),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_release)
 
     async def load_escrow(
         self,
@@ -2587,6 +2699,10 @@ class SQLiteClient:
     # Stage events
     # ------------------------------------------------------------------
 
+    #: Most rows one stage-event query will return, however many are asked for.
+    #: A caller wanting more pages with `after_id`.
+    STAGE_EVENT_PAGE_LIMIT = 500
+
     async def list_stage_events(
         self,
         *,
@@ -2596,7 +2712,36 @@ class SQLiteClient:
         listing_id: str | None = None,
         negotiation_id: str | None = None,
     ) -> list[dict]:
+        """Rows only, for a caller that does not need to know about truncation.
+
+        Prefer `list_stage_events_page` anywhere the answer is presented as a
+        complete history: this signature cannot tell a caller that it received
+        part of one.
+        """
+        rows, _ = await self.list_stage_events_page(
+            after_id=after_id, limit=limit, stage=stage,
+            listing_id=listing_id, negotiation_id=negotiation_id,
+        )
+        return rows
+
+    async def list_stage_events_page(
+        self,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> tuple[list[dict], bool]:
         """Query stage_events rows with optional filters.
+
+        Returns the rows and whether more matched than were returned. The cap is
+        enforced here rather than trusted from the caller, and reported rather
+        than applied silently: a caller receiving exactly the cap cannot otherwise
+        distinguish a complete result from a truncated one, and one reasoning
+        about a whole history would then reason about part of one. Detection is
+        by reading one row past the cap, so `truncated` means rows were withheld
+        and not merely that the cap was reached exactly.
 
         Parameters
         ----------
@@ -2613,9 +2758,15 @@ class SQLiteClient:
         """
         import json as _json
 
-        limit = min(limit, 500)
+        effective = min(limit, self.STAGE_EVENT_PAGE_LIMIT)
+        if limit > effective:
+            logger.warning(
+                "[STAGE_EVENTS] requested limit %d exceeds the %d-row page cap; "
+                "returning at most %d and reporting the result as truncated",
+                limit, self.STAGE_EVENT_PAGE_LIMIT, effective,
+            )
 
-        def _query() -> list[dict]:
+        def _query() -> tuple[list[dict], bool]:
             conn = sqlite3.connect(self.db_path, timeout=2)
             try:
                 conditions = ["id > ?"]
@@ -2630,7 +2781,10 @@ class SQLiteClient:
                     conditions.append("negotiation_id = ?")
                     params.append(negotiation_id)
                 where = " AND ".join(conditions)
-                params.append(limit)
+                # One past the page, to tell "exactly a full page" from "a full
+                # page and more behind it". The extra row is read and discarded;
+                # a count query instead would be a second scan for one boolean.
+                params.append(effective + 1)
                 cur = conn.execute(
                     f"SELECT id, ts, stage, event, negotiation_id, listing_id, escrow_uid, data "
                     f"FROM stage_events WHERE {where} ORDER BY id ASC LIMIT ?",
@@ -2653,7 +2807,8 @@ class SQLiteClient:
                         "escrow_uid": escrow,
                         "data": data,
                     })
-                return rows
+                truncated = len(rows) > effective
+                return rows[:effective], truncated
             finally:
                 conn.close()
 

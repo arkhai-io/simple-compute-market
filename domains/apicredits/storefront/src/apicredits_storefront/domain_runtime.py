@@ -6,6 +6,7 @@ from dataclasses import replace
 from market_core import (
     DomainCapability,
     ImmutableFulfillmentCapability,
+    ImmutableNegotiationCapability,
     ImmutablePublicationCapability,
     ImmutableSettlementCapability,
     ImmutableStorefrontCapability,
@@ -27,6 +28,9 @@ def _build_market_domain_contract() -> MarketDomainContract:
     )
     from core_storefront.escrow_verification import verify_escrow_for_settlement
     from domains.apicredits.domain_runtime import market_domain
+    from domains.apicredits.negotiation.policy_sources import (
+        api_credits_policy_sources,
+    )
     from domains.apicredits.negotiation.storefront_round import (
         default_seller_round_hook,
     )
@@ -37,12 +41,16 @@ def _build_market_domain_contract() -> MarketDomainContract:
         DomainCapability.PUBLICATION,
         DomainCapability.SETTLEMENT,
         DomainCapability.FULFILLMENT,
+        DomainCapability.NEGOTIATION,
     }
     return validate_domain_contract(replace(
         base,
         declared_capabilities=base.declared_capabilities | capabilities,
         storefront=ImmutableStorefrontCapability(
             run_negotiation_policy=default_seller_round_hook,
+        ),
+        negotiation=ImmutableNegotiationCapability(
+            policy_sources=api_credits_policy_sources,
         ),
         publication=ImmutablePublicationCapability(
             publish=publish_order_to_registry,

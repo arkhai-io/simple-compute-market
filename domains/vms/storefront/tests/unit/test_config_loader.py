@@ -41,6 +41,22 @@ def test_settings_toml_provides_baseline_defaults():
         "bisection",
     ]
     assert s.pricing.publish_priceless is False
+    # On by default -- the projection path has parity with the local-table
+    # path it supersedes. A staged/canary rollout sets this false
+    # explicitly rather than relying on a default that no longer matches.
+    assert s.capacity.use_site_projection_for_listings is True
+
+
+def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
+    tmp_path, monkeypatch,
+):
+    """The default flip doesn't remove the ability to opt back out for a
+    staged/canary rollout -- an explicit override still wins."""
+    monkeypatch.setenv(
+        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS", "false",
+    )
+    cfg = _build_isolated(tmp_path, [])
+    assert cfg.capacity.use_site_projection_for_listings is False
 
 
 def test_unset_sensitive_keys_are_empty_strings():

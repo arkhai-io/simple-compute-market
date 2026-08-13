@@ -129,12 +129,37 @@ root_path = ""
 # (spread to the site with the most free units).
 # hold_ttl_seconds: two-phase reserve — terms acceptance places a soft
 # hold that settlement commits into the lease; it auto-lapses if the
-# escrow never settles. 0 disables acceptance holds (settlement then
-# does the plain atomic reserve, racing other deals for the capacity).
+# escrow never settles. 0 disables acceptance holds, and settlement then
+# does the plain atomic reserve.
+#
+# DEFAULT IS 0 AS A SECURITY POSTURE, NOT A PERFORMANCE TRADE.
+# Nothing gates hold placement on funds, escrow, or any chain
+# interaction: acquiring a hold costs a buyer two signed HTTP requests.
+# There is no rate limiting and no per-buyer concurrency limit, and a
+# fresh buyer address is free to mint, so a single actor can hold a
+# storefront's entire sellable inventory indefinitely at no cost by
+# negotiating, accepting, and never settling. Shortening the window does
+# not fix this — it only raises the request rate the attacker needs,
+# while degrading legitimate settlement.
+#
+# The cost of 0 is a real but far smaller risk: a buyer whose escrow has
+# settled may find the capacity taken and must be refunded. That affects
+# one deal at a time and has a recovery path; the alternative denies
+# every buyer at once. Turn holds back on only once held capacity is
+# billed, so that acquiring exclusivity costs the holder something.
 authority_url    = ""
 poll_interval    = 5
 placement        = "fill_first"
-hold_ttl_seconds = 900
+hold_ttl_seconds = 0
+# Structural capacity source for listing derivation: local tables
+# (compute_capacity_pools/compute_pool_members) unless this is set,
+# in which case the site-resource-pool projection is used instead
+# wherever the storefront's own cache has a loaded value. On by
+# default -- the projection path has parity with local tables,
+# including bucket-sourced fungible capacity, multi-member
+# specific-resource listings, and listing-mode hints. Set to false
+# to fall back to local tables for a staged/canary rollout.
+use_site_projection_for_listings = true
 
 [provisioning]
 service_url            = "http://localhost:8085"
@@ -178,6 +203,35 @@ default_min_price            = ""
 default_token_address        = ""
 default_max_duration_seconds = 0   # 0 means unlimited
 publish_priceless            = false
+# Whether a resource pool's own projected `sla` hint
+# is consulted at all when resolving a listing's advertised SLA (the
+# middle tier of a storefront override > pool hint > this default
+# precedence chain -- see market_storefront.listings.pool_descriptors).
+# Off by default: publishing a site's self-reported SLA claim is new
+# capability a storefront operator must opt into, not something already
+# trusted today.
+accept_pool_declared_sla     = false
+# Storefront's own default SLA when neither a per-pool override
+# (compute_capacity_pools.sla) nor a trusted pool hint applies.
+default_sla                  = 0.0
+
+# Per-GPU-model pricing defaults (tier 1 of the
+# storefront-override > pool-hint > this-default precedence chain --
+# see market_storefront.listings.pricing_resolution). Structured to mirror
+# the structured-capacity-requirements change's own family-grouped
+# requirement shape, reserving room for non-GPU families (cpu/memory/
+# storage) once that change's vocabulary has landed and a pricing
+# dimension exists to key them by -- only `gpu` has entries today.
+# Add one [pricing.defaults.gpu.<model>] table per priced model; a
+# model with no table here, or a field left unset within one, falls
+# through to default_min_price/default_token_address/
+# default_max_duration_seconds above. Empty by default -- no priced
+# models ship out of the box.
+#
+# Example:
+# [pricing.defaults.gpu.H100]
+# min_price = "5.00"
+# token     = "0x0000000000000000000000000000000000000000"
 
 [integrations]
 # Sensitive — populated by Secret overlay.

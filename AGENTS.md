@@ -1,6 +1,6 @@
 # Repository Engineering Guidance
 
-This file defines repository-wide rules for AI-assisted and human implementation work. Read it with `docs/development/ARCHITECTURE.md` and `openspec/README.md` before changing code or specifications.
+This file defines repository-wide rules for AI-assisted and human implementation work. Read it with `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, and `openspec/README.md` before changing code or specifications.
 
 ## Working model
 
@@ -19,6 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, documentation compliance, and tasks compression. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 
@@ -92,11 +93,16 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 
 ## Tests and diagnostics
 
-- Put a test at the lowest level that can meaningfully prove the behavior.
+- Put a test at the lowest level that can meaningfully prove the behavior. See `docs/development/TESTING.md` for the level definitions, per-level jurisdiction, and coverage boundaries between them.
 - Prefer observable seams, injected dependencies, and deterministic test controls over sleeps or brute-force monkeypatching.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
+- Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
 
 ## Generated implementation artifacts
 
-Return only updated files. Copying an archive does not delete files, so paths requiring deletion must be represented by explicit review tombstones and listed as manual actions. Tombstones are review artifacts only: final production code and permanent documentation must not mention them.
+Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
+
+```python
+# TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
+```

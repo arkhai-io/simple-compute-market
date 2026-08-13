@@ -26,6 +26,15 @@ Admission and scheduling use the same fit semantics. Every requested dimension m
 
 A hold protects negotiation-time intent for a bounded period. Commit makes capacity durable for execution. Release returns capacity only through the owning lifecycle. Expiry and early termination may initiate release, but physical capacity remains held until executor or provider teardown succeeds or an operator explicitly force-releases it.
 
+## Resize as one transaction, not two calls in either order
+
+When a negotiated shape changes for an already-held reservation, the ledger supersedes it (`resize_reservation`) rather than mutating it in place or composing two ordinary `reserve()`/`release()` calls. Two simpler designs were considered and rejected because each has a real correctness bug the other doesn't:
+
+- **Reserve-new-then-release-old** evaluates the new shape's availability while the old hold is still artificially consuming capacity. A resource that would satisfy the new request the instant the old hold clears can incorrectly report as unavailable, because that capacity is invisible until release actually happens — a false negative, most visible exactly when the new shape targets the same resource or pool the old hold already occupies.
+- **Release-old-then-reserve-new** as two separate calls fixes that visibility problem but reintroduces a different risk: if the new reservation then fails, the old one is already gone, leaving the negotiation with nothing.
+
+Both properties — evaluating the new shape's availability *as if* the old hold were already released, and leaving the old reservation completely untouched if the new shape can't be satisfied — are only simultaneously achievable inside one transaction that releases-then-reserves internally, committing only on success and rolling back in full on failure. This generalizes the atomic-rebind pattern scheduling already uses for moving a settlement assignment between resources, to the case that pattern doesn't cover on its own: source and destination can legitimately be the same resource or pool, which is exactly when the visibility problem shows up.
+
 ## Projection boundaries
 
 The site exposes two independent storefront views:
@@ -44,6 +53,24 @@ Revisions make missed events detectable. A consumer that sees a gap refreshes a 
 ## Routing identity
 
 `site_id` is selected and trusted at the storefront aggregation boundary, where it is bound to a configured provisioning connection. Provisioning-local rows are already scoped by their database authority and do not encode routing endpoints or credentials into reservation identifiers.
+
+## Projected feasibility matching
+
+Ranking multiple sites for a claim (`most_available` placement) and
+authoritative admission at a single site use the same claim-matching
+semantics, but not the same code path by default. The core-layer
+aggregator's default matcher is deliberately coarse (pool/resource
+identity and quantitative dimensions only) — it cannot depend on any
+kit-layer package, so it cannot know a domain's categorical attributes
+(region, GPU model) the way the site's own admission path does. A
+domain composing the aggregator MAY inject an exact `ClaimMatcher` that
+delegates to its backing site's own authoritative matching function,
+so ranking and admission agree on every field the site actually checks,
+without moving site-specific matching logic into the core layer. This
+is composition, not a shared implementation: the aggregator's own
+default remains available to any domain whose backing site doesn't
+warrant the exact match, and the same package-layering rule that keeps
+core backend-agnostic still applies.
 
 ## Current limits
 

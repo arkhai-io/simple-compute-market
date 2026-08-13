@@ -158,7 +158,45 @@ class TestLeaseClientEndpointCoverage:
             lease_end_utc=datetime(2099, 1, 1, tzinfo=timezone.utc),
         )
 
+        from market_fulfillment import SettlementRecord, SettlementRecordState
+
+        session_factory = _container_module.resolved_session_factory
+        with session_factory() as db:
+            db.add(
+                SettlementRecord(
+                    capacity_reservation_id=reserved["capacity_reservation_id"],
+                    fulfillment_id="fulfillment-client-terminate",
+                    market="vms",
+                    scheduling_requirements={"resource_kind": "vm"},
+                    settlement_resource_id=HOST,
+                    pool_id="pool-1",
+                    provider="ansible",
+                    resource_attributes={"vm_host": HOST},
+                    fulfillment_request={
+                        "kind": "vm.fulfillment.request",
+                        "schema_version": 1,
+                        "payload": {},
+                    },
+                    prepared_teardown_operation={
+                        "kind": "vm.ansible.teardown.v1",
+                        "schema_version": 1,
+                        "payload": {},
+                    },
+                    provider_metadata={"current_job_id": "job-1"},
+                    state=SettlementRecordState.active.value,
+                )
+            )
+            db.commit()
+
         terminated = await client.terminate_lease(lease["id"], reason="client coverage")
 
         assert terminated["id"] == lease["id"]
         assert terminated["status"] == "releasing"
+
+        # Confirm terminate_lease actually drove the
+        # fulfillment aggregate into durable teardown, not just that the
+        # reservation-ledger view reports "releasing" -- the two are
+        # separate state machines now, joined only by VmReleaseExecutor.
+        with session_factory() as db:
+            record = db.get(SettlementRecord, reserved["capacity_reservation_id"])
+            assert record.state == SettlementRecordState.teardown_dispatch_pending.value

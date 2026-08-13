@@ -12,6 +12,10 @@ from typing import Any
 
 from domains.apicredits.settlement import fulfill_api_credits_obligation
 
+from apicredits_storefront.services.credits_service_client import (
+    get_credits_service_client,
+)
+
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -72,8 +76,6 @@ async def fulfill_credit_obligation(
     from apicredits_storefront.domain_runtime import (
         get_market_domain_contract,
     )
-    from apicredits_storefront.utils import config
-
     held_reservation: dict | None = None
     if negotiation_id:
         db = get_sqlite_client()
@@ -93,8 +95,7 @@ async def fulfill_credit_obligation(
         key_id=key_id,
         buyer_wallet=buyer_wallet,
         listing_id=listing_id,
-        service_url=config.credits_service_url(),
-        admin_key=config.credits_admin_key(),
+        credits_client=get_credits_service_client(),
         stage_event=stage_event,
         apply_failure_policy=_apply_fulfillment_failure_policy_adapter,
         held_reservation=held_reservation,

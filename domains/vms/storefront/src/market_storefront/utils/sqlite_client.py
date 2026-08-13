@@ -18,15 +18,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from core_storefront.sqlite_client import (  # noqa: F401 — re-exported
+from core_storefront.sqlite_client import (
     SQLiteClient as CoreSQLiteClient,
-    _amount_from_db_text,
-    _amount_to_db_text,
-    _publication_row_to_dict,
 )
 from core_storefront.sqlite_migrations import Migration
-from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
-from domains.vms.listings.resource_csv_importer import (
+
+from market_storefront.listings.host_csv_importer import upsert_hosts_from_csv
+from market_storefront.listings.reconciler import ensure_derived_compute_listings_table
+from market_storefront.listings.resource_csv_importer import (
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
@@ -213,19 +212,7 @@ class SQLiteClient(CoreSQLiteClient):
             END
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS derived_compute_listings (
-              listing_id TEXT PRIMARY KEY,
-              pool_id TEXT,
-              resource_id TEXT NOT NULL,
-              gpu_count INTEGER NOT NULL,
-              status TEXT NOT NULL,
-              derivation_key TEXT NOT NULL UNIQUE,
-              last_reconciled_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            )
-            """
-        )
+        ensure_derived_compute_listings_table(cur)
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS derived_bare_metal_listings (
@@ -240,18 +227,6 @@ class SQLiteClient(CoreSQLiteClient):
         )
 
     def _ensure_domain_indexes(self, cur: sqlite3.Cursor) -> None:
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_resource "
-            "ON derived_compute_listings(resource_id, gpu_count)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_pool "
-            "ON derived_compute_listings(pool_id, gpu_count)"
-        )
-        cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_derived_compute_listings_status "
-            "ON derived_compute_listings(status)"
-        )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_derived_bare_metal_listings_machine "
             "ON derived_bare_metal_listings(machine_id)"
@@ -317,7 +292,10 @@ class SQLiteClient(CoreSQLiteClient):
         """
         # Capacity gate — only for active compute.gpu slices.
         if resource_type == "compute.gpu" and (state is None or state != "deleted"):
-            from market_storefront.services.resource_capacity_validator import check_slice_fits_host
+            from market_storefront.services.resource_capacity_validator import (
+                check_slice_fits_host,
+            )
+
             attrs = attributes or {}
             await check_slice_fits_host(
                 sqlite_client=self,
@@ -365,7 +343,9 @@ class SQLiteClient(CoreSQLiteClient):
                         min_price,
                         token,
                         max_duration_seconds,
-                        json.dumps(accepted_escrows) if accepted_escrows is not None else None,
+                        json.dumps(accepted_escrows)
+                        if accepted_escrows is not None
+                        else None,
                         now_iso,
                         now_iso,
                     ),
@@ -401,6 +381,7 @@ class SQLiteClient(CoreSQLiteClient):
         state: str | None = None,
     ) -> list[dict[str, Any]]:
         """List resource rows from local DB as generic DB-resource dicts."""
+
         def _load() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -453,7 +434,10 @@ class SQLiteClient(CoreSQLiteClient):
                         except Exception:
                             attrs = {}
                     accepted: list[dict[str, Any]] | None = None
-                    if isinstance(row_accepted_escrows, str) and row_accepted_escrows.strip():
+                    if (
+                        isinstance(row_accepted_escrows, str)
+                        and row_accepted_escrows.strip()
+                    ):
                         try:
                             parsed_ae = json.loads(row_accepted_escrows)
                             if isinstance(parsed_ae, list):
@@ -485,6 +469,7 @@ class SQLiteClient(CoreSQLiteClient):
 
     async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
         """Fetch a single resource row by resource_id."""
+
         def _load_one() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -688,6 +673,7 @@ class SQLiteClient(CoreSQLiteClient):
         enabled: bool = True,
     ) -> None:
         """Create or update a host row."""
+
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -844,12 +830,19 @@ class SQLiteClient(CoreSQLiteClient):
             },
             "used": used,
             "remaining": {
-                k: (host_limit - used[k]) if (host_limit := host.get({
-                    "gpu_count": "total_gpu_count",
-                    "vcpu_count": "host_cpu_cores",
-                    "ram_gb": "host_ram_gb",
-                    "disk_gb": "host_disk_gb",
-                }[k])) is not None else None
+                k: (host_limit - used[k])
+                if (
+                    host_limit := host.get(
+                        {
+                            "gpu_count": "total_gpu_count",
+                            "vcpu_count": "host_cpu_cores",
+                            "ram_gb": "host_ram_gb",
+                            "disk_gb": "host_disk_gb",
+                        }[k]
+                    )
+                )
+                is not None
+                else None
                 for k in ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
             },
         }
@@ -908,7 +901,9 @@ class SQLiteClient(CoreSQLiteClient):
         Supports direct-set semantics only: set_value, set_state, set_attribute.
         """
         if set_value is None and set_state is None and not set_attribute:
-            raise ValueError("Transition must include set_value, set_state, or set_attribute")
+            raise ValueError(
+                "Transition must include set_value, set_state, or set_attribute"
+            )
 
         resolved_event_id = event_id or str(uuid.uuid4())
         set_attribute_json = json.dumps(set_attribute) if set_attribute else None
@@ -963,7 +958,9 @@ class SQLiteClient(CoreSQLiteClient):
                     attr_expr = "COALESCE(attributes, '{}')"
                     for path, path_value in set_attribute.items():
                         if not isinstance(path, str) or not path.startswith("$."):
-                            raise ValueError(f"Invalid JSON path for set_attribute: {path}")
+                            raise ValueError(
+                                f"Invalid JSON path for set_attribute: {path}"
+                            )
                         if path in ("$.allocation_id", "$.compute_allocation_id"):
                             continue
                         attr_expr = f"json_set({attr_expr}, ?, json(?))"
@@ -983,11 +980,13 @@ class SQLiteClient(CoreSQLiteClient):
                 if set_state == "available":
                     allocation_id = None
                     if set_attribute:
-                        raw_allocation_id = (
-                            set_attribute.get("$.allocation_id")
-                            or set_attribute.get("$.compute_allocation_id")
-                        )
-                        if isinstance(raw_allocation_id, str) and raw_allocation_id.strip():
+                        raw_allocation_id = set_attribute.get(
+                            "$.allocation_id"
+                        ) or set_attribute.get("$.compute_allocation_id")
+                        if (
+                            isinstance(raw_allocation_id, str)
+                            and raw_allocation_id.strip()
+                        ):
                             allocation_id = raw_allocation_id.strip()
                     if allocation_id:
                         cur.execute(
@@ -1052,7 +1051,6 @@ class SQLiteClient(CoreSQLiteClient):
             event_id=event_id,
             occurred_at=occurred_at,
         )
-
 
     @classmethod
     def _sync_compute_pool_for_resource(
@@ -1160,7 +1158,6 @@ class SQLiteClient(CoreSQLiteClient):
         )
         return pool_id
 
-
     # ------------------------------------------------------------------
     # Capacity holds — two-phase reserve bookkeeping. The hold itself
     # lives in the capacity ledger (a TTL'd reserved allocation); this
@@ -1169,11 +1166,21 @@ class SQLiteClient(CoreSQLiteClient):
     # ------------------------------------------------------------------
 
 
-
 _sqlite_client: SQLiteClient | None = None
 
 
 def get_sqlite_client() -> SQLiteClient:
+    """The process-wide client, addressing ``settings.db_path``.
+
+    Prefer a client the caller was given. This one resolves from configuration
+    rather than from composition, so a caller that already holds a unit of work
+    and reaches for this instead operates on a different database whenever the
+    two differ -- which is every test that seeds its own, and which produces a
+    write that reports success and changes nothing observable. The
+    listing-reconcile path takes its client as a parameter for exactly this
+    reason; other writers reached from a test still mutate the configured
+    database rather than a temporary one.
+    """
     global _sqlite_client
     if _sqlite_client is None:
         _sqlite_client = SQLiteClient(db_path=settings.db_path)

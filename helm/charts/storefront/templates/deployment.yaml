@@ -134,8 +134,17 @@ spec:
               readOnly: true
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
-          # /health performs only a fast SQLite ping — safe as a Kubernetes
-          # liveness/readiness probe with no outbound calls or blocking I/O.
+          # Both probes perform only a fast SQLite ping and a local read of the
+          # timer loops' state: no outbound calls, no blocking I/O.
+          #
+          # They answer different questions and must not be pointed at one route.
+          # /health fails only when a timer loop has ended on its own — nothing
+          # in the process restarts one, so replacing the pod is the only
+          # recovery available and this is how it is requested. /ready also fails
+          # while a loop has not begun cycling, which resolves on its own and
+          # should drain traffic rather than restart anything. A storefront held
+          # at its lifecycle pause stays ready: that is an operator control, not
+          # a fault.
           livenessProbe:
             httpGet:
               path: /health
@@ -145,7 +154,7 @@ spec:
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: {{ $agent.port }}
             initialDelaySeconds: 5
             periodSeconds: 10

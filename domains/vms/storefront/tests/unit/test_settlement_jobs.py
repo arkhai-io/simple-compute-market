@@ -17,16 +17,14 @@ import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from arkhai_vms import make_vm_provision_terms
 
-from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.settlement_jobs import (
     _run_settlement_job_bg,
     serialize_settlement_job,
     start_settlement_job,
 )
-
+from market_storefront.utils.sqlite_client import SQLiteClient
 
 # ---------------------------------------------------------------------------
 # SQLiteClient escrows helpers
@@ -44,6 +42,7 @@ def _anvil_chain(monkeypatch):
     ``CHAINS.get(chain_name)`` lookup resolves in tests that don't write a
     full storefront.toml."""
     from market_config.config_loader import ChainConfig
+
     from market_storefront.utils import config as agent_config
 
     monkeypatch.setattr(
@@ -82,19 +81,25 @@ async def test_insert_escrow_happy_path(client):
 
 @pytest.mark.asyncio
 async def test_insert_is_idempotent_by_primary_key(client):
-    assert await client.insert_escrow(
-        escrow_uid="0xescrow-1",
-        negotiation_id="neg-1",
-        chain_name="anvil",
-        escrow_address="0x" + "aa" * 20,
-    ) is True
+    assert (
+        await client.insert_escrow(
+            escrow_uid="0xescrow-1",
+            negotiation_id="neg-1",
+            chain_name="anvil",
+            escrow_address="0x" + "aa" * 20,
+        )
+        is True
+    )
     # Second insert for same escrow returns False, doesn't overwrite.
-    assert await client.insert_escrow(
-        escrow_uid="0xescrow-1",
-        negotiation_id="neg-DIFFERENT",
-        chain_name="other",
-        escrow_address="0x" + "bb" * 20,
-    ) is False
+    assert (
+        await client.insert_escrow(
+            escrow_uid="0xescrow-1",
+            negotiation_id="neg-DIFFERENT",
+            chain_name="other",
+            escrow_address="0x" + "bb" * 20,
+        )
+        is False
+    )
     row = await client.load_escrow(escrow_uid="0xescrow-1")
     assert row["negotiation_id"] == "neg-1"
     assert row["chain_name"] == "anvil"
@@ -103,8 +108,10 @@ async def test_insert_is_idempotent_by_primary_key(client):
 @pytest.mark.asyncio
 async def test_update_escrow_patches_only_provided_fields(client):
     await client.insert_escrow(
-        escrow_uid="0xescrow-1", negotiation_id="neg-1",
-        chain_name="anvil", escrow_address="0x" + "aa" * 20,
+        escrow_uid="0xescrow-1",
+        negotiation_id="neg-1",
+        chain_name="anvil",
+        escrow_address="0x" + "aa" * 20,
     )
     await client.update_escrow(
         escrow_uid="0xescrow-1",
@@ -128,13 +135,17 @@ async def test_load_missing_escrow_returns_none(client):
 @pytest.mark.asyncio
 async def test_load_primary_escrow_for_negotiation(client):
     await client.insert_escrow(
-        escrow_uid="0xprimary", negotiation_id="neg-1",
-        chain_name="anvil", escrow_address="0x" + "aa" * 20,
+        escrow_uid="0xprimary",
+        negotiation_id="neg-1",
+        chain_name="anvil",
+        escrow_address="0x" + "aa" * 20,
         is_primary=True,
     )
     await client.insert_escrow(
-        escrow_uid="0xbond", negotiation_id="neg-1",
-        chain_name="anvil", escrow_address="0x" + "bb" * 20,
+        escrow_uid="0xbond",
+        negotiation_id="neg-1",
+        chain_name="anvil",
+        escrow_address="0x" + "bb" * 20,
         is_primary=False,
     )
     primary = await client.load_primary_escrow_for_negotiation(negotiation_id="neg-1")
@@ -170,8 +181,11 @@ async def _seed_negotiation(
                        '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z', ?,
                        ?, ?, ?)""",
             (
-                neg_id, our_listing_id, terminal,
-                agreed_price, agreed_duration_seconds,
+                neg_id,
+                our_listing_id,
+                terminal,
+                agreed_price,
+                agreed_duration_seconds,
                 "2026-04-23T00:00:00Z" if agreed_price is not None else None,
             ),
         )
@@ -180,7 +194,9 @@ async def _seed_negotiation(
         conn.close()
 
 
-async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord-1") -> None:
+async def _seed_seller_order(
+    client: SQLiteClient, listing_id: str = "seller-ord-1"
+) -> None:
     conn = sqlite3.connect(client.db_path)
     try:
         conn.execute(
@@ -207,7 +223,7 @@ async def test_start_refuses_unknown_negotiation(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
-            chain_name='anvil',
+            chain_name="anvil",
         )
 
 
@@ -222,7 +238,7 @@ async def test_start_refuses_non_terminal_thread(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
-            chain_name='anvil',
+            chain_name="anvil",
         )
 
 
@@ -237,7 +253,7 @@ async def test_start_refuses_terminal_without_agreed_price(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
-            chain_name='anvil',
+            chain_name="anvil",
         )
 
 
@@ -252,7 +268,7 @@ async def test_start_refuses_when_seller_order_gone(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
-            chain_name='anvil',
+            chain_name="anvil",
         )
 
 
@@ -263,12 +279,15 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
 
     # Prevent the background task from doing real work during the test.
     # Bypass on-chain escrow verification — covered in test_escrow_verification.py.
-    with patch(
-        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
-        new=AsyncMock(),
-    ), patch(
-        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
-        new=AsyncMock(),
+    with (
+        patch(
+            "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+            new=AsyncMock(),
+        ),
+        patch(
+            "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+            new=AsyncMock(),
+        ),
     ):
         result = await start_settlement_job(
             escrow_uid="0xescrow",
@@ -276,7 +295,7 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
             ssh_public_key="ssh-rsa ...",
             sqlite_client=client,
             alkahest_client=MagicMock(),
-            chain_name='anvil',
+            chain_name="anvil",
         )
 
     assert result["status"] == "provisioning"
@@ -302,12 +321,15 @@ async def test_start_aborts_when_escrow_verification_rejects(client):
 
     bg_mock = AsyncMock()
     verify_mock = AsyncMock(side_effect=EscrowVerificationError("amount insufficient"))
-    with patch(
-        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
-        new=bg_mock,
-    ), patch(
-        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
-        new=verify_mock,
+    with (
+        patch(
+            "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+            new=bg_mock,
+        ),
+        patch(
+            "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+            new=verify_mock,
+        ),
     ):
         with pytest.raises(EscrowVerificationError, match="amount insufficient"):
             await start_settlement_job(
@@ -316,7 +338,7 @@ async def test_start_aborts_when_escrow_verification_rejects(client):
                 ssh_public_key="ssh-rsa ...",
                 sqlite_client=client,
                 alkahest_client=MagicMock(),
-            chain_name='anvil',
+                chain_name="anvil",
             )
 
     # No DB row, no background task.
@@ -329,29 +351,38 @@ async def test_start_is_idempotent_by_escrow_uid(client):
     await _seed_seller_order(client)
     await _seed_negotiation(client)
 
-    with patch(
-        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
-        new=AsyncMock(),
-    ), patch(
-        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
-        new=AsyncMock(),
+    with (
+        patch(
+            "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+            new=AsyncMock(),
+        ),
+        patch(
+            "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+            new=AsyncMock(),
+        ),
     ):
         first = await start_settlement_job(
-            escrow_uid="0xescrow", negotiation_id="neg-1",
+            escrow_uid="0xescrow",
+            negotiation_id="neg-1",
             ssh_public_key="ssh-rsa ...",
-            sqlite_client=client, alkahest_client=MagicMock(),
-            chain_name='anvil',
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+            chain_name="anvil",
         )
         # Flip the existing job to 'ready' to prove the second call reads, not overwrites.
         await client.update_escrow(
-            escrow_uid="0xescrow", status="ready",
-            fulfillment_uid="0xattest", connection_details="ssh bob@vm",
+            escrow_uid="0xescrow",
+            status="ready",
+            fulfillment_uid="0xattest",
+            connection_details="ssh bob@vm",
         )
         second = await start_settlement_job(
-            escrow_uid="0xescrow", negotiation_id="neg-1",
+            escrow_uid="0xescrow",
+            negotiation_id="neg-1",
             ssh_public_key="ssh-rsa ...",
-            sqlite_client=client, alkahest_client=MagicMock(),
-            chain_name='anvil',
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+            chain_name="anvil",
         )
 
     assert first["status"] == "provisioning"
@@ -382,12 +413,14 @@ async def _seed_escrow_provisioning(
 @pytest.mark.asyncio
 async def test_background_task_writes_ready_on_success(client):
     await _seed_escrow_provisioning(client)
-    mock_fulfill = AsyncMock(return_value={
-        "status": "fulfilled",
-        "fulfillment_uid": "0xattest",
-        "connection_details": "ssh alice@vm1",
-        "tenant_credentials": {"password": "secret"},
-    })
+    mock_fulfill = AsyncMock(
+        return_value={
+            "status": "fulfilled",
+            "fulfillment_uid": "0xattest",
+            "connection_details": "ssh alice@vm1",
+            "tenant_credentials": {"password": "secret"},
+        }
+    )
 
     with patch(
         "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
@@ -395,7 +428,9 @@ async def test_background_task_writes_ready_on_success(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="ssh-rsa ..."
+            ),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -410,6 +445,50 @@ async def test_background_task_writes_ready_on_success(client):
 
 
 @pytest.mark.asyncio
+async def test_background_task_threads_the_listings_mapped_site_to_fulfillment(client):
+    """A listing already mapped to a site (derived_compute_listings)
+    must have that site_id reach the domain-agnostic fulfillment.fulfill
+    dispatch -- proves the site_id resolution added in
+    _run_settlement_job_bg actually reaches its call, not just that
+    fulfill_vm_obligation honors a site_id kwarg when given one."""
+    from market_storefront.listings.reconciler import record_derived_listing
+
+    await _seed_escrow_provisioning(client)
+    record_derived_listing(
+        client.db_path,
+        listing_id="seller-ord-1",
+        site_id="dc-mapped",
+        resource_id="res-1",
+        gpu_count=2,
+    )
+    mock_fulfill = AsyncMock(
+        return_value={
+            "status": "fulfilled",
+            "fulfillment_uid": "0xattest",
+            "connection_details": "ssh alice@vm1",
+            "tenant_credentials": {"password": "secret"},
+        }
+    )
+
+    with patch(
+        "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
+        new=mock_fulfill,
+    ):
+        await _run_settlement_job_bg(
+            escrow_uid="0xescrow",
+            provision=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="ssh-rsa ..."
+            ),
+            listing_id="seller-ord-1",
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            sqlite_client=client,
+            alkahest_client=MagicMock(),
+        )
+
+    assert mock_fulfill.call_args.kwargs["site_id"] == "dc-mapped"
+
+
+@pytest.mark.asyncio
 async def test_background_task_writes_failed_on_exception(client):
     await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
@@ -420,7 +499,9 @@ async def test_background_task_writes_failed_on_exception(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="ssh-rsa ..."
+            ),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -445,7 +526,9 @@ async def test_background_task_leaves_listing_open_on_failure(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="ssh-rsa ..."
+            ),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -461,10 +544,12 @@ async def test_background_task_leaves_listing_open_on_failure(client):
 async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     """fulfill_compute_obligation returned a non-exception but non-success result."""
     await _seed_escrow_provisioning(client)
-    mock_fulfill = AsyncMock(return_value={
-        "status": "error",
-        "message": "Provisioning failed: No available compute VM",
-    })
+    mock_fulfill = AsyncMock(
+        return_value={
+            "status": "error",
+            "message": "Provisioning failed: No available compute VM",
+        }
+    )
 
     with patch(
         "market_storefront.services.fulfillment_service.fulfill_compute_obligation",
@@ -472,7 +557,9 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            provision=make_vm_provision_terms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
+            provision=make_vm_provision_terms(
+                duration_seconds=3600, ssh_public_key="ssh-rsa ..."
+            ),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
@@ -525,3 +612,85 @@ def test_serialize_parses_tenant_credentials_json():
     assert out["tenant_credentials"] == {"password": "secret"}
     assert out["fulfillment_uid"] == "0xa"
     assert "attestation_uid" not in out
+
+
+def test_serialize_includes_fulfillment_id_distinct_from_fulfillment_uid():
+    """fulfillment_id (durable physical-fulfillment identity) and
+    fulfillment_uid (on-chain settlement-claim identity) are different
+    concepts and may both be set on the same row."""
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_uid": "0xa",
+        "fulfillment_id": "fulfillment-123",
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert out["fulfillment_id"] == "fulfillment-123"
+    assert out["fulfillment_uid"] == "0xa"
+    assert out["fulfillment_id"] != out["fulfillment_uid"]
+
+
+def test_serialize_omits_fulfillment_id_when_none():
+    raw = {
+        "escrow_uid": "0xe",
+        "negotiation_id": "neg-1",
+        "status": "provisioning",
+        "fulfillment_id": None,
+        "created_at": "2026-04-23T00:00:00Z",
+        "updated_at": "2026-04-23T00:00:00Z",
+    }
+    out = serialize_settlement_job(raw)
+    assert "fulfillment_id" not in out
+
+
+@pytest.mark.asyncio
+async def test_fulfillment_context_and_processing_claim_round_trip(client):
+    await client.insert_escrow(
+        escrow_uid="0xresume",
+        negotiation_id="neg-resume",
+        chain_name="anvil",
+        escrow_address="0x" + "cc" * 20,
+    )
+    context = json.dumps(
+        {
+            "kind": "vm.storefront.fulfillment-context",
+            "schema_version": 1,
+            "payload": {"escrow_uid": "0xresume", "fulfillment_request": {}},
+        }
+    )
+    await client.update_escrow(
+        escrow_uid="0xresume",
+        fulfillment_context=context,
+        fulfillment_phase="context_persisted",
+    )
+    rows = await client.list_incomplete_primary_escrows(limit=10)
+    assert [row["escrow_uid"] for row in rows] == ["0xresume"]
+    assert rows[0]["fulfillment_context"] == context
+    assert (
+        await client.claim_escrow_convergence(
+            escrow_uid="0xresume",
+            owner="worker-a",
+            lease_until="2999-01-01T00:00:00+00:00",
+        )
+        is True
+    )
+    assert (
+        await client.claim_escrow_convergence(
+            escrow_uid="0xresume",
+            owner="worker-b",
+            lease_until="2999-01-01T00:00:00+00:00",
+        )
+        is False
+    )
+    await client.release_escrow_convergence(escrow_uid="0xresume", owner="worker-a")
+    assert (
+        await client.claim_escrow_convergence(
+            escrow_uid="0xresume",
+            owner="worker-b",
+            lease_until="2999-01-01T00:00:00+00:00",
+        )
+        is True
+    )

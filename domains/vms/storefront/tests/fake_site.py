@@ -19,6 +19,32 @@ from unittest.mock import patch
 import httpx
 
 
+#: Fields `kit/site`'s reserve route removes before answering. Mirrored here
+#: because a reservation commits to a site and a shape and to nothing narrower:
+#: scheduling may rebind it to another resource in another pool at the same
+#: site, so the resource and pool matched at admission are not reservation
+#: facts. A fake that returned them would let a caller depend on a field the
+#: real wire never sends -- which is how a `KeyError: 'resource_id'` reached
+#: the nightly e2e with a green storefront suite.
+#: Keep in step with `market_site.router`'s reserve route.
+_STRIPPED_RESERVATION_FIELDS = frozenset({
+    "resource_id",
+    "pool_id",
+    "member_id",
+    "capacity_bucket_id",
+    "backing_resource_id",
+    "vm_host",
+})
+
+
+def _strip_placement(reservation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in reservation.items()
+        if key not in _STRIPPED_RESERVATION_FIELDS
+    }
+
+
 class FakeSite:
     """Dict-backed single-site capacity ledger."""
 
@@ -88,6 +114,15 @@ class FakeSite:
                     "unit": "count",
                     "value": row["total_units"],
                     "available_units": self._available(rid),
+                    # Real kit/site's snapshot always includes a
+                    # multidimensional "available" map (PRIMARY_DIMENSION
+                    # is "gpu_count") -- without it, an injected exact
+                    # ClaimMatcher (which always resolves both legacy and
+                    # modern claims through this map, never
+                    # available_units directly) sees every row as
+                    # zero-capacity for ranking purposes, regardless of
+                    # this fake's own separate reservation-matching logic.
+                    "available": {"gpu_count": self._available(rid)},
                     "state": (
                         "available" if self._available(rid) > 0 else "leased"
                     ),
@@ -113,11 +148,11 @@ class FakeSite:
                 "deal_ref": body.get("deal_ref") or {},
             }
             self._emit("reserved", match["resource_id"])
-            return httpx.Response(200, json={"reservation": {
+            return httpx.Response(200, json={"reservation": _strip_placement({
                 **match,
                 "capacity_reservation_id": capacity_reservation_id,
                 "hold_expires_at": None,
-            }})
+            })})
 
         if path.endswith("/commit"):
             capacity_reservation_id = path.split("/")[-2]
@@ -195,6 +230,15 @@ class FakeSite:
         # ledger's _resource_matches skips it.
         dimensions = claim.get("dimensions") or {}
         requested = int(dimensions.get("gpu_count") or claim.get("gpu_count") or 1)
+        # resource_type is a special top-level claim key (mirroring real
+        # kit/site's _split_claim_requirement), not an arbitrary
+        # attribute -- every resource this fake serves is "compute.gpu"
+        # (see the hardcoded snapshot() response above), so it never
+        # lives in a resource's own attributes dict the way
+        # gpu_model/region do.
+        required_resource_type = claim.get("resource_type")
+        if required_resource_type is not None and required_resource_type != "compute.gpu":
+            return None
         for rid, row in self.resources.items():
             if not row["enabled"]:
                 continue
@@ -202,7 +246,8 @@ class FakeSite:
             top_level = {"resource_id": rid, "pool_id": rid}
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
-                for k, v in claim.items() if k not in ("gpu_count", "dimensions")
+                for k, v in claim.items()
+                if k not in ("gpu_count", "dimensions", "resource_type")
             )
             if mismatched:
                 continue
@@ -233,13 +278,13 @@ def aggregate_over(
     subscriber is attached — drive it with ``pump_events``.
     """
     from core_storefront.aggregation import AggregateCapacityClient
+    from market_site_client import SiteCapacityClient
 
     from market_storefront.services.capacity_client import (
-        RemoteCapacityClient,
         _make_listing_reconcile_subscriber,
     )
 
-    remote = RemoteCapacityClient(
+    remote = SiteCapacityClient(
         "http://fake-site:8081", "test-key", transport=fake.transport(),
     )
     aggregate = AggregateCapacityClient({site_name: remote})

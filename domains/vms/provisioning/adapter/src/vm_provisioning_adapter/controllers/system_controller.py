@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 
@@ -200,6 +200,38 @@ class SystemController:
             }
         """
         return await self._system_service.force_check_leases()
+
+    @_system_router.post(
+        "/fulfillment-convergence/run-cycle",
+        summary="Run one fulfillment convergence cycle (admin)",
+    )
+    async def run_fulfillment_convergence_cycle(self) -> dict:
+        """Run exactly one cycle of the production fulfillment watchdog.
+
+        The response contains bounded before/after aggregate diagnostics.
+        It never exposes prepared operations, provider payloads, or credentials.
+        """
+        result = await self._system_service.force_fulfillment_convergence()
+        if "error" in result:
+            raise HTTPException(status_code=503, detail=result["error"])
+        return result
+
+    @_system_router.post(
+        "/fulfillment-convergence/clear-claims",
+        summary="Free claimed settlement records so the next cycle re-reads them (admin)",
+    )
+    async def clear_fulfillment_convergence_claims(self) -> dict:
+        """Clear claim leases only — state and attempt counts are untouched.
+
+        A cycle that reads a still-running operation holds its claim for a lease
+        interval, so the cycle after it cannot re-read that record. This releases
+        those leases, which is what lets a caller advance convergence immediately
+        after making an operation finish rather than waiting for the lease.
+        """
+        result = await self._system_service.clear_fulfillment_claims()
+        if "error" in result:
+            raise HTTPException(status_code=503, detail=result["error"])
+        return result
 
     @_system_router.post(
         "/lease-watchdog/pause",

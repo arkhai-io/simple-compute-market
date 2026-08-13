@@ -1,15 +1,14 @@
-"""Ansible implementation of FulfillmentProvider."""
+"""Ansible implementation of the provider-neutral fulfillment contract."""
 
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from market_fulfillment import PhysicalSettlementRequest, SettlementResource
-from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
-from vm_provisioning_adapter.models.fulfillment_model import AnsibleFulfillmentMetadata, VmFulfillmentRequirements
+from compute_provisioning.contracts import ExecutorActionEnvelope
 from market_fulfillment import (
+    CredentialFetchFailedError,
+    ProvisionedResourceDescriptor,
     FulfillmentCreateFailedError,
     FulfillmentProvider,
     FulfillmentResult,
@@ -18,28 +17,31 @@ from market_fulfillment import (
     ProviderConfigInvalidError,
     ProviderOperationState,
     ProviderStatus,
+    SettlementResource,
+    SettlementResult,
+    VersionedEnvelope,
 )
+from vm_provisioning_adapter.fulfillment_results import (
+    VmConnectionInfo,
+    VmFulfillmentCredential,
+    build_vm_fulfillment_result,
+)
+from vm_provisioning_adapter.models.fulfillment_model import (
+    AnsibleFulfillmentMetadata,
+    AnsiblePoolConfig,
+    AnsiblePreparedJobParameters,
+    AnsiblePreparedOperation,
+    VmFulfillmentRequirements,
+)
+from vm_provisioning_adapter.models.jobs_model import AnsibleJobParams
+from vm_provisioning_adapter.requirement_delegates import resolve_requirement_delegate
 
 if TYPE_CHECKING:
-    from market_resource_pools import ResourcePoolService
     from compute_provisioning_service.services.async_job_queue import AsyncJobQueue
     from vm_provisioning_adapter.services.job_service import AnsibleJobService
 
-
-@dataclass(frozen=True)
-class AnsiblePoolConfig:
-    """Provider-local, typed view of a pool's Ansible provider configuration.
-
-    Deliberately narrower than persisted provider configuration:
-    ``inventory_group`` is not used for dispatch because concrete placement
-    belongs exclusively to ``PhysicalSettlementScheduler``. Treating an
-    inventory group as placement would introduce a conflicting scheduler.
-    """
-
-    playbook_path: str
-    extra_vars: dict[str, Any]
-
-
+_CREATE_KIND = "vm.ansible.create.v1"
+_TEARDOWN_KIND = "vm.ansible.teardown.v1"
 _JOB_STATUS_TO_OPERATION_STATE = {
     "queued": ProviderOperationState.pending,
     "running": ProviderOperationState.pending,
@@ -50,146 +52,243 @@ _JOB_STATUS_TO_OPERATION_STATE = {
 
 
 class AnsibleFulfillmentProvider(FulfillmentProvider):
-    """Wraps AnsibleJobService/AnsibleService to fulfill a selected resource.
-
-    Depends on AnsibleJobService (not AnsibleService directly — the job
-    service already owns that boundary) and ResourcePoolService, plus a
-    job-queue provider callable, mirroring VmOperationsService/
-    HostOperationsService's existing constructor shape.
-    """
-
     def __init__(
         self,
         *,
         job_service: "AnsibleJobService",
-        resource_pool_service: "ResourcePoolService",
         job_queue_provider: Callable[[], "AsyncJobQueue"],
     ) -> None:
         self._job_service = job_service
-        self._resource_pool_service = resource_pool_service
         self._job_queue_provider = job_queue_provider
 
-    def _pool_config(self, pool_id: str) -> AnsiblePoolConfig:
-        pool = self._resource_pool_service.get_pool(pool_id)
-        if pool is None:
+    @staticmethod
+    def _pool_config(pool_config: dict[str, Any]) -> AnsiblePoolConfig:
+        try:
+            return AnsiblePoolConfig.model_validate(pool_config)
+        except Exception as exc:
             raise ProviderConfigInvalidError(
-                f"Resource pool {pool_id!r} no longer exists"
-            )
-        config = pool.provider_config or {}
-        playbook_path = config.get("playbook_path")
-        if not playbook_path:
-            raise ProviderConfigInvalidError(
-                f"Pool {pool_id!r} has no playbook_path configured"
-            )
-        return AnsiblePoolConfig(
-            playbook_path=playbook_path,
-            extra_vars=dict(config.get("extra_vars") or {}),
-        )
+                f"invalid Ansible pool configuration: {exc}"
+            ) from exc
 
-    def _vm_host(self, resource: SettlementResource) -> str:
-        vm_host = resource.attributes.get("vm_host")
-        if not isinstance(vm_host, str) or not vm_host.strip():
+    @staticmethod
+    def _vm_host(resource: SettlementResource) -> str:
+        value = resource.attributes.get("vm_host")
+        if not isinstance(value, str) or not value.strip():
             raise ProviderConfigInvalidError(
                 "selected VM settlement resource requires a non-empty vm_host attribute"
             )
-        return vm_host
+        return value
 
-    def _validate_resource(self, resource: SettlementResource) -> AnsiblePoolConfig:
-        pool = self._resource_pool_service.get_pool(resource.pool_id)
-        if pool is None:
-            raise ProviderConfigInvalidError(f"Resource pool {resource.pool_id!r} no longer exists")
-        if not bool(getattr(pool, "enabled", True)):
-            raise ProviderConfigInvalidError(f"Resource pool {resource.pool_id!r} is disabled")
-        if getattr(pool, "provider", resource.provider) != resource.provider:
-            raise ProviderConfigInvalidError(
-                f"Resource provider {resource.provider!r} does not match pool provider {getattr(pool, 'provider', None)!r}"
-            )
-        return self._pool_config(resource.pool_id)
-
-    def _validate_extra_vars(self, base_params: AnsibleJobParams, extra_vars: dict[str, Any]) -> None:
-        """Reject extra_vars colliding with a built-in field for these params.
-
-        The reserved set is derived dynamically via
-        AnsibleJobService.reserved_var_keys(base_params) — the same logic
-        AnsibleService uses when actually rendering the vars file — rather
-        than a separately hand-maintained list. A hardcoded list can miss
-        built-in fields such as ``executor_kind`` and defer a collision until
-        asynchronous rendering. ``base_params`` must not have
-        ``provider_extra_vars`` set yet —
-        reserved_var_keys ignores that field regardless, but passing an
-        already-merged params object here would be a caller error.
-        """
-        if not extra_vars:
-            return
-        reserved = self._job_service.reserved_var_keys(base_params)
-        collisions = sorted(reserved.intersection(extra_vars))
+    def _validate_extra_vars(
+        self,
+        params: AnsibleJobParams,
+        extra: dict[str, Any],
+    ) -> None:
+        collisions = sorted(
+            self._job_service.reserved_var_keys(params).intersection(extra)
+        )
         if collisions:
             raise ProviderConfigInvalidError(
-                "provider extra_vars override reserved job variables: " + ", ".join(collisions)
+                "provider extra_vars override reserved job variables: "
+                + ", ".join(collisions)
             )
 
-    def validate_create(self, request: PhysicalSettlementRequest, resource: SettlementResource) -> VmFulfillmentRequirements:
-        self._validate_resource(resource)
-        self._vm_host(resource)
+    @staticmethod
+    def _prepared_parameters(params: AnsibleJobParams) -> AnsiblePreparedJobParameters:
+        return AnsiblePreparedJobParameters.model_validate(dataclasses.asdict(params))
+
+    @staticmethod
+    def _job_params(parameters: AnsiblePreparedJobParameters) -> AnsibleJobParams:
+        return AnsibleJobParams(**parameters.model_dump(mode="python"))
+
+    def prepare_create(
+        self,
+        *,
+        capacity_reservation_id: str,
+        request: VersionedEnvelope[Any],
+        resource: SettlementResource,
+        pool_config: dict[str, Any],
+    ) -> VersionedEnvelope[Any]:
         try:
-            requirements = VmFulfillmentRequirements.model_validate(request.requirements)
+            requirements = VmFulfillmentRequirements.model_validate(request.payload)
         except Exception as exc:
-            raise ProviderConfigInvalidError(f"invalid VM fulfillment requirements: {exc}") from exc
-        return requirements
+            raise ProviderConfigInvalidError(
+                f"invalid VM fulfillment requirements: {exc}"
+            ) from exc
 
-    def _build_create_params(self, request: PhysicalSettlementRequest, resource: SettlementResource) -> tuple[AnsibleJobParams, VmFulfillmentRequirements]:
-        pool_config = self._validate_resource(resource)
-        req = self.validate_create(request, resource)
-        base_params = AnsibleJobParams(
-            vm_host=self._vm_host(resource), vm_action="create", vm_target=req.vm_target,
-            image_setup_type=req.image_setup_type, vm_ram=req.vm_ram, vm_vcpus=req.vm_vcpus,
-            vm_disk_size=req.vm_disk_size, vm_os_variant=req.vm_os_variant, ssh_pubkey=req.ssh_pubkey,
-            gpu_provisioned=req.gpu_provisioned, vm_gpu_count=req.vm_gpu_count,
-            vm_gpu_device=req.vm_gpu_device, vm_gpu_devices=req.vm_gpu_devices,
-            vm_gpu_partition_size=req.vm_gpu_partition_size, escrow_uid=request.capacity_reservation_id,
-            playbook_path=pool_config.playbook_path,
+        config = self._pool_config(pool_config)
+        derived = resolve_requirement_delegate(
+            config.requirement_delegate
+        ).translate(resource.dimensions)
+        connectivity = requirements.connectivity
+        params = AnsibleJobParams(
+            vm_host=self._vm_host(resource),
+            vm_action="create",
+            vm_target=requirements.vm_target,
+            image_setup_type=requirements.image_setup_type,
+            vm_ram=derived.get("vm_ram", config.default_vm_ram),
+            vm_vcpus=derived.get("vm_vcpus", config.default_vm_vcpus),
+            vm_disk_size=derived.get("vm_disk_size", config.default_vm_disk_size),
+            vm_os_variant=requirements.vm_os_variant,
+            ssh_pubkey=requirements.ssh_pubkey,
+            gpu_provisioned=derived.get("gpu_provisioned"),
+            vm_gpu_count=derived.get("vm_gpu_count"),
+            vm_gpu_device=requirements.vm_gpu_device,
+            vm_gpu_devices=requirements.vm_gpu_devices,
+            vm_gpu_partition_size=requirements.vm_gpu_partition_size,
+            frp_server_addr=connectivity.frp_server_addr if connectivity else None,
+            frp_domain=connectivity.frp_domain if connectivity else None,
+            frp_dashboard_password=connectivity.frp_dashboard_password if connectivity else None,
+            escrow_uid=capacity_reservation_id,
+            playbook_path=config.playbook_path,
         )
-        self._validate_extra_vars(base_params, pool_config.extra_vars)
-        params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
-        return params, req
+        self._validate_extra_vars(params, config.extra_vars)
+        params = dataclasses.replace(params, provider_extra_vars=config.extra_vars)
+        operation = AnsiblePreparedOperation(
+            capacity_reservation_id=capacity_reservation_id,
+            action="create",
+            parameters=self._prepared_parameters(params),
+        )
+        return VersionedEnvelope(
+            kind=_CREATE_KIND,
+            schema_version=1,
+            payload=operation.model_dump(mode="json"),
+        )
 
-    async def create(
-        self, request: PhysicalSettlementRequest, resource: SettlementResource
+    async def dispatch_create(
+        self,
+        prepared: VersionedEnvelope[Any],
     ) -> FulfillmentResult:
         try:
-            params, req = self._build_create_params(request, resource)
-            response = await self._job_service.submit(params, self._job_queue_provider())
+            if prepared.kind != _CREATE_KIND or prepared.schema_version != 1:
+                raise ProviderConfigInvalidError(
+                    "unsupported Ansible create envelope"
+                )
+            try:
+                operation = AnsiblePreparedOperation.model_validate(prepared.payload)
+            except Exception as exc:
+                raise ProviderConfigInvalidError(
+                    f"invalid Ansible create envelope: {exc}"
+                ) from exc
+            params = self._job_params(operation.parameters)
+            contract = ExecutorActionEnvelope(
+                capacity_reservation_id=operation.capacity_reservation_id,
+                deal_ref={},
+                executor_kind="vm",
+                action_kind="create",
+                idempotency_key=f"{operation.capacity_reservation_id}:create",
+                parameters=operation.parameters.model_dump(mode="json"),
+            )
+            response = await self._job_service.submit(
+                params,
+                self._job_queue_provider(),
+                contract=contract,
+            )
+            metadata = AnsibleFulfillmentMetadata(
+                create_job_id=response.job_id,
+                current_job_id=response.job_id,
+                vm_host=params.vm_host,
+                vm_target=params.vm_target or "",
+                operation="create",
+            )
+            return FulfillmentResult(metadata.model_dump(mode="json"))
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
             raise FulfillmentCreateFailedError(str(exc)) from exc
-        metadata = AnsibleFulfillmentMetadata(
-            create_job_id=response.job_id, current_job_id=response.job_id,
-            vm_host=params.vm_host, vm_target=req.vm_target, operation="create",
-        )
-        return FulfillmentResult(provider_metadata=metadata.model_dump())
 
-    async def teardown(
-        self, capacity_reservation_id: str, resource: SettlementResource, provider_metadata: dict[str, Any]
+    def prepare_teardown(
+        self,
+        settlement_result: SettlementResult,
+        pool_config: dict[str, Any],
+    ) -> VersionedEnvelope[Any]:
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(
+                settlement_result.provider_metadata
+            )
+        except Exception as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid Ansible fulfillment metadata: {exc}"
+            ) from exc
+
+        config = self._pool_config(pool_config)
+        params = AnsibleJobParams(
+            vm_host=metadata.vm_host,
+            vm_action="vm_remove",
+            vm_target=metadata.vm_target,
+            escrow_uid=settlement_result.capacity_reservation_id,
+            playbook_path=config.playbook_path,
+        )
+        self._validate_extra_vars(params, config.extra_vars)
+        params = dataclasses.replace(params, provider_extra_vars=config.extra_vars)
+        operation = AnsiblePreparedOperation(
+            capacity_reservation_id=settlement_result.capacity_reservation_id,
+            action="teardown",
+            parameters=self._prepared_parameters(params),
+        )
+        return VersionedEnvelope(
+            kind=_TEARDOWN_KIND,
+            schema_version=1,
+            payload=operation.model_dump(mode="json"),
+        )
+
+    async def dispatch_teardown(
+        self,
+        prepared: VersionedEnvelope[Any],
     ) -> FulfillmentResult:
         try:
-            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
-            pool_config = self._validate_resource(resource)
-            base_params = AnsibleJobParams(
-                vm_host=metadata.vm_host, vm_action="vm_remove", vm_target=metadata.vm_target,
-                escrow_uid=capacity_reservation_id, playbook_path=pool_config.playbook_path,
+            if prepared.kind != _TEARDOWN_KIND or prepared.schema_version != 1:
+                raise ProviderConfigInvalidError(
+                    "unsupported Ansible teardown envelope"
+                )
+            try:
+                operation = AnsiblePreparedOperation.model_validate(prepared.payload)
+            except Exception as exc:
+                raise ProviderConfigInvalidError(
+                    f"invalid Ansible teardown envelope: {exc}"
+                ) from exc
+            params = self._job_params(operation.parameters)
+            contract = ExecutorActionEnvelope(
+                capacity_reservation_id=operation.capacity_reservation_id,
+                deal_ref={},
+                executor_kind="vm",
+                action_kind="teardown",
+                idempotency_key=f"{operation.capacity_reservation_id}:teardown",
+                parameters=operation.parameters.model_dump(mode="json"),
             )
-            self._validate_extra_vars(base_params, pool_config.extra_vars)
-            params = dataclasses.replace(base_params, provider_extra_vars=pool_config.extra_vars)
-            response = await self._job_service.submit(params, self._job_queue_provider())
+            response = await self._job_service.submit(
+                params,
+                self._job_queue_provider(),
+                contract=contract,
+            )
+            metadata = AnsibleFulfillmentMetadata(
+                create_job_id="",
+                teardown_job_id=response.job_id,
+                current_job_id=response.job_id,
+                vm_host=params.vm_host,
+                vm_target=params.vm_target or "",
+                operation="teardown",
+            )
+            return FulfillmentResult(metadata.model_dump(mode="json"))
         except ProviderConfigInvalidError:
             raise
         except Exception as exc:
             raise FulfillmentTeardownFailedError(str(exc)) from exc
-        updated = metadata.model_copy(update={
-            "teardown_job_id": response.job_id, "current_job_id": response.job_id, "operation": "teardown"
-        })
-        return FulfillmentResult(provider_metadata=updated.model_dump())
+
+    def resolve_provisioned_resources(
+        self, provider_metadata: dict[str, Any]
+    ) -> tuple[str, ...]:
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+        except Exception as exc:
+            raise ProviderConfigInvalidError(
+                f"invalid Ansible fulfillment metadata: {exc}"
+            ) from exc
+        if not metadata.vm_target.strip():
+            raise ProviderConfigInvalidError(
+                "Ansible fulfillment metadata requires a non-empty vm_target"
+            )
+        return (metadata.vm_target,)
 
     async def get_status(
         self,
@@ -197,26 +296,101 @@ class AnsibleFulfillmentProvider(FulfillmentProvider):
         resource: SettlementResource,
         provider_metadata: dict[str, Any],
     ) -> ProviderStatus:
-        job_id = provider_metadata.get("current_job_id") or provider_metadata.get("job_id")
-        if not job_id:
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+            job_id = metadata.current_job_id
+        except Exception as exc:
             return ProviderStatus(
-                state=ProviderOperationState.unknown,
-                detail="provider_metadata has no job_id",
+                ProviderOperationState.unknown,
+                f"invalid provider metadata: {exc}",
             )
+
         try:
             job = self._job_service.get_job(job_id)
         except LookupError:
-            # Documented, expected 404 signal from AnsibleJobService.get_job —
-            # this is the normal "job is gone" outcome, not a failure.
             return ProviderStatus(
-                state=ProviderOperationState.unknown, detail=f"job {job_id} not found"
+                ProviderOperationState.unknown,
+                f"job {job_id} not found",
             )
-        except Exception as exc:  # noqa: BLE001
-            # Anything else is unexpected and must not be silently folded
-            # into "unknown" — surface it.
+        except Exception as exc:
             raise FulfillmentStatusFailedError(str(exc)) from exc
 
-        state = _JOB_STATUS_TO_OPERATION_STATE.get(
-            job.status, ProviderOperationState.unknown
+        return ProviderStatus(
+            _JOB_STATUS_TO_OPERATION_STATE.get(
+                job.status,
+                ProviderOperationState.unknown,
+            ),
+            job.error,
         )
-        return ProviderStatus(state=state, detail=job.error)
+
+    async def fetch_credentials(
+        self,
+        provider_metadata: dict[str, Any],
+        provisioned_resources: tuple[ProvisionedResourceDescriptor, ...],
+    ) -> VersionedEnvelope[Any]:
+        """Fetch live credentials for the job that created this fulfillment's resource.
+
+        Declared async to satisfy the provider-neutral interface, which must
+        accommodate providers whose credential store is a real network
+        dependency; this adapter's own credential store is the local
+        ``AnsibleJobService`` database, so no ``await`` is needed internally
+        -- the same shape ``get_status`` already has with ``get_job``.
+        """
+
+        try:
+            metadata = AnsibleFulfillmentMetadata.model_validate(provider_metadata)
+            job_id = metadata.current_job_id
+        except Exception as exc:
+            raise CredentialFetchFailedError(
+                f"invalid provider metadata: {exc}"
+            ) from exc
+
+        try:
+            response = self._job_service.get_credentials(job_id)
+        except LookupError as exc:
+            raise CredentialFetchFailedError(f"job {job_id} not found") from exc
+        except Exception as exc:
+            raise CredentialFetchFailedError(str(exc)) from exc
+
+        # Best-effort: the job's parsed result payload carries VM
+        # identity/connection metadata (VmConnectionInfo's fields) beyond
+        # what credentials alone provide. A missing or unreadable result
+        # must not fail an otherwise-successful credential fetch -- every
+        # field on VmConnectionInfo is optional for exactly this reason.
+        result: dict[str, Any] = {}
+        try:
+            job = self._job_service.get_job(job_id)
+            if isinstance(job.result, dict):
+                result = job.result
+        except Exception as exc:
+            logger.warning(
+                "Could not read job %s result for fulfillment metadata: %s",
+                job_id, exc,
+            )
+
+        output_ids = tuple(
+            resource.provisioned_resource_id for resource in provisioned_resources
+        )
+        connection_info = VmConnectionInfo(
+            vm_name=result.get("vm_name"),
+            host=result.get("host"),
+            timestamp=result.get("timestamp"),
+            tenant_user=result.get("tenant_user"),
+            vm_ip_internal=result.get("vm_ip_internal"),
+            ssh_port=result.get("ssh_port"),
+        )
+        return build_vm_fulfillment_result(
+            provisioned_resources,
+            tuple(
+                VmFulfillmentCredential(
+                    role=credential.role,
+                    password=credential.password,
+                    ssh_commands=credential.ssh_commands,
+                    ssh_key_path_host=credential.ssh_key_path_host,
+                    key_type=credential.key_type,
+                    provisioned_resource_ids=output_ids,
+                )
+                for credential in response.credentials
+            ),
+            connection_info=connection_info,
+        )

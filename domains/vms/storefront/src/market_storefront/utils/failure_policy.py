@@ -4,12 +4,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from domains.vms.listings.reconciler import (
+from core_storefront.stage_log import stage_event
+
+from market_storefront.listings.reconciler import (
     closed_available_listing_ids,
     mark_derived_listings_open,
 )
 from market_storefront.utils.config import settings
-from core_storefront.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,9 @@ def _coerce_actions(raw: Any) -> list[str]:
 def configured_failure_actions() -> list[str]:
     cfg = getattr(settings, "fulfillment", None)
     policy = getattr(cfg, "failure_policy", None) if cfg is not None else None
-    return _coerce_actions(getattr(policy, "actions", None) if policy is not None else None)
+    return _coerce_actions(
+        getattr(policy, "actions", None) if policy is not None else None
+    )
 
 
 def _webhook_url() -> str:
@@ -107,7 +110,9 @@ async def _resolve_listing_id(db: Any, ctx: FulfillmentFailureContext) -> str | 
     return None
 
 
-async def _load_thread_for_escrow(db: Any, escrow_uid: str | None) -> dict[str, Any] | None:
+async def _load_thread_for_escrow(
+    db: Any, escrow_uid: str | None
+) -> dict[str, Any] | None:
     if not escrow_uid or not hasattr(db, "load_escrow"):
         return None
     escrow = await db.load_escrow(escrow_uid=escrow_uid)
@@ -147,16 +152,23 @@ async def _refund_from_escrow_proposal(
 
     escrow = await db.load_escrow(escrow_uid=ctx.escrow_uid)
     chain_name = (escrow or {}).get("chain_name") or proposal_raw.get("chain_name")
-    escrow_address = (escrow or {}).get("escrow_address") or proposal_raw.get("escrow_address")
+    escrow_address = (escrow or {}).get("escrow_address") or proposal_raw.get(
+        "escrow_address"
+    )
     if not chain_name or not escrow_address:
-        return {"action": "refund", "status": "failed", "reason": "escrow_chain_unknown"}
+        return {
+            "action": "refund",
+            "status": "failed",
+            "reason": "escrow_chain_unknown",
+        }
 
-    from market_storefront.utils.config import CHAINS
     from market_alkahest.alkahest import (
         get_escrow_codec_for,
         materialize_escrow_terms_from_proposal,
     )
     from market_core.schemas import EscrowProposal
+
+    from market_storefront.utils.config import CHAINS
 
     chain_cfg = CHAINS.get(chain_name)
     if chain_cfg is None:
@@ -169,7 +181,11 @@ async def _refund_from_escrow_proposal(
 
     private_key = str(settings.wallet.private_key or "").strip()
     if not private_key:
-        return {"action": "refund", "status": "skipped", "reason": "wallet_private_key_empty"}
+        return {
+            "action": "refund",
+            "status": "skipped",
+            "reason": "wallet_private_key_empty",
+        }
 
     try:
         proposal = EscrowProposal.model_validate(proposal_raw)
@@ -265,9 +281,12 @@ async def _release_capacity(
     from market_storefront.services.capacity_client import (
         build_capacity_client,
         member_availability_view,
+        remote_site_clients,
     )
 
-    result = FulfillmentFailurePolicyResult(capacity_reservation_id=ctx.capacity_reservation_id)
+    result = FulfillmentFailurePolicyResult(
+        capacity_reservation_id=ctx.capacity_reservation_id
+    )
     if capacity is None:
         capacity = build_capacity_client(lambda: db)
 
@@ -282,12 +301,14 @@ async def _release_capacity(
         result.state = "released"
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
-        reopened = closed_available_listing_ids(
-            db.db_path,
-            member_availability=await member_availability_view(
-                capacity, db.db_path,
-            ),
-        )
+        home_site = next(iter(remote_site_clients(capacity)), None)
+        reopened: list[str] = []
+        if home_site is not None:
+            reopened = closed_available_listing_ids(
+                db.db_path,
+                home_site=home_site,
+                member_availability=await member_availability_view(capacity),
+            )
         for listing_id in reopened:
             await db.update_listing(listing_id=listing_id, status="open")
         mark_derived_listings_open(db.db_path, reopened)
@@ -357,7 +378,9 @@ async def apply_fulfillment_failure_policy(
     actions = configured_failure_actions()
     listing_id = await _resolve_listing_id(db, ctx)
     ctx = FulfillmentFailureContext(**{**ctx.__dict__, "listing_id": listing_id})
-    result = FulfillmentFailurePolicyResult(capacity_reservation_id=ctx.capacity_reservation_id)
+    result = FulfillmentFailurePolicyResult(
+        capacity_reservation_id=ctx.capacity_reservation_id
+    )
 
     for action in actions:
         if action == "release_capacity":
@@ -372,7 +395,9 @@ async def apply_fulfillment_failure_policy(
                 result.actions.append({"action": action, "status": "ok"})
             except Exception as exc:
                 logger.warning("[FULFILLMENT_POLICY] release_capacity failed: %s", exc)
-                result.actions.append({"action": action, "status": "failed", "error": str(exc)})
+                result.actions.append(
+                    {"action": action, "status": "failed", "error": str(exc)}
+                )
         elif action == "emit_event":
             payload = _failure_payload(ctx, result)
             stage_event("fulfillment", "failed", **payload)
@@ -382,6 +407,8 @@ async def apply_fulfillment_failure_policy(
         elif action == "refund":
             result.actions.append(await _refund(db, ctx, listing_id))
         else:
-            result.actions.append({"action": action, "status": "skipped", "reason": "unknown_action"})
+            result.actions.append(
+                {"action": action, "status": "skipped", "reason": "unknown_action"}
+            )
 
     return result
