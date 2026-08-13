@@ -162,11 +162,12 @@ reclaim, missed-webhook, API-restart, or worker-restart scenario:
     authority state and the original operation/idempotency identity where the
     selected recovery scenario requires it.
 
-Each stage consumes exact `DealState` names through `require_state`. Provider
-retrieval follows the relationships and unique metadata created by this run;
-an account's latest object cannot satisfy an assertion. Setup and read-only
-polling may retry within bounds. Financial mutations remain inside production
-code and are never reissued by the harness under a new identity.
+Each operation consumes the prior typed snapshot and returns the next typed
+snapshot. Provider retrieval follows the relationships and unique metadata
+created by this run; an account's latest object cannot satisfy an assertion.
+Setup and read-only polling may retry within bounds. Financial mutations
+remain inside production code and are never reissued by the harness under a
+new identity.
 
 Run from the repository root after installing the Stripe CLI and Chromium:
 
