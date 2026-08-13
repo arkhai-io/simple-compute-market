@@ -61,7 +61,7 @@ temporary identifiers, and timing, none of which the behaviour depends on, and
 all of which will make the regression fail for reasons unrelated to what it
 protects.
 
-### A regression enters the level that owns the behaviour, and is owned there
+### A regression is placed at the level that owns the behaviour it protects
 
 Not a separate level, not a quarantined directory of generated tests.
 
@@ -69,10 +69,17 @@ A generated regression that lives apart from the tests protecting the same
 behaviour is a second place to look and a second thing to keep current, and in
 practice it becomes a directory nobody reads whose failures are assumed stale.
 
-This is the decision with the uncomfortable consequence, recorded in Open
-questions rather than resolved: it means someone maintains a test they did not
-write, generated from a trace they cannot read, protecting behaviour found by a
-tool they do not run.
+**This decides placement and not maintenance.** Which level a regression lands
+in is settled here. Who repairs it when it fails for an unrelated reason is a
+different question with real alternatives, and it stays open — see below. The
+two are easy to conflate because "owned" reads naturally for both, and
+conflating them would settle an architectural question on the strength of a
+word.
+
+The consequence of the placement decision is what makes the maintenance question
+pressing: a generated regression sits among tests written by people who did not
+write it, from a trace they cannot read, protecting behaviour found by a tool
+they do not run.
 
 ### Sanitization is the same boundary as any other crossing
 

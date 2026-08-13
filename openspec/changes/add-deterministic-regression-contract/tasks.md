@@ -67,10 +67,13 @@ design review.
 
 ### 4. Placement
 
-- [ ] 4.1 Establish that a generated regression enters the level owning the
-  behaviour it protects, and is owned by that level thereafter. Do not create a
-  separate level or a quarantined directory: a directory of generated tests
-  becomes one nobody reads, whose failures are assumed stale.
+- [ ] 4.1 Place a generated regression at the level owning the behaviour it
+  protects. Do not create a separate level or a quarantined directory: a
+  directory of generated tests becomes one nobody reads, whose failures are
+  assumed stale.
+- [ ] 4.1a Do not prescribe who maintains it thereafter. Placement is decided;
+  maintenance is an open question with three live options, and settling it in a
+  task would close it without anyone choosing.
 - [ ] 4.2 Record the consequence rather than eliding it — someone maintains a
   test they did not write, from a trace they cannot read, protecting behaviour
   found by a tool they do not run. See `design.md`, "Who owns a generated
@@ -107,6 +110,6 @@ design review.
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| A generated regression enters the level owning the behaviour it protects and is owned there | `docs/development/TESTING.md` | Pending |
+| A generated regression is placed at the level owning the behaviour it protects, and placement does not settle maintenance | `docs/development/TESTING.md` | Pending |
 | A green regression suite is not concurrency or capacity evidence | `docs/development/TESTING.md` | Pending |
 | `A regression declares what it cannot prove`, `A regression is separated from its execution adapter`, `A defect regression demonstrates failure without its fix`, and `A regression derived from agent evidence is sanitized before it is committed` | `openspec/specs/test-compatibility/spec.md` | At archival |

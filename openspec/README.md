@@ -63,6 +63,19 @@ Every non-trivial `proposal.md` should identify permanent documentation impact:
 
 Every implementation-ready `tasks.md` should name the exact promotion work rather than using a generic "update docs" task.
 
+## Open questions and prescribed tasks
+
+An item may not appear under a change's `## Open questions` while a non-decision
+task prescribes it. A design that calls a question open while its task list
+instructs an implementer to answer it one way has not deferred the decision — it
+has made it somewhere a reviewer will not look, and an implementer reading only
+`tasks.md` will reasonably assume authority they were never given.
+
+Either move the item into the design's decisions with its revisit trigger
+stated, or make the task an explicit decision gate. A task that says "decide X
+and record the reasoning" is a gate; a task that says "do X" is not, whether or
+not it cites the open question.
+
 ## Plan closeout requirements
 
 Every `tasks.md` for a change or a major section within one must end with a closeout task before implementation is considered planned, not invented after a review round asks for it. The closeout task has six parts:

@@ -77,11 +77,12 @@ that it is test data.
 - **THEN** it contains no private identifier, because a fixture is committed
   once and read rarely and would otherwise carry one unnoticed
 
-### Requirement: A generated regression enters the level that owns its behaviour
+### Requirement: A generated regression is placed at the level that owns its behaviour
 A generated regression MUST be placed at the verification level that owns the
-behaviour it protects, alongside the tests already covering that behaviour, and
-MUST be owned by that level thereafter. It MUST NOT be placed in a separate
-level or in a directory segregating generated tests.
+behaviour it protects, alongside the tests already covering that behaviour. It
+MUST NOT be placed in a separate level or in a directory segregating generated
+tests. This requirement governs placement; it does not assign responsibility for
+maintaining a generated regression after it lands.
 
 #### Scenario: A regression protects behaviour an existing level covers
 - **WHEN** a regression is generated for behaviour a verification level already
@@ -91,5 +92,5 @@ level or in a directory segregating generated tests.
 
 #### Scenario: A generated regression fails for an unrelated reason
 - **WHEN** an unrelated change causes a generated regression to fail
-- **THEN** the level owning it is responsible for it, and it is not treated as
-  stale on the grounds that a tool generated it
+- **THEN** it is not treated as stale on the grounds that a tool generated it,
+  and it is triaged like any other test at that level
