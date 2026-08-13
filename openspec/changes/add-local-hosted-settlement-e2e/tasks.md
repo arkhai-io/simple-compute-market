@@ -40,8 +40,8 @@
 
 - [x] 6.1 Focused hosted adapter/runtime, storefront, buyer, E2E state, release, Compose, package-boundary, Ruff, and mypy checks passed.
 - [x] 6.2 Built marketplace wheels and the opt-in E2E image from staged wheels; verified immutable release preflight and absence of sibling editable source.
-- [ ] 6.3 Run hermetic collection, reclaim, event, uncertainty, restart, readiness/coexistence, and wallet-free scenarios; run local EAS profile separately and existing Alkahest E2E unchanged.
-- [ ] 6.4 Run available real Stripe test-mode Checkout/Connect/transfer/refund evidence and disclose unavailable credentials, webhook reachability, account readiness, protected workflow, or external service behavior without substituting simulator output.
+- [ ] 6.3 **Superseded — intentionally incomplete.** The hermetic collection/reclaim/event/uncertainty/restart/readiness matrix and simulator-backed local EAS profile did not reach accepted system evidence. Deterministic recovery moves to hosted provider-port tests; local EAS and Alkahest run independently without simulator claims.
+- [x] 6.4 Available real Stripe test-mode evidence exercised Connect Account Link/readiness retrieval, two successful USD Checkout payments, one destination transfer, and one pre-transfer refund against the ordinary production image. Full protected marketplace restart/recovery acceptance moves to `replace-hosted-simulator-with-stripe-test-e2e`.
 - [x] 6.5 Targeted strict validation passed; repository-wide validation reported six unrelated active-change failures. This repository has no root `make check` target, so focused package targets were used.
 
 ## 7. Closeout
@@ -53,7 +53,7 @@ Per `openspec/README.md` plan-closeout requirements.
 - [x] 7.3 Promoted artifact-bound hosted system evidence, deterministic control ownership, and separate real-provider reporting to permanent test-compatibility and testing documentation.
 - [x] 7.4 Promoted immutable local composition, startup gating, secret isolation, and public contributor behavior to permanent deployment and architecture documentation.
 - [x] 7.5 Updated the E2E role runbook with current stages, commands, evidence, reset, and external-limit behavior; `ROADMAP.md` remains unchanged because this work changes delivery evidence, not product intent.
-- [ ] 7.6 Compress completed task notes to final behavior/evidence, record the hosted E2E and production manifest identities used for acceptance, and complete the design-promotion record below before archive.
+- [ ] 7.6 **Superseded — intentionally incomplete.** No accepted hosted E2E simulator manifest/run identity exists and none will be produced. Replacement changes own production-only release identity, permanent documentation, and final synchronization/archive.
 
 ## Design Promotion Record
 

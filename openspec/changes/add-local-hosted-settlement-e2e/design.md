@@ -122,3 +122,10 @@ Rollback removes the opt-in targets/profile and private workflow invocation. It 
 - Optional private local composition, release verification, secret isolation, and public contributor behavior: `openspec/specs/deployment-state/{spec,architecture}.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - Hosted release remains external and no editable/source dependency crosses upward: `docs/development/ARCHITECTURE.md` only if its current package/release boundary needs clarification.
 - Role-level invocation and state fields: `e2e-tests/tests/e2e/roles/README.md` and existing operator/developer command references, describing current behavior rather than the change history.
+
+
+## Supersession disposition
+
+Marketplace checkpoint `c128b902` contains the reusable production-release composition, marketplace lifecycle, protected Stripe driver/evidence, and simulator consumer implementation. Hosted checkpoints `f46ca41` and `d4fd002` contain the producer implementation and documentation. Both worktrees were clean before replacement planning; hosted replacement plan commit `03cf2e2` defines the producer deletion and provider-port recovery boundary.
+
+The hermetic Compose acceptance matrix never completed, so this change records implementation history rather than accepted simulator behavior. `replace-hosted-simulator-with-stripe-test-e2e` owns consumer cutover to one protected Stripe test-mode system lane. Hosted change `replace-e2e-simulator-with-scripted-provider-tests` owns deterministic provider-port coverage, simulator removal, and the production-only release handoff. Existing Alkahest and independent local EAS condition conformance remain outside both financial-provider substitutions.

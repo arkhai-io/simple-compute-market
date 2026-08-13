@@ -147,6 +147,17 @@ Producer removal is owned by a companion hosted-repository change: delete the fi
 
 The consumer must not merge a state that still selects deleted producer artifacts. The producer may release the simplified production-only contract first because existing production behavior is unchanged; the consumer then removes simulator selection and pins that exact release.
 
+
+## Implementation checkpoints
+
+- Marketplace implementation checkpoint: `c128b902` (`test(e2e): add hosted settlement release scenarios`) contains ordinary hosted-release composition, marketplace lifecycle, the protected Stripe driver/evidence, and simulator consumer surfaces; no unrelated uncommitted work remained when this cutover began.
+- Marketplace replacement plan: `81c8e47a` (`spec: replace hosted simulator with Stripe E2E`).
+- Hosted implementation checkpoint: `f46ca41` (`feat(e2e): publish hosted settlement simulator`) contains the fixture/simulator/control/clock implementation and production injection seams.
+- Hosted documentation checkpoint: `d4fd002` (`docs(e2e): define simulator release contract`).
+- Hosted replacement change: `replace-e2e-simulator-with-scripted-provider-tests`, committed as `03cf2e2` (`spec: replace settlement simulator with provider tests`). It owns provider-port recovery migration, producer simulator deletion, permanent hosted documentation, and the exact production-only release handoff required before consumer deletion.
+
+The consumer and producer worktrees were clean at these checkpoints. Completed implementation history remains in the superseded changes; neither superseded change claims the incomplete simulator acceptance matrix.
+
 ## Risks / Trade-offs
 
 - **[Protected E2E is unavailable to forks and offline developers]** → Keep all Arkhai-owned logic covered in credential-free focused/integration suites; publish sanitized protected results against exact commits and release identities.

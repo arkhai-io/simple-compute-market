@@ -1,8 +1,8 @@
 ## 1. Checkpoint and supersession boundary
 
-- [ ] 1.1 Audit the current marketplace and hosted-service worktrees by ownership; split and commit coherent reusable production-release, marketplace lifecycle, Stripe driver/evidence, and simulator implementation sets without mixing unrelated user changes, then record the exact checkpoint commits in this change.
-- [ ] 1.2 Amend `openspec/changes/add-local-hosted-settlement-e2e/{proposal,design,tasks}.md` without rewriting completed history: mark simulator-only tasks 6.3 and applicable closeout claims superseded by this change, preserve reusable completed evidence, disclose that hermetic simulator acceptance was not completed, and record the replacement path.
-- [ ] 1.3 Create and approve the companion hosted-settlement repository change that replaces its private E2E simulator with credential-free scripted-provider integration coverage and removes simulator artifacts; record its change name, acceptance boundary, and required production release handoff here before consumer deletion starts.
+- [x] 1.1 Recorded clean marketplace checkpoints `c128b902` and `81c8e47a`, hosted implementation checkpoints `f46ca41` and `d4fd002`, and hosted replacement-plan commit `03cf2e2` in `design.md`; both worktrees began the cutover clean.
+- [x] 1.2 Amended `add-local-hosted-settlement-e2e/{proposal,design,tasks}.md` without rewriting completed history: hermetic task 6.3 and simulator closeout 7.6 remain explicitly incomplete/superseded, available Stripe evidence is preserved, and replacement ownership is recorded.
+- [x] 1.3 Created and strictly validated hosted companion change `replace-e2e-simulator-with-scripted-provider-tests`; it owns provider-port recovery coverage, producer simulator removal, production-only release verification, permanent hosted documentation, and exact consumer handoff.
 
 ## 2. Hosted producer recovery and release prerequisite
 
