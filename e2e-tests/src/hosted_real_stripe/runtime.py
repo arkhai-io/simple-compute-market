@@ -322,6 +322,8 @@ class ComposeStack:
             "--env-file",
             str(compose_env),
         ]
+        for compose_file in compose_files:
+            self._base.extend(("-f", str(compose_file)))
         self._started = False
         self._runtime_env: dict[str, str] | None = None
 
