@@ -198,6 +198,32 @@ that fails to withdraw from one market stays listed there while the call reports
 success. That is a double-sell path in the claim being tested. Whether
 reconciliation already closes it is the first thing the row should establish.
 
+### Expected outcome cardinality depends on fairness policy, not only on hold posture
+
+A contention row declares exactly one success and typed scarcity for the rest.
+That cardinality is not a property of contention alone. It is what the product's
+scheduling policy decides to do when several demands arrive for one scarce
+resource, and "exactly one wins" is one possible policy rather than a law.
+
+The product's fairness work is design-gated, and its inputs changed: negotiable
+shapes and negotiation-time holds altered what contention means. So the scenario
+contract is declaring an expected cardinality against a policy that has not been
+settled, in the same way it would have been declaring an expected refusal
+against a hold posture that had not been settled.
+
+The hold posture got a declared field because a scenario is unevaluable without
+it. Fairness is different in one respect and the same in another: different
+because a scenario does not currently choose a fairness policy, the deployment
+does; the same because a change to it makes a previously-correct expectation
+wrong without anything in the scenario changing.
+
+**Not resolved here, and not a blocker.** Fairness policy changing what "one
+success and N scarcities" means is a reason to design the two together, not a
+prerequisite to satisfy first. Recorded so that whoever settles the fairness
+policy knows this contract depends on it, and so that a contention row failing
+after a fairness change is recognised as a contract that needs revisiting rather
+than a product defect.
+
 ## Open questions
 
 ### Should the product close the reason vocabulary?

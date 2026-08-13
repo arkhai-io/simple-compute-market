@@ -146,6 +146,16 @@ Rejected: reading the existing rule as already permitting reason 2. It does not,
 and quietly widening a criterion is how a plan loses track of which version of
 itself is in force. The widening is requested and recorded, not assumed.
 
+### A passing run produces receipts and no diagnosis narrative
+
+An actor owes a structured investigation and root-cause handoff. The shape is
+clear for a failure. For a run that succeeded, it is not clear whether the actor
+owes anything beyond its receipts — and requiring narrative for a passing run
+invites plausible narrative, which is the thing least worth recording.
+
+**Decided:** a passing run produces receipts and no diagnosis. Revisit if a
+recurring class of near-miss turns out to need one.
+
 ## Open questions
 
 ### Is the widened real-model rule accepted?
@@ -157,13 +167,3 @@ owns establishing it.
 
 Needs a decision from whoever governs the harness's execution rules, not a code
 reading.
-
-### What is a diagnosis of a passing run?
-
-An actor owes a structured investigation and root-cause handoff. The shape is
-clear for a failure. For a run that succeeded, it is not clear whether the actor
-owes anything beyond its receipts — and requiring narrative for a passing run
-invites plausible narrative, which is the thing least worth recording.
-
-Provisional: a passing run produces receipts and no diagnosis. Revisit if a
-recurring class of near-miss turns out to need one.

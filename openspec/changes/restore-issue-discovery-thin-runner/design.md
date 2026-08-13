@@ -141,10 +141,10 @@ directives, variable expansion, pattern rules, `.PHONY` declarations, and the
 whole prerequisite chain, so a target that exists but depends on one that does
 not is caught. Parsing `^target:` sees none of that.
 
-Rejected: parsing target definitions out of the Makefile. It was the earlier
-proposal here and it was reasoned from the wrong premise — that the environment
-might lack the tools a Makefile references, making invocation flaky. The harness
-is slated to run in a pinned image. Environment completeness is a controlled
+Rejected: parsing target definitions out of the Makefile. The premise for
+parsing is that the environment might lack the tools a Makefile references,
+making invocation flaky. That premise does not hold here: the harness runs in a
+pinned image. Environment completeness is a controlled
 property of that image, not an uncertainty to design around. A phase command
 whose tooling is missing is a defect in the image, and the correct response is
 to add the tool to the image, not to weaken the check so it survives the

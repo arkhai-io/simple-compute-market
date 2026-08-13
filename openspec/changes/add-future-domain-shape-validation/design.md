@@ -106,18 +106,18 @@ The reason to specify this rather than leave it to good practice: a harness that
 fails vaguely against a product change trains its operators to treat harness
 failures as noise, and after that it stops being a signal at all.
 
-## Open questions
-
-### Does the onboarding proof need a second fake domain?
+### The onboarding proof reuses the one fake adapter
 
 The feature-onboarding proof runs the intake workflow against an arbitrary
 fixture. One fake adapter demonstrates that adding a domain needs no core edit.
 Whether the *workflow* is genuinely repeatable is a slightly different claim, and
 it is better evidenced by doing it twice.
 
-Provisional: one fake adapter, and the onboarding proof reuses it rather than
+**Decided:** one fake adapter, and the onboarding proof reuses it rather than
 introducing a second. Revisit if the first onboarding turns out to have required
 an undocumented step, which is the thing a second run would reveal.
+
+## Open questions
 
 ### Where do domain oracles live when the domain has no adapter?
 

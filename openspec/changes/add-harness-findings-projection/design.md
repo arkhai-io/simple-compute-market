@@ -139,25 +139,23 @@ because a promise not to mutate is exactly the control that failed before: the
 archival branch's boundary was a design intent, and a wrapper script satisfied
 every test while violating it.
 
-## Open questions
-
-### What is the series identity of a re-run after a product change?
+### Series identity includes the product revision
 
 A series is immutable once established, so a later run extends it. But a run
 against a different product revision is arguably not the same series, and
 treating it as one produces a trend line across a discontinuity.
 
-Provisional: the product revision is part of series identity, so a revision
+**Decided:** the product revision is part of series identity, so a revision
 change starts a new series and comparison across them is explicit rather than
 implied. Revisit if it fragments series faster than they accumulate meaning.
 
-### Should a suppressed expected refusal be counted?
+### Suppressed expected refusals are counted in the result
 
 Suppression keeps it out of candidates. Whether the projection should still
 report "three expected refusals occurred" is a separate question — it is
 evidence the scenario did what it declared, and its absence would be
 suspicious.
 
-Provisional: counted in the result, absent from candidates. A scenario that
+**Decided:** counted in the result, absent from candidates. A scenario that
 declared three refusals and produced none has a finding, and that finding is
 only visible if the count is reported.
