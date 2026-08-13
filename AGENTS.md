@@ -106,3 +106,78 @@ Return only updated files. Represent a file requiring deletion by replacing its 
 ```python
 # TOMBSTONE: delete this file — replaced by domains/apicredits/settlement/credits_client.py
 ```
+
+## Public repository discipline
+
+This repository is public. Everything in it — code, comments, documentation,
+specifications, change documents, fixtures, test data, commit messages, and pull
+request descriptions — is world-readable, permanently, including after a later
+edit removes it.
+
+Some work here is paired with work in separate private repositories. That
+pairing never appears here.
+
+### Never enters this repository
+
+- Private repository names, branch names, or commit SHAs.
+- Cloud project, account, cluster, namespace, or host identifiers.
+- Internal endpoints, private URLs, or non-public service addresses.
+- Wallet addresses, keys, or credentials of any kind, including expired ones and
+  including ones believed to be test-only on a private network.
+- Filesystem paths from a private repository or a private working environment.
+- Raw logs, evidence bundles, or run artifacts produced by private tooling.
+- The names or contents of private planning documents.
+
+A change document, a `design.md` rationale, and a task note are as public as
+production code. "It is only in the change directory" is not an exception.
+
+### Test fixtures and local development configuration
+
+Local development configuration in this repository is public by design and must
+stay obviously so. Where a fixture needs an address, a key, or a host, use a
+well-known deterministic development value and say in a comment that it is one
+and must never be used on a public network.
+
+A value that looks plausible and is not obviously a fixture is worse than no
+comment, because a later reader cannot tell whether removing it is safe.
+
+### Referring to work that is not here
+
+When a change here exists because of work elsewhere, describe the requirement in
+terms of this repository's own behaviour, not in terms of the external
+consumer's identity.
+
+Prefer:
+
+```
+Exposes a stable invocation target so an external test harness can run the
+suite without reproducing the internal command sequence.
+```
+
+Avoid:
+
+```
+Needed by the harness runner in <private repo>, see <private plan document>.
+```
+
+The first is a durable statement about this repository's interface. The second
+is a leak, and it also rots the moment the external caller is renamed.
+
+### Cross-references must resolve
+
+Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by
+a permanent document must exist on the branch that cites it.
+
+A permanent document describing behaviour this branch does not implement is not
+a harmless forward reference — it is how work from another branch or another
+plan epoch gets treated as inherited without anyone deciding to inherit it. This
+has happened in this repository: a closeout commit promoted a documentation
+section describing a subsystem that has never existed on `dev`, citing a
+specification requirement that has never existed on `dev`.
+
+Note the shape of that failure, because the usual controls do not catch it. The
+commit was inside its author's permitted paths and violated no scope rule; the
+content came from a plan epoch the author had no authority over. Path
+permissions cannot detect that. A cross-reference check can, in one pass — so
+run one before promoting documentation, and treat an unresolvable citation as a
+blocking defect rather than a stale link to fix later.

@@ -24,6 +24,12 @@ Earlier buyer/registry/storefront projects now consume internal wheels correctly
   paths into `uv.lock` on every regeneration. Re-verify this table at implementation
   time rather than trusting it; it moved once already.
 - Add or repair local init/reinit targets so changed internal wheels are built into `.dist` and explicitly upgraded/reinstalled.
+
+  **Inventoried 2026-08-13.** 16 of 33 projects with a `pyproject.toml` have no `reinit`
+  target, and the absence follows no convention — `kit/config` and `kit/fulfillment`
+  define one while their six `kit/*` siblings do not. Task 2.5 carries the list and the
+  per-project decision; the count is larger than this bullet previously implied, and some
+  absences are correct.
 - Regenerate only affected locks against built wheels and preserve unrelated external index sources such as PyTorch CPU selection.
 - Add a repository check rejecting parent-directory internal `tool.uv.sources` entries in consumable projects.
 - Correct release documentation to match wheel-only internal dependency policy.

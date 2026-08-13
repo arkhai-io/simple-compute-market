@@ -178,6 +178,25 @@ remove-relative-uv-sources ──► finish-buyer-cli-residue ──► type-cor
 | [`refactor-e2e-fulfillment-lifecycle`](refactor-e2e-fulfillment-lifecycle/) | active; archival audited 2026-08-13 and blocked — task 3.3 names a test file absent from the repository, and two Section 3 decisions are unclassified | Scenarios assert on fulfillment identity rather than provisioning job identity. Its three open tasks are all blocked on a live docker-compose run, unavailable since 2026-07-29 |
 | [`extract-e2e-project`](extract-e2e-project/) | deferred | Activate only for a named external consumer, compatibility profile, and release owner |
 
+## Lesser goal — Agent-driven issue-discovery harness
+
+**What it adds up to.** `tools/issue-discovery` runs build and environment phases and turns failures into deduplicated issue candidates. It has no actor in it, its phase configuration names three directories that no longer exist, and no Make target invokes it. These changes repair it, declare a finite set of capacity scenarios it can validate without executing, establish who is allowed to perform which action, make a recorded run project into one deterministic result, and prove that supporting a second domain costs an adapter rather than a core edit. Not a roadmap goal — the harness is a tool and changes nothing the market can do. Its jurisdiction is documented in [`docs/development/TESTING.md`](../../docs/development/TESTING.md), which places it outside the four test levels rather than beside them.
+
+```text
+restore-issue-discovery-thin-runner ──► add-harness-scenario-contract ──┬──► add-harness-findings-projection
+                                                                        └──► add-harness-buyer-action-slice ──► add-future-domain-shape-validation
+```
+
+| Order | Change | Status | Acceptance boundary |
+|---|---|---|---|
+| 1 | [`restore-issue-discovery-thin-runner`](restore-issue-discovery-thin-runner/) | active | The inherited runner resolves against the current tree, drift fails at load rather than at runtime, and Make targets exist to invoke it. Removes the `TESTING.md` section describing a subsystem that has never existed on `dev`. Carries one open design question: the successor of the removed `service` workdir |
+| 2 | [`add-harness-scenario-contract`](add-harness-scenario-contract/) | active | A finite set of capacity scenarios is declared and validated, executing nothing. Scenarios declare the hold posture they assume, name a refusal match mode rather than an exact string, and require per-buyer discovery evidence. Contention is declared over markets, not seller processes |
+| 3a | [`add-harness-findings-projection`](add-harness-findings-projection/) | active | A recorded event corpus projects to one deterministic result. Offered demand, served capacity, and load-generator limit stay distinct and are never derived from one another. The existing issue engine gains update and reopen and no other mutation |
+| 3b | [`add-harness-buyer-action-slice`](add-harness-buyer-action-slice/) | active | Documented buyer actions are performed by the actor through the entry points the quickstart names; the controller has no code path that performs one. Requests are frozen before release, observation is independent of the observed, and live adapters fail closed on configuration |
+| 4 | [`add-future-domain-shape-validation`](add-future-domain-shape-validation/) | active | An adapter the runtime has never seen round-trips an opaque payload with no core edit. Prepared domains validate and dry-plan with zero effect on attempted execution. A testing seam, not a plugin platform |
+
+Two dependencies point outside this campaign. Nothing the harness exercises can complete a buyer journey until [`compose-domain-wheels-and-policies`](compose-domain-wheels-and-policies/) closes, and no scenario can assert that the GPU reserved is the GPU received until [`fix-vm-fulfillment-capacity-boundary`](fix-vm-fulfillment-capacity-boundary/) does. The `reinit` coverage gap the harness surfaced is owned by [`remove-relative-uv-sources`](remove-relative-uv-sources/) task 2.5, not by this campaign.
+
 ## Independent active changes
 
 Changes with no campaign; each stands alone.
