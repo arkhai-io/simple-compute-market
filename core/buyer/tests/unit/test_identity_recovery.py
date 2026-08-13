@@ -4,14 +4,18 @@ import json
 from pathlib import Path
 
 import pytest
-
 from core_buyer.buyer_config import (
     IdentityConfig,
     resolve_buyer_signer,
     resolve_identity_config,
     resolve_identity_credential,
 )
-from core_buyer.deal_helpers import load_deal_context, load_negotiation_resume_point
+from core_buyer.deal_helpers import (
+    accepted_settlement_mechanism,
+    load_deal_context,
+    load_negotiation_resume_point,
+    settlement_acceptance_fields,
+)
 from core_buyer.run_log import (
     RUN_LOG_VERSION,
     RunLog,
@@ -19,7 +23,7 @@ from core_buyer.run_log import (
     read_run,
     runs_dir,
 )
-from market_identity import Ed25519Signer, REQUEST_PROTOCOL, TrustedIdentitySet
+from market_identity import REQUEST_PROTOCOL, Ed25519Signer, TrustedIdentitySet
 
 
 def _state_dir(monkeypatch, tmp_path: Path) -> Path:
@@ -85,6 +89,27 @@ def test_hosted_recovery_preserves_settlement_reference(monkeypatch, tmp_path) -
         listing_id="listing-2",
         publisher_principals=_trust(publisher).model_dump(mode="json"),
     )
+    acceptance = settlement_acceptance_fields(
+        negotiation_id="neg-2",
+        selection={
+            "mechanism": "fiat.stripe.v1",
+            "option_id": "a" * 64,
+            "expiration_unix": 2_000_000_000,
+        },
+        plan={
+            "obligations": [
+                {
+                    "payer": "buyer",
+                    "claimant": "seller",
+                    "amount": "20",
+                    "asset": "usd",
+                    "expiration_unix": 2_000_000_000,
+                    "mechanism": "fiat.stripe.v1",
+                    "params": {"condition_profile": "vm"},
+                }
+            ]
+        },
+    )
     log.event(
         "negotiation_completed",
         status="agreed",
@@ -96,6 +121,7 @@ def test_hosted_recovery_preserves_settlement_reference(monkeypatch, tmp_path) -
         negotiation_id="neg-2",
         agreed_amount=20,
         publisher_principals=_trust(publisher).model_dump(mode="json"),
+        **acceptance,
     )
     log.event(
         "settlement_started",
@@ -111,6 +137,10 @@ def test_hosted_recovery_preserves_settlement_reference(monkeypatch, tmp_path) -
     assert context.publisher_principals == _trust(publisher)
     assert context.settlement_ref == "settlement-2"
     assert context.escrow_uid is None
+    assert accepted_settlement_mechanism(context) == "fiat.stripe.v1"
+    assert context.settlement_operation_identities == tuple(
+        acceptance["settlement_operation_identities"]
+    )
 
 
 def test_resume_refreshes_and_persists_retired_publisher_set(
@@ -176,6 +206,25 @@ def test_signer_secret_fields_are_never_serialized(monkeypatch, tmp_path) -> Non
     config_repr = repr(IdentityConfig(principal=signer.identity))
     assert "private" not in config_repr.lower()
     assert "credential" not in config_repr.lower()
+
+
+def test_run_log_rejects_resolved_settlement_config_snapshots(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _state_dir(monkeypatch, tmp_path)
+    signer = Ed25519Signer(b"\x15" * 32)
+
+    with pytest.raises(RunLogError, match="signer secret field"):
+        RunLog.start(
+            principal=signer.identity,
+            settlement_config={
+                "priority": ["fiat.stripe.v1"],
+                "stripe": {"provider_secret": "must-not-be-written"},
+            },
+        )
+
+    assert not list(runs_dir().glob("*.jsonl"))
 
 
 def test_legacy_eip191_address_migrates_atomically(monkeypatch, tmp_path) -> None:

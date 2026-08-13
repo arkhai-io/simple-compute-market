@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tarfile
+import zipfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +30,22 @@ _IDENTITY_CONTRACT = {
     "client_signer_api": "hosted_settlement_client.Signer",
     "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
 }
+
+
+def _hosted_client_wheel(*, entry_points: str | None = None) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w") as archive:
+        archive.writestr("hosted_settlement_client/__init__.py", "")
+        archive.writestr(
+            "arkhai_hosted_settlement_client-0.1.0.dist-info/METADATA",
+            "Name: arkhai-hosted-settlement-client\nVersion: 0.1.0\n",
+        )
+        if entry_points is not None:
+            archive.writestr(
+                "arkhai_hosted_settlement_client-0.1.0.dist-info/entry_points.txt",
+                entry_points,
+            )
+    return buffer.getvalue()
 
 
 def _fake_uv(bin_dir: Path) -> None:
@@ -56,7 +74,12 @@ raise SystemExit(f"unsupported fake uv invocation: {args}")
     executable.chmod(0o755)
 
 
-def _stage_root(tmp_path: Path, *, lock_extra: str = "") -> tuple[Path, dict[str, str]]:
+def _stage_root(
+    tmp_path: Path,
+    *,
+    lock_extra: str = "",
+    hosted_entry_points: str | None = None,
+) -> tuple[Path, dict[str, str]]:
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True)
     (root / "manifests").mkdir()
@@ -67,8 +90,9 @@ def _stage_root(tmp_path: Path, *, lock_extra: str = "") -> tuple[Path, dict[str
     (root / ".dist" / "arkhai_kit_identity-0.2.0-py3-none-any.whl").write_bytes(
         b"identity-0.2.0"
     )
+    hosted_client_wheel = _hosted_client_wheel(entry_points=hosted_entry_points)
     (root / ".dist" / "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl").write_bytes(
-        b"hosted-client-0.1.0"
+        hosted_client_wheel
     )
     manifest = {"payload": {"identity_contract": _IDENTITY_CONTRACT}}
     (root / ".dist" / "release-manifest.json").write_text(
@@ -153,6 +177,21 @@ def test_wheelhouse_rejects_incomplete_hosted_identity_contract(
 
     assert result.returncode != 0
     assert "exact identity contract" in result.stderr
+
+
+def test_wheelhouse_rejects_hosted_seller_entry_point(tmp_path: Path) -> None:
+    root, env = _stage_root(
+        tmp_path,
+        hosted_entry_points=(
+            "[console_scripts]\n"
+            "hosted-settlement-seller = hosted_settlement_client.seller:main\n"
+        ),
+    )
+
+    result = _run(root, env)
+
+    assert result.returncode != 0
+    assert "must not contain seller entry-point metadata" in result.stderr
 
 
 def test_wheelhouse_rejects_portable_lock_source_leakage(tmp_path: Path) -> None:
@@ -245,11 +284,13 @@ def test_wheelhouse_packages_external_release_inputs_and_portable_lock(
         assert member is not None
         pins = json.load(member)
     assert pins["schema_version"] == 1
+    assert pins["settlement_config_schema_version"] == 1
     assert pins["identity_wheel"] == {
         "filename": "arkhai_kit_identity-0.2.0-py3-none-any.whl",
         "sha256": hashlib.sha256(b"identity-0.2.0").hexdigest(),
     }
     assert pins["hosted_client_wheel"] == {
         "filename": "arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl",
-        "sha256": hashlib.sha256(b"hosted-client-0.1.0").hexdigest(),
+        "sha256": hashlib.sha256(_hosted_client_wheel()).hexdigest(),
+        "entry_point_metadata": False,
     }

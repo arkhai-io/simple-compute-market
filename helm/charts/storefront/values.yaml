@@ -19,6 +19,7 @@ image:
   tag: storefront
   # Production/release profiles pin sha256:<digest>; local development may use tag.
   digest: ""
+  settlementConfigSchemaVersion: 1
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
@@ -86,9 +87,8 @@ agents:
       registryAuthToken: ""
       # Hosted requests use the marketplace signer supplied by
       # identity.credentialSecret; no second credential is accepted here.
-    # config.* lands in the rendered storefront.toml. Keys map 1:1 to the
-    # storefront schema in market_storefront.utils.config (which reads top-level
-    # keys + [provisioning] / [negotiation] / [pricing] sections — no [seller] prefix).
+    # config.* lands in the public storefront.toml ConfigMap. Private identity
+    # and wallet credentials are accepted only through Secret references.
     config:
       registryAuthority:
         principals:
@@ -96,21 +96,9 @@ agents:
             identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
       seller:
         agentId: bob
-        # base_url, provisioning.serviceUrl: composed by the chart from
-        # the agent's Service DNS / global.provisioning.* — explicit
-        # overrides go here only when the cluster topology demands
-        # something different.
-        # dbPath: location of the SQLite agent.db. Defaults to the
-        # per-agent PVC mount at /var/lib/arkhai/agent.db (see persistence
-        # block below). Override only when pointing the agent at an
-        # external volume or for local-only setups.
         dbPath: "/var/lib/arkhai/agent.db"
         logFilePath: "./logs/bob.log"
-        # Path to the bundled compute resource inventory CSV. The file is
-        # included in the container image at this path. Set to "" to disable
-        # auto-seeding (resources must be imported manually or via a ConfigMap).
         resourcesCsvPath: "/app/src/market_storefront/data/kvm1-machine.csv"
-        sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
         enableEventQueue: false
         provisioning:
           mode: "mock"
@@ -119,49 +107,18 @@ agents:
               - scheme: eip191
                 identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
         negotiation:
-          # Ordered list of policies. Terminal policy is "bisection" (no
-          # ML deps) or "rl" (torch + checkpoint). The legacy `policyMode`
-          # key still works (rendered as `policy_mode = "<value>"`) and the
-          # storefront synthesizes the default chain from it.
           policies:
             - "has_matching_inventory_guard"
             - "escrow_shape_guard"
             - "bisection"
-        # Runtime credentials the agent reads. Empty = absent in TOML.
         integrations:
           geminiApiKey: ""
-      # Omit this block entirely for hosted-only, non-EVM deployments.
-      chain:
-        name: "anvil"
-      hostedSettlement:
-        enabled: false
-        baseUrl: ""
-        authorityId: ""
-        environment: ""
-        expectedManifestDigest: ""
-        contractVersion: "0.1.0"
-        expectedSchemaVersion: 4
-        requestTimeoutSeconds: 10
-        preflightTimeoutSeconds: 5
-        allowInsecureLoopback: false
-        requiredCapabilities:
-          - "conditional-escrow.v1"
-          - "stripe-connect-separate-charges-transfers.v1"
-          - "portable-attestation.v1"
-          - "eas-arbiter.v1"
-          - "scheme-tagged-identities.v1"
-          - "account-owner-admission.v1"
-          - "account-owner-rotation.v1"
-          - "account-owner-retirement.v1"
-          - "signer-injected-client.v1"
-          - "provider-neutral-seller-onboarding.v1"
-        # Resolver IDs are operator-owned keys; no RPC URL or signing key
-        # belongs in this marketplace chart.
-        resolvers: {}
-        # example:
-        #   eas-main:
-        #     chainName: "ethereum_sepolia"
-        #     evidenceMode: "eas.v1"
+      settlement:
+        schema_version: 1
+        priority: []
+      # Optional public EVM resources. Keep both mappings empty for fiat-only.
+      wallet: {}
+      chains: {}
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.

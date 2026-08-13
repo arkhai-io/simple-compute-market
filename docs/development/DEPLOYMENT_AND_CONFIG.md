@@ -156,42 +156,110 @@ against migrated state, operators recover by rolling forward from current
 identity history and operation journals rather than restoring stale state.
 
 
-## Hosted settlement consumer configuration
+## Settlement consumer configuration and cutover
 
-Hosted fiat settlement is disabled by default. Enabling
-`[hosted_settlement]` requires an HTTPS service URL (loopback HTTP is
-development-only), authority/environment identity, exact manifest digest and
-contract version, required identity capabilities, a public storefront
-principal with its Secret-backed signer credential, and operator-owned
-resolver IDs. Resolver entries may select a configured marketplace chain and
-evidence mode; negotiated data never supplies an RPC URL, service URL, or
-signing key.
+Marketplace roles resolve one strict `[Settlement]` root. `schema_version`
+selects the configuration contract, `priority` orders mechanism IDs, and peer
+`[Settlement.stripe]` and `[Settlement.alkahest]` tables contain only
+mechanism-owned consumer settings. Marketplace identity remains in
+`[Identity]`; EVM credentials and networks remain in `[Wallet]` and
+`[Chains]`. A hosted-only buyer therefore needs no wallet, chain, RPC, balance,
+or gas configuration. Secret or environment input supplies signing material;
+generated TOML, ConfigMaps, status output, and run logs contain only public
+configuration projections.
 
-The marketplace Helm chart renders only these storefront consumer settings.
-It does not deploy the hosted API/worker, migrations, database, ingress, EAS
-signer, Stripe credentials, or provider state. Those belong to the hosted
-service's independent release and chart. The marketplace package and
-storefront consume the exact hosted client wheel and identity interface bound
-by that release manifest; editable sibling sources, copied hosted signing
-logic, and compatible-major substitution are rejected. Enabled storefront
-startup verifies the exact health manifest, API version, principal scheme, and
-identity capabilities before accepting traffic or publishing a fiat option.
+Role CLIs reject legacy settlement keys and expose the same explicit migration
+contract. A check is read-only and reports paths and actions with values
+redacted. A write requires `--backup`, validates the complete candidate before
+mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically
+replaces the source. Conflicting old and new values fail rather than choosing
+one. Repeating a completed migration is a no-op.
 
-Local cross-repository Compose uses one verified supply-chain path. After the
-signed hosted release is staged, `make prepare-hosted-compose` verifies the
-configured trust policy, signed manifest, manifest-bound artifacts, and exact
-client wheel, then atomically generates
-`.dist/hosted-settlement-compose.env`. That file supplies the immutable
-`HOSTED_SETTLEMENT_VERIFIED_IMAGE=<trusted-repository>@sha256:<digest>` and
-verified manifest digest; it is generated input, not an operator selector.
+For each buyer and storefront configuration overlay, use this production
+sequence:
 
-`make hosted-compose-up` depends on that preparation step and gives the
-generated env file to `compose.vms-fiat.yml`. Arbitrary or mismatched
-`HOSTED_SETTLEMENT_VERIFIED_IMAGE` values and legacy split image-reference or
-digest environment overrides fail during preparation, before Compose starts.
-The stack runs the service-owned migration, API, and single reconciliation
-worker from the exact trusted image against one shared volume; it never builds
-or imports the sibling service source.
+1. Stage the release containing the migration commands and the exact signed
+   hosted client and manifest artifacts, without activating the new workload.
+2. Preview every mounted or generated file. Select a storefront file with the
+   root `--config` option; select a buyer overlay through its normal
+   `XDG_CONFIG_HOME` mount.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --check
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --check
+   ```
+
+3. Resolve every reported conflict and legacy environment-name rename. Then
+   create backups and migrate every overlay atomically.
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope settlement --write --backup
+   XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
+     --scope settlement --write --backup
+   ```
+
+4. Repeat `--check` for every file and render the Helm or Compose deployment.
+   Do not proceed if a migration, typed configuration validation, generated
+   schema check, hosted manifest check, or image/config schema check fails.
+5. Quiesce publication, negotiation, settlement, and recovery automation.
+   Deploy the coordinated marketplace configuration, wheels, image, Secret,
+   and ConfigMap set. Keep automation quiesced while every storefront reports
+   at least one ready mechanism:
+
+   ```console
+   market-storefront --config /path/storefront.toml settlement status --json
+   ```
+
+6. Resume automation only after the configured ready mechanisms and blocker
+   set match the intended overlay. Before activation or new settlement effects,
+   rollback restores each same-directory `.bak` and the previous pinned
+   artifacts together. After effects resume, recover forward from accepted
+   settlement plans and operation identities; never change mechanism priority
+   to redirect an accepted deal.
+
+The marketplace Helm chart renders only consumer settings. It does not deploy
+the hosted API, worker, hosted migrations, database, ingress, EAS signer,
+Stripe credentials, or provider state. Those belong to the hosted service's
+independent release and chart. Marketplace packages consume the exact hosted
+client wheel and identity interface bound by that signed release manifest;
+editable sibling sources and compatible-major substitution are rejected.
+
+Local cross-repository Compose uses the same verified supply-chain path.
+`make prepare-hosted-compose` verifies the configured trust policy, signed
+manifest, manifest-bound artifacts, and exact client wheel, then atomically
+generates `.dist/hosted-settlement-compose.env` with an immutable
+`HOSTED_SETTLEMENT_VERIFIED_IMAGE=<repository>@sha256:<digest>`.
+`make hosted-compose-up` passes that file to `compose.vms-fiat.yml`. The stack
+runs the hosted service-owned migration, API, and single reconciliation worker
+against one shared volume; it never builds or imports sibling service source.
+
+### Optional hosted local profiles
+
+Hosted local execution remains artifact-based. `make hosted-preflight`
+verifies the signed production manifest and exact client wheel.
+`make hosted-hermetic-preflight` additionally verifies the signed private E2E
+manifest, production compatibility, exact service and fixture wheels, image
+digests, schemas, protocols, and capabilities. Both atomically generate only
+non-secret Compose coordinates; they do not build or mount sibling source.
+
+`make hosted-hermetic` starts a clean digest-pinned authority/simulator
+assembly, admits the configured fixture account, runs the wallet-free
+marketplace lifecycle, and removes the authority, simulator, and controlled
+clock volumes on exit. The restart target retains those named volumes so
+recovery tests can resume the same operation identities. Simulator control and
+provider surfaces remain on isolated internal networks. Marketplace
+storefront/buyer profiles receive only public principals, release pins,
+resolver identifiers, and their own signer credentials.
+
+`make hosted-local-eas` adds local chain infrastructure only for
+condition-boundary conformance. `make hosted-real-stripe` instead uses the
+ordinary production-like authority image and separately injected Stripe,
+webhook, account, and operator secrets. These profiles produce distinct
+evidence and never fall back to one another. Public and fork workflows run
+without private artifact, simulator-control, or provider credentials.
 
 ## Current limits
 

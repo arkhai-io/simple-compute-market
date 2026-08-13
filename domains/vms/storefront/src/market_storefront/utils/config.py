@@ -74,10 +74,33 @@ def _coerce_chains_table(raw: Any) -> dict[str, dict[str, Any]]:
         if not isinstance(name, str):
             continue
         if hasattr(sub, "items"):
-            out[name] = {k: v for k, v in sub.items()}
+            out[name] = dict(sub.items())
         elif isinstance(sub, dict):
             out[name] = sub
     return out
+
+
+def _plain_config_value(value: Any) -> Any:
+    """Recursively detach Dynaconf containers from typed configuration input."""
+    if hasattr(value, "items"):
+        return {
+            str(key).lower(): _plain_config_value(item) for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_plain_config_value(item) for item in value]
+    return value
+
+
+def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
+    """Return the one canonical settlement table for registry resolution."""
+    active = source or settings
+    raw = active.get("settlement")
+    if raw is None:
+        return {}
+    value = _plain_config_value(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Settlement must be a table")
+    return value
 
 
 def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
@@ -102,7 +125,7 @@ def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
         coerced: dict[str, Any] = {}
         for k, v in sub.items():
             if hasattr(v, "items") and not isinstance(v, dict):
-                coerced[k] = {sk: sv for sk, sv in v.items()}
+                coerced[k] = dict(v.items())
             else:
                 coerced[k] = v
         out[name] = coerced
@@ -112,17 +135,38 @@ def _coerce_templates_table(raw: Any) -> dict[str, dict[str, Any]]:
 def _build_escrow_templates(
     s: Dynaconf, chains: dict[str, ChainConfig]
 ) -> dict[str, EscrowTemplate]:
-    """Build the typed ESCROW_TEMPLATES dict from merged dynaconf settings."""
+    """Build the typed templates with the installed Alkahest address resolver."""
     raw = s.get("escrow_templates")
+    settlement = _plain_config_value(s.get("settlement") or {})
+    alkahest = settlement.get("alkahest", {}) if isinstance(settlement, dict) else {}
+    address_config_path = (
+        alkahest.get("address_config_path") if isinstance(alkahest, dict) else None
+    )
+
+    def resolve_address(key: str, chain: ChainConfig) -> str:
+        from market_alkahest import alkahest as alkahest_module
+
+        resolver = getattr(alkahest_module, f"get_{key}", None)
+        if not callable(resolver):
+            raise ValueError(f"unknown Alkahest address key {key!r}")
+        return str(
+            resolver(
+                chain.name,
+                config_path=address_config_path,
+            )
+        )
+
     return escrow_templates_from_config(
         {"escrow_templates": _coerce_templates_table(raw)},
         chains=chains,
+        address_resolver=resolve_address,
     )
 
 
 settings: Dynaconf = _build_settings()
 CHAINS: dict[str, ChainConfig] = _build_chains(settings)
 ESCROW_TEMPLATES: dict[str, EscrowTemplate] = _build_escrow_templates(settings, CHAINS)
+
 
 def get_evm_wallet_address(source: Dynaconf | None = None) -> str:
     """Return the explicitly configured EVM mechanism address, if any."""
@@ -148,7 +192,10 @@ def _trusted_identity_set(raw: Any, *, field: str) -> TrustedIdentitySet:
         identities = tuple(Identity.model_validate(value) for value in raw)
         return TrustedIdentitySet(identities=identities)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field}.principals must contain 1-2 unique identities") from exc
+        raise ValueError(
+            f"{field}.principals must contain 1-2 unique identities"
+        ) from exc
+
 
 def get_administrator_configs(
     source: Dynaconf | None = None,
@@ -168,6 +215,7 @@ def get_administrator_configs(
             field=f"identity.administrators.{subject}",
         )
     return administrators
+
 
 def get_registry_authorities(
     source: Dynaconf | None = None,
@@ -257,7 +305,9 @@ def get_identity_config(source: Dynaconf | None = None) -> IdentityConfig:
     try:
         principal = Identity.model_validate(principal_raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError("identity.principal is required and must be canonical") from exc
+        raise ValueError(
+            "identity.principal is required and must be canonical"
+        ) from exc
     return IdentityConfig(
         scheme=IdentityScheme(principal.scheme),
         identifier=principal.identifier,
@@ -271,11 +321,12 @@ def resolve_marketplace_signer(
 ) -> Signer:
     """Build the configured signer from the dedicated Secret boundary."""
 
-    secret = os.environ.get(IDENTITY_CREDENTIAL_ENV) if credential is None else credential
+    secret = (
+        os.environ.get(IDENTITY_CREDENTIAL_ENV) if credential is None else credential
+    )
     if secret is None or secret == "" or secret == b"":
         raise ValueError(f"{IDENTITY_CREDENTIAL_ENV} is required")
     return resolve_storefront_signer(get_identity_config(source), secret)
-
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +341,7 @@ def _validate_agent_id(raw: Any) -> str:
             f"'{DEFAULT_AGENT_ID}'. Set agent_id to a valid identifier "
             f"(letters, digits, underscores only).",
             UserWarning,
+            stacklevel=2,
         )
         return DEFAULT_AGENT_ID
     s = str(raw)

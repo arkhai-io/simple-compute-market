@@ -395,6 +395,7 @@ async def fulfill_compute_obligation(
     seller_order_id: str | None = None,
     negotiation_id: str | None = None,
     site_id: str | None = None,
+    settlement_mechanism: str = "alkahest.v1",
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
 
@@ -432,6 +433,7 @@ async def fulfill_compute_obligation(
         start_utc=start_utc,
         listing_id=listing_id,
         seller_order_id=seller_order_id,
+        settlement_mechanism=settlement_mechanism,
         chain_configs=CHAINS,
         base_url=BASE_URL_OVERRIDE,
         get_sqlite_client=get_sqlite_client,

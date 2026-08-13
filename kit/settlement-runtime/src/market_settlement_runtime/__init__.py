@@ -1,5 +1,18 @@
 """One durable, mechanism-neutral commercial settlement runtime."""
-
+from .configuration import (
+    SETTLEMENT_CONFIG_SCHEMA_VERSION,
+    BuyerCompatibilityHook,
+    ClientFactory,
+    MechanismReadiness,
+    MechanismRegistration,
+    OptionBuilder,
+    PreflightCallback,
+    ReadinessBlocker,
+    SettlementConfig,
+    SettlementConfigurationError,
+    SettlementConfigurationRegistry,
+    SettlementRole,
+)
 from .jobs import (
     FulfillmentOutcome,
     PreparedSettlement,
@@ -57,6 +70,11 @@ from .sqlite_repository import (
 )
 
 __all__ = [
+    "SETTLEMENT_CONFIG_SCHEMA_VERSION",
+    "SETTLEMENT_MIGRATION_ID",
+    "SETTLEMENT_PRINCIPAL_MIGRATION_ID",
+    "BuyerCompatibilityHook",
+    "ClientFactory",
     "ConditionDecision",
     "ConditionOutcome",
     "ConditionState",
@@ -71,12 +89,18 @@ __all__ = [
     "MaterializationOutcome",
     "MaterializationState",
     "MaterializationStatus",
+    "MechanismReadiness",
+    "MechanismRegistration",
     "OperationKind",
     "OperationState",
+    "OptionBuilder",
     "Party",
+    "PreflightCallback",
     "PreparedSettlement",
-    "SETTLEMENT_MIGRATION_ID",
-    "SETTLEMENT_PRINCIPAL_MIGRATION_ID",
+    "ReadinessBlocker",
+    "SettlementConfig",
+    "SettlementConfigurationError",
+    "SettlementConfigurationRegistry",
     "SettlementJobCoordinator",
     "SettlementManualRequired",
     "SettlementMigration",
@@ -84,6 +108,7 @@ __all__ = [
     "SettlementOperationOutcome",
     "SettlementOperationRecord",
     "SettlementPlanStatus",
+    "SettlementRole",
     "SettlementRuntime",
     "SettlementRuntimeRepository",
     "SettlementSQLiteRepository",

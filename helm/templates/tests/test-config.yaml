@@ -57,8 +57,14 @@ continue to work.
 {{- $targetConfig := $targetAgent.config | default dict -}}
 {{- $registryAuthority := $targetConfig.registryAuthority | default dict -}}
 {{- $sellerConfig := $targetConfig.seller | default dict -}}
+{{- $settlementConfig := $targetConfig.settlement | default dict -}}
+{{- $alkahestConfig := $settlementConfig.alkahest | default dict -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $generated := dict -}}
+{{- $_ := set $generated "settlement" (dict
+  "schema_version" ($settlementConfig.schema_version | default 1)
+  "priority" ($settlementConfig.priority | default list)
+) -}}
 {{- if $rpcUrl -}}
 {{- $rpcConfig := dict "url" $rpcUrl -}}
 {{- if $rpc.chainId -}}
@@ -79,7 +85,7 @@ continue to work.
   "base_url_override" ($sellerConfig.baseUrl | default "")
   "agent_id" ($targetAgent.agentId | default "")
 ) -}}
-{{- if and $rpc.enabled $rpc.host $rpc.port -}}
+{{- if and ($alkahestConfig.enabled | default false) $rpc.enabled $rpc.host $rpc.port -}}
 {{- $_ := set $generated "buyer" (dict
   "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
 ) -}}

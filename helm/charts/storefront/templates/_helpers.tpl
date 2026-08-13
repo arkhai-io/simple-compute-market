@@ -170,18 +170,37 @@ storefront.toml.
 principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ scheme = {{ required (printf "%s principal scheme is required" $.label) $principal.scheme | quote }}, identifier = {{ required (printf "%s principal identifier is required" $.label) $principal.identifier | quote }} }{{ end }}]
 {{- end }}
 
+{{- define "storefront.tomlLiteral" -}}
+{{- $value := . -}}
+{{- if kindIs "map" $value -}}
+{ {{- range $index, $key := (keys $value | sortAlpha) }}{{ if $index }}, {{ end }}{{ $key | quote }} = {{ include "storefront.tomlLiteral" (index $value $key) }}{{- end }} }
+{{- else if kindIs "slice" $value -}}
+[{{- range $index, $item := $value }}{{ if $index }}, {{ end }}{{ include "storefront.tomlLiteral" $item }}{{- end }}]
+{{- else if kindIs "string" $value -}}
+{{ $value | quote }}
+{{- else -}}
+{{ $value }}
+{{- end -}}
+{{- end }}
+
 {{- define "storefront.agentConfigToml" -}}
 {{- $root := .root -}}
 {{- $agent := .agent -}}
 {{- $cfg := $agent.config -}}
 {{- $seller := $cfg.seller | default dict -}}
 {{- $identity := $agent.identity | default dict -}}
-{{- $chain := $cfg.chain | default dict -}}
+{{- $wallet := $cfg.wallet | default dict -}}
+{{- $chains := $cfg.chains | default dict -}}
 {{- $prov := $seller.provisioning | default dict -}}
 {{- $provIdentity := $prov.identity | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
-{{- $hosted := $cfg.hostedSettlement | default dict -}}
+{{- $settlement := $cfg.settlement | default dict -}}
+{{- $stripe := $settlement.stripe | default dict -}}
+{{- $alkahest := $settlement.alkahest | default dict -}}
 {{- $registryAuthority := $cfg.registryAuthority | default dict -}}
+{{- if ne (int ($root.Values.image.settlementConfigSchemaVersion | default 0)) (int ($settlement.schema_version | default 0)) -}}
+  {{- fail "storefront image and Settlement config schema versions must match" -}}
+{{- end -}}
 {{- $registryURL := default (include "storefront.registryUrl" $root) $cfg.registryUrl -}}
 {{- if not $cfg.registryUrl -}}
   {{- if ne $registryAuthority.authority $root.Values.global.registryIdentity.authority -}}
@@ -224,7 +243,7 @@ principals = [{{ range $i, $principal := $principals }}{{ if $i }}, {{ end }}{ s
     {{- fail "service-peer trust must include the active provisioning principal for the configured site" -}}
   {{- end -}}
 {{- end -}}
-{{- $expectedAuthority := $hosted.expectedAuthority | default dict -}}
+{{- $expectedAuthority := $stripe.authority | default dict -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
 # Sensitive values come from the Secret overlay (storefront.secrets.toml).
@@ -240,37 +259,37 @@ resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
 {{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
 
-[identity.principal]
+[Identity.principal]
 scheme = {{ required "storefront agent identity.principal.scheme is required" $identity.principal.scheme | quote }}
 identifier = {{ required "storefront agent identity.principal.identifier is required" $identity.principal.identifier | quote }}
 {{- range $subject, $administrator := ($identity.administrators | default dict) }}
 
-[identity.administrators.{{ $subject }}]
+[Identity.administrators.{{ $subject }}]
 {{ include "storefront.principalsToml" (dict "label" (printf "identity administrator %s" $subject) "principals" $administrator.principals) }}
 {{- end }}
 {{- range $peerID, $peer := ($identity.servicePeers | default dict) }}
 
-[identity.service_peers.{{ $peerID }}]
+[Identity.service_peers.{{ $peerID }}]
 role = {{ required (printf "identity service peer %s role is required" $peerID) $peer.role | quote }}
 site_id = {{ required (printf "identity service peer %s siteId is required" $peerID) $peer.siteId | quote }}
 {{ include "storefront.principalsToml" (dict "label" (printf "identity service peer %s" $peerID) "principals" $peer.principals) }}
 {{- end }}
 
-{{- if $seller.sshPublicKey }}
-[wallet]
-ssh_public_key = {{ $seller.sshPublicKey | quote }}
+{{- if $wallet }}
+[Wallet]
+{{- if $wallet.address }}
+address = {{ $wallet.address | quote }}
 {{- end }}
-{{- if $chain.name }}
+{{- if $wallet.ssh_public_key }}
+ssh_public_key = {{ $wallet.ssh_public_key | quote }}
+{{- end }}
+{{- end }}
+{{- range $chainName := keys $chains | sortAlpha }}
+{{- $chain := index $chains $chainName }}
 
-[chains.{{ $chain.name }}]
-rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
-chain_id = {{ required "global.rpc.chainId is required when a storefront chain is configured" $root.Values.global.rpc.chainId | int }}
-{{- if $chain.alkahestAddressConfigPath }}
-alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
-{{- end }}
-{{- if $agent.agentId }}
-onchain_agent_id = {{ $agent.agentId | int }}
-{{- end }}
+[Chains.{{ $chainName }}]
+rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpc_url | quote }}
+chain_id = {{ required (printf "chains.%s.chain_id is required" $chainName) $chain.chain_id | int }}
 {{- end }}
 
 [registry]
@@ -300,28 +319,68 @@ poll_interval = {{ $prov.pollInterval | int }}
 [provisioning.identity]
 {{ include "storefront.principalsToml" (dict "label" "provisioning identity" "principals" $provIdentity.principals) }}
 
-[hosted_settlement]
-enabled = {{ $hosted.enabled | default false }}
-base_url = {{ $hosted.baseUrl | default "" | quote }}
-authority_id = {{ $hosted.authorityId | default "" | quote }}
-environment = {{ $hosted.environment | default "" | quote }}
-expected_manifest_digest = {{ $hosted.expectedManifestDigest | default "" | quote }}
-contract_version = {{ $hosted.contractVersion | default "0.1.0" | quote }}
-expected_schema_version = {{ $hosted.expectedSchemaVersion | default 4 }}
-timeout_seconds = {{ $hosted.requestTimeoutSeconds | default 10 }}
-preflight_timeout_seconds = {{ $hosted.preflightTimeoutSeconds | default 5 }}
-allow_insecure_loopback = {{ $hosted.allowInsecureLoopback | default false }}
-required_capabilities = [{{ range $i, $cap := ($hosted.requiredCapabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
-{{- if $hosted.enabled }}
+[Settlement]
+schema_version = {{ $settlement.schema_version | default 1 }}
+priority = [{{ range $i, $mechanism := ($settlement.priority | default list) }}{{ if $i }}, {{ end }}{{ $mechanism | quote }}{{ end }}]
 
-[settlement.hosted.authority]
-{{ include "storefront.principalsToml" (dict "label" "hosted settlement authority" "principals" $expectedAuthority.principals) }}
+{{- if $stripe }}
+[Settlement.stripe]
+enabled = {{ $stripe.enabled | default false }}
+{{- if $stripe.base_url }}
+base_url = {{ $stripe.base_url | quote }}
 {{- end }}
-{{- range $resolverID, $resolver := ($hosted.resolvers | default dict) }}
+{{- if $stripe.authority_id }}
+authority_id = {{ $stripe.authority_id | quote }}
+{{- end }}
+{{- if $stripe.environment }}
+environment = {{ $stripe.environment | quote }}
+{{- end }}
+{{- if $stripe.expected_manifest_digest }}
+expected_manifest_digest = {{ $stripe.expected_manifest_digest | quote }}
+{{- end }}
+expected_api_version = {{ $stripe.expected_api_version | default "0.1.0" | quote }}
+expected_schema_version = {{ $stripe.expected_schema_version | default 4 }}
+required_capabilities = [{{ range $i, $cap := ($stripe.required_capabilities | default list) }}{{ if $i }}, {{ end }}{{ $cap | quote }}{{ end }}]
+{{- if $stripe.account_ref }}
+account_ref = {{ $stripe.account_ref | quote }}
+{{- end }}
+currency = {{ $stripe.currency | default "usd" | quote }}
+{{- if $stripe.condition_profile }}
+condition_profile = {{ $stripe.condition_profile | quote }}
+{{- end }}
+request_timeout_seconds = {{ $stripe.request_timeout_seconds | default 10.0 }}
+preflight_timeout_seconds = {{ $stripe.preflight_timeout_seconds | default 5.0 }}
+allow_insecure_loopback = {{ $stripe.allow_insecure_loopback | default false }}
+{{- if $expectedAuthority.principals }}
 
-[hosted_settlement.resolvers.{{ $resolverID }}]
-chain_name = {{ $resolver.chainName | quote }}
-evidence_mode = {{ $resolver.evidenceMode | quote }}
+[Settlement.stripe.authority]
+{{ include "storefront.principalsToml" (dict "label" "Stripe settlement authority" "principals" $expectedAuthority.principals) }}
+{{- end }}
+{{- range $profileID, $profile := ($stripe.condition_profiles | default dict) }}
+
+[Settlement.stripe.condition_profiles.{{ $profileID | quote }}]
+{{ range $field := keys $profile | sortAlpha }}
+{{ $field }} = {{ include "storefront.tomlLiteral" (index $profile $field) }}
+{{ end }}
+{{- end }}
+{{- range $resolverID, $resolver := ($stripe.resolvers | default dict) }}
+
+[Settlement.stripe.resolvers.{{ $resolverID | quote }}]
+chain_name = {{ $resolver.chain_name | quote }}
+evidence_mode = {{ $resolver.evidence_mode | quote }}
+{{- end }}
+{{- end }}
+
+{{- if $alkahest }}
+[Settlement.alkahest]
+enabled = {{ $alkahest.enabled | default false }}
+{{- if $alkahest.address_config_path }}
+address_config_path = {{ $alkahest.address_config_path | quote }}
+{{- end }}
+oracle_gated = {{ $alkahest.oracle_gated | default false }}
+trusted_oracle_addresses = [{{ range $i, $address := ($alkahest.trusted_oracle_addresses | default list) }}{{ if $i }}, {{ end }}{{ $address | quote }}{{ end }}]
+interruptible = {{ $alkahest.interruptible | default false }}
+interruptible_oracle_addresses = [{{ range $i, $address := ($alkahest.interruptible_oracle_addresses | default list) }}{{ if $i }}, {{ end }}{{ $address | quote }}{{ end }}]
 {{- end }}
 
 [negotiation]

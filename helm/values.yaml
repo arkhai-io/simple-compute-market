@@ -145,6 +145,7 @@ storefront:
     name: arkhai
     tag: storefront
     digest: ""
+    settlementConfigSchemaVersion: 1
     pullPolicy: IfNotPresent
 
   # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
@@ -191,7 +192,6 @@ storefront:
           agentId: bob
           dbPath: "./agent.db"
           logFilePath: "./logs/bob.log"
-          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
           enableEventQueue: false
           provisioning:
             mode: "mock"
@@ -206,9 +206,11 @@ storefront:
               - "bisection"
           integrations:
             geminiApiKey: ""
-        chain:
-          name: "anvil"
-          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+        settlement:
+          schema_version: 1
+          priority: []
+        wallet: {}
+        chains: {}
 
 
 # ---------------------------------------------------------------------------

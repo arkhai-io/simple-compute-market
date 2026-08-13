@@ -6,14 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from core_storefront.models.listing_models import CreateListingRequest
 from market_storefront.models.listing_models import (
     HostedFiatSettlementConfig,
     VmCreateListingRequest,
 )
 from market_storefront.services.listing_service import ListingService
 from tests.fake_site import TEST_MARKETPLACE_SIGNER
-
 
 _VALID_CONFIG = {
     "account_ref": "acct-seller",
@@ -52,57 +50,56 @@ def test_vm_listing_request_validates_hosted_fiat_settlement_config() -> None:
 
 
 @pytest.mark.asyncio
-async def test_vm_preflight_rejects_malformed_opaque_config_before_resolution() -> None:
+async def test_direct_settlement_options_are_rejected() -> None:
     service = ListingService(
         sqlite_client=object(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=lambda: object(),
     )
-    request = CreateListingRequest(
+    request = VmCreateListingRequest(
         offer={},
-        settlement_config={**_VALID_CONFIG, "currency": "USD"},
+        settlement_options=[
+            {
+                "option_id": "direct",
+                "mechanism": "fiat.stripe.v1",
+                "asset": "usd",
+                "rates": [],
+                "params": {},
+            }
+        ],
     )
 
-    with pytest.raises(ValidationError):
-        await service._preflight_hosted_option(request)
+    with pytest.raises(ValueError, match="derived from installed"):
+        await service._derive_settlement_artifacts(request)
 
 
 @pytest.mark.asyncio
-async def test_vm_preflight_preserves_valid_hosted_listing_option(monkeypatch) -> None:
-    profile = {
-        "condition_id": "vm-fulfillment",
-        "evaluator": {"kind": "builtin.v1", "version": "1"},
-        "demand": {"encoding": "application/jcs+json", "value": {}},
+async def test_registration_composition_receives_valid_hosted_listing_input() -> None:
+    option = {
+        "option_id": "hosted",
+        "mechanism": "fiat.stripe.v1",
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        "params": {"account_ref": "acct-seller"},
     }
-    hosted_config = SimpleNamespace(
-        enabled=True,
-        condition_profiles={"vm-fulfillment": profile},
-        expected_manifest_digest="sha256:test-manifest",
-        contract_version="0.1.0",
-        expected_schema_version=4,
-        required_capabilities=(),
+    composition = SimpleNamespace(
+        settlement_config=SimpleNamespace(
+            mechanism_config=lambda _key: SimpleNamespace(condition_profiles={})
+        ),
+        publication_artifacts=AsyncMock(return_value=([], [option], ())),
     )
-    import market_storefront.utils.config as config_module
-
-    monkeypatch.setattr(
-        config_module,
-        "settings",
-        SimpleNamespace(settlement=SimpleNamespace(hosted=hosted_config)),
-    )
-    adapter = AsyncMock()
     service = ListingService(
         sqlite_client=object(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
-        settlement_composition_provider=lambda: SimpleNamespace(
-            mechanism_clients={"fiat.stripe.v1": adapter}
-        ),
+        settlement_composition_provider=lambda: composition,
     )
     request = VmCreateListingRequest(offer={}, settlement_config=_VALID_CONFIG)
 
-    option = await service._preflight_hosted_option(request)
+    accepted, options = await service._derive_settlement_artifacts(request)
 
-    assert option is not None
-    assert option["mechanism"] == "fiat.stripe.v1"
-    assert option["asset"] == "usd"
-    assert option["params"]["account_ref"] == "acct-seller"
-    assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
-    adapter.verify_ready.assert_awaited_once()
+    assert accepted == []
+    assert options == [option]
+    resources = composition.publication_artifacts.await_args.args[0]
+    assert resources["account_ref"] == "acct-seller"
+    assert resources["rate_minor_units"] == 125
+    assert resources["claimant_principal"] == TEST_MARKETPLACE_SIGNER.identity

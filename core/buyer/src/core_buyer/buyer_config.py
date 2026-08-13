@@ -14,7 +14,6 @@ from dataclasses import dataclass
 import typer
 from market_identity import Identity, IdentityScheme, Signer, create_signer
 
-
 IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
 
 
@@ -30,21 +29,21 @@ def resolve_identity_config(
     override_scheme: str | None = None,
     override_identifier: str | None = None,
 ) -> IdentityConfig:
-    """Resolve the buyer's public ``[identity]`` principal."""
+    """Resolve the buyer's public ``[Identity]`` principal."""
 
     scheme = resolve_config_value(
         override=override_scheme,
-        toml_path="identity.scheme",
+        toml_path="Identity.scheme",
     )
     identifier = resolve_config_value(
         override=override_identifier,
-        toml_path="identity.identifier",
+        toml_path="Identity.identifier",
     )
     missing = [
         name
         for name, value in (
-            ("identity.scheme", scheme),
-            ("identity.identifier", identifier),
+            ("Identity.scheme", scheme),
+            ("Identity.identifier", identifier),
         )
         if not value
     ]

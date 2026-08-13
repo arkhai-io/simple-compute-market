@@ -60,6 +60,12 @@ Marketplace identity and transaction credentials have independent lifetimes. Wal
 
 Run logs persist the canonical public principal, signature-contract version, accepted obligation and operation identities, and domain state required to resume. They do not serialize credential material. Recovery checks the complete recorded principal and permits a different credential only when a completed rotation authorizes it as an active replacement, before submitting another authenticated or settlement mutation.
 
+## Configured mechanism choice
+
+The buyer receives installed and enabled mechanisms through the shared settlement configuration registry. It filters advertised options for compatibility first, then uses canonical configured priority only as policy input among surviving pre-acceptance choices. Mechanism prerequisites are late-bound: hosted fiat does not resolve wallet, chain, RPC, token, or gas inputs; an EVM selection resolves them through its owning adapter.
+
+Priority never authorizes recovery-time failover. Accepted Terms, the obligation reference, and stable operation identities remain authoritative even if current priority or readiness changes. Generated buyer configuration therefore contains shared selection vocabulary but omits seller account, onboarding, publication, authority-administration, and provider fields.
+
 ## Current limits
 
 The plugin boundary and shipped export contracts do not prove that every arbitrary third-party command composes without collision. Persisted recovery covers documented stages; it is not a universal exactly-once transaction spanning registries, storefronts, and settlement mechanisms.

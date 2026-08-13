@@ -13,22 +13,17 @@ from typing import Any
 from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
-from hosted_settlement_client import (
-    ClientConfig,
-    ConditionDescriptor,
-    HostedSettlementAsyncClient,
-)
-from market_alkahest import AlkahestConditionalEscrowClient
+from hosted_settlement_client import ConditionDescriptor
+from market_alkahest import create_alkahest_registration
 from market_core.schemas import EscrowProposal, SettlementPlan
-from market_identity import Identity, Signer, TrustedIdentitySet
-from market_hosted_settlement import (
-    HostedConditionalEscrowClient,
-    MarketplaceSignerAdapter,
-    adapt_expected_authorities,
-)
+from market_hosted_settlement import create_stripe_registration
+from market_identity import Identity, Signer
 from market_settlement_runtime import (
     FulfillmentOutcome,
+    MechanismReadiness,
     PreparedSettlement,
+    SettlementConfig,
+    SettlementConfigurationRegistry,
     SettlementJobCoordinator,
     SettlementRuntime,
     SettlementServicingWorker,
@@ -83,6 +78,77 @@ class VmSettlementComposition:
     local_principal: Identity
     mechanism_clients: Mapping[str, Any]
     evidence_clients: Mapping[str, Any]
+    settlement_config: SettlementConfig
+    configuration_registry: SettlementConfigurationRegistry
+    mechanism_resources: Mapping[str, Any]
+
+    async def readiness(self) -> tuple[MechanismReadiness, ...]:
+        return await self.configuration_registry.ordered_readiness(
+            self.settlement_config,
+            role="seller",
+            resources=self.mechanism_resources,
+        )
+
+    async def publication_artifacts(
+        self,
+        resources: Mapping[str, Any],
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
+    ]:
+        merged_resources = {**self.mechanism_resources, **resources}
+        readiness = await self.configuration_registry.ordered_readiness(
+            self.settlement_config,
+            role="seller",
+            resources=merged_resources,
+        )
+        accepted_escrows: list[dict[str, Any]] = []
+        settlement_options: list[dict[str, Any]] = []
+        for status in readiness:
+            if not status.enabled:
+                continue
+            if not status.ready:
+                logger.warning(
+                    "[SETTLEMENT] option suppressed mechanism=%s blockers=%s",
+                    status.mechanism,
+                    ",".join(blocker.code for blocker in status.blockers),
+                )
+                continue
+            try:
+                envelope = self.configuration_registry.build_option(
+                    status,
+                    self.settlement_config,
+                    role="seller",
+                    resources=merged_resources,
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "[SETTLEMENT] option suppressed mechanism=%s reason=%s",
+                    status.mechanism,
+                    str(exc),
+                )
+                continue
+            if not isinstance(envelope, Mapping):
+                raise RuntimeError(
+                    f"settlement option builder {status.mechanism} returned no envelope"
+                )
+            accepted_escrows.extend(
+                dict(item) for item in envelope.get("accepted_escrows", ())
+            )
+            settlement_options.extend(
+                dict(item) for item in envelope.get("settlement_options", ())
+            )
+        if not accepted_escrows and not settlement_options:
+            raise RuntimeError("no enabled settlement mechanism is ready")
+        return accepted_escrows, settlement_options, readiness
+
+
+def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
+    return SettlementConfigurationRegistry(
+        (
+            create_alkahest_registration(),
+            create_stripe_registration(),
+        )
+    )
 
 
 def _resolve_duration_seconds(
@@ -412,6 +478,7 @@ async def fulfill_vm_settlement(
         listing_id=fulfillment_input.listing_id,
         negotiation_id=fulfillment_input.negotiation_id,
         site_id=fulfillment_input.site_id,
+        settlement_mechanism=str(selected_obligation.get("mechanism") or ""),
     )
     result = dict(result or {})
     if result.get("status") != "fulfilled":
@@ -603,13 +670,11 @@ class HostedAgreement:
 
 
 def _plain_mapping(value: Any) -> dict[str, Any]:
-    if hasattr(value, "to_dict"):
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
+    elif hasattr(value, "to_dict"):
         value = value.to_dict()
     return dict(value) if isinstance(value, Mapping) else {}
-
-def _hosted_config() -> Any:
-    settlement = getattr(storefront_config.settings, "settlement", None)
-    return getattr(settlement, "hosted", None)
 
 
 async def load_hosted_agreement(
@@ -662,8 +727,8 @@ def _hosted_evidence_input(
     resolver_id = condition.evaluator.resolver_id
     if not resolver_id:
         raise ValueError("hosted condition has no configured evidence resolver")
-    hosted_config = _hosted_config()
-    resolvers = _plain_mapping(getattr(hosted_config, "resolvers", {}))
+    stripe_config = composition.settlement_config.mechanism_config("stripe")
+    resolvers = _plain_mapping(getattr(stripe_config, "resolvers", {}))
     resolver = _plain_mapping(resolvers.get(resolver_id))
     chain_name = str(resolver.get("chain_name") or "")
     evidence_mode = str(resolver.get("evidence_mode") or "")
@@ -807,53 +872,33 @@ async def hosted_settlement_projection(
     return {
         "settlement_ref": record.mechanism_ref,
         "obligation_ref": record.obligation_ref,
+        "payer_principal": record.payer_principal,
+        "claimant_principal": record.claimant_principal,
         "status": hosted_public_status(record),
+        "condition_anchor": record.condition_anchor,
+        "fulfillment_ref": record.fulfillment_ref,
         "action": action,
         "action_kind": (record.buyer_action or {}).get("kind"),
         "action_expires_at_unix": (record.buyer_action or {}).get("expires_at_unix"),
     }
 
 
-async def verify_hosted_contract_ready(
+async def preflight_settlement_mechanisms(
     composition: VmSettlementComposition,
-) -> None:
-
-    hosted_config = _hosted_config()
-    if not hosted_config or not bool(getattr(hosted_config, "enabled", False)):
-        return
-    adapter = composition.mechanism_clients.get("fiat.stripe.v1")
-    if adapter is None:
-        raise RuntimeError("hosted settlement is enabled without its adapter")
-    expected_manifest = str(
-        getattr(hosted_config, "expected_manifest_digest", "") or ""
-    )
-    expected_contract = str(getattr(hosted_config, "contract_version", "") or "")
-    expected_schema = int(getattr(hosted_config, "expected_schema_version", 0) or 0)
-    if not expected_manifest or expected_contract != "0.1.0" or expected_schema != 4:
-        raise RuntimeError("hosted settlement release pin is incomplete")
-    required = tuple(
-        sorted(
-            {
-                "conditional-escrow.v1",
-                "stripe-connect-separate-charges-transfers.v1",
-                "portable-attestation.v1",
-                "eas-arbiter.v1",
-                *(
-                    str(value)
-                    for value in (
-                        getattr(hosted_config, "required_capabilities", ()) or ()
-                    )
-                ),
-            }
+) -> tuple[MechanismReadiness, ...]:
+    """Observe every enabled registration and log only sanitized status."""
+    readiness = await composition.readiness()
+    for status in readiness:
+        logger.log(
+            logging.INFO if status.ready or not status.enabled else logging.WARNING,
+            "[SETTLEMENT] mechanism=%s configured=%s enabled=%s ready=%s blockers=%s",
+            status.mechanism,
+            status.configured,
+            status.enabled,
+            status.ready,
+            ",".join(blocker.code for blocker in status.blockers),
         )
-    )
-    await adapter.verify_contract_ready(
-        expected_manifest_digest=expected_manifest,
-        expected_contract_version=expected_contract,
-        expected_schema_version=expected_schema,
-        required_capabilities=required,
-        operation_ref="storefront-startup",
-    )
+    return readiness
 
 
 def build_vm_settlement_composition(
@@ -868,80 +913,70 @@ def build_vm_settlement_composition(
         sqlite_client.db_path,
         apply_migrations=False,
     )
-    alkahest = AlkahestConditionalEscrowClient(
-        get_client=lambda chain: alkahest_clients.get(chain or ""),
-        chain_config_paths={
-            name: config.alkahest_address_config_path
-            for name, config in storefront_config.CHAINS.items()
-        },
-        default_chain=getattr(storefront_config.settings, "chain_name", None),
+    registry = build_storefront_settlement_registry()
+    settlement_config = registry.resolve(
+        storefront_config.settlement_config_mapping(),
+        role="seller",
     )
-    mechanism_clients: dict[str, Any] = {}
-    if storefront_config.CHAINS:
-        mechanism_clients["alkahest.v1"] = alkahest
-
-    hosted_config = _hosted_config()
-    hosted_enabled = bool(hosted_config and getattr(hosted_config, "enabled", False))
-    if hosted_enabled:
-        hosted_base_url = str(getattr(hosted_config, "base_url", "") or "")
-        authority_raw = _plain_mapping(getattr(hosted_config, "authority", {}))
-        authority_principals_raw = authority_raw.get("principals")
-        required_fields = {
-            "base_url": hosted_base_url,
-            "authority_id": str(getattr(hosted_config, "authority_id", "") or ""),
-            "environment": str(getattr(hosted_config, "environment", "") or ""),
-            "authority.principals": authority_principals_raw,
-            "expected_manifest_digest": str(
-                getattr(hosted_config, "expected_manifest_digest", "") or ""
-            ),
-            "contract_version": str(
-                getattr(hosted_config, "contract_version", "") or ""
-            ),
-            "expected_schema_version": (
-                int(getattr(hosted_config, "expected_schema_version", 0) or 0)
-                if int(getattr(hosted_config, "expected_schema_version", 0) or 0) == 4
-                else 0
-            ),
+    mechanism_resources: dict[str, Any] = {
+        "marketplace_signer": marketplace_signer,
+        "clients": dict(alkahest_clients),
+        "get_client": lambda chain: alkahest_clients.get(chain or ""),
+        "chains": storefront_config.CHAINS,
+        "default_chain": getattr(storefront_config.settings, "chain_name", None),
+    }
+    alkahest_section = settlement_config.mechanism_config("alkahest")
+    if alkahest_section is not None and (
+        bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
+    ):
+        mechanism_resources["wallet"] = {
+            "address": storefront_config.get_evm_wallet_address(),
+            "private_key": storefront_config.get_evm_wallet_private_key(),
         }
-        missing = sorted(name for name, value in required_fields.items() if not value)
-        if missing:
-            raise RuntimeError(
-                "hosted settlement is enabled with incomplete consumer configuration: "
-                + ", ".join(missing)
-            )
 
+    mechanism_clients: dict[str, Any] = {}
+    for registration in registry.ordered_registrations(
+        settlement_config,
+        role="seller",
+    ):
+        section = settlement_config.mechanism_config(registration.config_key)
+        if section is None:
+            continue
         try:
-            marketplace_authorities = TrustedIdentitySet(
-                identities=tuple(
-                    Identity.model_validate(value)
-                    for value in authority_principals_raw
-                )
+            mechanism_clients[registration.mechanism_id] = registry.create_client(
+                registration.mechanism_id,
+                settlement_config,
+                role="seller",
+                resources=mechanism_resources,
             )
-        except (TypeError, ValueError) as exc:
-            raise RuntimeError(
-                "settlement.hosted.authority.principals must contain "
-                "1-2 unique canonical principals"
-            ) from exc
-        expected_authorities = adapt_expected_authorities(marketplace_authorities)
-        hosted = HostedConditionalEscrowClient(
-            HostedSettlementAsyncClient(
-                ClientConfig(
-                    base_url=hosted_base_url,
-                    signer=MarketplaceSignerAdapter(marketplace_signer),
-                    caller_role="seller",
-                    authority_id=required_fields["authority_id"],
-                    environment=required_fields["environment"],
-                    expected_authorities=expected_authorities,
-                    timeout_seconds=float(
-                        getattr(hosted_config, "timeout_seconds", 10.0)
-                    ),
-                    allow_insecure_loopback=bool(
-                        getattr(hosted_config, "allow_insecure_loopback", False)
-                    ),
-                )
+        except (TypeError, ValueError):
+            if getattr(section, "enabled", False):
+                raise
+            logger.debug(
+                "[SETTLEMENT] disabled mechanism has no recoverable client: %s",
+                registration.mechanism_id,
             )
-        )
-        mechanism_clients["fiat.stripe.v1"] = hosted
+    hosted_client = mechanism_clients.get("fiat.stripe.v1")
+    if hosted_client is not None:
+        mechanism_resources["hosted_client"] = hosted_client
+    evidence_clients = dict(alkahest_clients)
+    if hosted_client is not None:
+        stripe_section = settlement_config.mechanism_config("stripe")
+        for resolver in _plain_mapping(
+            getattr(stripe_section, "resolvers", {})
+        ).values():
+            resolver_config = _plain_mapping(resolver)
+            if resolver_config.get("evidence_mode") != "portable-remote.v1":
+                continue
+            client_name = str(resolver_config.get("chain_name") or "")
+            if (
+                client_name in evidence_clients
+                and evidence_clients[client_name] is not hosted_client
+            ):
+                raise ValueError(
+                    "hosted evidence client name conflicts with a chain client"
+                )
+            evidence_clients[client_name] = hosted_client
     runtime = SettlementRuntime(repository, mechanism_clients)
 
     async def on_terminal(
@@ -1030,8 +1065,11 @@ def build_vm_settlement_composition(
         coordinator=coordinator,
         worker=worker,
         mechanism_clients=mechanism_clients,
-        evidence_clients=dict(alkahest_clients),
+        evidence_clients=evidence_clients,
         local_principal=marketplace_signer.identity,
+        settlement_config=settlement_config,
+        configuration_registry=registry,
+        mechanism_resources=mechanism_resources,
     )
     composition_holder["value"] = composition
     return composition

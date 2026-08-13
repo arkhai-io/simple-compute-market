@@ -13,38 +13,38 @@ Composite by design — for the rare cases where you want only stage 3
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Optional
 
 import typer
+from market_core.schemas import SettlementPlan
+from market_identity import Identity
+from market_settlement_runtime import derive_obligation_ref
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from market_core.schemas import SettlementPlan
-from market_settlement_runtime import derive_obligation_ref
-
 from .buy_orchestrator import (
-    AgreedTerms,
     DEFAULT_SETTLEMENT_POLL_INTERVAL,
     DEFAULT_SETTLEMENT_TIMEOUT,
+    AgreedTerms,
     submit_settlement_request,
     wait_for_settlement,
+)
+from .deal_helpers import (
+    accepted_settlement_mechanism,
+    load_deal_context,
+    make_deal_publisher_trust_resolver,
+    open_run_log,
+    resolve_chain_settings,
 )
 from .escrow_client import looks_like_propagation_lag
 from .hosted_settlement import (
     start_hosted_settlement,
     wait_for_hosted_settlement,
 )
-from .deal_helpers import (
-    load_deal_context,
-    make_deal_publisher_trust_resolver,
-    open_run_log,
-    resolve_chain_settings,
-)
 from .run_log import read_run
 
 
-def _chain_name_from_run_log(run_id: str, *, signer) -> Optional[str]:
+def _chain_name_from_run_log(run_id: str, *, signer) -> str | None:
     """Look up the explicit EVM mechanism chain recorded for a run."""
 
     for ev in read_run(run_id, signer=signer):
@@ -63,7 +63,7 @@ def _chain_name_from_run_log(run_id: str, *, signer) -> Optional[str]:
     return None
 
 
-def _first_listing_chain(deal) -> Optional[str]:
+def _first_listing_chain(deal) -> str | None:
     """Fallback: pick the chain from the deal's listing accepted_escrows."""
     listing = getattr(deal, "listing", None)
     if isinstance(listing, dict):
@@ -75,7 +75,7 @@ def _first_listing_chain(deal) -> Optional[str]:
     return None
 
 
-def _accepted_proposal_chain(deal) -> Optional[str]:
+def _accepted_proposal_chain(deal) -> str | None:
     terms = getattr(deal, "accepted_escrow_terms", None)
     if isinstance(terms, list) and terms:
         first = terms[0]
@@ -110,18 +110,18 @@ def _hosted_obligation(deal) -> dict | None:
 def run_settle_from_log(
     *,
     run_id: str,
-    escrow_uid: Optional[str],
-    token_contract: Optional[str],
-    token_decimals: Optional[int],
-    duration_seconds: Optional[int],
+    escrow_uid: str | None,
+    token_contract: str | None,
+    token_decimals: int | None,
+    duration_seconds: int | None,
     expiration_seconds: int,
-    ssh_public_key: Optional[str],
-    buyer_address: Optional[str],
-    buyer_private_key: Optional[str],
-    chain_name: Optional[str],
+    ssh_public_key: str | None,
+    buyer_address: str | None,
+    buyer_private_key: str | None,
+    chain_name: str | None,
     poll_interval: float,
     settlement_timeout: float,
-    console: Optional[Console] = None,
+    console: Console | None = None,
 ) -> dict:
     """Drive stages 3-5 of a deal from a buyer run-log.
 
@@ -153,19 +153,41 @@ def run_settle_from_log(
     log = open_run_log(run_id, signer=signer)
     log.event("settle_resumed", run_id=run_id)
 
+    try:
+        accepted_mechanism = accepted_settlement_mechanism(deal)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
     hosted_obligation = _hosted_obligation(deal)
-    if hosted_obligation is not None:
+    if accepted_mechanism == "fiat.stripe.v1":
+        if hosted_obligation is None:
+            raise typer.BadParameter(
+                "accepted hosted selection has no matching settlement obligation"
+            )
         obligation_ref = derive_obligation_ref(
             deal.negotiation_id,
             0,
             hosted_obligation,
         )
+        if (
+            deal.settlement_operation_identities
+            and deal.settlement_operation_identities[0] != obligation_ref
+        ):
+            raise typer.BadParameter(
+                "accepted settlement operation identity conflicts with the run-log"
+            )
         settlement_ref = escrow_uid or deal.settlement_ref
         if settlement_ref is None:
             started = start_hosted_settlement(
                 seller_url=deal.seller_url,
                 negotiation_id=deal.negotiation_id,
                 obligation_ref=obligation_ref,
+                payer_principal=Identity.model_validate(
+                    hosted_obligation.get("payer_principal")
+                ),
+                claimant_principal=Identity.model_validate(
+                    hosted_obligation.get("claimant_principal")
+                ),
                 principal=deal.buyer_principal,
                 signer=signer,
                 resolve_seller_principals=resolve_seller_principals,
@@ -178,6 +200,7 @@ def run_settle_from_log(
             log.event(
                 "settlement_started",
                 settlement_ref=settlement_ref,
+                settlement_operation_identity=obligation_ref,
                 status=started.get("status"),
                 action_kind=(started.get("action") or {}).get("kind"),
                 action_expires_at_unix=(started.get("action") or {}).get(
@@ -226,16 +249,25 @@ def run_settle_from_log(
             raise typer.Exit(7)
         return final
 
+    if accepted_mechanism != "alkahest.v1":
+        raise typer.BadParameter(
+            f"accepted settlement mechanism {accepted_mechanism!r} is not installed; "
+            "recovery will not fall back to another mechanism"
+        )
+    from .settlement_composition import resolve_alkahest_address_config_path
+
+    alkahest_address_config_path = resolve_alkahest_address_config_path()
+
     effective_token = token_contract or deal.token_contract
-    effective_token_decimals: Optional[int] = (
+    effective_token_decimals: int | None = (
         int(token_decimals)
         if token_decimals is not None
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
     chain_cfg_name = (
-        chain_name
-        or _accepted_proposal_chain(deal)
+        _accepted_proposal_chain(deal)
         or _chain_name_from_run_log(run_id, signer=signer)
+        or chain_name
         or _first_listing_chain(deal)
     )
     if not chain_cfg_name:
@@ -274,7 +306,7 @@ def run_settle_from_log(
             ssh_public_key=resolved_ssh_public_key,
             rpc_url=chain_cfg.rpc_url,
             chain_name=chain_cfg.name,
-            alkahest_addr_config=chain_cfg.alkahest_address_config_path,
+            alkahest_addr_config=alkahest_address_config_path,
             token_contract=effective_token or "",
             token_decimals=effective_token_decimals,
         )
@@ -287,6 +319,7 @@ def run_settle_from_log(
             token_contract=effective_token,
             token_decimals=effective_token_decimals,
         )
+        chain.alkahest_addr_config = alkahest_address_config_path
 
     resolved_uid = escrow_uid or deal.escrow_uid
     effective_duration = (
@@ -334,10 +367,12 @@ def run_settle_from_log(
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
 
         import time as _time
-        from market_alkahest.schemas import EscrowProposal
+
         from market_alkahest.alkahest import (
             get_erc20_escrow_obligation_default,
         )
+        from market_alkahest.schemas import EscrowProposal
+
         from .escrow_client import (
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
@@ -494,27 +529,27 @@ def register(app: typer.Typer) -> None:
             help="Buyer run-id from a prior `market negotiate` to resume "
             "from (see `market logs runs`).",
         ),
-        escrow_uid: Optional[str] = typer.Option(
+        escrow_uid: str | None = typer.Option(
             None,
             "--escrow-uid",
             "-u",
             help="Skip escrow.create when the on-chain escrow already exists. "
             "If absent, the run-log is checked for an `escrow_created` event.",
         ),
-        token_contract: Optional[str] = typer.Option(
+        token_contract: str | None = typer.Option(
             None,
             "--token-contract",
             help="Legacy ERC-20 token override for old run-logs without an "
             "accepted escrow proposal. Current run-logs settle from the "
             "seller-accepted proposal.",
         ),
-        token_decimals: Optional[int] = typer.Option(
+        token_decimals: int | None = typer.Option(
             None,
             "--token-decimals",
             help="Legacy ERC-20 decimals override for old run-logs without "
             "an accepted escrow proposal.",
         ),
-        duration_hours: Optional[float] = typer.Option(
+        duration_hours: float | None = typer.Option(
             None,
             "--duration-hours",
             "-t",
@@ -526,22 +561,12 @@ def register(app: typer.Typer) -> None:
             "--expiration",
             help="Escrow deadline (seconds from now) for the reclaim_expired escape hatch.",
         ),
-        ssh_public_key: Optional[str] = typer.Option(
+        ssh_public_key: str | None = typer.Option(
             None,
             "--ssh-public-key",
             help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
-        buyer_address: Optional[str] = typer.Option(
-            None,
-            "--buyer-address",
-            help="Override buyer wallet address (default: derived from wallet.private_key).",
-        ),
-        buyer_private_key: Optional[str] = typer.Option(
-            None,
-            "--buyer-priv-key",
-            help="Override buyer private key (default: wallet.private_key).",
-        ),
-        chain_name: Optional[str] = typer.Option(
+        chain_name: str | None = typer.Option(
             None,
             "--chain",
             help="Override which configured [chains.<name>] entry to settle on. "
@@ -572,7 +597,7 @@ def register(app: typer.Typer) -> None:
         """
         # Convert user-friendly hours flag to the wire's seconds.
         duration_seconds_override = (
-            int(round(duration_hours * 3600)) if duration_hours is not None else None
+            round(duration_hours * 3600) if duration_hours is not None else None
         )
         run_settle_from_log(
             run_id=run_id,
@@ -582,8 +607,8 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds_override,
             expiration_seconds=expiration_seconds,
             ssh_public_key=ssh_public_key,
-            buyer_address=buyer_address,
-            buyer_private_key=buyer_private_key,
+            buyer_address=None,
+            buyer_private_key=None,
             chain_name=chain_name,
             poll_interval=poll_interval,
             settlement_timeout=settlement_timeout,

@@ -39,6 +39,12 @@ PROJECTS: dict[str, Project] = {
         ("kit/settlement-runtime/tests",),
         ("dist-kits",),
     ),
+    "kit/config": Project(
+        "kit/config",
+        "arkhai-kit-config",
+        ("kit/config/tests",),
+        ("dist-config",),
+    ),
     "kit/alkahest": Project(
         "kit/alkahest",
         "arkhai-kit-alkahest",
@@ -200,6 +206,7 @@ IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
         "core/storefront-client",
         "kit/settlement-runtime",
         "kit/hosted-settlement",
+        "kit/config",
         "kit/policy",
         "kit/site-client",
         "domains/vms/buyer",
@@ -239,13 +246,27 @@ IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
         "e2e-tests",
     ),
     "kit/hosted-settlement": (
+        "core/buyer",
+        "domains/vms/buyer",
         "domains/vms/storefront",
     ),
     "kit/settlement-runtime": (
         "kit/alkahest",
+        "kit/hosted-settlement",
+        "core/buyer",
+        "core/storefront",
+        "domains/vms/buyer",
         "domains/vms/storefront",
-        "domains/apicredits/storefront",
-        "domains/bare_metal/storefront",
+    ),
+    "kit/config": (
+        "core/buyer",
+        "core/storefront",
+        "domains/vms/buyer",
+        "domains/vms/storefront",
+    ),
+    "kit/alkahest": (
+        "domains/vms/buyer",
+        "domains/vms/storefront",
     ),
     "kit/fulfillment": (
         "kit/site",
@@ -253,6 +274,30 @@ IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
         "provisioning/compute/service",
     ),
 }
+
+SETTLEMENT_DEPLOYMENT_PROJECTS = frozenset(
+    {
+        "kit/config",
+        "kit/settlement-runtime",
+        "kit/hosted-settlement",
+        "kit/alkahest",
+        "core/buyer",
+        "domains/vms/buyer",
+        "domains/vms/storefront",
+    }
+)
+SETTLEMENT_DEPLOYMENT_PATHS = (
+    "helm/",
+    "manifests/",
+    "compose.vms",
+    "compose.hosted-settlement.yml",
+    "config.stripe-fiat-ed25519.toml",
+    "domains/vms/compose.yml",
+    "domains/vms/storefront/Dockerfile",
+    "scripts/package-review-wheelhouse.sh",
+    "scripts/prepare-hosted-compose.py",
+    "scripts/verify-hosted-release.py",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -285,6 +330,8 @@ def _projects_for_files(files: list[str]) -> set[str]:
             if changed == root or changed.startswith(f"{root}/"):
                 selected.add(root)
                 break
+        if changed == "Makefile" or changed.startswith(SETTLEMENT_DEPLOYMENT_PATHS):
+            selected.update(SETTLEMENT_DEPLOYMENT_PROJECTS)
     return selected
 
 

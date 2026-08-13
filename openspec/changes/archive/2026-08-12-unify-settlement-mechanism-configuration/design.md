@@ -4,6 +4,31 @@ See `proposal.md` for motivation. The settlement runtime and hosted adapter alre
 
 The preceding identity change separates `[Identity]` from optional chain credentials and publishes an exact hosted-client identity pin. This change consumes those contracts; it must not reintroduce private-key fields into settlement models or put hosted authority/provider behavior in marketplace code.
 
+## Prerequisite contract pins and legacy inventory
+
+The marketplace identity cutover is implemented, promoted, strictly validated, and archived at `openspec/changes/archive/2026-08-11-add-nonchain-marketplace-identities/`. This change consumes its canonical `{scheme, identifier}` principals, injected `market_identity.Signer`, Secret-backed identity credential, body-bound `arkhai.market-request-signature.v2`, signed-response trust, replay reservation, and dual-proof rotation contracts without adding settlement-owned identity fields.
+
+The immutable hosted input is release `0.1.0` from `arkhai/hosted-settlement-service` source commit `d167a7adbdc2aee90c976b643bc18bd4045c4bf6`: release contract `arkhai.hosted-settlement-release.v2`, API `0.1.0`, schema `4`, manifest SHA-256 `4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e`, client wheel `arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl` SHA-256 `a1524d11bfbd76a3ce63b02b9ea698bb09557c7789948be7011ec80af896bfe9`, and service image digest `sha256:28a59051cc7c8fb681bb01b71421eb5b4f817e582a44c09acf7bc637617b9ef2`. The wheel contains only importable client modules and no console-script entry-point metadata; storefront owns the seller command surface.
+
+The clean-cutover mapping is:
+
+| Legacy surface | Destination or removal |
+|---|---|
+| `[hosted_settlement]` and `[settlement.hosted]` | `[Settlement.stripe]`; duplicate old sections conflict rather than merge |
+| hosted `enabled`, `base_url`, `authority_id`, `environment`, manifest/API/schema/capability pins, timeouts, and loopback policy | corresponding strict Stripe consumer fields; obsolete fields not declared by the released client contract are removed explicitly |
+| `[settlement.hosted.authority].principals` | `[Settlement.stripe.authority].principals`, preserving the one-or-rotation-pair public trust set |
+| `[settlement.hosted.condition_profiles]` and `.resolvers` | `[Settlement.stripe.condition_profiles]` and `.resolvers`; raw RPC URLs, keys, provider IDs, and authority-admin fields remain forbidden |
+| listing/resource `account_ref`, `currency`, rate, condition-profile, and resolver selection | remain listing-owned inputs; no provider credential or authority state moves into listing data |
+| root `oracle_gated_listings`, `trusted_oracle_address`, `interruptible_listings`, and `interruptible_oracle_address` | `[Settlement.alkahest]` policy fields; the singular trusted-oracle value becomes the typed address collection |
+| `[chains.<name>].alkahest_address_config_path` | `[Settlement.alkahest].address_config_path` when one effective override exists; incompatible per-chain overrides are a migration conflict; RPC URL and chain ID stay in `[Chains.<name>]` |
+| buyer `[settlement].mechanism_priority` | `[Settlement].priority` with whole-list replacement |
+| buyer `--settlement-mechanism` and hosted option/credential preference flags | removed; configured priority and compatible advertised options govern only pre-acceptance selection |
+| storefront hosted startup branch, separate preflight, and top-level hosted seller command/executable references | common registration/status plus `market-storefront settlement stripe ...` |
+| Alkahest-specific publication branches and startup probes | Alkahest registration preflight/option builder; wallet and chains are injected only when enabled or invoked |
+| `STOREFRONT_SETTLEMENT__HOSTED__*`, `HOSTED_SETTLEMENT_*` marketplace-consumer aliases, and old Alkahest root environment names | generated `STOREFRONT_SETTLEMENT__STRIPE__*` or `STOREFRONT_SETTLEMENT__ALKAHEST__*` names; hosted-service-owned `HOSTED_SETTLEMENT_*` deployment variables remain authority configuration |
+| hand-maintained buyer/storefront settlement templates, Helm fragments, examples, and reference tables | generated role-appropriate surfaces from typed metadata |
+| run-log copies of current preference or mechanism credentials | schema version, public installed/enabled mechanism fingerprint, accepted selection, and stable operation identity only |
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -169,3 +194,7 @@ No financial database ownership or settlement state schema changes. Existing pla
 - Buyer selection and late chain prerequisites: `openspec/specs/buyer-orchestration/{spec,architecture}.md`.
 - Role/mechanism composition: `openspec/specs/market-composition/{spec,architecture}.md` and `docs/development/ARCHITECTURE.md`.
 - Overlay, Secret, Helm/Compose, migration, and rollback rules: `openspec/specs/deployment-state/{spec,architecture}.md` and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+
+Promotion completed on 2026-08-11. Every destination above now describes the implemented current system; the capability index includes settlement configuration. `docs/development/ROADMAP.md` remains unchanged because its hosted settlement section already states the durable authority and signed-release boundary, while configuration unification adds no new directional goal.
+
+Verification reached focused and integration suites, review-wheelhouse distributions, exact hosted release and image checks, rendered Helm/Compose surfaces, local Anvil Alkahest E2E, no-wallet cross-repository hosted E2E, and real Stripe test-mode onboarding/readiness/settlement evidence. External webhook ingress, a public EAS network, Kubernetes rollout, and public artifact publishing were unavailable and were not replaced by mocks. The repository has no root `make check` target and its package environments expose no runnable mypy target/dependency; those checks remain explicitly unrun. Repository-wide strict OpenSpec validation passes 55 of 61 artifacts; the six failures belong to unrelated active changes.

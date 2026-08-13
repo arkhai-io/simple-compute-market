@@ -4,6 +4,7 @@ import hashlib
 import json
 from typing import Any
 
+import market_hosted_settlement.adapter as adapter_module
 import pytest
 from hosted_settlement_client import (
     AccountReadiness,
@@ -15,6 +16,7 @@ from hosted_settlement_client import (
     EscrowResult,
     ExpectedAuthorities,
     FinancialState,
+    FulfillmentPublicationResult,
     HostedSettlementAsyncClient,
     ManifestHealth,
     OperationReceipt,
@@ -22,19 +24,16 @@ from hosted_settlement_client import (
     Principal,
     canonical_json,
 )
+from market_hosted_settlement import (
+    REQUIRED_HOSTED_CAPABILITIES,
+    HostedConditionalEscrowClient,
+    MarketplaceSignerAdapter,
+)
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
     SettlementRuntime,
     SettlementSQLiteRepository,
 )
-
-import market_hosted_settlement.adapter as adapter_module
-from market_hosted_settlement import (
-    HostedConditionalEscrowClient,
-    MarketplaceSignerAdapter,
-    REQUIRED_HOSTED_CAPABILITIES,
-)
-
 
 BUYER = Identity(
     scheme=IdentityScheme.ED25519,
@@ -66,6 +65,7 @@ class FakeMarketplaceSigner:
 class FakeClient:
     def __init__(self) -> None:
         self.materialize_request: Any = None
+        self.publication_request: Any = None
         self.status_call: tuple[str, str] | None = None
         self.collect_call: tuple[str, OperationRequest] | None = None
         self.reclaim_call: tuple[str, OperationRequest] | None = None
@@ -102,6 +102,12 @@ class FakeClient:
             capabilities=("transfers",),
         )
 
+    async def publish_fulfillment(self, request: Any) -> FulfillmentPublicationResult:
+        self.publication_request = request
+        return FulfillmentPublicationResult(
+            request_id=request.request_id,
+            attestation_uid="0x" + "99" * 32,
+        )
     async def materialize(self, request: Any) -> EscrowResult:
         self.materialize_request = request
         return self.escrow()
@@ -212,6 +218,30 @@ async def test_conditional_adapter_instantiates_from_injected_signer() -> None:
         assert adapter is not None
     finally:
         await hosted_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_adapter_publishes_only_a_stable_fulfillment_digest() -> None:
+    client = FakeClient()
+    adapter = HostedConditionalEscrowClient(client)  # type: ignore[arg-type]
+
+    first = await adapter.publish_fulfillment(
+        condition_anchor="0x" + "66" * 32,
+        evidence='{"connection_details":"ssh private@host"}',
+    )
+    first_request = client.publication_request
+    second = await adapter.publish_fulfillment(
+        condition_anchor="0x" + "66" * 32,
+        evidence='{"connection_details":"ssh private@host"}',
+    )
+
+    assert first == second == "0x" + "99" * 32
+    assert client.publication_request == first_request
+    assert first_request.evidence_digest == (
+        "sha256:"
+        + hashlib.sha256(b'{"connection_details":"ssh private@host"}').hexdigest()
+    )
+    assert "private@host" not in first_request.model_dump_json()
 
 
 @pytest.mark.asyncio

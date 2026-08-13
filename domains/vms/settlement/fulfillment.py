@@ -4,9 +4,21 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class FulfillmentPublisher(Protocol):
+    """Mechanism-owned publication port for immutable fulfillment evidence."""
+
+    async def publish_fulfillment(
+        self,
+        *,
+        condition_anchor: str,
+        evidence: str | None,
+    ) -> str: ...
 
 
 class FulfillmentReconciliationUnavailable(RuntimeError):
@@ -98,12 +110,17 @@ async def submit_compute_fulfillment(
     escrow_uid: str,
     connection_details: str | None,
 ) -> str:
-    """Submit VM fulfillment on-chain, or return a simulated id in demo mode."""
+    """Publish VM fulfillment through the selected mechanism evidence port."""
     if not client:
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        logger.info(
-            "[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client."
+        logger.info("[SETTLEMENT] Simulated compute fulfillment without an evidence client.")
+        return fulfillment_uid
+    if isinstance(client, FulfillmentPublisher):
+        fulfillment_uid = await client.publish_fulfillment(
+            condition_anchor=escrow_uid,
+            evidence=connection_details,
         )
+        logger.info("[SETTLEMENT] Published compute fulfillment evidence.")
         return fulfillment_uid
 
     from market_alkahest.txlock import chain_tx_lock

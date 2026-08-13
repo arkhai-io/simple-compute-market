@@ -55,6 +55,37 @@ Rollback is valid only before the identity schema cutover and before authenticat
 
 Hosted identity wire behavior belongs to the independently released hosted client. Marketplace packages consume the exact client wheel, hash, identity capabilities, and service artifacts bound by one verified hosted manifest. The manifest is the atomic compatibility boundary: it proves that the client and service agree on identity semantics, while explicit capability checks prevent a version number from being mistaken for support. Editable sibling sources, copied signing modules, compatible-major substitution, or a client/service identity mismatch fail packaging verification or startup preflight before hosted publication.
 
+## Settlement configuration cutover
+
+Role TOML, generated defaults and references, environment overlays, Helm values and templates, Compose, and automation all consume the same typed `[Settlement]` hierarchy. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Hosted provider, administrator, webhook, database, and service-migration settings remain owned by the hosted authority and are not marketplace deployment inputs.
+
+The settlement cutover deliberately rejects runtime aliases. Migration tooling is deployed first, then operators preview and back up every affected role file and overlay, quiesce publication and configuration automation, migrate and validate the complete population, and activate the matching image and configuration together. A schema/image mismatch fails before publication or settlement mutation. Rollback restores prior artifacts and backups only before the new configuration is activated; after new effects begin, recovery rolls forward from pinned plans and operation journals.
+
+Typed settlement metadata generates role-appropriate templates, edit validation, schema fragments, and reference output. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
+
+## Optional hosted local composition
+
+Local hosted composition follows the same artifact boundary as deployment.
+Preflight verifies a signed production manifest and exact client wheel, then
+emits a non-secret Compose environment containing digest-qualified image and
+contract coordinates. Hermetic mode additionally verifies a signed,
+production-compatible private E2E manifest and exact service/fixture wheels;
+it never treats a locally rebuilt tag or sibling checkout as equivalent.
+
+The production-like, hermetic, local EAS, and real Stripe profiles are
+deliberately separate. Hermetic mode substitutes only provider, clock, and
+event-delivery ports inside the authority assembly. The storefront remains a
+normal wallet-free consumer and receives no simulator control or provider
+credential. Local EAS adds chain infrastructure only for condition-boundary
+conformance. Real Stripe uses the ordinary authority image and its own
+secret-bearing operator lane.
+
+Authority state, deterministic provider state, and controlled time use
+separate named volumes. Clean execution removes them; restart evidence retains
+them to prove recovery from durable operation identities. Control and provider
+surfaces stay on isolated internal networks, while any development host
+mapping is explicitly loopback-only.
+
 ## Current limits
 
 The repository does not yet have one universal configuration-delivery mechanism or migration phase for every service. Publication authority between private artifact registries and public package releases, removal of all local source overrides, and a repository-wide typed-client versioning policy remain separate decisions.

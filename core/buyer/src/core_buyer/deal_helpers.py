@@ -7,13 +7,14 @@ decoding those payloads and deriving mechanism-specific enrichments.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
 import typer
+from market_identity import Identity, Signer, TrustedIdentitySet
 
 from .run_log import RunLog, read_run
-from market_identity import Identity, Signer, TrustedIdentitySet
 
 
 @dataclass
@@ -29,8 +30,8 @@ class DealContext:
     listing_id: str
     negotiation_id: str
     agreed_amount: float
-    escrow_uid: Optional[str] = None
-    settlement_ref: Optional[str] = None
+    escrow_uid: str | None = None
+    settlement_ref: str | None = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
     # per-hour price by duration_seconds/3600 to compute total payment.
@@ -38,15 +39,109 @@ class DealContext:
     # Settlement-time enrichments captured by `market negotiate` when
     # available. None means the field wasn't logged — caller falls
     # back to flags / config.toml defaults / a fresh HTTP lookup.
-    seller_wallet_address: Optional[str] = None
-    token_contract: Optional[str] = None
-    token_decimals: Optional[float] = None
-    accepted_escrow_proposal: Optional[dict[str, Any]] = None
+    seller_wallet_address: str | None = None
+    token_contract: str | None = None
+    token_decimals: float | None = None
+    accepted_escrow_proposal: dict[str, Any] | None = None
     # Canonical mechanism-neutral settlement carrier plus the optional
     # legacy flat term payload recorded on older wire exchanges.
-    settlement_plan: Optional[dict[str, Any]] = None
-    accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
-    accepted_provision_terms: Optional[dict[str, Any]] = None
+    settlement_plan: dict[str, Any] | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    accepted_provision_terms: dict[str, Any] | None = None
+    settlement_selection: dict[str, Any] | None = None
+    settlement_operation_identities: tuple[str, ...] = ()
+
+
+def accepted_settlement_mechanism(deal: DealContext) -> str:
+    """Return the mechanism pinned by accepted Terms, never current config."""
+
+    selected: str | None = None
+    if deal.settlement_selection is not None:
+        value = deal.settlement_selection.get("mechanism")
+        if not isinstance(value, str) or not value:
+            raise ValueError("accepted settlement selection has no mechanism")
+        selected = value
+
+    planned: set[str] = set()
+    if deal.settlement_plan is not None:
+        obligations = deal.settlement_plan.get("obligations")
+        if not isinstance(obligations, list) or not obligations:
+            raise ValueError("accepted settlement plan has no obligations")
+        for obligation in obligations:
+            if not isinstance(obligation, dict):
+                raise ValueError("accepted settlement plan has a malformed obligation")
+            mechanism = obligation.get("mechanism")
+            if not isinstance(mechanism, str) or not mechanism:
+                raise ValueError("accepted settlement obligation has no mechanism")
+            planned.add(mechanism)
+        if selected is None and len(planned) != 1:
+            raise ValueError(
+                "accepted settlement plan spans multiple mechanisms without a selection"
+            )
+
+    if selected is not None and planned and selected not in planned:
+        raise ValueError(
+            "accepted settlement selection conflicts with the settlement plan"
+        )
+    mechanism = selected or next(iter(planned), None)
+    if mechanism is None:
+        raise ValueError("run-log has no accepted settlement mechanism")
+    return mechanism
+
+
+def settlement_acceptance_fields(
+    *,
+    negotiation_id: str,
+    selection: Any | None,
+    plan: Any | None,
+) -> dict[str, Any]:
+    """Serialize public accepted selection and stable obligation identities."""
+
+    from market_core.schemas import SettlementPlan, SettlementSelection
+    from market_settlement_runtime import derive_obligation_ref
+
+    decoded_selection = (
+        SettlementSelection.model_validate(selection) if selection is not None else None
+    )
+    decoded_plan = SettlementPlan.model_validate(plan) if plan is not None else None
+    if decoded_plan is None:
+        return {
+            "settlement_selection": (
+                decoded_selection.model_dump(mode="json")
+                if decoded_selection is not None
+                else None
+            ),
+            "settlement_plan": None,
+            "settlement_operation_identities": [],
+        }
+
+    mechanisms = {obligation.mechanism for obligation in decoded_plan.obligations}
+    if (
+        decoded_selection is not None
+        and decoded_selection.mechanism not in mechanisms
+    ):
+        raise ValueError(
+            "accepted settlement selection conflicts with the settlement plan"
+        )
+    if not negotiation_id:
+        raise ValueError("accepted settlement plan has no negotiation identity")
+    identities = [
+        derive_obligation_ref(
+            negotiation_id,
+            index,
+            obligation.model_dump(mode="json"),
+        )
+        for index, obligation in enumerate(decoded_plan.obligations)
+    ]
+    return {
+        "settlement_selection": (
+            decoded_selection.model_dump(mode="json")
+            if decoded_selection is not None
+            else None
+        ),
+        "settlement_plan": decoded_plan.model_dump(mode="json"),
+        "settlement_operation_identities": identities,
+    }
 
 
 def _parse_publisher_trust(value: Any) -> TrustedIdentitySet:
@@ -115,34 +210,60 @@ def load_deal_context(
             f"No run-log found for run_id={run_id!r}. Check `market logs runs`."
         )
     buyer_principal = Identity.model_validate(events[0]["buyer_principal"])
-    publisher_principals: Optional[TrustedIdentitySet] = None
-    publisher_id: Optional[str] = None
-    source_registry_url: Optional[str] = None
-    source_registry_authority: Optional[str] = None
+    publisher_principals: TrustedIdentitySet | None = None
+    publisher_id: str | None = None
+    source_registry_url: str | None = None
+    source_registry_authority: str | None = None
 
-    seller_url: Optional[str] = None
-    listing_id: Optional[str] = None
-    negotiation_id: Optional[str] = None
-    agreed_amount: Optional[float] = None
-    escrow_uid: Optional[str] = None
-    settlement_ref: Optional[str] = None
+    seller_url: str | None = None
+    listing_id: str | None = None
+    negotiation_id: str | None = None
+    agreed_amount: float | None = None
+    escrow_uid: str | None = None
+    settlement_ref: str | None = None
     duration_seconds: int = 3600
-    seller_wallet_address: Optional[str] = None
-    token_contract: Optional[str] = None
-    token_decimals: Optional[float] = None
-    accepted_escrow_proposal: Optional[dict[str, Any]] = None
-    settlement_plan: Optional[dict[str, Any]] = None
-    accepted_escrow_terms: Optional[list[dict[str, Any]]] = None
-    accepted_provision_terms: Optional[dict[str, Any]] = None
-    last_status: Optional[str] = None
+    seller_wallet_address: str | None = None
+    token_contract: str | None = None
+    token_decimals: float | None = None
+    accepted_escrow_proposal: dict[str, Any] | None = None
+    settlement_plan: dict[str, Any] | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    accepted_provision_terms: dict[str, Any] | None = None
+    settlement_selection: dict[str, Any] | None = None
+    settlement_operation_identities: tuple[str, ...] = ()
+    last_status: str | None = None
 
     def _capture_accepted_terms(ev: dict[str, Any]) -> None:
         nonlocal accepted_escrow_proposal, settlement_plan, accepted_escrow_terms
-        nonlocal accepted_provision_terms
+        nonlocal accepted_provision_terms, settlement_selection
+        nonlocal settlement_operation_identities
         nonlocal seller_wallet_address, token_contract
         raw_plan = ev.get("settlement_plan")
         if isinstance(raw_plan, dict):
             settlement_plan = raw_plan
+        raw_selection = ev.get("settlement_selection")
+        if isinstance(raw_selection, dict):
+            if (
+                settlement_selection is not None
+                and settlement_selection != raw_selection
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted settlement selections."
+                )
+            settlement_selection = raw_selection
+        raw_identities = ev.get("settlement_operation_identities")
+        if isinstance(raw_identities, list) and all(
+            isinstance(item, str) and item for item in raw_identities
+        ):
+            identities = tuple(raw_identities)
+            if (
+                settlement_operation_identities
+                and settlement_operation_identities != identities
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting settlement operation identities."
+                )
+            settlement_operation_identities = identities
         raw_terms = ev.get("accepted_escrow_terms")
         if isinstance(raw_terms, list):
             accepted_escrow_terms = [
@@ -310,6 +431,23 @@ def load_deal_context(
             accepted_escrow_terms
         ).model_dump()
 
+    if settlement_plan is not None:
+        expected_identities = tuple(
+            settlement_acceptance_fields(
+                negotiation_id=negotiation_id,  # type: ignore[arg-type]
+                selection=settlement_selection,
+                plan=settlement_plan,
+            )["settlement_operation_identities"]
+        )
+        if (
+            settlement_operation_identities
+            and settlement_operation_identities != expected_identities
+        ):
+            raise typer.BadParameter(
+                f"Run-log {run_id!r} has conflicting settlement operation identities."
+            )
+        settlement_operation_identities = expected_identities
+
     return DealContext(
         buyer_principal=buyer_principal,
         publisher_principals=publisher_principals,  # type: ignore[arg-type]
@@ -330,6 +468,8 @@ def load_deal_context(
         settlement_plan=settlement_plan,
         accepted_escrow_terms=accepted_escrow_terms,
         accepted_provision_terms=accepted_provision_terms,
+        settlement_selection=settlement_selection,
+        settlement_operation_identities=settlement_operation_identities,
     )
 
 
@@ -357,13 +497,13 @@ class NegotiationResumePoint:
     publisher_id: str
     source_registry_url: str
     source_registry_authority: str
-    last_seller_proposal: Optional[dict]
+    last_seller_proposal: dict | None
     rounds_completed: int
-    last_status: Optional[str]
+    last_status: str | None
     # Negotiation policy recorded at run start — a resume continues
     # under the policy that opened the negotiation, not whatever the
     # config says today.
-    policy: Optional[str] = None
+    policy: str | None = None
 
 
 def is_negotiation_complete(run_id: str, *, signer: Signer) -> bool:
@@ -392,20 +532,20 @@ def load_negotiation_resume_point(
             f"No run-log found for run_id={run_id!r}. Check `market logs runs`."
         )
     buyer_principal = Identity.model_validate(events[0]["buyer_principal"])
-    publisher_principals: Optional[TrustedIdentitySet] = None
-    publisher_id: Optional[str] = None
-    source_registry_url: Optional[str] = None
-    source_registry_authority: Optional[str] = None
+    publisher_principals: TrustedIdentitySet | None = None
+    publisher_id: str | None = None
+    source_registry_url: str | None = None
+    source_registry_authority: str | None = None
 
-    seller_url: Optional[str] = None
-    listing_id: Optional[str] = None
-    negotiation_id: Optional[str] = None
+    seller_url: str | None = None
+    listing_id: str | None = None
+    negotiation_id: str | None = None
     transcript: list = []
-    last_seller_proposal: Optional[dict] = None
-    last_status: Optional[str] = None
+    last_seller_proposal: dict | None = None
+    last_status: str | None = None
     rounds_completed = 0
 
-    policy: Optional[str] = None
+    policy: str | None = None
     for ev in events:
         for name in (
             "publisher_id",

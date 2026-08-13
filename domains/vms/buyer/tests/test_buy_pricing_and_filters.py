@@ -5,23 +5,15 @@ on `market buy`.
 from __future__ import annotations
 
 import json
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 from unittest import mock
 
 import pytest
 import typer
-
-from market_core.schemas import (
-    EscrowProposal,
-    EscrowTerms,
-    RateValue,
-    SettlementOption,
-    derive_settlement_option_id,
-)
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
-from identity_helpers import BUYER_SIGNER, seller_principals
+from domains.vms.buyer.buy_cli import _make_hosted_settle_hook
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -33,9 +25,14 @@ from domains.vms.buyer.buy_orchestrator import (
     run_buy,
 )
 from domains.vms.buyer.cli_helpers import parse_filter_options
-from domains.vms.buyer.buy_cli import (
-    _make_hosted_settle_hook,
-    _select_hosted_option,
+from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
+from identity_helpers import BUYER_SIGNER, seller_principals
+from market_core.schemas import (
+    EscrowProposal,
+    EscrowTerms,
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
 )
 
 
@@ -109,26 +106,40 @@ def _hosted_option() -> SettlementOption:
 def test_select_hosted_option_pins_exact_listed_choice():
     option = _hosted_option()
     listing = {"settlement_options": [option.model_dump(mode="json")]}
+    policy = resolve_buyer_settlement_policy(
+        {
+            "Settlement": {
+                "priority": ["fiat.stripe.v1"],
+                "stripe": {"enabled": True},
+            }
+        }
+    )
 
-    selection = _select_hosted_option(
+    selected = policy.select(
         listing,
-        mechanism="fiat.stripe.v1",
         option_id=option.option_id,
         expiration_unix=1_800_000_000,
     )
 
-    assert selection is not None
-    assert selection.option_id == option.option_id
-    assert selection.expiration_unix == 1_800_000_000
+    assert selected is not None
+    assert selected.selection.option_id == option.option_id
+    assert selected.selection.expiration_unix == 1_800_000_000
 
 
 def test_select_hosted_option_rejects_unlisted_choice():
     option = _hosted_option()
+    policy = resolve_buyer_settlement_policy(
+        {
+            "Settlement": {
+                "priority": ["fiat.stripe.v1"],
+                "stripe": {"enabled": True},
+            }
+        }
+    )
 
     assert (
-        _select_hosted_option(
+        policy.select(
             {"settlement_options": [option.model_dump(mode="json")]},
-            mechanism="fiat.stripe.v1",
             option_id="0" * 64,
             expiration_unix=1_800_000_000,
         )
@@ -139,8 +150,8 @@ def test_select_hosted_option_rejects_unlisted_choice():
 def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     monkeypatch,
 ):
-    from market_core.schemas import SettlementObligation, SettlementPlan
     from domains.vms.buyer.buyer_client import NegotiationOutcome
+    from market_core.schemas import SettlementObligation, SettlementPlan
 
     monkeypatch.setattr(
         "domains.vms.buyer.buy_cli.make_publisher_trust_resolver",
@@ -191,6 +202,10 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
                 SettlementObligation(
                     payer="buyer",
                     claimant="seller",
+                    payer_principal=BUYER_SIGNER.identity.model_dump(mode="json"),
+                    claimant_principal=seller_principals()
+                    .identities[0]
+                    .model_dump(mode="json"),
                     amount=125,
                     asset="usd",
                     expiration_unix=1_800_000_000,
@@ -214,6 +229,8 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
     assert opened == ["https://checkout.example/session"]
     assert starts[0]["negotiation_id"] == "neg-1"
     assert len(starts[0]["obligation_ref"]) == 64
+    assert starts[0]["payer_principal"] == BUYER_SIGNER.identity
+    assert starts[0]["claimant_principal"] == seller_principals().identities[0]
     assert result.status == "ready"
     assert result.escrow_uid == "settlement-1"
     assert all("url" not in body for _, body in events)

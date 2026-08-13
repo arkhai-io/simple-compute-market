@@ -94,6 +94,12 @@ Wallet and chain configuration is mechanism-scoped. A hosted non-EVM obligation 
 
 The hosted adapter passes the marketplace signer through the exact manifest-pinned hosted client identity interface. Hosted canonicalization, headers, scheme wrappers, response verification, account-link behavior, and provider models remain owned by that released client. The adapter neither reproduces those bytes nor persists its private credential. Startup and publication preflight require the released manifest to advertise the configured principal scheme and contract version; otherwise the hosted mechanism remains unavailable.
 
+## Configuration and durable runtime state
+
+Typed mechanism registration controls which clients are constructed and which new options may be published. It does not create another runtime or status authority: every enabled client dispatches through the same obligation identity, operation journal, leases, retries, claim engine, and aggregate projection.
+
+Configuration and readiness are admission inputs, not durable-plan interpreters. Once Terms are accepted, the stored canonical mechanism, exact parameters, payer/claimant direction, and operation identities govern recovery. Disabling or deprioritizing a mechanism may stop new publication, but funded obligations continue authoritative status, collection, and reclaim convergence through their original client.
+
 ## Current limits
 
 Heartbeat evidence remains persisted but is not an automated adjudication

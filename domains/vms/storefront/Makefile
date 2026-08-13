@@ -9,6 +9,9 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # Dockerfile passes --find-links /dist on the uv sync CLI instead;
 # this variable is for local development only.
 DIST_DIR ?= ../../../.dist
+# Podman may reuse cross-stage layers after an internal wheel changes. Make the
+# wheel set an explicit cache key for both image stages.
+DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
 HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.1.0-trust.json
 HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
 HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
@@ -60,11 +63,11 @@ reinit: verify-hosted-release ## Force-reinstall verified internal wheels.
 build: build-images
 
 build-images:
-	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
+	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
 build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
-	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
+	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
 test: reinit test-unit test-integration ## Run all tests

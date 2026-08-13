@@ -6,21 +6,24 @@ import re
 from typing import Any, Literal
 
 from hosted_settlement_client import (
+    REQUEST_PROTOCOL,
+    RESPONSE_PROTOCOL,
     CheckEscrowRequest,
     ConditionDescriptor,
     ConditionState,
     CreateEscrowRequest,
     EscrowResult,
+    ExpectedAuthorities,
     FinancialState,
+    FulfillmentPublicationRequest,
     FulfillmentRef,
     HostedSettlementAsyncClient,
-    ExpectedAuthorities,
-    IdentityScheme as HostedIdentityScheme,
     OperationRequest,
     Principal,
-    REQUEST_PROTOCOL,
-    RESPONSE_PROTOCOL,
     canonical_json,
+)
+from hosted_settlement_client import (
+    IdentityScheme as HostedIdentityScheme,
 )
 from market_identity import Signer as MarketplaceSigner
 from market_identity import TrustedIdentitySet
@@ -120,6 +123,27 @@ class HostedConditionalEscrowClient:
         ):
             raise ValueError("hosted settlement client lacks identity v2")
         self._client = client
+
+    async def publish_fulfillment(
+        self,
+        *,
+        condition_anchor: str,
+        evidence: str | None,
+    ) -> str:
+        evidence_digest = "sha256:" + hashlib.sha256(
+            (evidence or "").encode()
+        ).hexdigest()
+        operation_digest = hashlib.sha256(
+            f"{condition_anchor}\0{evidence_digest}".encode()
+        ).hexdigest()
+        result = await self._client.publish_fulfillment(
+            FulfillmentPublicationRequest(
+                request_id=f"fulfillment:{operation_digest}",
+                condition_anchor=condition_anchor,
+                evidence_digest=evidence_digest,
+            )
+        )
+        return result.attestation_uid
 
     async def verify_contract_ready(
         self,

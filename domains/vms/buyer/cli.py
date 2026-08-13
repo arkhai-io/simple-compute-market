@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import typer
-
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms.domain_runtime import market_domain
 from core_buyer.cli import build_app
@@ -16,15 +15,15 @@ from market_core import (
 )
 
 from . import buy_cli as buy_module
+from . import negotiate_cli as negotiate_module
+from . import service_cli as service_module
+from . import settle_cli as settle_module
 from .chain_cli import chain_app
 from .config_cli import config_app
-from .logs_cli import logs_app
-from .network_cli import network_app
-from . import negotiate_cli as negotiate_module
-from . import settle_cli as settle_module
-from . import service_cli as service_module
 from .escrow_cli import escrow_app
 from .listing_cli import listing_app
+from .logs_cli import logs_app
+from .network_cli import network_app
 
 
 def register(app: typer.Typer) -> None:
@@ -35,7 +34,7 @@ def register(app: typer.Typer) -> None:
     app.add_typer(
         config_app,
         name="config",
-        help="Inspect or edit the buyer.toml (path/show/get/set/init-user).",
+        help="Inspect, edit, initialize, or migrate the buyer.toml.",
     )
     app.add_typer(
         logs_app,

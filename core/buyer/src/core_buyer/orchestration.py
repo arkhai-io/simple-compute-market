@@ -21,18 +21,20 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any
 
 from market_core.schemas import SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
+
 from core_buyer.orchestrator import (
     DEFAULT_HTTP_TIMEOUT,
     BuyConfig,
     BuyConstraints,
     BuyResult,
-    NegotiationResult,
     NegotiateFn,
+    NegotiationResult,
     SettleFn,
     fetch_listing_dict,
 )
@@ -42,7 +44,6 @@ from .negotiation_client import (
     _authenticated_json,
     negotiate_with_seller,
 )
-
 
 DEFAULT_SETTLEMENT_POLL_INTERVAL = 5.0
 DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
@@ -277,7 +278,7 @@ def wait_for_settlement(
     signer: Signer,
     poll_interval: float = DEFAULT_SETTLEMENT_POLL_INTERVAL,
     total_timeout: float = DEFAULT_SETTLEMENT_TIMEOUT,
-    on_poll: Optional[Callable[[int, dict], None]] = None,
+    on_poll: Callable[[int, dict], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
 ) -> dict[str, Any]:
@@ -344,8 +345,8 @@ def make_negotiate_hook(
     decode_escrow_proposal: DecodeOpaquePayloadFn,
     decode_escrow_terms: DecodeOpaquePayloadFn,
     max_negotiation_rounds: int,
-    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
-    chain: Optional[list[Any]],
+    derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
+    chain: list[Any] | None,
 ) -> NegotiateFn:
     """Build the schema-instantiated negotiate hook.
 
@@ -393,8 +394,8 @@ def _negotiate_matches(
     decode_escrow_proposal: DecodeOpaquePayloadFn,
     decode_escrow_terms: DecodeOpaquePayloadFn,
     max_negotiation_rounds: int,
-    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]],
-    chain: Optional[list[Any]],
+    derive_prices: Callable[[dict[str, Any]], tuple[int, int]] | None,
+    chain: list[Any] | None,
     on_event: Callable[[str, dict], None],
 ) -> NegotiationResult:
     attempts: list[dict[str, Any]] = []
@@ -558,6 +559,13 @@ def _negotiate_matches(
         # (default in the buyer's chain) handles seller-pin-mutation
         # vetoes per round — no separate post-agreement audit is needed.
 
+        from .deal_helpers import settlement_acceptance_fields
+
+        accepted_settlement = settlement_acceptance_fields(
+            negotiation_id=outcome.negotiation_id or "",
+            selection=outcome.settlement_selection,
+            plan=outcome.settlement_plan,
+        )
         _emit_neg(
             "negotiation_completed",
             seller_url=seller_url,
@@ -570,11 +578,7 @@ def _negotiate_matches(
                 if outcome.accepted_escrow_proposal is not None
                 else None
             ),
-            settlement_plan=(
-                outcome.settlement_plan.model_dump()
-                if outcome.settlement_plan is not None
-                else None
-            ),
+            **accepted_settlement,
             accepted_escrow_terms=(
                 [_opaque_payload_dict(term) for term in outcome.accepted_escrow_terms]
                 if outcome.accepted_escrow_terms is not None
@@ -616,13 +620,13 @@ def _negotiate_matches(
 
 def make_settle_hook(
     *,
-    config: "BuyConfig",
+    config: BuyConfig,
     unit_count: float,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     settlement_recipient: SettlementRecipientFn,
     build_settlement_payload: BuildSettlementPayloadFn,
-    confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
+    confirm_settlement: Callable[[AgreedTerms, dict[str, Any]], bool] | None,
     settlement_submit_max_attempts: int,
     settlement_submit_retryable: Callable[[RuntimeError], bool],
     settlement_poll_interval: float,
@@ -669,7 +673,7 @@ def _settle_one(
     *,
     match: dict[str, Any],
     outcome: NegotiationOutcome,
-    config: "BuyConfig",
+    config: BuyConfig,
     unit_count: float,
     duration_seconds: int,
     build_settlement_payload: BuildSettlementPayloadFn,
@@ -678,13 +682,13 @@ def _settle_one(
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     settlement_recipient: SettlementRecipientFn,
-    confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
+    confirm_settlement: Callable[[AgreedTerms, dict[str, Any]], bool] | None,
     settlement_poll_interval: float,
     settlement_total_timeout: float,
     sleep: Callable[[float], None],
     on_event: Callable[[str, dict], None],
     attempts: list[dict[str, Any]],
-) -> "BuyResult":
+) -> BuyResult:
     """Drive escrow → submit → poll for the policy's chosen winner.
 
     Lifted out of the run_buy loop so the negotiate-vs-settle split is

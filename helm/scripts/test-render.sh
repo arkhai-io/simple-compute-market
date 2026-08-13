@@ -6,12 +6,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/.."
 RELEASE="${RELEASE:-arkhai-test}"
+"${PYTHON:-python3}" "$SCRIPT_DIR/check-settlement-schema-drift.py"
 
 DEFAULT_RENDERED="$(mktemp)"
 FIAT_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"
+DUAL_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED"' EXIT
+trap 'rm -f "$DEFAULT_RENDERED" "$FIAT_RENDERED" "$EVM_RENDERED" "$DUAL_RENDERED" "$OVERLAP_RENDERED"' EXIT
 
 helm template "$RELEASE" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" >"$DEFAULT_RENDERED" 2>/dev/null
@@ -21,6 +23,17 @@ helm template "$RELEASE-fiat" "$CHART_DIR" \
 helm template "$RELEASE-evm" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" >"$EVM_RENDERED" 2>/dev/null
+helm template "$RELEASE-dual" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
+    --set-json 'storefront.agents[0].config.settlement.priority=["fiat.stripe.v1","alkahest.v1"]' \
+    --set 'storefront.agents[0].config.settlement.stripe.enabled=true' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.base_url=https://hosted-settlement.example.test' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.expected_manifest_digest=sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.expected_api_version=0.1.0' \
+    --set 'storefront.agents[0].config.settlement.stripe.expected_schema_version=4' \
+    --set-json 'storefront.agents[0].config.settlement.stripe.authority.principals=[{"scheme":"eip191","identifier":"0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63"}]' \
+    --set-json 'storefront.agents[0].config.settlement.stripe.required_capabilities=["conditional-escrow.v1","stripe-connect-separate-charges-transfers.v1","portable-attestation.v1","eas-arbiter.v1","scheme-tagged-identities.v1","account-owner-admission.v1","account-owner-rotation.v1","account-owner-retirement.v1","signer-injected-client.v1","provider-neutral-seller-onboarding.v1"]' >"$DUAL_RENDERED" 2>/dev/null
 helm template "$RELEASE-overlap" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
@@ -33,8 +46,8 @@ helm template "$RELEASE-overlap" "$CHART_DIR" \
     --set-string 'storefront.agents[0].config.registryAuthority.principals[1].identifier=0x90f79bf6eb2c4f870365e785982e1f101e93b906' \
     --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].scheme=eip191' \
     --set-string 'storefront.agents[0].config.seller.provisioning.identity.principals[1].identifier=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' \
-    --set-string 'storefront.agents[0].config.hostedSettlement.expectedAuthority.principals[1].scheme=eip191' \
-    --set-string 'storefront.agents[0].config.hostedSettlement.expectedAuthority.principals[1].identifier=0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63' >"$OVERLAP_RENDERED" 2>/dev/null
+    --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].scheme=eip191' \
+    --set-string 'storefront.agents[0].config.settlement.stripe.authority.principals[1].identifier=0x1c5a77d9fa7ef466951b2f01f724bca3a5820b63' >"$OVERLAP_RENDERED" 2>/dev/null
 
 errors=0
 fail() {
@@ -94,6 +107,19 @@ expect_render_failure() {
     fi
 }
 
+expect_override_failure() {
+    local base_fixture="$1"
+    local label="$2"
+    shift 2
+    if helm template "$RELEASE-invalid" "$CHART_DIR" \
+        --values "$CHART_DIR/values.yaml" \
+        --values "$base_fixture" "$@" >/dev/null 2>&1; then
+        fail "$label"
+    else
+        pass "$label"
+    fi
+}
+
 DEFAULT_CONFIGMAP="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/configmap\.yaml')"
 DEFAULT_DEPLOYMENT="$(extract_section "$DEFAULT_RENDERED" 'storefront/templates/deployment\.yaml')"
 FIAT_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'storefront/templates/configmap\.yaml')"
@@ -101,6 +127,7 @@ FIAT_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'storefront/templates/deploy
 FIAT_REGISTRY="$(extract_section "$FIAT_RENDERED" 'registry/templates/deployment\.yaml')"
 EVM_CONFIGMAP="$(extract_section "$EVM_RENDERED" 'storefront/templates/configmap\.yaml')"
 EVM_DEPLOYMENT="$(extract_section "$EVM_RENDERED" 'storefront/templates/deployment\.yaml')"
+DUAL_CONFIGMAP="$(extract_section "$DUAL_RENDERED" 'storefront/templates/configmap\.yaml')"
 PROVISIONING_CONFIGMAP="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/configmap\.yaml')"
 PROVISIONING_DEPLOYMENT="$(extract_section "$FIAT_RENDERED" 'provisioning/templates/deployment\.yaml')"
 OVERLAP_CONFIGMAP="$(extract_section "$OVERLAP_RENDERED" 'storefront/templates/configmap\.yaml')"
@@ -110,18 +137,25 @@ expect_present "$DEFAULT_CONFIGMAP" 'storefront\.toml:' "storefront ConfigMap re
 expect_present "$DEFAULT_DEPLOYMENT" 'mountPath: +/etc/arkhai/storefront\.toml' "storefront mounts public config"
 expect_present "$DEFAULT_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "signer credential uses environment injection"
 expect_present "$DEFAULT_DEPLOYMENT" 'name: +\"?arkhai-bob-identity\"?' "signer credential references a Secret"
+expect_present "$DEFAULT_CONFIGMAP" 'priority = \[\]' "new defaults have empty settlement priority"
+expect_absent "$DEFAULT_CONFIGMAP" '\[Settlement\.(stripe|alkahest)\]' "new defaults install no mechanism subsection"
 expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "default manifests contain no signing key fields"
 expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
 
 expect_present "$FIAT_CONFIGMAP" 'scheme = \"ed25519\"' "fiat profile renders Ed25519 scheme"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\"' "fiat profile renders the configured public storefront principal"
+expect_present "$FIAT_CONFIGMAP" '\[Settlement\]' "fiat profile renders canonical Settlement root"
+expect_present "$FIAT_CONFIGMAP" 'priority = \["fiat\.stripe\.v1"\]' "fiat profile selects only Stripe"
+expect_present "$FIAT_CONFIGMAP" '\[Settlement\.stripe\]' "fiat profile renders Stripe subsection"
 expect_present "$FIAT_CONFIGMAP" 'expected_schema_version = 4' "fiat profile pins hosted schema 4"
 expect_present "$FIAT_CONFIGMAP" 'scheme-tagged-identities\.v1' "fiat profile pins scheme-tagged hosted identity"
 expect_present "$FIAT_CONFIGMAP" 'signer-injected-client\.v1' "fiat profile pins signer-injected hosted client"
 expect_present "$FIAT_CONFIGMAP" 'account-owner-retirement\.v1' "fiat profile pins owner retirement"
 expect_present "$FIAT_DEPLOYMENT" 'name: +\"?fiat-bob-marketplace-identity\"?' "fiat signer comes from a Secret reference"
-expect_absent "$FIAT_CONFIGMAP" '\[wallet\]|\[chains\.' "fiat storefront config omits wallet and chains"
+expect_absent "$FIAT_CONFIGMAP" '\[Wallet\]|\[Chains\.|rpc_url|(^|[[:space:]])(provider|webhook|database|migration)[[:space:]]*=' "fiat storefront config omits EVM and authority-provider configuration"
+expect_absent "$FIAT_CONFIGMAP" 'hostedSettlement|hosted_settlement|settlement\.hosted' "fiat storefront config rejects legacy hierarchy"
 expect_absent "$FIAT_DEPLOYMENT" 'wait-for-rpc|CHAIN_ID|RPC_URL' "fiat storefront pod omits chain readiness"
+expect_absent "$FIAT_DEPLOYMENT" 'STOREFRONT_SETTLEMENT__HOSTED|HOSTED_SETTLEMENT' "fiat storefront pod emits no legacy settlement environment"
 expect_absent "$FIAT_REGISTRY" 'CHAIN_ID|RPC_URL' "fiat registry pod omits chain configuration"
 expect_present "$FIAT_REGISTRY" 'name: +REGISTRY_AUTHORITY_SCHEME' "fiat registry renders its public signer scheme"
 expect_present "$FIAT_REGISTRY" 'value: +\"?NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y\"?' "fiat registry renders its public authority"
@@ -134,11 +168,11 @@ expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +0EqyMnQrtKs6E2i9RhXk5tAiS
 expect_present "$PROVISIONING_CONFIGMAP" 'identifier: +5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' "fiat provisioning pins a distinct administrator principal"
 expect_present "$PROVISIONING_DEPLOYMENT" 'name: +ARKHAI_IDENTITY_CREDENTIAL' "fiat provisioning injects its signer credential"
 expect_present "$PROVISIONING_DEPLOYMENT" 'name: +\"?fiat-provisioning-identity\"?' "fiat provisioning signer is Secret-referenced"
-expect_present "$FIAT_CONFIGMAP" '\[identity\.service_peers\.provisioning_default\]' "fiat storefront renders provisioning service-peer trust"
+expect_present "$FIAT_CONFIGMAP" '\[Identity\.service_peers\.provisioning_default\]' "fiat storefront renders provisioning service-peer trust"
 expect_present "$FIAT_CONFIGMAP" 'site_id = \"default\"' "fiat storefront binds provisioning callbacks to the default site"
 expect_present "$FIAT_CONFIGMAP" '\[provisioning\.identity\]' "fiat storefront pins provisioning response authority"
 expect_present "$FIAT_CONFIGMAP" 'identifier = \"xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI\"' "fiat storefront trusts the provisioning principal"
-expect_present "$FIAT_CONFIGMAP" '\[identity\.administrators\.operator\]' "fiat storefront renders explicit administrator trust"
+expect_present "$FIAT_CONFIGMAP" '\[Identity\.administrators\.operator\]' "fiat storefront renders explicit administrator trust"
 expect_present "$FIAT_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\", identifier = \"5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g\" \}\]' "fiat storefront administrator is principal-bound and distinct from its service signer"
 expect_present "$FIAT_CONFIGMAP" '\[registry\.authorities\.\"http://arkhai-test-fiat-registry:8080\"\]' "fiat storefront pins registry response authority by URL"
 expect_present "$FIAT_CONFIGMAP" 'authority = \"registry-a\"' "fiat storefront pins the stable registry authority id separately from its URL"
@@ -150,7 +184,12 @@ expect_present "$FIAT_RENDERED" 'image: +[^[:space:]]+@sha256:444444444444444444
 expect_absent "$FIAT_RENDERED" 'kind: +Secret|sshPrivateKey|golden_root_ssh_password|frp_dashboard_password' "fiat chart renders only pre-existing Secret references"
 
 expect_present "$EVM_CONFIGMAP" 'scheme = \"eip191\"' "EVM profile renders explicit EIP-191 scheme"
-expect_present "$EVM_CONFIGMAP" '\[chains\.anvil\]' "EVM profile renders explicit chain"
+expect_present "$EVM_CONFIGMAP" '\[Settlement\.alkahest\]' "EVM profile renders canonical Alkahest mechanism"
+expect_present "$EVM_CONFIGMAP" 'priority = \["alkahest\.v1"\]' "EVM profile selects only Alkahest"
+expect_present "$EVM_CONFIGMAP" '\[Chains\.anvil\]' "EVM profile renders explicit chain"
+expect_present "$DUAL_CONFIGMAP" 'priority = \["fiat\.stripe\.v1", "alkahest\.v1"\]' "dual profile preserves canonical priority"
+expect_present "$DUAL_CONFIGMAP" '\[Settlement\.stripe\]' "dual profile renders Stripe"
+expect_present "$DUAL_CONFIGMAP" '\[Settlement\.alkahest\]' "dual profile renders Alkahest"
 expect_present "$OVERLAP_CONFIGMAP" 'principals = \[\{ scheme = \"ed25519\"[^]]+\}, \{ scheme = \"eip191\"' "overlap profile renders ordered two-principal storefront trust"
 expect_present "$OVERLAP_PROVISIONING_CONFIGMAP" 'identifier: +0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc' "overlap profile renders second provisioning administrator principal"
 expect_present "$EVM_CONFIGMAP" 'chain_id = 31337' "EVM profile renders explicit chain ID"
@@ -174,6 +213,22 @@ expect_render_failure \
 expect_render_failure \
     "$CHART_DIR/fixtures/invalid-missing-hosted-capability-values.yaml" \
     "missing hosted identity capability fails schema/render"
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "legacy hosted values fail schema/render" \
+    --set 'storefront.agents[0].config.hostedSettlement.enabled=true'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "provider fields fail marketplace schema/render" \
+    --set-string 'storefront.agents[0].config.settlement.stripe.webhook_secret=forbidden'
+expect_override_failure \
+    "$CHART_DIR/fixtures/fiat-ed25519-values.yaml" \
+    "image and config schema mismatch fails render" \
+    --set 'storefront.image.settlementConfigSchemaVersion=2'
+expect_override_failure \
+    "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
+    "Alkahest without wallet Secret fails schema/render" \
+    --set-string 'storefront.agents[0].secret.secretName='
 
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2

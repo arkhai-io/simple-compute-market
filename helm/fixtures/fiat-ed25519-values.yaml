@@ -99,7 +99,6 @@ storefront:
           dbPath: /var/lib/arkhai/agent.db
           logFilePath: ./logs/fiat-bob.log
           resourcesCsvPath: ""
-          sshPublicKey: ""
           enableEventQueue: false
           provisioning:
             mode: mock
@@ -113,30 +112,35 @@ storefront:
               - escrow_shape_guard
               - bisection
           integrations: {}
-        hostedSettlement:
-          enabled: true
-          baseUrl: https://hosted-settlement.example.test
-          authorityId: hosted-authority
-          environment: test
-          expectedAuthority:
-            principals:
-              - scheme: ed25519
-                identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
-          expectedManifestDigest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          contractVersion: 0.1.0
-          expectedSchemaVersion: 4
-          requestTimeoutSeconds: 10
-          preflightTimeoutSeconds: 5
-          allowInsecureLoopback: false
-          requiredCapabilities:
-            - account-owner-retirement.v1
-            - conditional-escrow.v1
-            - stripe-connect-separate-charges-transfers.v1
-            - portable-attestation.v1
-            - eas-arbiter.v1
-            - scheme-tagged-identities.v1
-            - account-owner-admission.v1
-            - account-owner-rotation.v1
-            - signer-injected-client.v1
-            - provider-neutral-seller-onboarding.v1
-          resolvers: {}
+        settlement:
+          schema_version: 1
+          priority: ["fiat.stripe.v1"]
+          stripe:
+            enabled: true
+            base_url: https://hosted-settlement.example.test
+            authority_id: hosted-authority
+            environment: test
+            authority:
+              principals:
+                - scheme: ed25519
+                  identifier: 6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM
+            expected_manifest_digest: sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e
+            expected_api_version: 0.1.0
+            expected_schema_version: 4
+            required_capabilities:
+              - account-owner-retirement.v1
+              - conditional-escrow.v1
+              - stripe-connect-separate-charges-transfers.v1
+              - portable-attestation.v1
+              - eas-arbiter.v1
+              - scheme-tagged-identities.v1
+              - account-owner-admission.v1
+              - account-owner-rotation.v1
+              - signer-injected-client.v1
+              - provider-neutral-seller-onboarding.v1
+            currency: usd
+            request_timeout_seconds: 10.0
+            preflight_timeout_seconds: 5.0
+            allow_insecure_loopback: false
+            condition_profiles: {}
+            resolvers: {}

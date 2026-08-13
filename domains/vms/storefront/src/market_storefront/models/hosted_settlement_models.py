@@ -27,6 +27,8 @@ class SettlementPublicResponse(BaseModel):
     claimant_principal: Identity
     obligation_ref: str
     status: str
+    condition_anchor: str | None = None
+    fulfillment_ref: str | None = None
     action: dict[str, Any] | None = None
     action_kind: str | None = None
     action_expires_at_unix: int | None = None

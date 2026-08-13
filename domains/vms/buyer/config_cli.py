@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Mapping
+from typing import Any
 
 import typer
-
 from market_config.config_loader import (
     get_dotted,
     load_user_config,
@@ -12,9 +14,29 @@ from market_config.config_loader import (
     user_config_file,
     write_user_config,
 )
-
+from market_config.settlement_migration import (
+    BUYER_MIGRATION_COMMAND,
+    SettlementMigrationError,
+    format_migration_result,
+    migrate_settlement_config,
+    reject_legacy_settlement_path,
+)
+from market_settlement_runtime import SettlementRole
 
 config_app = typer.Typer(no_args_is_help=True)
+
+
+def _validate_settlement_candidate(
+    document: Mapping[str, Any], role: SettlementRole
+) -> None:
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import SettlementConfigurationRegistry
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    registry.resolve(document.get("Settlement", {}), role=role)
 
 
 @config_app.command("path")
@@ -62,6 +84,11 @@ def config_set(
     float-looking strings → float, otherwise left as strings. Use quotes around
     strings that look numeric if you want to keep them as text.
     """
+    try:
+        reject_legacy_settlement_path(key, command=BUYER_MIGRATION_COMMAND)
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
@@ -101,41 +128,61 @@ def config_get(
         typer.echo(str(val))
 
 
+@config_app.command("migrate")
+def config_migrate(
+    scope: str = typer.Option(..., "--scope", help="Configuration scope to migrate."),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Preview redacted settlement changes without writing.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Validate, back up, and atomically write the migrated file.",
+    ),
+    backup: bool = typer.Option(
+        False,
+        "--backup",
+        help="Create the required same-directory backup in write mode.",
+    ),
+) -> None:
+    """Migrate a legacy buyer configuration through an explicit clean cutover."""
+
+    if scope != "settlement":
+        typer.secho("Only --scope settlement is supported.", err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+    try:
+        result = migrate_settlement_config(
+            user_config_file(),
+            role="buyer",
+            check=check,
+            write=write,
+            backup=backup,
+            environ=os.environ,
+            validator=_validate_settlement_candidate,
+        )
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    for line in format_migration_result(result):
+        typer.echo(line)
+
+
 _INIT_USER_TEMPLATE = """\
 # arkhai buyer config — see `market config path` for this file's location
 # Public marketplace identity is required. Signing material is never written
 # here: inject it through the ARKHAI_IDENTITY_CREDENTIAL secret environment
-# variable. Hosted-fiat Ed25519 operation needs no [wallet] or [chains] table.
+# variable. Hosted-fiat Ed25519 operation needs no EVM wallet or chain tables.
 
-[identity.principal]
+[Identity]
 # scheme = "ed25519"
 # identifier = "<unpadded-base64url-public-key>"
 
-# EVM mechanism credentials only. Omit this entire table for fiat.stripe.v1.
-[wallet]
-# address = "0x..."
-# private_key = "0x..."
 
 [provisioning]
 # ssh_public_key = "ssh-ed25519 AAAA... user@host"
 
-# One [chains.<name>] table per chain the buyer wants to transact on.
-# A single buy/negotiate run targets one chain — the buyer picks it from
-# the intersection of this config and the listing's accepted_escrows,
-# either interactively or via `--chain <name>` (required with --yes when
-# there's more than one match). The table key is the canonical name used
-# in alkahest_py + the registry's accepted_escrows[].chain_name field.
-
-[chains.ethereum_sepolia]
-# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
-# chain_id = 11155111                          # optional; auto-fills for the canonical chain names
-                                                # (anvil | base_sepolia | ethereum_sepolia |
-                                                # ethereum_mainnet | filecoin_calibration).
-# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
-
-# Add additional chains by uncommenting and customizing:
-# [chains.base_sepolia]
-# rpc_url = "https://sepolia.base.org"
 
 [registry]
 # urls = ["http://localhost:8080"]             # one or more indexer URLs to discover listings from.
@@ -167,8 +214,34 @@ _INIT_USER_TEMPLATE = """\
                                                 # deadline are cancelled and the lowest agreed price among
                                                 # those that completed wins. Unset = wait for all.
 
-[settlement]
-# mechanism_priority = ["alkahest.v1", "fiat.stripe.v1"]
+[Settlement]
+schema_version = 1
+priority = []
+
+[Settlement.stripe]
+enabled = false
+# base_url = "https://settlement.example"
+# authority_id = "hosted-authority"
+# environment = "production"
+# expected_manifest_digest = "sha256:<released-manifest-digest>"
+# expected_api_version = "0.1.0"
+# expected_schema_version = 4
+# required_capabilities = []
+# request_timeout_seconds = 10.0
+# preflight_timeout_seconds = 5.0
+# allow_insecure_loopback = false
+# [Settlement.stripe.authority]
+# principals = [
+#   { scheme = "ed25519", identifier = "<authority-public-key>" },
+# ]
+
+[Settlement.alkahest]
+enabled = false
+# address_config_path = "/path/to/alkahest.json"
+# oracle_gated = false
+# trusted_oracle_addresses = []
+# interruptible = false
+# interruptible_oracle_addresses = []
 
 [negotiation]
 # policies = ["buyer_escrow_shape_guard", "bisection"]
@@ -188,6 +261,19 @@ _INIT_USER_TEMPLATE = """\
 #                                              # when `policies` is absent)
 """
 
+_EVM_RESOURCE_TEMPLATE = """\
+
+# Shared EVM resources are separate from mechanism policy and are omitted
+# unless `market config init-user --include-evm-resources` is requested.
+[Wallet]
+# address = "0x..."
+# private_key = "0x..."
+
+[Chains.ethereum_sepolia]
+# rpc_url = "https://sepolia.infura.io/v3/<project_id>"
+# chain_id = 11155111
+"""
+
 
 @config_app.command("init-user")
 def config_init_user(
@@ -195,6 +281,11 @@ def config_init_user(
         False,
         "--overwrite",
         help="Replace an existing buyer.toml instead of refusing.",
+    ),
+    include_evm_resources: bool = typer.Option(
+        False,
+        "--include-evm-resources",
+        help="Include optional [Wallet] and [Chains] placeholders for EVM mechanisms.",
     ),
 ) -> None:
     """Scaffold the buyer.toml with placeholders for every known key.
@@ -213,6 +304,9 @@ def config_init_user(
         raise typer.Exit(1)
 
     user_config_dir().mkdir(parents=True, exist_ok=True)
-    path.write_text(_INIT_USER_TEMPLATE)
+    template = _INIT_USER_TEMPLATE
+    if include_evm_resources:
+        template += _EVM_RESOURCE_TEMPLATE
+    path.write_text(template)
     typer.echo(f"Wrote {path}")
     typer.echo("Edit it, or use `market config set <key> <value>` to populate.")

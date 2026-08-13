@@ -6,21 +6,29 @@ import json
 import os
 import tempfile
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from market_identity import Identity, IdentityScheme, REQUEST_PROTOCOL, Signer
+from market_identity import REQUEST_PROTOCOL, Identity, IdentityScheme, Signer
 
 RUN_LOG_VERSION = 2
 _FORBIDDEN_SECRET_FIELDS = {
+    "admin_api_key",
+    "api_key",
     "buyer_private_key",
+    "config_snapshot",
+    "database_url",
     "identity_credential",
     "private_key",
+    "provider_secret",
+    "resolved_config",
+    "settlement_config",
     "signer",
     "signer_secret",
+    "webhook_secret",
 }
 _RESERVED_EVENT_FIELDS = {
     "event",
@@ -251,7 +259,7 @@ class RunLog:
         self.principal = principal
 
     @classmethod
-    def start(cls, *, principal: Identity, **input_fields: Any) -> "RunLog":
+    def start(cls, *, principal: Identity, **input_fields: Any) -> RunLog:
         """Begin a fresh run without accepting or serializing signer material."""
 
         run_id = _new_run_id()
@@ -262,7 +270,7 @@ class RunLog:
         return log
 
     @classmethod
-    def open(cls, run_id: str, *, signer: Signer) -> "RunLog":
+    def open(cls, run_id: str, *, signer: Signer) -> RunLog:
         """Open a recovery log only when the available signer owns it."""
 
         path = runs_dir() / f"{run_id}.jsonl"

@@ -117,12 +117,20 @@ The same scheme-neutral role lifecycle supports wallet-free Ed25519 discovery, n
 
 See the [marketplace identity contract](../../openspec/specs/marketplace-identity/spec.md) and its [architecture](../../openspec/specs/marketplace-identity/architecture.md).
 
+### Settlement configuration
+
+Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe` and `alkahest` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
+
+Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication derives options from every enabled ready registration in configured order; buyer policy ranks only compatible advertised survivors. Priority applies before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
+
+Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md) and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+
 ## Runtime service map
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│                    Settlement mechanism                      │
-│          EVM / Alkahest today; other codecs possible        │
+│                   Settlement mechanisms                      │
+│              Hosted fiat / Alkahest adapters                 │
 └───────────────────┬──────────────────────────┬───────────────┘
                     │                          │
           ┌─────────▼─────────┐       ┌────────▼──────────┐
@@ -432,4 +440,13 @@ Marketplace persistence contains opaque settlement references, lifecycle
 states, action kind/expiry, condition anchors, safe fulfillment references,
 and opaque receipts. Checkout URLs are retrieved for an immediate response
 and are not written to marketplace databases or run logs.
+
+Hosted system evidence preserves the same ownership boundary. The hosted
+repository publishes service conformance and a separately signed private E2E
+fixture release; this repository verifies those immutable artifacts and owns
+the consumer VM lifecycle scenarios. Hermetic finance/time/event controls stay
+inside the private fixture network and never enter marketplace packages or
+public APIs. Wallet-free portable-condition evidence, local EAS/arbiter
+conformance, and real Stripe Checkout/webhook/Connect evidence are separate
+lanes with separate release and run identities.
 

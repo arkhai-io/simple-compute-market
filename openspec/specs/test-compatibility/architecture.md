@@ -45,6 +45,28 @@ Scenario fixtures create the precise resource and policy state they assert, rema
 
 A moved or extracted boundary may require wheel-content checks, typing markers, dependency-direction tests, consumer suites, composition startup, duplicate-registration checks, and retry/idempotency coverage in addition to ordinary unit tests. Which checks apply follows the authority being changed.
 
+## Hosted settlement evidence lanes
+
+Hosted settlement uses a producer/consumer split. The independently released
+authority owns service conformance, deterministic provider behavior, private
+control artifacts, and signed release identity. This repository owns the
+marketplace lifecycle scenario and consumes only exact release artifacts.
+Neither repository imports the other's implementation source.
+
+The hermetic lane supplies deterministic finance, time, and event delivery
+behind authenticated private controls. The marketplace still reaches the
+authority and storefront only through their ordinary public clients; the
+private runner may plan outcomes and inspect a bounded normalized effect by
+stable operation reference. Clean runs remove authority, simulator, and clock
+volumes, while restart scenarios deliberately retain them.
+
+Real Stripe compatibility is a separate evidence lane because Checkout UI,
+webhook signing, connected-account readiness, provider retrieval, transfer,
+and refund behavior cannot be inferred from a simulator. Its report carries
+the consumer commit and hosted release/workflow identities independently from
+the hermetic report. Local EAS/arbiter conformance is likewise separate from
+the default wallet-free portable-condition path.
+
 ## Current limits
 
 The e2e harness predominantly uses HTTP clients and explicit test seams, but it is not yet completely external to service packages and a few scenarios retain timing or private-client dependencies. The architecture therefore states the desired boundary only where current tests establish it and treats full harness extraction as separate work.

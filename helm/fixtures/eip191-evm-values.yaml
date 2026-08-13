@@ -96,7 +96,6 @@ storefront:
           dbPath: /var/lib/arkhai/agent.db
           logFilePath: ./logs/evm-bob.log
           resourcesCsvPath: /app/src/market_storefront/data/kvm1-machine.csv
-          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
           enableEventQueue: false
           provisioning:
             mode: mock
@@ -110,21 +109,20 @@ storefront:
               - escrow_shape_guard
               - bisection
           integrations: {}
-        chain:
-          name: anvil
-          alkahestAddressConfigPath: /app/src/market_storefront/data/alkahest_anvil_addresses.json
-        hostedSettlement:
-          enabled: false
-          contractVersion: 0.1.0
-          expectedSchemaVersion: 4
-          requiredCapabilities:
-            - conditional-escrow.v1
-            - stripe-connect-separate-charges-transfers.v1
-            - account-owner-retirement.v1
-            - portable-attestation.v1
-            - eas-arbiter.v1
-            - scheme-tagged-identities.v1
-            - account-owner-admission.v1
-            - account-owner-rotation.v1
-            - signer-injected-client.v1
-            - provider-neutral-seller-onboarding.v1
+        settlement:
+          schema_version: 1
+          priority: ["alkahest.v1"]
+          alkahest:
+            enabled: true
+            address_config_path: /app/src/market_storefront/data/alkahest_anvil_addresses.json
+            oracle_gated: false
+            trusted_oracle_addresses: []
+            interruptible: false
+            interruptible_oracle_addresses: []
+        wallet:
+          address: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          ssh_public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+        chains:
+          anvil:
+            rpc_url: http://arkhai-node-operator-dev-env:8545
+            chain_id: 31337

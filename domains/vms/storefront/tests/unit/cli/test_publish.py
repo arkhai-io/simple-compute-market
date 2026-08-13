@@ -8,8 +8,10 @@ from core_storefront.publication_runner import (
     PublicationCycleResult,
 )
 
+from tests.fixtures.publish import build_failed_resource, build_published_entry
+
 from .conftest import fake_chain
-from tests.fixtures.publish import build_published_entry, build_failed_resource
+
 
 def _publication_result(
     *,
@@ -30,6 +32,13 @@ def _publication_result(
 def _patch_publish_prereqs(monkeypatch, *, db_path: str = "/fake/agent.db") -> None:
     monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: db_path)
     monkeypatch.setattr("market_storefront.utils.config.CHAINS", {"anvil": fake_chain()})
+    monkeypatch.setattr(
+        "market_storefront.utils.config.settlement_config_mapping",
+        lambda: {
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
 
 
 def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
@@ -45,6 +54,13 @@ def test_publish_exits_when_db_not_resolvable(monkeypatch, runner, app):
 def test_publish_exits_when_no_chains_configured(monkeypatch, runner, app):
     monkeypatch.setattr("market_storefront.cli_publish._resolve_db_path", lambda _db: "/fake/agent.db")
     monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
+    monkeypatch.setattr(
+        "market_storefront.utils.config.settlement_config_mapping",
+        lambda: {
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
 
     result = runner.invoke(app, ["publish"])
 

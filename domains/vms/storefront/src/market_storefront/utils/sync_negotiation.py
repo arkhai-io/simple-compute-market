@@ -313,12 +313,14 @@ def _accepted_hosted_artifacts(
     params["payer_principal"] = buyer_principal.model_dump(mode="json")
     params["claimant_principal"] = seller_principal.model_dump(mode="json")
     plan = SettlementPlan(
+        buyer_principal=buyer_principal.model_dump(mode="json"),
+        seller_principal=seller_principal.model_dump(mode="json"),
         obligations=[
             SettlementObligation(
                 payer="buyer",
                 claimant="seller",
-                payer_principal=buyer_principal,
-                claimant_principal=seller_principal,
+                payer_principal=buyer_principal.model_dump(mode="json"),
+                claimant_principal=seller_principal.model_dump(mode="json"),
                 amount=agreed_amount,
                 asset=str(option.get("asset") or ""),
                 expiration_unix=accepted.expiration_unix,
@@ -326,19 +328,11 @@ def _accepted_hosted_artifacts(
                 mechanism=accepted.mechanism,
                 params=params,
             )
-        ]
+        ],
     )
-    plan_payload = plan.model_dump()
-    payer_value = buyer_principal.model_dump(mode="json")
-    claimant_value = seller_principal.model_dump(mode="json")
-    obligation = plan_payload["obligations"][0]
-    obligation["payer_principal"] = payer_value
-    obligation["claimant_principal"] = claimant_value
-    plan_payload["buyer_principal"] = payer_value
-    plan_payload["seller_principal"] = claimant_value
     return {
         "settlement_selection": accepted.model_dump(),
-        "settlement_plan": plan_payload,
+        "settlement_plan": plan.model_dump(),
     }
 
 
@@ -768,8 +762,8 @@ async def start_sync_negotiation(
             else proposal_dict
         ),
         provision_terms=(
-            vm_message_terms.model_dump(mode="json")
-            if vm_message_terms is not None
+            provision_terms.model_dump(mode="json")
+            if provision_terms is not None
             else None
         ),
         opening_sender_principal=buyer_principal,

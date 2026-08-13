@@ -67,6 +67,12 @@ Rotation preserves the stable authority subject. A site authority, storefront ad
 
 The storefront validates and migrates listing sellers, negotiation parties and messages, accepted settlement plans, heartbeat parties, obligation parties, administrators, service peers, replay reservations, stage events, claims, and audit actors as one service-local transaction. It cross-checks listing ownership, storefront URL, party relations, embedded principals, and uniqueness of active bindings before retiring address-only columns. Stable listing, negotiation, obligation, fulfillment, service-peer, rotation, and operation identities survive the conversion. A malformed or partial identity, conflict, duplicate binding, or referential gap rolls the whole population back rather than leaving a mixed authorization boundary.
 
+## Settlement option reconciliation
+
+The storefront owns seller settlement status and administration because it is the authority that turns mechanism readiness into market-visible options. It preflights every enabled installed registration and derives deterministic options for all ready mechanisms in configured priority order. A sanitized blocker suppresses only its unready mechanism; ready peers remain publishable. If none are ready, publication fails without modifying accepted negotiations or active settlement state.
+
+Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths.
+
 ## Related contracts
 
 - [Marketplace identity](../marketplace-identity/spec.md)

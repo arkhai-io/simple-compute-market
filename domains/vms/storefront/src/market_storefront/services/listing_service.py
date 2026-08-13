@@ -11,10 +11,7 @@ at construction time so failures are visible immediately rather than per-call.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -32,54 +29,9 @@ from core_storefront.models.listing_models import (
 )
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
-from hosted_settlement_client import ConditionDescriptor
-from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
-from market_identity import Identity, Signer
-from market_hosted_settlement import MECHANISM
-from market_storefront.models.listing_models import HostedFiatSettlementConfig
+from market_identity import Signer
 
 logger = logging.getLogger(__name__)
-_CURRENCY = re.compile(r"^[a-z]{3}$")
-
-
-def _build_hosted_settlement_option(
-    *,
-    account_ref: str,
-    currency: str,
-    rate_minor_units: int,
-    condition: ConditionDescriptor,
-    claimant_principal: Identity,
-) -> SettlementOption:
-    if not account_ref or account_ref != account_ref.strip():
-        raise ValueError("hosted settlement account_ref must be non-empty and trimmed")
-    if not _CURRENCY.fullmatch(currency):
-        raise ValueError("hosted settlement currency must be lowercase ISO 4217")
-    if (
-        isinstance(rate_minor_units, bool)
-        or not isinstance(rate_minor_units, int)
-        or rate_minor_units <= 0
-    ):
-        raise ValueError("hosted settlement rate must be positive integer minor units")
-    rates = [RateValue(field="amount", per="hour", value=rate_minor_units)]
-    params = {
-        "account_ref": account_ref,
-        "claimant_principal": claimant_principal.model_dump(mode="json"),
-        "funds_flow": "separate_charges_transfers",
-        "payment_method_types": ["card"],
-        "condition": condition.model_dump(mode="json"),
-    }
-    return SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism=MECHANISM,
-            asset=currency,
-            rates=rates,
-            params=params,
-        ),
-        mechanism=MECHANISM,
-        asset=currency,
-        rates=rates,
-        params=params,
-    )
 
 
 class ListingService:
@@ -104,7 +56,7 @@ class ListingService:
         )
 
         self._token_transfers_available = bool(
-            CHAINS and get_evm_wallet_private_key()
+            self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
         )
         self._alkahest_available = bool(self._alkahest_clients)
 
@@ -267,102 +219,47 @@ class ListingService:
             f"{type(amount_value).__name__}"
         )
 
-    async def _preflight_hosted_option(
+    async def _derive_settlement_artifacts(
         self,
         request: CreateListingRequest,
-    ) -> dict[str, Any] | None:
-        raw_config = request.settlement_config
-        if raw_config is None:
-            return None
-        spec = (
-            raw_config
-            if isinstance(raw_config, HostedFiatSettlementConfig)
-            else HostedFiatSettlementConfig.model_validate(raw_config)
-        )
-        from market_storefront.utils.config import settings
-
-        settlement_config = getattr(settings, "settlement", None)
-        hosted_config = getattr(settlement_config, "hosted", None)
-        if not hosted_config or not bool(getattr(hosted_config, "enabled", False)):
-            logger.warning(
-                "[LISTINGS] Hosted settlement option suppressed: integration disabled"
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if request.settlement_options:
+            raise ValueError(
+                "settlement_options are derived from installed mechanism registrations"
             )
-            return None
         composition = self._settlement_composition_provider()
-        adapter = (
-            composition.mechanism_clients.get("fiat.stripe.v1")
-            if composition is not None
-            else None
-        )
-        if adapter is None:
-            logger.warning(
-                "[LISTINGS] Hosted settlement option suppressed: adapter unavailable"
+        if composition is None:
+            raise RuntimeError("settlement composition is not initialized")
+        resources: dict[str, Any] = {
+            "accepted_escrows": list(request.accepted_escrows),
+            "claimant_principal": self._marketplace_signer.identity,
+        }
+        if request.settlement_config is not None:
+            spec = (
+                request.settlement_config.model_dump(mode="python")
+                if hasattr(request.settlement_config, "model_dump")
+                else dict(request.settlement_config)
             )
-            return None
-
-        profiles = getattr(hosted_config, "condition_profiles", {}) or {}
-        if hasattr(profiles, "to_dict"):
-            profiles = profiles.to_dict()
-        profile = (
-            profiles.get(spec.condition_profile) if isinstance(profiles, dict) else None
-        )
+            resources.update(spec)
+            resolver_id = spec.get("resolver_id")
+            if resolver_id is not None:
+                stripe = composition.settlement_config.mechanism_config("stripe")
+                profiles = getattr(stripe, "condition_profiles", {}) if stripe else {}
+                condition = profiles.get(spec.get("condition_profile"))
+                configured = (
+                    condition.evaluator.resolver_id if condition is not None else None
+                )
+                if resolver_id != configured:
+                    raise ValueError(
+                        "listing resolver does not match configured condition profile"
+                    )
         try:
-            condition = ConditionDescriptor.model_validate(profile)
-            configured_resolver = condition.evaluator.resolver_id
-            if spec.resolver_id is not None and spec.resolver_id != configured_resolver:
-                raise ValueError("listing resolver does not match configured profile")
-            expected_manifest = str(
-                getattr(hosted_config, "expected_manifest_digest", "") or ""
+            accepted, options, _readiness = await composition.publication_artifacts(
+                resources
             )
-            expected_contract = str(
-                getattr(hosted_config, "contract_version", "") or ""
-            )
-            expected_schema = int(
-                getattr(hosted_config, "expected_schema_version", 0) or 0
-            )
-            if not expected_manifest or not expected_contract or expected_schema != 4:
-                raise ValueError("hosted release pin is incomplete")
-            required = {
-                "conditional-escrow.v1",
-                "stripe-connect-separate-charges-transfers.v1",
-                "portable-attestation.v1",
-                "eas-arbiter.v1",
-            }
-            configured_required = (
-                getattr(hosted_config, "required_capabilities", ()) or ()
-            )
-            required.update(str(value) for value in configured_required)
-            request_hash = hashlib.sha256(
-                json.dumps(
-                    {
-                        "account_ref": spec.account_ref,
-                        "condition_profile": spec.condition_profile,
-                    },
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ).encode()
-            ).hexdigest()
-            await adapter.verify_ready(
-                account_ref=spec.account_ref,
-                expected_manifest_digest=expected_manifest,
-                expected_contract_version=expected_contract,
-                required_capabilities=tuple(sorted(required)),
-                expected_schema_version=expected_schema,
-                operation_ref=f"listing-preflight:{request_hash}",
-            )
-            option = _build_hosted_settlement_option(
-                account_ref=spec.account_ref,
-                currency=spec.currency,
-                rate_minor_units=spec.rate_minor_units,
-                condition=condition,
-                claimant_principal=self._marketplace_signer.identity,
-            )
-        except Exception:
-            logger.warning(
-                "[LISTINGS] Hosted settlement option suppressed: sanitized preflight failure"
-            )
-            return None
-        return option.model_dump(mode="json")
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
+        return accepted, options
 
     def _parse_offer_and_escrows(
         self, request: CreateListingRequest
@@ -389,28 +286,16 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
-        if not request.accepted_escrows and not (
-            request.settlement_options or request.settlement_config
-        ):
-            raise ValueError(
-                "at least one accepted escrow or settlement input is required"
-            )
+        if not request.accepted_escrows and request.settlement_config is None:
+            raise ValueError("at least one settlement input is required")
         demands = [
             d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
             for d in (request.demands or [])
         ]
-        settlement_options: list[dict[str, Any]] = []
-        for raw_option in request.settlement_options or []:
-            option = SettlementOption.model_validate(raw_option)
-            if option.mechanism == "fiat.stripe.v1":
-                raise ValueError(
-                    "fiat.stripe.v1 options require settlement_config preflight input"
-                )
-            settlement_options.append(option.model_dump(mode="json"))
         return (
             offer_resource,
             list(request.accepted_escrows),
-            settlement_options,
+            [],
             demands,
         )
 
@@ -432,14 +317,12 @@ class ListingService:
         )
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
-        offer, accepted_escrows, settlement_options, demands = (
+        offer, _accepted_inputs, _settlement_inputs, demands = (
             self._parse_offer_and_escrows(request)
         )
-        hosted_option = await self._preflight_hosted_option(request)
-        if hosted_option is not None:
-            settlement_options.append(hosted_option)
-        if not accepted_escrows and not settlement_options:
-            raise ValueError("no settlement option passed authority preflight")
+        accepted_escrows, settlement_options = (
+            await self._derive_settlement_artifacts(request)
+        )
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),
@@ -492,6 +375,48 @@ class ListingService:
                 "message", f"Listing {listing_id} ({publish_result.get('status')})"
             ),
         )
+
+    async def reconcile_settlement_options(
+        self,
+        listing_id: str,
+        *,
+        resources: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Refresh one listing's ready options without touching accepted Terms."""
+        from domains.vms.listings.models import Listing
+
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
+
+        stored = await self._db.load_listing(listing_id=listing_id)
+        if stored is None:
+            raise ValueError(f"listing {listing_id!r} does not exist")
+        composition = self._settlement_composition_provider()
+        if composition is None:
+            raise RuntimeError("settlement composition is not initialized")
+        option_resources: dict[str, Any] = {
+            "accepted_escrows": list(stored.get("accepted_escrows") or ()),
+            "claimant_principal": self._marketplace_signer.identity,
+        }
+        if resources:
+            option_resources.update(resources)
+        accepted_escrows, settlement_options, _readiness = (
+            await composition.publication_artifacts(option_resources)
+        )
+        await self._db.update_listing(
+            listing_id=listing_id,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+        )
+        updated = {
+            **stored,
+            "accepted_escrows": accepted_escrows,
+            "settlement_options": settlement_options,
+        }
+        listing = Listing.model_validate(updated)
+        await publish_order_to_registry(listing)
+        return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:
         """Mark the listing closed locally; if registry discovery is enabled,

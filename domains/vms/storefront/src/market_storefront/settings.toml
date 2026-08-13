@@ -54,84 +54,41 @@ claims_sweep_interval = 30
 # Advertised buyer-heartbeat cadence (seconds) echoed by the deals
 # endpoint; gating collection on heartbeats is lifecycle policy (I.5).
 heartbeat_interval_seconds = 60
-# Oracle-gated collection (lifecycle work item I.5): publish listings
-# whose escrow demand is TrustedOracleArbiter(trusted_oracle_address) so
-# collection waits for a third party both sides trust to arbitrate()
-# true — assumed at end of lease unless a dispute is raised. The
-# storefront's own wallet is rejected as the oracle: the party
-# collecting cannot also be the party deciding collection. Buyer
-# heartbeats (cadence above) are the dispute evidence.
-oracle_gated_listings = false
-trusted_oracle_address = ""
-# Interruptible / spot collection: publish listings whose escrow demand
-# routes through ERC20Splitter. The buyer escrows the max amount; on
-# interruption, the refund authority declares the seller/refund split.
-# Empty interruptible_oracle_address means this storefront's wallet,
-# which is intentional for the current trusted-seller MVP.
-interruptible_listings = false
-interruptible_oracle_address = ""
 default_vm_host               = "kvm1"
 # Marketplace identity (public). Signing material is supplied only through
 # the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
-[identity.principal]
+[Identity.principal]
 scheme     = ""
 identifier = ""
 
 # Every provisioning callback peer is an explicit public trust binding.
 # Configure one table per stable peer; site_id must be a configured
 # [capacity.sites] key (or "default" for the single-site form).
-# [identity.service_peers.provisioning_default]
+# [Identity.service_peers.provisioning_default]
 # role = "service"
 # site_id = "default"
 # principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
 
 # Stable administrator subjects use the same scheme-tagged public principals.
-# [identity.administrators.operator]
+# [Identity.administrators.operator]
 # principals = [{ scheme = "ed25519", identifier = "<public-key-base64url>" }]
 
 
-[settlement.hosted]
-# Disabled by default. When enabled, startup verifies the exact manifest/API
-# capability pin before accepting traffic. The service owns Stripe/EAS/RPC
-# secrets; this consumer table contains only public trust and request settings.
-enabled = false
-base_url = ""
-authority_id = ""
-environment = ""
-expected_manifest_digest = ""
-contract_version = "0.1.0"
-expected_schema_version = 4
-required_capabilities = [
-  "conditional-escrow.v1",
-  "stripe-connect-separate-charges-transfers.v1",
-  "portable-attestation.v1",
-  "eas-arbiter.v1",
-  "scheme-tagged-identities.v1",
-  "account-owner-admission.v1",
-  "account-owner-rotation.v1",
-  "account-owner-retirement.v1",
-  "signer-injected-client.v1",
-  "provider-neutral-seller-onboarding.v1",
-]
-timeout_seconds = 10.0
-preflight_timeout_seconds = 5.0
-allow_insecure_loopback = false
+[Settlement]
+schema_version = 1
+priority = []
 
-[settlement.hosted.authority]
-principals = []
+# Mechanism subsections are intentionally absent from new defaults. Operators
+# add [Settlement.stripe] and/or [Settlement.alkahest] explicitly; generated
+# role configuration supplies every typed field and the exact capability pins.
+# Hosted consumer configuration contains only public client/trust policy.
+# Provider, webhook, database, migration, EAS, and RPC service configuration is
+# authority-owned and is rejected from [Settlement.stripe].
 
-# Operator overlays define [settlement.hosted.condition_profiles.<name>] using
-# the released ConditionDescriptor wire shape and
-# [settlement.hosted.resolvers.<resolver_id>] with only a configured chain_name
-# and evidence_mode. Negotiated listing data never supplies RPC URLs or keys.
-
-# [wallet] and [chains.<name>] are optional EVM-mechanism settings supplied
-# by operator overlays. A storefront that only advertises fiat.stripe.v1
-# leaves them absent. Alkahest listings require wallet.address,
-# wallet.private_key, and a selected chain with:
-#   rpc_url                       (required)
-#   chain_id                      (optional for canonical chain names)
-#   alkahest_address_config_path  (optional, file deployments only)
+# [Wallet] and [Chains.<name>] are optional EVM resources supplied by operator
+# overlays. A storefront that only advertises fiat.stripe.v1 leaves them absent.
+# Private wallet material belongs only in storefront.secrets.toml. Alkahest
+# requires Wallet.address plus a selected Chains entry with rpc_url and chain_id.
 
 [registry]
 # Leave empty by default. Any user-supplied list at a higher overlay

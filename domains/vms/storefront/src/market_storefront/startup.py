@@ -17,7 +17,6 @@ from core_storefront.app_startup import (
 
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
-    CHAINS,
     settings,
 )
 from market_storefront.utils.logging_config import setup_file_logging
@@ -27,49 +26,6 @@ setup_file_logging(settings.log_file_path or None, settings.log_level)
 logger = logging.getLogger(__name__)
 
 
-async def _probe_chain_addresses() -> None:
-    """For each configured chain, eth_getCode-check the alkahest addresses."""
-    if not CHAINS:
-        return
-    from market_alkahest.alkahest import resolve_alkahest_address_config
-    from market_alkahest.chain_probe import probe_addresses
-
-    for chain in CHAINS.values():
-        addresses: dict[str, str] = {}
-        try:
-            cfg = resolve_alkahest_address_config(
-                chain.name,
-                config_path=chain.alkahest_address_config_path,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[STARTUP] chain=%s could not resolve alkahest config: %s",
-                chain.name,
-                exc,
-            )
-            cfg = None
-        if cfg is not None:
-            for path, label in (
-                (
-                    ("arbiters_addresses", "recipient_arbiter"),
-                    f"{chain.name}/alkahest.recipient_arbiter",
-                ),
-                (("arbiters_addresses", "eas"), f"{chain.name}/alkahest.eas"),
-                (
-                    ("erc20_addresses", "escrow_obligation_default"),
-                    f"{chain.name}/alkahest.erc20_escrow_obligation",
-                ),
-            ):
-                obj: object | None = cfg
-                for attr in path:
-                    obj = getattr(obj, attr, None)
-                    if obj is None:
-                        break
-                if isinstance(obj, str) and obj.strip():
-                    addresses[label] = obj
-        if not addresses:
-            continue
-        await probe_addresses(chain.rpc_url, addresses)
 
 
 async def _preflight_provisioning() -> None:
@@ -209,16 +165,16 @@ def _start_negotiation_watchdog() -> None:
     )
 
 
-async def _preflight_hosted_settlement() -> None:
+async def _preflight_settlement_mechanisms() -> None:
     import market_storefront.container as _container
     from market_storefront.settlement_composition import (
-        verify_hosted_contract_ready,
+        preflight_settlement_mechanisms,
     )
 
     composition = _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
-    await verify_hosted_contract_ready(composition)
+    await preflight_settlement_mechanisms(composition)
 
 
 def _start_settlement_servicing() -> None:
@@ -301,14 +257,13 @@ async def _startup_tasks() -> None:
                 _seed_resources_if_empty,
                 error_message="[STARTUP] Resource seeding failed: %s",
             ),
-            StorefrontStartupStep("probe_chain_addresses", _probe_chain_addresses),
             StorefrontStartupStep(
                 "negotiation_watchdog",
                 _start_negotiation_watchdog,
             ),
             StorefrontStartupStep(
-                "hosted_settlement_preflight",
-                _preflight_hosted_settlement,
+                "settlement_mechanism_preflight",
+                _preflight_settlement_mechanisms,
             ),
             StorefrontStartupStep("settlement_servicing", _start_settlement_servicing),
             StorefrontStartupStep("fulfillment_resume", _start_fulfillment_resume),

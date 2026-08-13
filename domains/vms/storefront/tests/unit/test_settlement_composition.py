@@ -5,15 +5,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from market_hosted_settlement import adapt_expected_authorities
-from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_hosted_settlement import StripeResolverConfig
+from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
 
+from market_storefront.models.hosted_settlement_models import SettlementPublicResponse
 from market_storefront.settlement_composition import (
     VmFulfillmentInput,
     VmProjectionContext,
-    build_vm_settlement_composition,
+    _hosted_evidence_input,
+    build_storefront_settlement_registry,
     fulfill_vm_settlement,
+    hosted_settlement_projection,
     persist_vm_settlement_outcome,
     prepare_vm_settlement,
     reserve_vm_settlement_start,
@@ -23,12 +26,8 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
-_HOSTED_AUTHORITY_SIGNER = Ed25519Signer(b"\x33" * 32)
 _BUYER = _BUYER_SIGNER.identity
 _SELLER = _SELLER_SIGNER.identity
-_HOSTED_AUTHORITIES = TrustedIdentitySet(
-    identities=(_HOSTED_AUTHORITY_SIGNER.identity,)
-)
 
 
 def _obligation(index: int = 0) -> dict:
@@ -85,55 +84,61 @@ def db(tmp_path):
     return SQLiteClient(db_path=str(tmp_path / "vm-settlement.db"))
 
 
-def test_hosted_composition_injects_signer_and_trusted_authorities(
-    db, monkeypatch
-):
-    captured = {}
-    hosted_config = SimpleNamespace(
-        enabled=True,
-        base_url="https://hosted-settlement.test",
-        authority_id="hosted-test",
-        environment="test",
-        expected_manifest_digest="sha256:test-manifest",
-        contract_version="0.1.0",
-        expected_schema_version=4,
-        required_capabilities=(),
-        timeout_seconds=10.0,
-        allow_insecure_loopback=False,
-        authority={
-            "principals": [
-                principal.model_dump(mode="json")
-                for principal in _HOSTED_AUTHORITIES.identities
-            ]
-        },
+def test_storefront_installs_both_mechanism_registrations():
+    registry = build_storefront_settlement_registry()
+
+    assert [registration.mechanism_id for registration in registry.registrations] == [
+        "alkahest.v1",
+        "fiat.stripe.v1",
+    ]
+
+
+def test_hosted_evidence_resolver_accepts_typed_configuration():
+    evidence_client = object()
+    resolver = StripeResolverConfig(
+        chain_name="fiat.stripe.v1",
+        evidence_mode="portable-remote.v1",
+    )
+    composition = SimpleNamespace(
+        settlement_config=SimpleNamespace(
+            mechanism_config=lambda _key: SimpleNamespace(
+                resolvers={"vm-portable": resolver}
+            )
+        ),
+        evidence_clients={"fiat.stripe.v1": evidence_client},
+    )
+    condition = SimpleNamespace(evaluator=SimpleNamespace(resolver_id="vm-portable"))
+
+    assert _hosted_evidence_input(
+        composition=composition,
+        condition=condition,
+    ) == ("vm-portable", "portable-remote.v1", evidence_client)
+
+
+@pytest.mark.asyncio
+async def test_hosted_projection_exposes_portable_fulfillment_binding():
+    record = SimpleNamespace(
+        mechanism_ref="settlement-1",
+        obligation_ref="obligation-1",
+        payer_principal=_BUYER,
+        claimant_principal=_SELLER,
+        mechanism_status="ready",
+        reclaim_state="pending",
+        collection_state="pending",
+        materialization_state="succeeded",
+        condition_state="pending",
+        fulfillment_ref="0xfulfillment",
+        condition_anchor="0xanchor",
+        buyer_action=None,
+    )
+    projection = await hosted_settlement_projection(
+        composition=SimpleNamespace(mechanism_clients={}),
+        record=record,
     )
 
-    def hosted_client(config):
-        captured["config"] = config
-        return SimpleNamespace()
-
-    monkeypatch.setattr(
-        "market_storefront.settlement_composition._hosted_config",
-        lambda: hosted_config,
-    )
-    monkeypatch.setattr(
-        "market_storefront.settlement_composition.HostedSettlementAsyncClient",
-        hosted_client,
-    )
-    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
-
-    composition = build_vm_settlement_composition(
-        sqlite_client=db,
-        alkahest_clients={},
-        marketplace_signer=_SELLER_SIGNER,
-    )
-
-    assert composition.local_principal == _SELLER
-    assert captured["config"].signer.principal.identifier == _SELLER.identifier
-    assert captured["config"].expected_authorities == adapt_expected_authorities(
-        _HOSTED_AUTHORITIES
-    )
-    assert "fiat.stripe.v1" in composition.mechanism_clients
+    response = SettlementPublicResponse.model_validate(projection)
+    assert response.condition_anchor == "0xanchor"
+    assert response.fulfillment_ref == "0xfulfillment"
 
 
 @pytest.mark.asyncio
@@ -286,9 +291,7 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
     )
 
     assert prepared.mechanism_ref == "settlement-1"
-    assert prepared.obligations[0]["payer_principal"] == _BUYER.model_dump(
-        mode="json"
-    )
+    assert prepared.obligations[0]["payer_principal"] == _BUYER.model_dump(mode="json")
     assert prepared.obligations[0]["claimant_principal"] == _SELLER.model_dump(
         mode="json"
     )

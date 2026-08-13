@@ -20,49 +20,31 @@ Assumes the seller agent is already running (mirror of `market buy`).
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import subprocess
 import time
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich import box
-
-from storefront_client import (
-    StorefrontClientError,
-    SyncStorefrontClient,
-)
-from registry_client import (
-    ListingRequest,
-    SyncRegistryClient,
-    UpdateListingRequest,
+from arkhai_vms.storefront_adapter import (
+    vm_candidate_skip_keys,
+    vm_offer_resource_for_listing,
 )
 from core_storefront.publication_command import (
     StorefrontPublicationCommandCallbacks,
     StorefrontPublicationCommandConfig,
     run_storefront_publication_command,
 )
-from core_storefront.publication_sources import PublicationSource
 from core_storefront.publication_runner import (
     PublicationCommandResult,
     PublicationSourceSelection,
 )
-
-from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
-from .publication_wiring import (
-    BareMetalPublicationSourceCallbacks,
-    VmPublicationSourceCallbacks,
-    build_bare_metal_publication_source_kwargs,
-    build_bare_metal_storefront_publication_selection,
-    build_storefront_publication_selection,
-    build_vm_publication_source_kwargs,
-)
+from core_storefront.publication_sources import PublicationSource
+from domains.vms.listings.pricing_resolution import GpuPricingFields
 from domains.vms.listings.reconciler import (
     PoolHintResolutionSettings,
     available_compute_slices,
@@ -73,11 +55,31 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
-from domains.vms.listings.pricing_resolution import GpuPricingFields
-from arkhai_vms.storefront_adapter import (
-    vm_candidate_skip_keys,
-    vm_offer_resource_for_listing,
+from registry_client import (
+    ListingRequest,
+    SyncRegistryClient,
+    UpdateListingRequest,
 )
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from storefront_client import (
+    StorefrontClientError,
+    SyncStorefrontClient,
+)
+
+from .cli_common import _resolve_db_path, resolve_storefront_url
+from .publication_wiring import (
+    BareMetalPublicationSourceCallbacks,
+    VmPublicationSourceCallbacks,
+    build_bare_metal_publication_source_kwargs,
+    build_bare_metal_storefront_publication_selection,
+    build_storefront_publication_selection,
+    build_vm_publication_source_kwargs,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_max_duration_seconds(value: Any) -> int | None:
@@ -90,7 +92,7 @@ def _normalize_max_duration_seconds(value: Any) -> int | None:
     return seconds if seconds > 0 else None
 
 
-def _import_csv(csv_path: str, db: Optional[str]) -> None:
+def _import_csv(csv_path: str, db: str | None) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
     Uses ``sys.executable`` (the python running this CLI) and locates
@@ -140,6 +142,7 @@ def _capacity_snapshot_sync() -> list[dict[str, Any]] | None:
     import asyncio
 
     from market_site_client import SiteCapacityClient
+
     from market_storefront.services.capacity_client import _capacity_settings
     from market_storefront.utils.config import (
         get_provisioning_authorities,
@@ -192,6 +195,7 @@ def _site_pool_projection_sync() -> dict[str, list[dict[str, Any]]] | None:
     import asyncio
 
     from market_site_client import SiteCapacityClient
+
     from market_storefront.services.capacity_client import _capacity_settings
     from market_storefront.utils.config import (
         get_provisioning_authorities,
@@ -237,6 +241,7 @@ def _site_capacity_buckets_sync() -> dict[str, list[dict[str, Any]]] | None:
     import asyncio
 
     from market_site_client import SiteCapacityClient
+
     from market_storefront.services.capacity_client import _capacity_settings
     from market_storefront.utils.config import (
         get_provisioning_authorities,
@@ -440,6 +445,8 @@ def _publish_offer(
     accepted_escrows: list[dict],
     demands: list[dict],
     max_duration_seconds: int | None,
+    *,
+    settlement_config: dict[str, Any] | None = None,
 ) -> dict:
     """POST /listings/create and return the callback response mapping."""
     from .utils.config import resolve_marketplace_signer
@@ -455,12 +462,13 @@ def _publish_offer(
             resp = client.create_listing(
                 offer=offer,
                 accepted_escrows=accepted_escrows,
+                settlement_config=settlement_config,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
@@ -533,12 +541,8 @@ def _publish_existing_listing_to_registries(
                 api_key=_registry_auth_token(url),
                 signer=signer,
                 caller_role="seller",
-                expected_registries=authorities[
-                    normalize_registry_url(url)
-                ].principals,
-                registry_authority=authorities[
-                    normalize_registry_url(url)
-                ].authority,
+                expected_registries=authorities[normalize_registry_url(url)].principals,
+                registry_authority=authorities[normalize_registry_url(url)].authority,
             ) as client:
                 client.publish_listing(request)
                 client.update_listing(listing_id, update)
@@ -638,7 +642,7 @@ def _close_order(
             resp = client.close_listing(order_id)
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "root_agent_response": resp.root_agent_response,
@@ -769,8 +773,6 @@ def _publication_adapters() -> tuple[PublicationSource, ...]:
     return _publication_source_selection().build_sources()
 
 
-
-
 def _open_publication_keys(db_path: str) -> set[str]:
     return _publication_source_selection().open_keys(db_path)
 
@@ -778,9 +780,9 @@ def _open_publication_keys(db_path: str) -> set[str]:
 def _resolve_pricing(
     res: dict,
     *,
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
-) -> tuple[Optional[str], Optional[str]]:
+    default_min_price: str | None,
+    default_token_address: str | None,
+) -> tuple[str | None, str | None]:
     """Pick the (min_price, token_address) for a resource: row > defaults > None.
 
     Returns (min_price, token_address). Both fall through to defaults
@@ -816,7 +818,7 @@ def _scale_template_entries(
     the entry references an unknown chain or a token whose metadata
     can't be resolved on that chain.
     """
-    from market_alkahest.token import resolve_token, TokenResolutionError
+    from market_alkahest.token import TokenResolutionError, resolve_token
 
     scaled: list[dict[str, Any]] = []
     for raw_entry in entries:
@@ -997,31 +999,32 @@ def _demands_for_chains(
     wallet_address: str,
 ) -> list[dict[str, Any]]:
     """Published demand set per the seller's settlement posture."""
-    from market_storefront.utils.config import settings
+    from market_storefront.utils.config import settlement_config_mapping
 
-    interruptible = bool(getattr(settings, "interruptible_listings", False))
-    if getattr(settings, "oracle_gated_listings", False):
+    alkahest = settlement_config_mapping().get("alkahest", {})
+    if not isinstance(alkahest, dict):
+        alkahest = {}
+    interruptible = bool(alkahest.get("interruptible", False))
+    if alkahest.get("oracle_gated", False):
         if interruptible:
             raise ValueError(
-                "oracle_gated_listings and interruptible_listings are mutually "
-                "exclusive settlement postures"
+                "Settlement.alkahest oracle and interruptible policies "
+                "are mutually exclusive"
             )
-        oracle = str(getattr(settings, "trusted_oracle_address", "") or "")
+        trusted = alkahest.get("trusted_oracle_addresses", [])
+        oracle = str(trusted[0] if isinstance(trusted, list) and trusted else "")
         if not oracle:
             raise ValueError(
-                "oracle_gated_listings requires trusted_oracle_address — a "
-                "third party both sides trust. The seller's own wallet is "
-                "not a valid oracle: the party collecting cannot also be "
-                "the party deciding collection."
+                "Settlement.alkahest.oracle_gated requires a trusted oracle"
             )
         if oracle.lower() == wallet_address.lower():
             raise ValueError(
-                "trusted_oracle_address equals this storefront's wallet; "
-                "a self-oracle gates nothing — name a third party."
+                "Settlement.alkahest trusted oracle equals the storefront wallet"
             )
         return _heartbeat_oracle_demands_for_chains(chains, chain_names, oracle)
     if interruptible:
-        oracle = str(getattr(settings, "interruptible_oracle_address", "") or "")
+        trusted = alkahest.get("interruptible_oracle_addresses", [])
+        oracle = str(trusted[0] if isinstance(trusted, list) and trusted else "")
         return _splitter_demands_for_chains(
             chains,
             chain_names,
@@ -1031,19 +1034,20 @@ def _demands_for_chains(
 
 
 def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
-    from market_storefront.utils.config import settings
+    from market_storefront.utils.config import settlement_config_mapping
 
-    return vm_offer_resource_for_listing(
-        res,
-        interruptible=bool(getattr(settings, "interruptible_listings", False)),
+    alkahest = settlement_config_mapping().get("alkahest", {})
+    interruptible = isinstance(alkahest, dict) and bool(
+        alkahest.get("interruptible", False)
     )
+    return vm_offer_resource_for_listing(res, interruptible=interruptible)
 
 
 def _default_alkahest_payload(
     *,
     resource: dict[str, Any],
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
+    default_min_price: str | None,
+    default_token_address: str | None,
     default_max_duration_seconds: int | None,
     wallet_address: str,
     publish_priceless: bool,
@@ -1090,7 +1094,8 @@ def _default_alkahest_payload(
             f"invalid token {token_address!r} — must be a 0x ERC-20 address "
             f"(symbol shorthand is no longer supported)"
         )
-    from market_alkahest.token import resolve_token, TokenResolutionError
+    from market_alkahest.token import TokenResolutionError, resolve_token
+
     from .utils.config import CHAINS
 
     if not CHAINS:
@@ -1192,8 +1197,8 @@ def _default_alkahest_payload(
 def _alkahest_payload_for_candidate(
     *,
     pricing_resource: dict[str, Any],
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
+    default_min_price: str | None,
+    default_token_address: str | None,
     default_max_duration_seconds: int | None,
     wallet_address: str,
     publish_priceless: bool,
@@ -1208,13 +1213,62 @@ def _alkahest_payload_for_candidate(
     )
 
 
+def _stripe_listing_input(
+    *,
+    pricing_resource: dict[str, Any],
+    stripe: dict[str, Any],
+    default_min_price: str | None,
+) -> dict[str, Any] | str:
+    min_price, _token = _resolve_pricing(
+        pricing_resource,
+        default_min_price=default_min_price,
+        default_token_address=None,
+    )
+    if min_price is None:
+        return "Stripe publication requires an explicit integer rate in minor units"
+    try:
+        rate = Decimal(str(min_price))
+    except (InvalidOperation, TypeError, ValueError):
+        return f"unparseable Stripe rate={min_price!r}; expected integer minor units"
+    if rate != rate.to_integral_value() or rate <= 0:
+        return "Stripe publication rate must be a positive integer in minor units"
+    return {
+        "account_ref": stripe.get("account_ref"),
+        "currency": stripe.get("currency"),
+        "rate_minor_units": int(rate),
+        "condition_profile": stripe.get("condition_profile"),
+        "resolver_id": stripe.get("resolver_id"),
+    }
+
+
+def _enabled_settlement_sections() -> tuple[dict[str, Any], dict[str, Any]]:
+    from market_storefront.settlement_composition import (
+        build_storefront_settlement_registry,
+    )
+
+    from .utils.config import settlement_config_mapping
+
+    registry = build_storefront_settlement_registry()
+    settlement = registry.resolve(settlement_config_mapping(), role="seller")
+    stripe = settlement.mechanism_config("stripe")
+    alkahest = settlement.mechanism_config("alkahest")
+    return (
+        stripe.model_dump(mode="python")
+        if stripe is not None and stripe.enabled
+        else {},
+        alkahest.model_dump(mode="python")
+        if alkahest is not None and alkahest.enabled
+        else {},
+    )
+
+
 def _publish_command_round(
     *,
     db_path: str,
     base_url: str,
     wallet_address: str,
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
+    default_min_price: str | None,
+    default_token_address: str | None,
     default_max_duration_seconds: int | None,
     publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
@@ -1241,20 +1295,61 @@ def _publish_command_round(
     Returns the core publication command result with published, failed, skipped,
     and closed collections.
     """
+    stripe, alkahest = _enabled_settlement_sections()
+    listing_inputs: dict[int, dict[str, Any]] = {}
 
     def build_payload(
         adapter: PublicationSource,
         candidate: dict[str, Any],
         offer: dict[str, Any],
     ) -> tuple[list[dict], list[dict], int | None] | str:
-        return _alkahest_payload_for_candidate(
-            pricing_resource=adapter.pricing_resource(candidate, offer),
-            default_min_price=default_min_price,
-            default_token_address=default_token_address,
-            default_max_duration_seconds=default_max_duration_seconds,
-            wallet_address=wallet_address,
-            publish_priceless=publish_priceless,
+        pricing_resource = adapter.pricing_resource(candidate, offer)
+        raw_max_duration = (
+            pricing_resource.get("max_duration_seconds")
+            if pricing_resource.get("max_duration_seconds") is not None
+            else default_max_duration_seconds
         )
+        payload: tuple[list[dict], list[dict], int | None] | str = (
+            [],
+            [],
+            _normalize_max_duration_seconds(raw_max_duration),
+        )
+        if alkahest:
+            payload = _alkahest_payload_for_candidate(
+                pricing_resource=pricing_resource,
+                default_min_price=default_min_price,
+                default_token_address=default_token_address,
+                default_max_duration_seconds=default_max_duration_seconds,
+                wallet_address=wallet_address,
+                publish_priceless=publish_priceless,
+            )
+            if isinstance(payload, str) and not stripe:
+                return payload
+            if isinstance(payload, str):
+                logger.warning(
+                    "[PUBLISH] Alkahest option suppressed: %s",
+                    payload,
+                )
+                payload = (
+                    [],
+                    [],
+                    _normalize_max_duration_seconds(raw_max_duration),
+                )
+        if stripe:
+            stripe_input = _stripe_listing_input(
+                pricing_resource=pricing_resource,
+                stripe=stripe,
+                default_min_price=default_min_price,
+            )
+            if isinstance(stripe_input, str):
+                if not alkahest or isinstance(payload, str):
+                    return stripe_input
+                logger.warning("[PUBLISH] Stripe option suppressed: %s", stripe_input)
+            else:
+                listing_inputs[id(offer)] = stripe_input
+        if not alkahest and not stripe:
+            return "no settlement mechanism is enabled"
+        return payload
 
     def publish_offer(
         offer: dict[str, Any],
@@ -1263,12 +1358,22 @@ def _publish_command_round(
         max_duration_seconds: int | None,
     ) -> dict[str, Any]:
         try:
+            stripe_input = listing_inputs.pop(id(offer), None)
+            if stripe_input is None:
+                return _publish_offer(
+                    base_url,
+                    offer,
+                    accepted_escrows,
+                    demands,
+                    max_duration_seconds,
+                )
             return _publish_offer(
                 base_url,
                 offer,
                 accepted_escrows,
                 demands,
                 max_duration_seconds,
+                settlement_config=stripe_input,
             )
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
@@ -1289,19 +1394,17 @@ def _publish_command_round(
     )
 
 
-
-
 def run_watch_loop(
     *,
     db_path: str,
     base_url: str,
     wallet_address: str,
-    default_min_price: Optional[str],
-    default_token_address: Optional[str],
+    default_min_price: str | None,
+    default_token_address: str | None,
     default_max_duration_seconds: int | None,
     publish_priceless: bool = False,
     poll_interval: float,
-    console: Optional[Console] = None,
+    console: Console | None = None,
     log_silent_cycles: bool = True,
 ) -> None:
     """Long-running publish loop. Used by `publish --watch` and by `serve`.
@@ -1384,7 +1487,7 @@ def _print_publish_table(
     summary.add_column("Resource", style="bold")
     summary.add_column("GPU")
     summary.add_column("Region")
-    summary.add_column("Price/hr × Token")
+    summary.add_column("Price/hr x Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
     from market_core.schemas import accepted_token_address, primary_rate_value
@@ -1454,7 +1557,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("publish")
     def provide(
-        inventory: Optional[str] = typer.Option(
+        inventory: str | None = typer.Option(
             None,
             "--inventory",
             "-i",
@@ -1466,7 +1569,7 @@ def register(app: typer.Typer) -> None:
             "--abort-all",
             help="Close every open sell order on this agent instead of publishing. Useful on shutdown.",
         ),
-        max_duration_seconds: Optional[int] = typer.Option(
+        max_duration_seconds: int | None = typer.Option(
             None,
             "--max-duration-seconds",
             help="Override the per-listing max lease ceiling (seconds). "
@@ -1484,13 +1587,13 @@ def register(app: typer.Typer) -> None:
             "--poll-interval",
             help="Seconds between scans in --watch mode.",
         ),
-        storefront_url: Optional[str] = typer.Option(
+        storefront_url: str | None = typer.Option(
             None,
             "--storefront-url",
             "-a",
             help="Storefront base URL (default: base_url from storefront.toml).",
         ),
-        db: Optional[str] = typer.Option(
+        db: str | None = typer.Option(
             None,
             "--db",
             help="Explicit storefront SQLite DB path "
@@ -1504,7 +1607,12 @@ def register(app: typer.Typer) -> None:
         row-level price or a default are skipped (reported as failed).
         """
         console = Console()
-        from .utils.config import get_evm_wallet_address, settings
+        from .utils.config import (
+            CHAINS,
+            get_evm_wallet_address,
+            settings,
+            settlement_config_mapping,
+        )
 
         base_url = resolve_storefront_url(storefront_url, default_port=8001)
         wallet_address = get_evm_wallet_address()
@@ -1529,13 +1637,14 @@ def register(app: typer.Typer) -> None:
             default_max_duration_seconds
         )
 
-        from .utils.config import CHAINS
-
-        if not CHAINS:
+        alkahest = settlement_config_mapping().get("alkahest", {})
+        alkahest_enabled = isinstance(alkahest, dict) and bool(
+            alkahest.get("enabled", False)
+        )
+        if alkahest_enabled and not CHAINS and not abort_all:
             typer.secho(
-                "No [chains.<name>] tables configured — required to resolve "
-                "ERC-20 token metadata on chain. Add at least one chain "
-                "entry to storefront.toml.",
+                "Settlement.alkahest is enabled but no [Chains.<name>] "
+                "tables are configured.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -1598,7 +1707,7 @@ def register(app: typer.Typer) -> None:
                 typer.secho(
                     f"Inventory import failed: {exc}", err=True, fg=typer.colors.RED
                 )
-                raise typer.Exit(2)
+                raise typer.Exit(2) from exc
 
         # ------------------------------------------------------------------
         # One-shot path

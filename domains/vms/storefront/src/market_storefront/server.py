@@ -31,13 +31,6 @@ from core_storefront.stage_log import set_stage_event_db_path, stage_event
 
 import market_storefront.container as _container
 from market_storefront.domain_runtime import get_market_domain_contract
-from market_storefront.utils.config import (
-    AGENT_ID,
-    get_registry_authorities,
-    resolve_marketplace_signer,
-    settings,
-)
-from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.middleware.admin_identity import (
     administrator_identity_middleware,
     initialize_administrator_identities,
@@ -47,6 +40,13 @@ from market_storefront.middleware.service_peer_auth import (
     initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
+from market_storefront.utils.config import (
+    AGENT_ID,
+    get_registry_authorities,
+    resolve_marketplace_signer,
+    settings,
+)
+from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.utils.sync_negotiation import continue_sync_negotiation
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,13 @@ def run_serve(
 
 
 def _build_alkahest_clients() -> dict:
+    from market_storefront.utils.config import CHAINS, settlement_config_mapping
+
+    alkahest = settlement_config_mapping().get("alkahest", {})
+    if not isinstance(alkahest, dict) or not alkahest:
+        return {}
+    if not bool(alkahest.get("enabled", False)) and not CHAINS:
+        return {}
     from market_storefront.services import alkahest_service
 
     return alkahest_service.build_clients()

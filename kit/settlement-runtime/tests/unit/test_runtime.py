@@ -42,12 +42,10 @@ def obligation(
     return {
         "payer": payer,
         "claimant": "seller" if payer == "buyer" else "buyer",
-        "payer_principal": (
-            payer_principal or default_payer
-        ).model_dump(mode="json"),
-        "claimant_principal": (
-            claimant_principal or default_claimant
-        ).model_dump(mode="json"),
+        "payer_principal": (payer_principal or default_payer).model_dump(mode="json"),
+        "claimant_principal": (claimant_principal or default_claimant).model_dump(
+            mode="json"
+        ),
         "amount": "10",
         "asset": "asset",
         "expiration_unix": expiration_unix,
@@ -193,6 +191,33 @@ async def test_principal_gating_and_aggregate_status(repository) -> None:
         )
 
 
+async def test_status_operation_is_shared_by_both_authorized_participants(
+    repository,
+) -> None:
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="buyer-materialize",
+    )
+
+    payer_status = await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="payer-status",
+    )
+    claimant_status = await runtime.reconcile_status(
+        obligation_ref=record.obligation_ref,
+        local_principal=SELLER,
+        worker_id="claimant-status",
+    )
+
+    assert payer_status.status == "pending"
+    assert claimant_status.status == "pending"
+
+
 async def test_eip191_principal_remains_opaque_to_the_mechanism(repository) -> None:
     client = Client()
     runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
@@ -213,9 +238,7 @@ async def test_eip191_principal_remains_opaque_to_the_mechanism(repository) -> N
         "scheme": "eip191",
         "identifier": "0x3333333333333333333333333333333333333333",
     }
-    assert not {"address", "wallet", "private_key"}.intersection(
-        stored["obligation"]
-    )
+    assert not {"address", "wallet", "private_key"}.intersection(stored["obligation"])
 
 
 async def test_uncertain_retry_reuses_operation_identity(repository) -> None:

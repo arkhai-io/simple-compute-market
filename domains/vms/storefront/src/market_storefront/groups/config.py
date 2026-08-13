@@ -9,9 +9,11 @@ buyer and seller keeps its two roles' state separate.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Mapping
+from typing import Any
 
 import typer
-
 from market_config.config_loader import (
     get_dotted,
     load_storefront_config,
@@ -21,9 +23,29 @@ from market_config.config_loader import (
     user_config_dir,
     write_user_config,
 )
-
+from market_config.settlement_migration import (
+    STOREFRONT_MIGRATION_COMMAND,
+    SettlementMigrationError,
+    format_migration_result,
+    migrate_settlement_config,
+    reject_legacy_settlement_path,
+)
+from market_settlement_runtime import SettlementRole
 
 config_app = typer.Typer(no_args_is_help=True)
+
+
+def _validate_settlement_candidate(
+    document: Mapping[str, Any], role: SettlementRole
+) -> None:
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import SettlementConfigurationRegistry
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    registry.resolve(document.get("Settlement", {}), role=role)
 
 
 @config_app.command("path")
@@ -73,6 +95,11 @@ def config_set(
     float-looking strings → float, otherwise left as strings. Use quotes around
     strings that look numeric if you want to keep them as text.
     """
+    try:
+        reject_legacy_settlement_path(key, command=STOREFRONT_MIGRATION_COMMAND)
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2) from exc
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
@@ -112,6 +139,47 @@ def config_get(
         typer.echo(json.dumps(val, indent=2, sort_keys=True))
     else:
         typer.echo(str(val))
+
+
+@config_app.command("migrate")
+def config_migrate(
+    scope: str = typer.Option(..., "--scope", help="Configuration scope to migrate."),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Preview redacted settlement changes without writing.",
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Validate, back up, and atomically write the migrated file.",
+    ),
+    backup: bool = typer.Option(
+        False,
+        "--backup",
+        help="Create the required same-directory backup in write mode.",
+    ),
+) -> None:
+    """Migrate a legacy seller configuration through an explicit clean cutover."""
+
+    if scope != "settlement":
+        typer.secho("Only --scope settlement is supported.", err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+    try:
+        result = migrate_settlement_config(
+            storefront_config_file(),
+            role="seller",
+            check=check,
+            write=write,
+            backup=backup,
+            environ=os.environ,
+            validator=_validate_settlement_candidate,
+        )
+    except SettlementMigrationError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(1) from exc
+    for line in format_migration_result(result):
+        typer.echo(line)
 
 
 _INIT_USER_TEMPLATE = """\

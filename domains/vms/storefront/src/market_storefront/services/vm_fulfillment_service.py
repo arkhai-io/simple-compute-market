@@ -6,13 +6,16 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
 from domains.vms.settlement import submit_compute_fulfillment
 
+from market_storefront.services.vm_fulfillment_planner import build_vm_fulfillment_plan
+
 logger = logging.getLogger(__name__)
+_background_tasks: set[asyncio.Task[None]] = set()
 
 StageEventFn = Callable[..., Any]
 SQLiteClientFactory = Callable[[], Any]
@@ -212,11 +215,13 @@ async def _build_vm_fulfillment_context(
     listing_id: str | None,
     seller_order_id: str | None,
     chain_configs: dict[str, Any] | None,
+    settlement_mechanism: str,
 ) -> tuple[Any, dict[str, Any]]:
     """Build the immutable VM request and its restart-recovery envelope."""
     plan = build_vm_fulfillment_plan(
         order=order,
         duration_seconds=duration_seconds,
+        settlement_mechanism=settlement_mechanism,
         chain_configs=chain_configs,
     )
     connectivity = None
@@ -320,6 +325,7 @@ async def fulfill_vm_obligation(
     listing_id: str | None = None,
     seller_order_id: str | None = None,
     chain_configs: dict[str, Any] | None = None,
+    settlement_mechanism: str = "alkahest.v1",
     base_url: str | None = None,
     get_sqlite_client: SQLiteClientFactory,
     capacity: CapacityClientLike,
@@ -349,7 +355,7 @@ async def fulfill_vm_obligation(
     vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(
-        "[ALKAHEST] Order for fulfillment: type=%s keys=%s",
+        "[SETTLEMENT] Order for fulfillment: type=%s keys=%s",
         type(order).__name__,
         sorted(order.keys()) if isinstance(order, dict) else "n/a",
     )
@@ -365,6 +371,7 @@ async def fulfill_vm_obligation(
             listing_id=listing_id,
             seller_order_id=seller_order_id,
             chain_configs=chain_configs,
+            settlement_mechanism=settlement_mechanism,
         )
         order_id = plan.order_id
         required_attributes = plan.required_attributes
@@ -511,7 +518,7 @@ async def fulfill_vm_obligation(
                     policy_err,
                 )
         logger.error(
-            "[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s",
+            "[SETTLEMENT] Provisioning failed, skipping obligation fulfillment: %s",
             error,
         )
         stage_event(
@@ -652,7 +659,9 @@ async def fulfill_vm_obligation(
                 shutdown_err,
             )
 
-    asyncio.create_task(_schedule_shutdown_best_effort())
+    shutdown_task = asyncio.create_task(_schedule_shutdown_best_effort())
+    _background_tasks.add(shutdown_task)
+    shutdown_task.add_done_callback(_background_tasks.discard)
 
     try:
         fulfillment_uid = await submit_compute_fulfillment(
@@ -662,7 +671,7 @@ async def fulfill_vm_obligation(
         )
     except Exception as error:
         logger.error(
-            "[ALKAHEST] EVENT=settlement_failed_after_provisioning "
+            "[SETTLEMENT] EVENT=settlement_failed_after_provisioning "
             "escrow_uid=%s listing_id=%s resource_id=%s capacity_reservation_id=%s "
             "error=%s",
             escrow_uid,
@@ -682,7 +691,7 @@ async def fulfill_vm_obligation(
         )
         return {
             "status": "error",
-            "message": f"On-chain fulfillment failed after provisioning: {error}",
+            "message": f"Fulfillment evidence publication failed after provisioning: {error}",
             "escrow_uid": escrow_uid,
             "connection_details": None,
             "ssh_public_key": ssh_public_key,

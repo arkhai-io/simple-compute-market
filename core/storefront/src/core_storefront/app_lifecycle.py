@@ -58,7 +58,6 @@ def build_storefront_lifespan(callbacks: StorefrontLifecycleCallbacks) -> Callab
         )
         negotiation_service = callbacks.build_negotiation_service(
             sqlite_client=sqlite_client,
-            marketplace_signer=marketplace_signer,
         )
         system_service = callbacks.build_system_service(
             sqlite_client=sqlite_client,

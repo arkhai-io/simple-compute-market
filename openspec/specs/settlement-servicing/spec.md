@@ -207,6 +207,11 @@ from them.
 - **WHEN** an authorized Ed25519 payer requests reclaim after the hosted obligation becomes eligible
 - **THEN** the mechanism-neutral runtime and hosted client submit the stable operation without resolving wallet or chain settings
 
+#### Scenario: Either participant reconciles shared status
+
+- **WHEN** the payer-facing status route and claimant-side servicing worker reconcile the same non-terminal obligation
+- **THEN** both calls share one principal-bound status operation keyed by the canonical payer and claimant pair rather than conflicting on which authorized participant initiated the poll
+
 ### Requirement: Chain credentials are mechanism-scoped
 
 A settlement adapter MAY require an EVM address, wallet, RPC endpoint, chain ID, or deployed contract only for an obligation whose selected mechanism or condition performs that EVM effect. Generic settlement carriers and hosted non-EVM obligations MUST NOT require or infer those values from marketplace principals.
@@ -229,6 +234,24 @@ The hosted settlement adapter MUST pass an injected marketplace signer through t
 
 - **WHEN** storefront startup or publication preflight sees a hosted manifest that does not advertise the configured principal scheme and contract version
 - **THEN** hosted settlement remains unavailable and no fiat option is published
+
+### Requirement: Configuration composes one settlement runtime
+
+Each composition root MUST build installed mechanism clients from the typed settlement registrations and inject them into the single mechanism-neutral settlement runtime. Enablement, priority, or mechanism-specific commands MUST NOT create a parallel lifecycle, operation journal, claim engine, retry loop, or status authority.
+
+#### Scenario: Both mechanisms are enabled
+
+- **WHEN** Alkahest and hosted Stripe registrations are ready
+- **THEN** both dispatch through the same obligation identity, operation journal, leases, retry rules, and aggregate status contract
+
+### Requirement: Mechanism configuration cannot reinterpret durable plans
+
+Mechanism configuration and readiness MAY govern new option publication and admission, but a persisted accepted plan MUST retain its canonical mechanism, exact parameters, payer/claimant direction, and stable operation identities. Recovery MUST use authoritative stored state even when that mechanism is no longer preferred or enabled for new deals.
+
+#### Scenario: Hosted mechanism is disabled after funding
+
+- **WHEN** reconciliation resumes an existing funded hosted obligation after operators disable new hosted publication
+- **THEN** the runtime continues authoritative status/collection/reclaim recovery for that obligation rather than switching or abandoning it
 
 ## Evidence
 

@@ -15,14 +15,13 @@ import json
 import sqlite3
 
 import pytest
+from market_alkahest.token import ERC20TokenMetadata, TokenResolutionError
+from market_config.config_loader import ChainConfig
 
 from market_storefront.cli_publish import (
     _publish_command_round,
     _scale_template_entries,
 )
-from market_alkahest.token import ERC20TokenMetadata, TokenResolutionError
-from market_config.config_loader import ChainConfig
-
 
 _USDC_BASE = "0x036cbd53842c5426634e7929541ec2318f3dcf7e"
 _USDC_OPT = "0x0b2c639c533813f4aa9d7837caf62653d097ff85"
@@ -58,18 +57,27 @@ def _stub_resolve_token(monkeypatch, chains):
             raise TokenResolutionError(f"untested address: {address}")
         sym, dec = _TOKEN_DECIMALS[key]
         return ERC20TokenMetadata(
-            symbol=sym, contract_address=key, decimals=dec, chain_id=chain_id,
+            symbol=sym,
+            contract_address=key,
+            decimals=dec,
+            chain_id=chain_id,
         )
 
     monkeypatch.setattr("market_alkahest.token.resolve_token", fake_resolve)
     from market_alkahest import alkahest as alkahest_mod
+
     monkeypatch.setattr(
         alkahest_mod,
         "get_recipient_arbiter",
         lambda chain_name, *, config_path=None: "0x" + "ab" * 20,
     )
     from market_storefront.utils import config as agent_config
+
     monkeypatch.setattr(agent_config, "CHAINS", chains, raising=False)
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._enabled_settlement_sections",
+        lambda: ({}, {"enabled": True}),
+    )
 
 
 def _init_db(path: str) -> None:
@@ -136,13 +144,13 @@ def _insert_resource(
 
 
 def _round_kwargs(**overrides):
-    base = dict(
-        base_url="http://agent",
-        wallet_address=_WALLET_ADDRESS,
-        default_min_price=None,
-        default_token_address=None,
-        default_max_duration_seconds=None,
-    )
+    base = {
+        "base_url": "http://agent",
+        "wallet_address": _WALLET_ADDRESS,
+        "default_min_price": None,
+        "default_token_address": None,
+        "default_max_duration_seconds": None,
+    }
     base.update(overrides)
     return base
 
@@ -153,12 +161,14 @@ def _round_kwargs(**overrides):
 
 
 def test_scale_template_entries_scales_by_decimals(chains):
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc" + "0" * 37,
-        "literal_fields": {"token": _USDC_BASE},
-        "rates": [{"field": "amount", "per": "hour", "value": "2"}],
-    }]
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc" + "0" * 37,
+            "literal_fields": {"token": _USDC_BASE},
+            "rates": [{"field": "amount", "per": "hour", "value": "2"}],
+        }
+    ]
     result = _scale_template_entries(entries, chains)
     assert len(result) == 1
     entry = result[0]
@@ -170,68 +180,80 @@ def test_scale_template_entries_scales_by_decimals(chains):
 
 
 def test_scale_template_entries_preserves_zero(chains):
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc" + "0" * 37,
-        "literal_fields": {"token": _USDC_BASE},
-        "rates": [{"field": "amount", "per": "hour", "value": "0"}],
-    }]
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc" + "0" * 37,
+            "literal_fields": {"token": _USDC_BASE},
+            "rates": [{"field": "amount", "per": "hour", "value": "0"}],
+        }
+    ]
     result = _scale_template_entries(entries, chains)
     assert result[0]["rates"][0]["value"] == "0"
 
 
 def test_scale_template_entries_unknown_chain_errors(chains):
-    entries = [{
-        "chain_name": "mars-sepolia",
-        "escrow_address": "0xabc",
-        "literal_fields": {"token": _USDC_BASE},
-        "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-    }]
+    entries = [
+        {
+            "chain_name": "mars-sepolia",
+            "escrow_address": "0xabc",
+            "literal_fields": {"token": _USDC_BASE},
+            "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+        }
+    ]
     with pytest.raises(ValueError, match="unknown chain 'mars-sepolia'"):
         _scale_template_entries(entries, chains)
 
 
 def test_scale_template_entries_unresolvable_token_errors(chains):
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc",
-        "literal_fields": {"token": "0x" + "ff" * 20},
-        "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-    }]
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc",
+            "literal_fields": {"token": "0x" + "ff" * 20},
+            "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+        }
+    ]
     with pytest.raises(ValueError, match="unresolvable on chain"):
         _scale_template_entries(entries, chains)
 
 
 def test_scale_template_entries_missing_token_errors(chains):
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc",
-        "literal_fields": {},
-        "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-    }]
-    with pytest.raises(ValueError, match="missing literal_fields.token"):
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc",
+            "literal_fields": {},
+            "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+        }
+    ]
+    with pytest.raises(ValueError, match=r"missing literal_fields.token"):
         _scale_template_entries(entries, chains)
 
 
 def test_scale_template_entries_rejects_negative(chains):
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc",
-        "literal_fields": {"token": _USDC_BASE},
-        "rates": [{"field": "amount", "per": "hour", "value": "-1"}],
-    }]
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc",
+            "literal_fields": {"token": _USDC_BASE},
+            "rates": [{"field": "amount", "per": "hour", "value": "-1"}],
+        }
+    ]
     with pytest.raises(ValueError, match="negative"):
         _scale_template_entries(entries, chains)
 
 
 def test_scale_template_entries_rejects_overprecision(chains):
     # USDC has 6 decimals; 0.0000001 would need 7.
-    entries = [{
-        "chain_name": "base-sepolia",
-        "escrow_address": "0xabc",
-        "literal_fields": {"token": _USDC_BASE},
-        "rates": [{"field": "amount", "per": "hour", "value": "0.0000001"}],
-    }]
+    entries = [
+        {
+            "chain_name": "base-sepolia",
+            "escrow_address": "0xabc",
+            "literal_fields": {"token": _USDC_BASE},
+            "rates": [{"field": "amount", "per": "hour", "value": "0.0000001"}],
+        }
+    ]
     with pytest.raises(ValueError, match="more decimals"):
         _scale_template_entries(entries, chains)
 
@@ -247,36 +269,42 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-001",
-        accepted_escrows=[{
-            "chain_name": "base-sepolia",
-            "escrow_address": "0xee" + "0" * 38,
-            "literal_fields": {"token": _USDC_BASE},
-            "rates": [{"field": "amount", "per": "hour", "value": "2"}],
-        }],
+        db,
+        "compute-001",
+        accepted_escrows=[
+            {
+                "chain_name": "base-sepolia",
+                "escrow_address": "0xee" + "0" * 38,
+                "literal_fields": {"token": _USDC_BASE},
+                "rates": [{"field": "amount", "per": "hour", "value": "2"}],
+            }
+        ],
     )
 
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
         lambda agent_url, offer, accepted_escrows, demands, *a, **k: (
-            calls.append({
-                "offer": offer,
-                "accepted_escrows": accepted_escrows,
-                "demands": demands,
-            })
+            calls.append(
+                {
+                    "offer": offer,
+                    "accepted_escrows": accepted_escrows,
+                    "demands": demands,
+                }
+            )
             or {"status": "created", "listing_id": "l1"}
         ),
     )
 
     def boom_alkahest(*a, **k):
-        pytest.fail(
-            "Template path must not call get_erc20_escrow_obligation_default"
-        )
+        pytest.fail("Template path must not call get_erc20_escrow_obligation_default")
 
     from market_alkahest import alkahest as alkahest_mod
+
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_default", boom_alkahest,
+        alkahest_mod,
+        "get_erc20_escrow_obligation_default",
+        boom_alkahest,
     )
 
     result = _publish_command_round(db_path=db, **_round_kwargs())
@@ -292,14 +320,16 @@ def test_publish_round_uses_row_templates(tmp_path, monkeypatch):
 
 
 def test_publish_round_template_multi_chain_emits_one_entry_per_chain(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The whole point of templates: a single row can pick which chains
     to publish to, instead of every row broadcasting to every chain."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-multi",
+        db,
+        "compute-multi",
         accepted_escrows=[
             {
                 "chain_name": "base-sepolia",
@@ -342,15 +372,18 @@ def test_publish_round_template_ignores_row_min_price(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-002",
+        db,
+        "compute-002",
         min_price="999",  # would scale to a huge number; must be ignored
         token=_USDC_OPT,  # different chain — must be ignored
-        accepted_escrows=[{
-            "chain_name": "base-sepolia",
-            "escrow_address": "0xee" + "0" * 38,
-            "literal_fields": {"token": _USDC_BASE},
-            "rates": [{"field": "amount", "per": "hour", "value": "5"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "base-sepolia",
+                "escrow_address": "0xee" + "0" * 38,
+                "literal_fields": {"token": _USDC_BASE},
+                "rates": [{"field": "amount", "per": "hour", "value": "5"}],
+            }
+        ],
     )
     captured: list[dict] = []
     monkeypatch.setattr(
@@ -373,13 +406,16 @@ def test_publish_round_template_bad_chain_fails_row(tmp_path, monkeypatch):
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-bad-chain",
-        accepted_escrows=[{
-            "chain_name": "ethereum",  # not in CHAINS
-            "escrow_address": "0xff" + "0" * 38,
-            "literal_fields": {"token": _USDC_BASE},
-            "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-        }],
+        db,
+        "compute-bad-chain",
+        accepted_escrows=[
+            {
+                "chain_name": "ethereum",  # not in CHAINS
+                "escrow_address": "0xff" + "0" * 38,
+                "literal_fields": {"token": _USDC_BASE},
+                "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+            }
+        ],
     )
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
@@ -396,13 +432,16 @@ def test_publish_round_template_unresolvable_token_fails_row(tmp_path, monkeypat
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-bad-token",
-        accepted_escrows=[{
-            "chain_name": "base-sepolia",
-            "escrow_address": "0xff" + "0" * 38,
-            "literal_fields": {"token": "0x" + "de" * 20},  # not in stub
-            "rates": [{"field": "amount", "per": "hour", "value": "1"}],
-        }],
+        db,
+        "compute-bad-token",
+        accepted_escrows=[
+            {
+                "chain_name": "base-sepolia",
+                "escrow_address": "0xff" + "0" * 38,
+                "literal_fields": {"token": "0x" + "de" * 20},  # not in stub
+                "rates": [{"field": "amount", "per": "hour", "value": "1"}],
+            }
+        ],
     )
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
@@ -419,13 +458,17 @@ def test_publish_round_no_template_uses_synthesized_payload(tmp_path, monkeypatc
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
-        db, "compute-legacy",
-        min_price="2", token=_USDC_BASE,
+        db,
+        "compute-legacy",
+        min_price="2",
+        token=_USDC_BASE,
     )
 
     from market_alkahest import alkahest as alkahest_mod
+
     monkeypatch.setattr(
-        alkahest_mod, "get_erc20_escrow_obligation_default",
+        alkahest_mod,
+        "get_erc20_escrow_obligation_default",
         lambda chain_name, *, config_path=None: "0x" + "cd" * 20,
     )
     captured: list[dict] = []

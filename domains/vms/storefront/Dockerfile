@@ -18,6 +18,8 @@ ENV UV_HTTP_RETRIES=10
 RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ARG DIST_FINGERPRINT=unknown
+LABEL org.arkhai.builder-dist-fingerprint="${DIST_FINGERPRINT}"
 
 # Copy the pre-built wheels from the monorepo .dist/ directory.
 # These are built on the host by `make dist` before `docker build`.
@@ -81,6 +83,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
 
+
 # ENV does not cross FROM — this stage runs uv sync too (see the builder
 # stage for why the retries are raised).
 ENV UV_HTTP_RETRIES=10
@@ -106,6 +109,10 @@ USER appuser
 WORKDIR /app
 
 EXPOSE 9993/udp
+
+# Bind cross-stage application layers to the exact internal wheel set.
+ARG DIST_FINGERPRINT=unknown
+LABEL org.arkhai.dist-fingerprint="${DIST_FINGERPRINT}"
 
 COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
@@ -144,7 +151,7 @@ COPY .dist/ /.dist/
 # resolve inside the image; every internal package installs from its
 # /.dist wheel instead.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-sources --no-dev --find-links /.dist \
+    uv sync --no-sources --no-dev --no-editable --find-links /.dist \
         --refresh-package arkhai-core \
         --refresh-package arkhai-core-storefront \
         --refresh-package arkhai-core-registry-client \
@@ -161,6 +168,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --refresh-package arkhai-bare-metal \
         --refresh-package arkhai-vms-storefront \
         --refresh-package arkhai-compute-provisioning
+
+# Fail the image build if the immutable hosted client regains a seller command
+# or any repository dependency was installed as an editable sibling source.
+RUN python -c 'import importlib.metadata as m, json; assert all(ep.name != "hosted-settlement-seller" for ep in m.entry_points(group="console_scripts")); assert all(not (json.loads(text).get("dir_info") or {}).get("editable", False) for dist in m.distributions() if (text := dist.read_text("direct_url.json")))'
 
 ARG PORT=8080
 ENV PORT=${PORT}

@@ -15,26 +15,37 @@ log_file_path       = "./logs/bob.log"
 # the CSV content is delivered through the agent Secret, not a file path.
 resources_csv_path  = "/app/resources.csv"
 
-[identity.principal]
+[Identity.principal]
 scheme = "eip191"
 identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
 
-[identity.administrators.operator]
+[Identity.administrators.operator]
 principal = { scheme = "eip191", identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc" }
 
-[identity.service_peers.provisioning_default]
+[Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
 principal = { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" }
 
-[wallet]
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+interruptible = false
+interruptible_oracle_addresses = []
+
+[Wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
 
-[chains.anvil]
+[Chains.anvil]
 rpc_url = "ws://anvil:8545"
 chain_id = 31337
-alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
 
 [registry]
 # Two registry instances: ``registry`` is the public one,

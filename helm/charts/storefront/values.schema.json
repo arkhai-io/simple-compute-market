@@ -34,6 +34,146 @@
       "properties": {
         "principals": {"$ref": "#/definitions/principals"}
       }
+    },
+    "stripeSettlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "base_url": {"type": "string", "minLength": 1},
+        "authority_id": {"type": "string", "minLength": 1},
+        "environment": {"type": "string", "minLength": 1},
+        "authority": {"$ref": "#/definitions/trustedIdentitySet"},
+        "expected_manifest_digest": {"pattern": "^sha256:[0-9a-f]{64}$"},
+        "expected_api_version": {"const": "0.1.0"},
+        "expected_schema_version": {"const": 4},
+        "required_capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1},
+          "allOf": [
+            {"contains": {"const": "scheme-tagged-identities.v1"}},
+            {"contains": {"const": "account-owner-admission.v1"}},
+            {"contains": {"const": "account-owner-retirement.v1"}},
+            {"contains": {"const": "account-owner-rotation.v1"}},
+            {"contains": {"const": "signer-injected-client.v1"}},
+            {"contains": {"const": "provider-neutral-seller-onboarding.v1"}}
+          ]
+        },
+        "account_ref": {"type": "string", "minLength": 1},
+        "currency": {"type": "string", "pattern": "^[a-z]{3}$"},
+        "condition_profile": {"type": "string", "minLength": 1},
+        "condition_profiles": {"type": "object", "additionalProperties": {"type": "object"}},
+        "resolvers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["chain_name", "evidence_mode"],
+            "properties": {
+              "chain_name": {"type": "string", "minLength": 1},
+              "evidence_mode": {"enum": ["eas.v1", "portable-remote.v1"]}
+            }
+          }
+        },
+        "request_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "preflight_timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "allow_insecure_loopback": {"type": "boolean"}
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {
+        "required": [
+          "base_url",
+          "authority",
+          "expected_manifest_digest",
+          "expected_api_version",
+          "expected_schema_version",
+          "required_capabilities"
+        ]
+      }
+    },
+    "alkahestSettlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "address_config_path": {"type": "string", "minLength": 1},
+        "oracle_gated": {"type": "boolean"},
+        "trusted_oracle_addresses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
+        },
+        "interruptible": {"type": "boolean"},
+        "interruptible_oracle_addresses": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"}
+        }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "priority"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "priority": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["fiat.stripe.v1", "alkahest.v1"]}
+        },
+        "stripe": {"$ref": "#/definitions/stripeSettlement"},
+        "alkahest": {"$ref": "#/definitions/alkahestSettlement"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"priority": {"contains": {"const": "fiat.stripe.v1"}}}},
+          "then": {
+            "required": ["stripe"],
+            "properties": {
+              "stripe": {
+                "properties": {"enabled": {"const": true}},
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"priority": {"contains": {"const": "alkahest.v1"}}}},
+          "then": {
+            "required": ["alkahest"],
+            "properties": {
+              "alkahest": {
+                "properties": {"enabled": {"const": true}},
+                "required": ["enabled"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "wallet": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": {"type": "string", "pattern": "^0x[0-9A-Fa-f]{40}$"},
+        "ssh_public_key": {"type": "string", "minLength": 1}
+      }
+    },
+    "chains": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rpc_url", "chain_id"],
+        "properties": {
+          "rpc_url": {"type": "string", "minLength": 1},
+          "chain_id": {"type": "integer", "minimum": 1}
+        }
+      }
     }
   },
   "type": "object",
@@ -47,7 +187,8 @@
             {"const": ""},
             {"pattern": "^sha256:[0-9a-f]{64}$"}
           ]
-        }
+        },
+        "settlementConfigSchemaVersion": {"type": "integer", "minimum": 1}
       }
     },
     "agents": {
@@ -109,18 +250,18 @@
               "configKey": {"type": "string", "minLength": 1},
               "privKey": false,
               "privateKey": false,
-              "hostedSettlementRequestCredential": false
+              "walletPrivateKey": false
             }
           },
           "config": {
             "type": "object",
             "required": ["registryAuthority"],
             "properties": {
-              "chain": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {"name": {"type": "string", "minLength": 1}}
-              },
+              "hostedSettlement": false,
+              "chain": false,
+              "settlement": {"$ref": "#/definitions/settlement"},
+              "wallet": {"$ref": "#/definitions/wallet"},
+              "chains": {"$ref": "#/definitions/chains"},
               "registryAuthority": {
                 "type": "object",
                 "additionalProperties": false,
@@ -129,31 +270,6 @@
                   "authority": {"type": "string", "minLength": 1},
                   "principals": {"$ref": "#/definitions/principals"}
                 }
-              },
-              "hostedSettlement": {
-                "type": "object",
-                "properties": {
-                  "enabled": {"type": "boolean"},
-                  "expectedAuthority": {"$ref": "#/definitions/trustedIdentitySet"},
-                  "contractVersion": {"const": "0.1.0"},
-                  "expectedSchemaVersion": {"const": 4},
-                  "expectedManifestDigest": {"pattern": "^(sha256:)?[0-9a-f]{64}$"},
-                  "requiredCapabilities": {
-                    "type": "array",
-                    "allOf": [
-                      {"contains": {"const": "scheme-tagged-identities.v1"}},
-                      {"contains": {"const": "account-owner-admission.v1"}},
-                      { "contains": { "const": "account-owner-retirement.v1" } },
-                      {"contains": {"const": "account-owner-rotation.v1"}},
-                      {"contains": {"const": "signer-injected-client.v1"}},
-                      {"contains": {"const": "provider-neutral-seller-onboarding.v1"}}
-                    ]
-                  }
-                },
-                "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
-                "then": {
-                  "required": ["contractVersion", "expectedSchemaVersion", "expectedManifestDigest", "expectedAuthority", "requiredCapabilities"]
-                }
               }
             }
           }
@@ -161,10 +277,23 @@
         "allOf": [
           {
             "if": {
-              "required": ["config"],
               "properties": {
-                "config": {"required": ["chain"]}
-              }
+                "config": {
+                  "properties": {
+                    "settlement": {
+                      "properties": {
+                        "alkahest": {
+                          "properties": {"enabled": {"const": true}},
+                          "required": ["enabled"]
+                        }
+                      },
+                      "required": ["alkahest"]
+                    }
+                  },
+                  "required": ["settlement"]
+                }
+              },
+              "required": ["config"]
             },
             "then": {
               "required": ["secret"],
@@ -174,6 +303,13 @@
                   "properties": {
                     "createSecret": {"const": false},
                     "secretName": {"type": "string", "minLength": 1}
+                  }
+                },
+                "config": {
+                  "required": ["wallet", "chains"],
+                  "properties": {
+                    "wallet": {"required": ["address"]},
+                    "chains": {"minProperties": 1}
                   }
                 }
               }

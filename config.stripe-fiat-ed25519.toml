@@ -5,14 +5,14 @@ db_path = "/var/lib/arkhai/agent.db"
 log_file_path = "./logs/bob.log"
 resources_csv_path = "/app/resources.csv"
 
-[identity.principal]
+[Identity.principal]
 scheme = "ed25519"
 identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
 
-[identity.administrators.operator]
+[Identity.administrators.operator]
 principals = [{ scheme = "ed25519", identifier = "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc" }]
 
-[identity.service_peers.provisioning_default]
+[Identity.service_peers.provisioning_default]
 role = "service"
 site_id = "default"
 principals = [{ scheme = "ed25519", identifier = "xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI" }]
@@ -51,13 +51,17 @@ default_min_price = "100"
 default_token_address = ""
 default_max_duration_seconds = 0
 
-[hosted_settlement]
+[Settlement]
+schema_version = 1
+priority = ["fiat.stripe.v1"]
+
+[Settlement.stripe]
 enabled = true
-base_url = "http://hosted-settlement-api:8080"
+base_url = "http://127.0.0.1:8080"
 authority_id = "local-hosted-authority"
 environment = "e2e"
-expected_manifest_digest = "sha256:a699fb8812aeaf76538a95cecad286eb5f8fff0491c17269ac5cb805f2da2a22"
-contract_version = "0.1.0"
+expected_manifest_digest = "sha256:4859b12cb8703a3c1db85c9636be903f493ae9a9ad1795ffb18a8f801a843a7e"
+expected_api_version = "0.1.0"
 expected_schema_version = 4
 required_capabilities = [
   "conditional-escrow.v1",
@@ -71,6 +75,10 @@ required_capabilities = [
   "signer-injected-client.v1",
   "provider-neutral-seller-onboarding.v1",
 ]
+currency = "usd"
+request_timeout_seconds = 10.0
+preflight_timeout_seconds = 5.0
+allow_insecure_loopback = true
 
-[settlement.hosted.authority]
+[Settlement.stripe.authority]
 principals = [{ scheme = "ed25519", identifier = "6yzxO_euOl9hQWih-wknLTl3HsS4UjcngV5GbK-O4WM" }]

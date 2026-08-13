@@ -131,6 +131,26 @@ def test_retry_is_idempotent_and_does_not_rerun_policy(services):
     assert first == second
 
 
+def test_reservation_can_schedule_its_own_exclusive_resource(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    ledger.register_resource(
+        resource_id="exclusive-host",
+        resource_type="compute.gpu",
+        total_units=1,
+        pool_id="pool-a",
+        attributes={
+            "physical_host_id": "host-a",
+            "allocation_mode": "exclusive",
+        },
+    )
+    capacity_reservation_id = _reserve(ledger)
+
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    assert resource.settlement_resource_id == "exclusive-host"
+
+
 def test_round_robin_is_deterministic_across_pools(services):
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")

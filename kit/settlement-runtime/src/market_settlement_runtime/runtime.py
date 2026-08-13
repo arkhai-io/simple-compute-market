@@ -150,9 +150,7 @@ class SettlementRuntime:
         """
         record = await self._load(obligation_ref)
         self._require_principal(record, local_principal, "claimant")
-        reserved = await self._reserve(
-            record, "fulfill", worker_id, local_principal
-        )
+        reserved = await self._reserve(record, "fulfill", worker_id, local_principal)
         if reserved is None:
             return self._outcome(record, "fulfill", "busy")
         terminal = self._terminal_outcome(record, "fulfill", reserved)
@@ -289,9 +287,7 @@ class SettlementRuntime:
             )
         mechanism_ref = self._require_mechanism_ref(record)
         client = self._client(record)
-        reserved = await self._reserve(
-            record, "status", worker_id, local_principal
-        )
+        reserved = await self._reserve(record, "status", worker_id, local_principal)
         if reserved is None:
             return self._outcome(record, "status", "busy")
         terminal = self._terminal_outcome(record, "status", reserved)
@@ -409,9 +405,7 @@ class SettlementRuntime:
             raise ValueError("obligation conditions are not ready")
         fulfillment_ref = self._require_fulfillment(record)
         client = self._client(record)
-        reserved = await self._reserve(
-            record, "collect", worker_id, local_principal
-        )
+        reserved = await self._reserve(record, "collect", worker_id, local_principal)
         if reserved is None:
             return self._outcome(record, "collect", "busy")
         terminal = self._terminal_outcome(record, "collect", reserved)
@@ -455,9 +449,7 @@ class SettlementRuntime:
         if self._clock() < float(record.obligation["expiration_unix"]):
             raise ValueError("obligation has not expired")
         client = self._client(record)
-        reserved = await self._reserve(
-            record, "reclaim", worker_id, local_principal
-        )
+        reserved = await self._reserve(record, "reclaim", worker_id, local_principal)
         if reserved is None:
             return self._outcome(record, "reclaim", "busy")
         terminal = self._terminal_outcome(record, "reclaim", reserved)
@@ -508,16 +500,12 @@ class SettlementRuntime:
         operation: str,
     ) -> None:
         if not isinstance(local_principal, Identity):
-            raise TypeError(
-                "local_principal must be a canonical marketplace identity"
-            )
+            raise TypeError("local_principal must be a canonical marketplace identity")
         if (
             local_principal != record.payer_principal
             and local_principal != record.claimant_principal
         ):
-            raise PermissionError(
-                f"only an obligation participant may {operation} it"
-            )
+            raise PermissionError(f"only an obligation participant may {operation} it")
 
     @staticmethod
     def _require_principal(
@@ -526,13 +514,9 @@ class SettlementRuntime:
         field: Literal["payer", "claimant"],
     ) -> None:
         if not isinstance(local_principal, Identity):
-            raise TypeError(
-                "local_principal must be a canonical marketplace identity"
-            )
+            raise TypeError("local_principal must be a canonical marketplace identity")
         expected = (
-            record.payer_principal
-            if field == "payer"
-            else record.claimant_principal
+            record.payer_principal if field == "payer" else record.claimant_principal
         )
         if local_principal != expected:
             raise PermissionError(
@@ -707,12 +691,20 @@ def _request_hash(
     local_principal: Identity,
     request_values: Mapping[str, Any] | None = None,
 ) -> str:
+    principal_binding: dict[str, Any]
+    if operation == "status":
+        principal_binding = {
+            "payer": record.payer_principal.model_dump(mode="json"),
+            "claimant": record.claimant_principal.model_dump(mode="json"),
+        }
+    else:
+        principal_binding = local_principal.model_dump(mode="json")
     payload = {
         "protocol": "arkhai.settlement-operation.v2",
         "obligation_ref": record.obligation_ref,
         "obligation_hash": record.obligation_hash,
         "operation": operation,
-        "principal": local_principal.model_dump(mode="json"),
+        "principal": principal_binding,
         "request": dict(request_values or {}),
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

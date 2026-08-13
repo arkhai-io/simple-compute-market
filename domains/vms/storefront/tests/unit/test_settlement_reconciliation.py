@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from market_storefront.services.listing_service import ListingService
+from tests.fake_site import TEST_MARKETPLACE_SIGNER
+
+
+@pytest.mark.asyncio
+async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms(
+    monkeypatch,
+):
+    accepted_terms = {
+        "mechanism": "fiat.stripe.v1",
+        "option_id": "accepted-option",
+    }
+    stored = {
+        "listing_id": "listing-stable",
+        "status": "open",
+        "created_at": "2026-08-12T00:00:00",
+        "updated_at": "2026-08-12T00:00:00",
+        "storefront_url": "http://seller.test",
+        "seller_principal": TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
+        "offer_resource": {
+            "resource_type": "compute",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "region": "California, US",
+            "sla": 99.0,
+            "pool_id": "pool-a",
+        },
+        "accepted_escrows": [],
+        "settlement_options": [],
+        "demands": [],
+        "max_duration_seconds": 3600,
+        "oracle_address": None,
+        "accepted_terms": accepted_terms,
+    }
+    db = SimpleNamespace(
+        load_listing=AsyncMock(return_value=stored),
+        update_listing=AsyncMock(),
+    )
+    new_option = {
+        "option_id": "newly-ready-option",
+        "mechanism": "fiat.stripe.v1",
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+        "params": {},
+    }
+    composition = SimpleNamespace(
+        publication_artifacts=AsyncMock(return_value=([], [new_option], ()))
+    )
+    publish = AsyncMock(return_value={"status": "published"})
+    monkeypatch.setattr(
+        "market_storefront.services.publication_service.publish_order_to_registry",
+        publish,
+    )
+    service = ListingService(
+        sqlite_client=db,
+        marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=lambda: composition,
+    )
+
+    result = await service.reconcile_settlement_options(
+        "listing-stable",
+        resources={"rate_minor_units": 125},
+    )
+
+    assert result["listing_id"] == "listing-stable"
+    db.update_listing.assert_awaited_once_with(
+        listing_id="listing-stable",
+        accepted_escrows=[],
+        settlement_options=[new_option],
+    )
+    assert stored["accepted_terms"] is accepted_terms
+    assert stored["accepted_terms"]["option_id"] == "accepted-option"
+    assert publish.await_args.args[0].listing_id == "listing-stable"

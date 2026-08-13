@@ -267,6 +267,14 @@ async def test_hosted_selection_is_persisted_and_materialized_as_plan(db):
         "settlement_selection": selection.model_dump()
     }
     assert thread["settlement_plan"] == response["settlement_plan"]
+    assert thread["provision_terms"] == {
+        "kind": "compute.v1",
+        "version": 1,
+        "payload": {
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-rsa AAAA",
+        },
+    }
 
 
 @pytest.mark.asyncio

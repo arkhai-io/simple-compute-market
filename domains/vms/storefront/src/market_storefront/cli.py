@@ -9,6 +9,7 @@ Subcommands:
     publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.
     escrow       Seller-side escrow lifecycle (claim, refund, show).
+    settlement    Inspect readiness and administer installed mechanisms.
     portfolio    Manage local resource portfolio data.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
@@ -16,9 +17,8 @@ Subcommands:
 
 from __future__ import annotations
 
-import asyncio
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
@@ -28,7 +28,7 @@ from .cli_publish import register as register_publish_command
 from .groups.config import config_app
 from .groups.escrow import escrow_app
 from .groups.network import network_app
-
+from .groups.settlement import settlement_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -124,10 +124,15 @@ app.add_typer(
 app.add_typer(
     config_app,
     name="config",
-    help="Inspect or edit the user config.toml (path/show/get/set/init-user).",
+    help="Inspect or edit user config (path/show/get/set/init-user/migrate).",
 )
 app.add_typer(
     escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund)."
+)
+app.add_typer(
+    settlement_app,
+    name="settlement",
+    help="Inspect readiness and administer installed settlement mechanisms.",
 )
 register_publish_command(app)
 

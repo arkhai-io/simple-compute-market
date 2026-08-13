@@ -46,6 +46,34 @@ def test_envelope_round_trip_serializes_amount_as_string():
     assert again.mechanism == "alkahest.v1"
 
 
+def test_plan_round_trip_preserves_scheme_tagged_parties() -> None:
+    buyer = {"scheme": "ed25519", "identifier": "buyer"}
+    seller = {"scheme": "ed25519", "identifier": "seller"}
+    plan = SettlementPlan(
+        buyer_principal=buyer,
+        seller_principal=seller,
+        obligations=[
+            SettlementObligation(
+                payer="buyer",
+                claimant="seller",
+                payer_principal=buyer,
+                claimant_principal=seller,
+                amount=2000,
+                asset="usd",
+                expiration_unix=4_102_444_800,
+                mechanism="fiat.stripe.v1",
+            )
+        ],
+    )
+
+    again = SettlementPlan.model_validate(plan.model_dump())
+
+    assert again.buyer_principal == buyer
+    assert again.seller_principal == seller
+    assert again.obligations[0].payer_principal == buyer
+    assert again.obligations[0].claimant_principal == seller
+
+
 def test_mechanism_is_required_on_envelope_shapes():
     with pytest.raises(ValidationError):
         SettlementObligation(

@@ -29,11 +29,17 @@ router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
 
 
 def _proposal_payload(proposal: Any, settlement_selection: Any) -> Any:
-    if proposal is not None:
+    if settlement_selection is None:
         return proposal
-    if settlement_selection is not None:
-        return {"settlement_selection": settlement_selection.model_dump()}
-    return None
+    selection_payload = settlement_selection.model_dump(mode="json")
+    if proposal is None:
+        return {"settlement_selection": selection_payload}
+    if isinstance(proposal, dict):
+        payload = dict(proposal)
+    else:
+        payload = proposal.model_dump(mode="json")
+    payload["settlement_selection"] = selection_payload
+    return payload
 
 
 @cbv(router)
@@ -83,7 +89,9 @@ class NegotiateController:
         base_url = BASE_URL_OVERRIDE or ""
         signer = _container.resolved_marketplace_signer
         if signer is None:
-            raise HTTPException(status_code=503, detail="storefront identity unavailable")
+            raise HTTPException(
+                status_code=503, detail="storefront identity unavailable"
+            )
         try:
             result = await start_sync_negotiation(
                 sqlite_client=self._db,

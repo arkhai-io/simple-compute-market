@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -8,6 +9,11 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESOLVER = REPO_ROOT / "scripts" / "resolve-review-scope.py"
+_SPEC = importlib.util.spec_from_file_location("resolve_review_scope", RESOLVER)
+assert _SPEC is not None and _SPEC.loader is not None
+resolver = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = resolver
+_SPEC.loader.exec_module(resolver)
 
 
 def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> None:
@@ -30,6 +36,7 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
         "kit/identity",
         "kit/hosted-settlement",
         "kit/settlement-runtime",
+        "kit/config",
         "kit/policy",
         "kit/site-client",
         "core/registry-client",
@@ -55,3 +62,18 @@ def test_identity_change_expands_to_every_runtime_and_deployment_consumer() -> N
     assert "dist-hosted-client" in payload["dist_targets"]
     assert "dist-storefront-client" in payload["dist_targets"]
     assert "dist-arkhai-core-registry" in payload["dist_targets"]
+
+
+
+def test_settlement_deployment_change_selects_full_wheelhouse_scope() -> None:
+    selected = resolver._projects_for_files(["helm/charts/storefront/values.yaml"])
+
+    assert selected >= {
+        "kit/config",
+        "kit/settlement-runtime",
+        "kit/hosted-settlement",
+        "kit/alkahest",
+        "core/buyer",
+        "domains/vms/buyer",
+        "domains/vms/storefront",
+    }

@@ -9,35 +9,33 @@ ListingsController router, backed by an in-memory
 SQLiteClient. This mirrors how provisioning-service tests wire a real
 FastAPI app with dependency overrides.
 """
+
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import AsyncIterator
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from storefront_client.client import StorefrontClient, StorefrontClientError
 
 import market_storefront.container as _container
+from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
-from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.utils.sqlite_client import SQLiteClient
-from storefront_client.client import StorefrontClient, StorefrontClientError
 
 _TEST_MARKETPLACE_SIGNER = Ed25519Signer(b"\x31" * 32)
 _TEST_ADMIN_SIGNER = Ed25519Signer(b"\x32" * 32)
 _TEST_BUYER_SIGNER = Ed25519Signer(b"\x33" * 32)
 _TEST_PROVISIONING_SIGNER = Ed25519Signer(b"\x34" * 32)
 _TEST_SELLER_PRINCIPAL = _TEST_MARKETPLACE_SIGNER.identity
-_TEST_PUBLISHERS = TrustedIdentitySet(
-    identities=(_TEST_MARKETPLACE_SIGNER.identity,)
-)
-_TEST_ADMINISTRATORS = TrustedIdentitySet(
-    identities=(_TEST_ADMIN_SIGNER.identity,)
-)
+_TEST_PUBLISHERS = TrustedIdentitySet(identities=(_TEST_MARKETPLACE_SIGNER.identity,))
+_TEST_ADMINISTRATORS = TrustedIdentitySet(identities=(_TEST_ADMIN_SIGNER.identity,))
 _TEST_PROVISIONING_AUTHORITIES = TrustedIdentitySet(
     identities=(_TEST_PROVISIONING_SIGNER.identity,)
 )
@@ -57,10 +55,10 @@ def _configure_administrator_auth(
     app.middleware("http")(_admin_identity.administrator_identity_middleware)
 
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
@@ -88,12 +86,16 @@ async def _seed_listing(
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource=offer_resource,
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
-            "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
-        }],
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {
+                    "token": "0x0000000000000000000000000000000000000001"
+                },
+                "rates": [{"field": "amount", "per": "hour", "value": "9000"}],
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         storefront_url="http://seller:8001",
@@ -158,6 +160,7 @@ async def unsigned_client(
 # GET /api/v1/listings
 # ---------------------------------------------------------------------------
 
+
 class TestListListings:
     async def test_empty_list(self, client):
         c, _ = client
@@ -220,6 +223,7 @@ class TestListListings:
 # GET /api/v1/listings/{listing_id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetListing:
     async def test_returns_listing(self, client):
         c, db = client
@@ -238,6 +242,7 @@ class TestGetListing:
 # ---------------------------------------------------------------------------
 # POST /api/v1/listings/{listing_id}/pause
 # ---------------------------------------------------------------------------
+
 
 class TestPauseListing:
     async def test_requires_authentication(self, unsigned_client):
@@ -264,6 +269,7 @@ class TestPauseListing:
 # ---------------------------------------------------------------------------
 # POST /api/v1/listings/{listing_id}/resume
 # ---------------------------------------------------------------------------
+
 
 class TestResumeListing:
     async def test_requires_authentication(self, unsigned_client):
@@ -304,7 +310,9 @@ class TestResumeListing:
     async def test_legacy_invalid_listing_fails_without_clearing_pause(self, client):
         c, db = client
         await _seed_listing(
-            db, "legacy-invalid", valid_capacity_identity=False,
+            db,
+            "legacy-invalid",
+            valid_capacity_identity=False,
         )
         await db.set_listing_paused(listing_id="legacy-invalid", paused=True)
 
@@ -324,8 +332,6 @@ class TestResumeListing:
 # /api/v1/admin/listings/* routes). ListingService is real; evaluate-negotiate
 # is a pure dry-run of the negotiation chain against a listing row.
 # ---------------------------------------------------------------------------
-
-from unittest.mock import AsyncMock, patch
 
 
 @pytest_asyncio.fixture
@@ -408,22 +414,28 @@ async def unsigned_admin_client(
 
 _OFFER = {
     "resource_id": "res-test-1",
-    "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
+    "gpu_model": "H200",
+    "gpu_count": 1,
+    "sla": 99.0,
+    "region": "California, US",
 }
 # Stub accepted_escrows for API-contract tests. Address-correctness is the
 # storefront's concern at negotiate time; at listing-create time the
 # storefront just stores what it's told.
-_ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": "0x" + "11" * 20,
-    "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
-    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
-}]
+_ACCEPTED_ESCROWS = [
+    {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "literal_fields": {"token": "0x0000000000000000000000000000000000000001"},
+        "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
+    }
+]
 
 
 # ---------------------------------------------------------------------------
 # POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate
 # ---------------------------------------------------------------------------
+
 
 class TestEvaluateNegotiate:
     """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run."""
@@ -438,7 +450,12 @@ class TestEvaluateNegotiate:
         ):
             result = await c.evaluate_negotiate(
                 "neg-eval-1",
-                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
         assert isinstance(result.would_negotiate, bool)
@@ -453,7 +470,12 @@ class TestEvaluateNegotiate:
         ):
             result = await c.evaluate_negotiate(
                 "neg-eval-2",
-                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
         assert result.decision in ("accept", "counter", "exit")
@@ -471,7 +493,12 @@ class TestEvaluateNegotiate:
         ):
             result = await c.evaluate_negotiate(
                 "neg-eval-floor",
-                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 9000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 9000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
         # At exactly the floor price, bisection should accept or counter, not exit
@@ -486,7 +513,12 @@ class TestEvaluateNegotiate:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.evaluate_negotiate(
                 "ghost-listing",
-                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 1000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 1000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
         assert "404" in str(exc_info.value)
@@ -501,10 +533,17 @@ class TestEvaluateNegotiate:
         ):
             await c.evaluate_negotiate(
                 "neg-eval-no-thread",
-                proposal={"chain_name": "anvil", "escrow_address": "0x"+"0"*40, "fields": {"amount": 5000, "token": "0x"+"a"*40}, "expiration_unix": 2000000000},
+                proposal={
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "0" * 40,
+                    "fields": {"amount": 5000, "token": "0x" + "a" * 40},
+                    "expiration_unix": 2000000000,
+                },
                 buyer_principal=_TEST_BUYER_SIGNER.identity,
             )
-        threads = await db.get_active_negotiations_for_listing(listing_id="neg-eval-no-thread")
+        threads = await db.get_active_negotiations_for_listing(
+            listing_id="neg-eval-no-thread"
+        )
         assert len(threads) == 0, (
             "evaluate-negotiate created a negotiation thread — it must be a pure dry-run"
         )
@@ -522,9 +561,7 @@ class TestEvaluateNegotiate:
                     },
                     "expiration_unix": 2000000000,
                 },
-                "buyer_principal": _TEST_BUYER_SIGNER.identity.model_dump(
-                    mode="json"
-                ),
+                "buyer_principal": _TEST_BUYER_SIGNER.identity.model_dump(mode="json"),
             },
         )
         assert response.status_code == 401
@@ -537,6 +574,7 @@ def _bisection_chain():
     an inventory-portfolio entry. Avoids the torch/rl dependency.
     """
     from domains.vms.negotiation.policies import bisection_middleware
+
     return [bisection_middleware]
 
 
@@ -576,10 +614,15 @@ async def seller_auth_full_client(db):
     """Listing lifecycle app with a real signer-aware ListingService."""
     from market_storefront.services.listing_service import ListingService
 
+    class _AcceptedEscrowComposition:
+        async def publication_artifacts(self, resources):
+            return list(resources["accepted_escrows"]), [], ()
+
     listing_svc = ListingService(
         sqlite_client=db,
         alkahest_clients=None,
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=lambda: _AcceptedEscrowComposition(),
     )
 
     _container.resolved_sqlite_client = db
@@ -607,11 +650,14 @@ async def seller_auth_full_client(db):
 
 class TestLegacyInvalidListingRemoval:
     async def test_seller_can_explicitly_close_invalid_legacy_listing(
-        self, seller_auth_full_client,
+        self,
+        seller_auth_full_client,
     ):
         c, db = seller_auth_full_client
         await _seed_listing(
-            db, "legacy-invalid-close", valid_capacity_identity=False,
+            db,
+            "legacy-invalid-close",
+            valid_capacity_identity=False,
         )
         with patch(
             "market_storefront.services.publication_service.close_order",
@@ -624,9 +670,7 @@ class TestLegacyInvalidListingRemoval:
             result = await c.close_listing("legacy-invalid-close")
 
         assert result.status == "closed"
-        close_order.assert_awaited_once_with(
-            {"listing_id": "legacy-invalid-close"}
-        )
+        close_order.assert_awaited_once_with({"listing_id": "legacy-invalid-close"})
 
 
 class TestCreateListing:
@@ -639,9 +683,11 @@ class TestCreateListing:
     or evaluate-only tests.
     """
 
-    async def test_creates_listing_and_returns_listing_id(self, seller_auth_full_client):
+    async def test_creates_listing_and_returns_listing_id(
+        self, seller_auth_full_client
+    ):
         """Valid request creates a listing and returns a listing_id."""
-        c, db = seller_auth_full_client
+        c, _ = seller_auth_full_client
         result = await c.create_listing(
             offer=_OFFER,
             accepted_escrows=_ACCEPTED_ESCROWS,
@@ -650,11 +696,14 @@ class TestCreateListing:
         assert hasattr(result, "listing_id") or (
             isinstance(result, dict) and "listing_id" in result
         ), f"No listing_id in response: {result}"
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        listing_id = (
+            result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        )
         assert listing_id, "listing_id must be non-empty"
 
     async def test_rejects_offer_with_neither_pool_id_nor_resource_id(
-        self, seller_auth_full_client,
+        self,
+        seller_auth_full_client,
     ):
         """A compute offer with no pool_id and no resource_id can't be
         reliably matched to inventory at reservation time and must be
@@ -681,7 +730,9 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        listing_id = (
+            result.listing_id if hasattr(result, "listing_id") else result["listing_id"]
+        )
         assert listing_id, "listing_id must be non-empty"
 
     async def test_listing_persisted_in_db(self, seller_auth_full_client):
@@ -698,7 +749,11 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
+        listing_id = (
+            result.listing_id
+            if hasattr(result, "listing_id")
+            else result.get("listing_id")
+        )
         assert listing_id is not None, (
             "listing_id is None — policy pipeline returned no_action or service failed. "
             f"Full response: {result}"
@@ -719,7 +774,11 @@ class TestCreateListing:
             accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
-        listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
+        listing_id = (
+            result.listing_id
+            if hasattr(result, "listing_id")
+            else result.get("listing_id")
+        )
         assert listing_id is not None, (
             f"paused=True create should still return a listing_id. Response: {result}"
         )

@@ -8,17 +8,21 @@ and materializes the selected chain and token metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import typer
-
 from core_buyer.deal_helpers import (  # noqa: F401 — re-exports
     DealContext,
     NegotiationResumePoint,
+    accepted_settlement_mechanism,
     is_negotiation_complete,
-    load_deal_context as _core_load_deal_context,
-    load_negotiation_resume_point as _core_load_negotiation_resume_point,
     open_run_log,
+)
+from core_buyer.deal_helpers import (
+    load_deal_context as _core_load_deal_context,
+)
+from core_buyer.deal_helpers import (
+    load_negotiation_resume_point as _core_load_negotiation_resume_point,
 )
 
 if TYPE_CHECKING:
@@ -174,19 +178,19 @@ class ChainSettings:
     ssh_public_key: str
     rpc_url: str
     chain_name: str
-    alkahest_addr_config: Optional[str]
+    alkahest_addr_config: str | None
     token_contract: str
     token_decimals: int
 
 
 def resolve_chain_settings(
     *,
-    buyer_address: Optional[str],
-    buyer_private_key: Optional[str],
-    ssh_public_key: Optional[str],
-    chain: "ChainConfig",
-    token_contract: Optional[str],
-    token_decimals: Optional[int],
+    buyer_address: str | None,
+    buyer_private_key: str | None,
+    ssh_public_key: str | None,
+    chain: ChainConfig,
+    token_contract: str | None,
+    token_decimals: int | None,
     require_ssh: bool = True,
 ) -> ChainSettings:
     """Resolve wallet, SSH key, token metadata, and chain settings in-domain."""
@@ -256,7 +260,7 @@ def resolve_chain_settings(
                 err=True,
                 fg=typer.colors.RED,
             )
-            raise typer.Exit(2)
+            raise typer.Exit(2) from exc
 
     return ChainSettings(
         buyer_address=addr,

@@ -4,6 +4,7 @@ Uses ``StorefrontClient.negotiate_new()`` and ``negotiate_continue()``
 via ``httpx.ASGITransport`` with canonical Ed25519 buyer authentication,
 pinned seller trust, and signed seller responses.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,9 +14,13 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_core.schemas import EscrowProposal, SettlementSelection
 
 import market_storefront.container as _container
-from market_storefront.controllers.negotiate_controller import router as negotiate_router
+from market_storefront.controllers.negotiate_controller import (
+    _proposal_payload,
+    router as negotiate_router,
+)
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from tests._settings_overrides import settings_overrides
 from storefront_client import StorefrontClient, StorefrontClientError
@@ -23,9 +28,7 @@ from storefront_client import StorefrontClient, StorefrontClientError
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
-_EXPECTED_PUBLISHERS = TrustedIdentitySet(
-    identities=(_SELLER_SIGNER.identity,)
-)
+_EXPECTED_PUBLISHERS = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _TOKEN = "0x0000000000000000000000000000000000000001"
 
 
@@ -45,9 +48,29 @@ def _assert_canonical_owners(result: dict) -> None:
     assert result["seller_principal"] == _SELLER_SIGNER.identity.model_dump(mode="json")
 
 
+def test_proposal_payload_preserves_settlement_selection() -> None:
+    proposal = EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "00" * 20,
+        fields={"amount": "2000"},
+        expiration_unix=1_800_000_000,
+    )
+    selection = SettlementSelection(
+        mechanism="fiat.stripe.v1",
+        option_id="1" * 64,
+        expiration_unix=1_800_000_000,
+    )
+
+    payload = _proposal_payload(proposal, selection)
+
+    assert payload["fields"] == {"amount": "2000"}
+    assert payload["settlement_selection"] == selection.model_dump(mode="json")
+
+
 @pytest_asyncio.fixture
 async def db(tmp_path):
     from market_storefront.utils.sqlite_client import SQLiteClient
+
     return SQLiteClient(db_path=str(tmp_path / "negotiate_test.db"))
 
 
@@ -62,17 +85,27 @@ async def _seed_listing(
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"resource_id": f"res-{listing_id}", "gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        accepted_escrows=[{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "literal_fields": {"token": _TOKEN},
-            "rates": (
-                []
-                if demand_amount is None
-                else [{"field": "amount", "per": "hour", "value": str(demand_amount)}]
-            ),
-        }],
+        offer_resource={
+            "resource_id": f"res-{listing_id}",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "sla": 99.9,
+            "region": "California, US",
+        },
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "literal_fields": {"token": _TOKEN},
+                "rates": (
+                    []
+                    if demand_amount is None
+                    else [
+                        {"field": "amount", "per": "hour", "value": str(demand_amount)}
+                    ]
+                ),
+            }
+        ],
         fulfillment_resource=None,
         max_duration_seconds=max_duration_seconds,
         storefront_url="http://seller:8001",
@@ -110,7 +143,6 @@ async def client(db):
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-
     _container.resolved_sqlite_client = db
 
     _container.resolved_marketplace_signer = _SELLER_SIGNER
@@ -125,7 +157,8 @@ async def client(db):
 
     fake_site = FakeSite()
     fake_site.add_resource(
-        "res-fake-site", 8,
+        "res-fake-site",
+        8,
         attributes={
             "gpu_model": "H200",
             "region": "California, US",
@@ -154,24 +187,33 @@ class TestNegotiateNew:
         """listing_id is required — Pydantic rejects the request."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="", initial_amount=8000,
-            provision_terms=_vm_provision(),)
+            await c.negotiate_new(
+                listing_id="",
+                initial_amount=8000,
+                provision_terms=_vm_provision(),
+            )
         # missing listing_id can't be tested via client (required param);
         # test that a nonexistent listing returns 404 below.
 
     async def test_unknown_listing_returns_404(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="ghost-listing", initial_amount=8000,
-            provision_terms=_vm_provision(),)
+            await c.negotiate_new(
+                listing_id="ghost-listing",
+                initial_amount=8000,
+                provision_terms=_vm_provision(),
+            )
         assert "404" in str(exc_info.value)
 
     async def test_valid_request_starts_negotiation(self, client, db):
         c, db = client
         await _seed_listing(db, "neg-listing-1", demand_amount=5000)
-        result = await c.negotiate_new(listing_id="neg-listing-1", initial_amount=5000,
-        provision_terms=_vm_provision(),
-        token=_TOKEN,)
+        result = await c.negotiate_new(
+            listing_id="neg-listing-1",
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+        )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
@@ -184,9 +226,12 @@ class TestNegotiateNew:
             demand_amount=5000,
             max_duration_seconds=0,
         )
-        result = await c.negotiate_new(listing_id="neg-listing-unlimited", initial_amount=5000,
-        provision_terms=_vm_provision(),
-        token=_TOKEN,)
+        result = await c.negotiate_new(
+            listing_id="neg-listing-unlimited",
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+        )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
@@ -216,8 +261,11 @@ class TestNegotiateNew:
         c, db = client
         await _seed_listing(db, "neg-listing-zero-duration")
         with pytest.raises((StorefrontClientError, Exception)) as exc_info:
-            await c.negotiate_new(listing_id="neg-listing-zero-duration", initial_amount=8000,
-            provision_terms=_vm_provision(0),)
+            await c.negotiate_new(
+                listing_id="neg-listing-zero-duration",
+                initial_amount=8000,
+                provision_terms=_vm_provision(0),
+            )
         assert "400" in str(exc_info.value)
         assert "incompatible_provision_terms" in str(exc_info.value)
 
@@ -231,8 +279,11 @@ class TestNegotiateNew:
             status="closed",
         )
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="neg-listing-closed", initial_amount=5000,
-            provision_terms=_vm_provision(),)
+            await c.negotiate_new(
+                listing_id="neg-listing-closed",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+            )
         msg = str(exc_info.value)
         assert "409" in msg
         assert "listing_not_open" in msg
@@ -251,23 +302,30 @@ class TestNegotiateNew:
             # availability snapshot has nothing matching.
             offer_resource={
                 "resource_id": "res-neg-listing-empty",
-                "gpu_model": "B300", "gpu_count": 1, "sla": 99.9,
+                "gpu_model": "B300",
+                "gpu_count": 1,
+                "sla": 99.9,
                 "region": "California, US",
             },
-            accepted_escrows=[{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": _TOKEN},
-                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
-            }],
+            accepted_escrows=[
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": _TOKEN},
+                    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
+                }
+            ],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             storefront_url="http://seller:8001",
             seller_principal=_SELLER_SIGNER.identity,
         )
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="neg-listing-empty", initial_amount=5000,
-            provision_terms=_vm_provision(),)
+            await c.negotiate_new(
+                listing_id="neg-listing-empty",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+            )
         msg = str(exc_info.value)
         assert "409" in msg
         assert "no_matching_inventory" in msg
@@ -284,15 +342,19 @@ class TestNegotiateNew:
             updated_at=datetime.now().isoformat(),
             offer_resource={
                 "resource_id": "res-priceless",
-                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "gpu_model": "H200",
+                "gpu_count": 1,
+                "sla": 99.9,
                 "region": "California, US",
             },
-            accepted_escrows=[{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": _TOKEN},
-                "rates": [],  # hidden reserve
-            }],
+            accepted_escrows=[
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": _TOKEN},
+                    "rates": [],  # hidden reserve
+                }
+            ],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             storefront_url="http://seller:8001",
@@ -307,13 +369,20 @@ class TestNegotiateNew:
             unit="vm",
             value=1,
             state="available",
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "vm_host": "kvm1",
+            },
         )
         # default_min_price is None in the test config — falls through.
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="neg-listing-priceless", initial_amount=5000,
-            provision_terms=_vm_provision(),
-            token=_TOKEN,)
+            await c.negotiate_new(
+                listing_id="neg-listing-priceless",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+                token=_TOKEN,
+            )
         msg = str(exc_info.value)
         assert "409" in msg
         assert "no_floor_price" in msg
@@ -336,15 +405,19 @@ class TestNegotiateNew:
             updated_at=datetime.now().isoformat(),
             offer_resource={
                 "resource_id": "res-attestation",
-                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "gpu_model": "H200",
+                "gpu_count": 1,
+                "sla": 99.9,
                 "region": "California, US",
             },
-            accepted_escrows=[{
-                "chain_name": "anvil",
-                "escrow_address": escrow_address,
-                "literal_fields": literals,
-                "rates": [],
-            }],
+            accepted_escrows=[
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": escrow_address,
+                    "literal_fields": literals,
+                    "rates": [],
+                }
+            ],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             storefront_url="http://seller:8001",
@@ -357,16 +430,22 @@ class TestNegotiateNew:
             unit="vm",
             value=1,
             state="available",
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
+            attributes={
+                "gpu_model": "H200",
+                "region": "California, US",
+                "vm_host": "kvm1",
+            },
         )
 
-        with settings_overrides(**{
-            "negotiation.policies": [
-                "has_matching_inventory_guard",
-                "escrow_shape_guard",
-                "accept_exact_listing",
-            ],
-        }):
+        with settings_overrides(
+            **{
+                "negotiation.policies": [
+                    "has_matching_inventory_guard",
+                    "escrow_shape_guard",
+                    "accept_exact_listing",
+                ],
+            }
+        ):
             result = await c.negotiate_new(
                 listing_id="neg-listing-attestation",
                 initial_amount=None,
@@ -414,15 +493,19 @@ class TestNegotiateNew:
             updated_at=datetime.now().isoformat(),
             offer_resource={
                 "resource_id": "res-neg-listing-rtx",
-                "gpu_model": "RTX 4090", "gpu_count": 1, "sla": 99.9,
+                "gpu_model": "RTX 4090",
+                "gpu_count": 1,
+                "sla": 99.9,
                 "region": "California, US",
             },
-            accepted_escrows=[{
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "11" * 20,
-                "literal_fields": {"token": _TOKEN},
-                "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
-            }],
+            accepted_escrows=[
+                {
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "literal_fields": {"token": _TOKEN},
+                    "rates": [{"field": "amount", "per": "hour", "value": "5000"}],
+                }
+            ],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             storefront_url="http://seller:8001",
@@ -431,8 +514,11 @@ class TestNegotiateNew:
         # The H200 resource seeded by _seed_listing doesn't match the
         # RTX 4090 offer; the seller should refuse.
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_new(listing_id="neg-listing-rtx", initial_amount=5000,
-            provision_terms=_vm_provision(),)
+            await c.negotiate_new(
+                listing_id="neg-listing-rtx",
+                initial_amount=5000,
+                provision_terms=_vm_provision(),
+            )
         assert "409" in str(exc_info.value)
         assert "no_matching_inventory" in str(exc_info.value)
 
@@ -443,8 +529,10 @@ class TestNegotiateContinue:
     async def test_unknown_neg_id_returns_404(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.negotiate_continue("ghost-neg-id",
-            action="exit", )
+            await c.negotiate_continue(
+                "ghost-neg-id",
+                action="exit",
+            )
         assert "404" in str(exc_info.value)
 
     async def test_invalid_action_returns_422(self, client):

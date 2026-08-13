@@ -21,6 +21,8 @@ def start_hosted_settlement(
     obligation_ref: str,
     principal: Identity,
     signer: Signer,
+    payer_principal: Identity,
+    claimant_principal: Identity,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     resolve_seller_principals: Callable[[], TrustedIdentitySet],
 ) -> dict[str, Any]:
@@ -30,7 +32,8 @@ def start_hosted_settlement(
         {
             "negotiation_id": negotiation_id,
             "obligation_ref": obligation_ref,
-            "buyer_principal": principal.model_dump(mode="json"),
+            "payer_principal": payer_principal.model_dump(mode="json"),
+            "claimant_principal": claimant_principal.model_dump(mode="json"),
         },
         signer=signer,
         principal=principal,

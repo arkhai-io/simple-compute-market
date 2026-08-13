@@ -312,6 +312,22 @@ class SettlementObligation(BaseModel):
             "bond: seller posts, buyer claims."
         ),
     )
+    payer_principal: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Canonical scheme-tagged principal authorized to fund this "
+            "obligation. Required by mechanisms that do not derive authority "
+            "from a mechanism-specific wallet."
+        ),
+    )
+    claimant_principal: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Canonical scheme-tagged principal authorized to collect this "
+            "obligation. Required by mechanisms that do not derive authority "
+            "from a mechanism-specific wallet."
+        ),
+    )
     amount: int | None = Field(
         default=None,
         description=(
@@ -428,6 +444,14 @@ class SettlementPlan(BaseModel):
 
     obligations: list[SettlementObligation] = Field(
         description="Every obligation the deal materializes.",
+    )
+    buyer_principal: dict[str, str] | None = Field(
+        default=None,
+        description="Canonical scheme-tagged buyer principal bound at acceptance.",
+    )
+    seller_principal: dict[str, str] | None = Field(
+        default=None,
+        description="Canonical scheme-tagged seller principal bound at acceptance.",
     )
     service_terms: dict[str, Any] = Field(
         default_factory=dict,

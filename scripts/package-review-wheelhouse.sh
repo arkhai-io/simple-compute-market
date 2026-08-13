@@ -46,11 +46,24 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import zipfile
 
 bundle = Path(sys.argv[1])
 wheelhouse = bundle / "wheelhouse"
 trust = json.loads((bundle / "release" / "hosted-settlement-trust.json").read_text())
 manifest = json.loads((bundle / "release" / "release-manifest.json").read_text())
+client_wheel_path = wheelhouse / sys.argv[3]
+try:
+    with zipfile.ZipFile(client_wheel_path) as archive:
+        entry_point_files = [
+            name
+            for name in archive.namelist()
+            if name.endswith(".dist-info/entry_points.txt")
+        ]
+except zipfile.BadZipFile as exc:
+    raise SystemExit(f"hosted client is not a readable wheel: {exc}") from exc
+if entry_point_files:
+    raise SystemExit("hosted client wheel must not contain seller entry-point metadata")
 
 expected_identity = {
     "request_signature_protocol": "arkhai.hosted-request-signature.v2",
@@ -80,13 +93,15 @@ if manifest["payload"].get("identity_contract") != expected_identity:
 
 pins = {
     "schema_version": 1,
+    "settlement_config_schema_version": 1,
     "identity_wheel": {
         "filename": sys.argv[2],
         "sha256": hashlib.sha256((wheelhouse / sys.argv[2]).read_bytes()).hexdigest(),
     },
     "hosted_client_wheel": {
         "filename": sys.argv[3],
-        "sha256": hashlib.sha256((wheelhouse / sys.argv[3]).read_bytes()).hexdigest(),
+        "sha256": hashlib.sha256(client_wheel_path.read_bytes()).hexdigest(),
+        "entry_point_metadata": False,
     },
     "hosted_release_manifest": {
         "filename": "release-manifest.json",

@@ -59,12 +59,17 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
-        {{- $chain := (($agent.config | default dict).chain | default dict) }}
-        {{- if $chain.name }}
+        {{- $config := $agent.config | default dict }}
+        {{- $settlement := $config.settlement | default dict }}
+        {{- $alkahest := $settlement.alkahest | default dict }}
+        {{- $chains := $config.chains | default dict }}
+        {{- if and ($alkahest.enabled | default false) (gt (len $chains) 0) }}
+        {{- $chainName := first (keys $chains | sortAlpha) }}
+        {{- $chain := index $chains $chainName }}
         - name: wait-for-rpc
           image: busybox:1.36
-          {{- /* Probe the explicit chain endpoint when one is configured. */}}
-          {{- $rpcProbeUrl := default (include "rpc.url" $) $chain.rpcUrl }}
+          {{- /* Probe an injected chain only when Alkahest is enabled. */}}
+          {{- $rpcProbeUrl := default (include "rpc.url" $) $chain.rpc_url }}
           command:
             - sh
             - -c

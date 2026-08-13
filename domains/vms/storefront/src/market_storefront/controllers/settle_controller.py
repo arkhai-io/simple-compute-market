@@ -253,19 +253,6 @@ class SettlementsController:
         request: Request,
     ) -> SettlementPublicResponse:
         composition = self._composition()
-        try:
-            agreement = await load_hosted_agreement(
-                sqlite_client=self._db,
-                negotiation_id=body.negotiation_id,
-                obligation_ref=body.obligation_ref,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if (
-            body.payer_principal != agreement.buyer_principal
-            or body.claimant_principal != composition.local_principal
-        ):
-            raise HTTPException(status_code=403, detail="settlement parties mismatch")
         auth = await buyer_auth._verify(
             request,
             "settlement_start",
@@ -280,6 +267,20 @@ class SettlementsController:
             if status_code >= 400:
                 raise HTTPException(status_code=status_code, detail=payload)
             return SettlementPublicResponse.model_validate(payload)
+        try:
+            agreement = await load_hosted_agreement(
+                sqlite_client=self._db,
+                negotiation_id=body.negotiation_id,
+                obligation_ref=body.obligation_ref,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if (
+            body.payer_principal != agreement.buyer_principal
+            or body.claimant_principal != composition.local_principal
+        ):
+            raise HTTPException(status_code=403, detail="settlement parties mismatch")
+
         records = await composition.runtime.register_plan(
             agreement_ref=agreement.negotiation_id,
             obligations=[agreement.obligation],
@@ -359,7 +360,7 @@ class SettlementsController:
                 record=record,
             )
         except Exception as exc:
-            logger.warning(
+            logger.exception(
                 "[SETTLEMENTS] Hosted settlement status reconciliation failed"
             )
             raise HTTPException(
