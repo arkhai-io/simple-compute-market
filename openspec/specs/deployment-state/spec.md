@@ -187,41 +187,92 @@ Typed configuration metadata MUST generate role-appropriate init templates, dott
 - **WHEN** a mechanism's typed configuration adds or removes an operator field
 - **THEN** drift validation requires the applicable templates, schema, and reference output to change together
 
-### Requirement: Optional hosted test composition consumes immutable releases
+### Requirement: Protected hosted test composition uses the production release
 
-The local hosted production, hermetic, local-EAS, and real-Stripe profiles
-MUST consume verified release artifacts by exact digest and MUST NOT build,
-mount, import, or install sibling hosted source. Hermetic startup MUST verify a
-signed private E2E manifest compatible with the selected signed production
-manifest before creating services.
+Every hosted financial system E2E composition MUST consume one verified signed
+production hosted release by exact manifest digest, client wheel version and
+hash, service image digest, migration schema, OpenAPI/conformance identities,
+provenance, and hosted source commit. It MUST NOT build, mount, import, or
+install sibling hosted source. The composition MUST run the ordinary migration,
+API, and reconciliation worker roles against Stripe test mode and preserve the
+authority store across selected restart scenarios. Production and test
+artifacts MUST contain no provider substitute, controlled clock or event API,
+synthetic event worker, test-provider credential, alternate fixture
+distribution, control protocol, or test-only service entry point.
 
-#### Scenario: Hermetic release identities disagree
+#### Scenario: Protected Stripe composition starts
 
-- **WHEN** the production and private E2E manifests disagree on client or service wheel, production manifest identity, image digest, migration schema, control protocol, or capability
-- **THEN** preflight fails before Compose creates a service
+- **WHEN** an authorized operator supplies a compatible production release, test-mode Stripe access, a verified loopback webhook-forwarding path, Chromium, and a ready allowlisted connected account
+- **THEN** release verification and migration complete before the ordinary authority API and worker become ready, marketplace consumers use the public authority address and released client, and no alternate provider or test-control service exists
 
-#### Scenario: Hermetic stack is restarted
+#### Scenario: Authority process restarts
 
-- **WHEN** an operator uses the restart-preserving command
-- **THEN** the authority, simulator, and controlled-clock named volumes remain available so the original operation identities can resume
+- **WHEN** a hosted recovery scenario restarts the ordinary authority API or reconciliation worker without resetting the scenario
+- **THEN** the authority store and accepted operation identities remain available and reconciliation resumes against authoritative Stripe test-mode state
 
-#### Scenario: Hermetic stack is reset
+### Requirement: Stripe test-mode activation fails closed
 
-- **WHEN** an operator requests a clean hosted run or teardown
-- **THEN** the hosted named volumes and isolated control/provider networks are removed before the next scenario
+Protected hosted startup MUST prove the exact marketplace consumer commit and
+hosted release identity, a test-mode secret (`sk_test` or least-privilege
+`rk_test`), non-live returned objects,
+Stripe API connectivity, expected allowlisted test-account ownership and
+capabilities, loopback-only webhook delivery to the exact authority endpoint,
+and browser availability. A mismatch or unavailable prerequisite MUST stop
+before the relevant publication, acceptance, Checkout, transfer, or refund
+mutation. Local focused evidence MUST NOT replace a failed prerequisite.
+
+#### Scenario: Live credential is supplied
+
+- **WHEN** protected hosted E2E receives a live-mode Stripe credential or observes a live provider object
+- **THEN** preflight fails before creating any payment, transfer, refund, or marketplace settlement mutation and redacts the credential
+
+#### Scenario: Connected account is unready
+
+- **WHEN** the selected test connected account lacks the expected ownership binding, charge/transfer capability, or readiness required by the scenario
+- **THEN** preflight reports an account-readiness failure before publication of a Stripe option or payment creation
+
+#### Scenario: Release identity is incomplete
+
+- **WHEN** a protected run cannot bind its manifest digest, client wheel hash, service image digest, hosted source commit, or producer workflow/run identity
+- **THEN** startup fails before Compose creates the authority or marketplace services and no partial identity is reported as system evidence
 
 ### Requirement: Hosted test secrets remain role-scoped
 
-Provider, webhook, authority, simulator-control, internal provider, release
-signing, and marketplace signer credentials MUST be supplied only to the role
-that consumes them. The marketplace storefront and buyer configuration MUST
-contain no hosted provider/control endpoint or credential, and private
-controls MUST NOT be reachable through marketplace production APIs.
+Stripe provider, webhook, hosted authority, release acquisition, marketplace
+signer, and browser-test credentials MUST be supplied only to the process that
+consumes them. Marketplace storefront and buyer configuration MUST contain no
+hosted provider or administrator endpoint or credential, webhook secret,
+connected-account provider identifier, or raw provider state. Default and fork
+workflows MUST receive no protected hosted artifact or Stripe credential.
+Process output and reports MUST exclude credentials, Checkout or Account Link
+URLs, account/customer/card data, raw webhook bodies, and unrestricted provider
+payloads.
 
 #### Scenario: Public or fork workflow runs
 
 - **WHEN** untrusted contributor code executes
-- **THEN** no private hosted artifact credential, provider credential, control token, raw event, or secret-bearing report is available
+- **THEN** no protected artifact credential, Stripe credential, connected-account identifier, webhook secret, raw event, Checkout action, or secret-bearing report is available
+
+#### Scenario: Stripe CLI forwards webhooks
+
+- **WHEN** an authorized protected run starts Stripe CLI forwarding to the loopback-only hosted webhook mapping
+- **THEN** the signing secret is delivered only to the authority webhook process, is never printed or persisted in marketplace state, and is destroyed with the run environment
+
+### Requirement: Hosted test deployment has no alternate provider surfaces
+
+Active marketplace Compose, Make, workflow, packaging, configuration,
+release-verification, schema, and permanent documentation surfaces MUST expose
+only the ordinary production hosted client/service artifacts for financial E2E.
+They MUST NOT contain or select a provider substitute distribution, image,
+manifest, protocol, endpoint, credential, state store, controlled clock or
+event service, synthetic provider worker, or alternate hosted profile.
+Historical change artifacts MAY retain provenance but MUST NOT be executable or
+referenced by current production or test entry points.
+
+#### Scenario: Deployment surfaces are inspected
+
+- **WHEN** active hosted test and packaging surfaces are examined
+- **THEN** only the ordinary production hosted release and protected Stripe test prerequisites remain and no alternate provider artifact can be selected or started
 
 ## Evidence
 

@@ -141,6 +141,14 @@ and required capabilities; a matching major version or floating image tag is
 not a substitute. The hosted repository publishes those artifacts. This
 repository publishes only the thin adapter and marketplace consumers.
 
+Hosted financial system E2E consumes that same ordinary production release; it
+does not acquire a second test distribution or alternate service image. The
+verified identity also records the hosted source commit and producer workflow
+run, and protected reports keep those producer coordinates separate from the
+marketplace consumer commit. Provider-neutral scripted collaborators exist
+only in the hosted producer's focused tests and are absent from client/service
+wheels, image layers, manifests, capabilities, migrations, and entry points.
+
 ## Troubleshooting
 
 - **403 from PyPI** — trusted publishing is not configured for the

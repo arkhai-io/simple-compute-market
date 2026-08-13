@@ -292,32 +292,82 @@ with mixed signature versions or an address-only fallback.
   readiness failure when any authority or client lacks the pinned identity
   version.
 
-## Hosted Settlement System Evidence
+## Hosted Settlement Evidence
 
-Hosted settlement has three separately reported system lanes:
+Hosted settlement has one provider-authentic system lane:
 
-- `make hosted-hermetic` verifies signed production and private E2E artifacts,
-  starts digest-pinned authority and simulator images, and runs the
-  marketplace-owned wallet-free VM lifecycle. Deterministic controls may set
-  finance, time, and event outcomes, but marketplace packages use only public
-  storefront and authority clients. Reports contain release identities and
-  bounded normalized effects, never raw provider events or credentials.
-- `make hosted-local-eas` runs condition-boundary conformance with local
-  Anvil/EAS/arbiter infrastructure. It does not change the default portable
-  non-EVM condition path or provide Stripe evidence.
-- `make hosted-real-stripe` uses the ordinary hosted image, browser-driven
-  test-mode Checkout, verified webhook forwarding, and authoritative provider
-  inspection. Missing credentials, connected-account readiness, webhook
-  reachability, protected workflow access, or provider behavior is an external
-  limitation to report; hermetic output never substitutes for it.
+```console
+make hosted-stripe-test
+```
 
-The hosted service repository owns process conformance and the signed private
-fixture release. This repository owns consumer composition and staged
-discovery, negotiation, materialization, funding, fulfillment, collection,
-reclaim, uncertainty, restart, readiness, and coexistence scenarios. Each
-report records the consumer commit, production manifest, and private E2E
-manifest independently. Default public and fork suites neither resolve private
-artifacts nor receive private credentials.
+This protected target verifies one exact ordinary signed hosted production
+release and then runs the marketplace-owned wallet-free VM lifecycle against
+Stripe test mode. Publication, discovery, negotiation, exact
+`fiat.stripe.v1` selection, materialization, buyer action, funding,
+fulfillment evidence, collection or reclaim, status, restart, and recovery use
+released marketplace and hosted clients and ordinary network contracts.
+Chromium completes Checkout, Stripe CLI forwards the real signed event to the
+loopback authority mapping, and Stripe retrieval APIs verify the exact related
+payment, charge, transfer, or refund. Provider behavior is not inferred from a
+local substitute.
+
+Preflight completes before publication or financial mutation and requires:
+
+- the exact marketplace commit and signed hosted production manifest, client
+  wheel hash/version, service image digest, hosted source commit, and producer
+  workflow identity;
+- a test-mode secret (`sk_test` or least-privilege `rk_test`), Stripe
+  connectivity, and non-live returned objects;
+- the expected allowlisted connected account with the required ownership,
+  charge/transfer capabilities, and readiness;
+- Stripe CLI forwarding to the exact loopback webhook endpoint; and
+- Chromium and the official Stripe test payment inputs for the selected case.
+
+A missing prerequisite is a failed explicit run, not a skip. Terminal results
+are classified as `product` (a tested contract is wrong), `account`
+(ownership/capability/readiness is unsuitable), `environment`
+(credential/artifact/Stripe/CLI/browser/network access is unavailable), or
+`timeout` (a named state did not converge within its bound after valid
+preflight). Classification never weakens an assertion.
+
+System recovery uses real omissions: webhook forwarding, the authority API, or
+the ordinary worker may be stopped and restarted while preserving the
+authority store and original marketplace operation identity. Setup and
+read-only polling may retry within declared bounds. Financial mutations remain
+inside production code and retain the original durable idempotency identity;
+the harness never issues a replacement mutation under a new identity.
+
+Deterministic timeout placement, unknown acknowledgement, delayed visibility,
+provider unavailability, exact-attempt failure, and event-order cases belong
+to credential-free hosted-producer integration tests. Those tests inject a
+small provider-neutral scripted collaborator directly at the internal
+financial-provider or webhook-inbox boundary and exercise the production
+journal, leases, retry policy, reconciliation, inbox, and lifecycle. They
+assert Arkhai behavior under declared outcomes, do not reproduce provider
+objects or public protocols, and are not Stripe evidence. Marketplace public
+checks separately cover released-client conformance, adapter mapping,
+orchestration, configuration, packaging, and production-release verification
+without provider mutation or protected credentials.
+
+Protected evidence contains only the marketplace repository and exact commit,
+the separately identified hosted manifest/client/image/source/producer-run
+coordinates, scenario and stage, unique run identity, opaque durable operation
+identity, normalized state/amount/currency/cardinality, failure class, and
+bounded diagnostics. Logs and reports exclude credentials, Checkout or Account
+Link URLs, account/customer/card data, raw webhooks, unrestricted provider
+payloads, and unrelated provider objects.
+
+Alkahest remains an independent mechanism E2E and can be selected with:
+
+```console
+make -C e2e-tests test-buyer-machine \
+  BUYER_MODULE=e2e_alkahest_escrow_codecs
+```
+
+Local EAS/allowlisted-arbiter behavior is condition-boundary conformance only,
+not hosted financial evidence. There is currently no standalone hosted
+local-EAS operator target; do not infer Stripe or hosted finance behavior from
+focused condition tests.
 
 ## Boundary-Change Validation
 

@@ -129,3 +129,23 @@ Rollback removes the opt-in targets/profile and private workflow invocation. It 
 Marketplace checkpoint `c128b902` contains the reusable production-release composition, marketplace lifecycle, protected Stripe driver/evidence, and simulator consumer implementation. Hosted checkpoints `f46ca41` and `d4fd002` contain the producer implementation and documentation. Both worktrees were clean before replacement planning; hosted replacement plan commit `03cf2e2` defines the producer deletion and provider-port recovery boundary.
 
 The hermetic Compose acceptance matrix never completed, so this change records implementation history rather than accepted simulator behavior. `replace-hosted-simulator-with-stripe-test-e2e` owns consumer cutover to one protected Stripe test-mode system lane. Hosted change `replace-e2e-simulator-with-scripted-provider-tests` owns deterministic provider-port coverage, simulator removal, and the production-only release handoff. Existing Alkahest and independent local EAS condition conformance remain outside both financial-provider substitutions.
+
+The earlier decisions, matrix, migration plan, and promotion list are preserved
+to explain the completed implementation checkpoint; they are not current
+architecture and do not authorize further simulator release, acquisition,
+composition, control, or acceptance work. Final disposition is:
+
+| Historical scope | Disposition |
+|---|---|
+| Ordinary signed hosted production release verification and artifact-only consumer boundary | Retained and narrowed to production client/service artifacts by `replace-hosted-simulator-with-stripe-test-e2e`; current contract lives in `openspec/specs/deployment-state/{spec,architecture}.md` |
+| Marketplace publication through collection/reclaim lifecycle and protected browser/Stripe inspection | Retained under the replacement's single protected `hosted-stripe-test` lane; current evidence rules live in `openspec/specs/test-compatibility/{spec,architecture}.md` |
+| Deterministic timeout, uncertainty, delayed-visibility, event-order, journal, retry, reconciliation, and idempotency cases | Moved to provider-neutral integration at the hosted producer's internal provider and webhook-inbox boundaries by `replace-e2e-simulator-with-scripted-provider-tests` |
+| Hermetic system matrix, simulator-backed local EAS profile, and simulator release identity | Not accepted; tasks 6.3 and 7.6 remain intentionally incomplete and superseded |
+| Local EAS/allowlisted-arbiter behavior | Condition-boundary work only; no current standalone hosted operator target and no hosted-finance or Stripe claim |
+| Existing Alkahest E2E | Unchanged independent mechanism evidence |
+| Permanent simulator topology, artifact, control, and command documentation | Superseded and replaced in current `openspec/specs/**`, `docs/development/{ARCHITECTURE,TESTING,DEPLOYMENT_AND_CONFIG}.md`, and `e2e-tests/tests/e2e/roles/README.md` |
+
+No simulator-era manifest or run identity is accepted by this change. Exact
+future protected reports identify the marketplace commit independently from
+the verified production-only hosted manifest, client wheel, service image,
+hosted source, and producer workflow/run identity.

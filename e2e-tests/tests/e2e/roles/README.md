@@ -130,50 +130,89 @@ uv run pytest tests/e2e/roles/scenarios/vms/ -v
 
 ## Hosted fiat scenarios
 
-Hosted VM scenarios use a dedicated state carrier under
-`scenarios/vms/hosted/`; they do not branch or reinterpret the Alkahest
-full-deal state. The stages are:
+Hosted VM system acceptance has one protected provider lane:
+`hosted-stripe-test`. It uses the dedicated hosted state carrier rather than
+branching or reinterpreting the Alkahest full-deal state. A collection,
+reclaim, missed-webhook, API-restart, or worker-restart scenario:
 
-1. verify authority/simulator readiness and the production/private manifest
-   identities;
-2. prove wallet-free runtime and connected fixture-account readiness;
-3. publish and discover a listing;
-4. negotiate accepted `fiat.stripe.v1` terms;
-5. materialize one obligation and capture its redirect action and stable
-   operation reference;
-6. fund through the selected provider lane;
-7. complete VM fulfillment and project portable condition evidence;
-8. collect or reclaim and inspect exactly one bounded normalized effect; and
-9. report marketplace, authority, and release identities.
+1. binds the exact marketplace commit and ordinary signed hosted production
+   manifest, client wheel, service image, hosted source commit, and producer
+   workflow/run identity;
+2. proves a test-mode secret and non-live Stripe objects, API connectivity, the
+   exact allowlisted connected account's ownership/capabilities/readiness, the
+   fixed loopback webhook path, and Chromium availability;
+3. starts the ordinary hosted migration, API, and reconciliation worker roles
+   and proves wallet, chain, RPC, balance, and gas inputs are absent;
+4. publishes and discovers one `fiat.stripe.v1` option through marketplace
+   clients;
+5. negotiates, materializes one accepted obligation, and captures its opaque
+   durable operation identity;
+6. opens the transient Checkout action in Chromium and completes a supported
+   Stripe test-mode payment outcome;
+7. forwards the real signed event to
+   `http://127.0.0.1:18080/webhooks/stripe` and waits on a named observable
+   state with a declared bound;
+8. completes VM fulfillment and portable condition evidence through ordinary
+   marketplace paths;
+9. lets the ordinary hosted worker collect or reclaim and retrieves the exact
+   related Stripe objects to prove amount, currency, relation, connected
+   destination, operation metadata, and one-effect cardinality; and
+10. restarts only ordinary processes or webhook forwarding while preserving
+    authority state and the original operation/idempotency identity where the
+    selected recovery scenario requires it.
 
-Each stage consumes exact `DealState` names through `require_state`. Checkout
-and Account Link URLs are transient and excluded from reports. Simulator
-control credentials, provider credentials, raw events, and raw authority
-payloads remain outside the marketplace state carrier.
+Each stage consumes exact `DealState` names through `require_state`. Provider
+retrieval follows the relationships and unique metadata created by this run;
+an account's latest object cannot satisfy an assertion. Setup and read-only
+polling may retry within bounds. Financial mutations remain inside production
+code and are never reissued by the harness under a new identity.
 
-Run the lanes from the repository root:
+Run from the repository root after installing the Stripe CLI and Chromium:
 
-```bash
-# Exact signed private artifacts; clean volumes before and after the run.
-make hosted-hermetic \
+```console
+make hosted-stripe-test \
   HOSTED_RELEASE_DIR=/path/to/production-release \
-  HOSTED_E2E_RELEASE_DIR=/path/to/private-e2e-release
-
-# Local EAS/allowlisted-arbiter condition conformance; finance stays simulated.
-make hosted-local-eas
-
-# Real Stripe test-mode evidence; requires authorized secrets and account state.
-make hosted-real-stripe
+  HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
+  HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
+  HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
+  HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
+  HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
+  HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
+  HOSTED_STRIPE_TEST_SCENARIO=<scenario>
 ```
 
-`hosted-hermetic` covers collection, expiry reclaim, event withholding,
-duplication and ordering, uncertain provider acknowledgements, process
-restart, readiness, and mechanism coexistence without sleeps. A clean run
-removes hosted authority, simulator, and clock volumes; restart-specific
-controls retain them only across the tested boundary.
+Provide `STRIPE_SECRET_KEY` (a test-mode `sk_test` or least-privilege
+`rk_test`) and `STRIPE_CONNECTED_ACCOUNT_ID` only through the approved
+protected Secret/environment boundary. `HOSTED_STRIPE_TEST_EVIDENCE` may
+select the sanitized report destination. Connect onboarding is a separate
+manual or scheduled account-lifecycle smoke; every transaction run still
+retrieves and validates the maintained allowlisted account before publication.
 
-The local EAS and real Stripe commands are deliberately independent.
-Hermetic output is never reported as EAS or Stripe evidence. If external
-credentials, connected-account readiness, webhook reachability, or an
-authorized protected workflow is unavailable, report that prerequisite
-instead of skipping silently or substituting simulator results.
+An explicit run that lacks a release, credential, network, account, webhook,
+Stripe CLI, or browser prerequisite fails before the applicable mutation
+boundary. Reports classify terminal outcomes as `product`, `account`,
+`environment`, or `timeout` and keep the marketplace repository/commit
+separate from the hosted manifest/client/image/source/producer-run identity.
+Their allowlist contains scenario/stage, unique run reference, opaque operation
+identity, normalized state/amount/currency/cardinality, failure class, and
+bounded diagnostics. Credentials, Checkout or Account Link URLs,
+account/customer/card data, raw webhooks, unrestricted provider payloads, and
+unrelated provider objects are excluded from state, process output, and
+reports.
+
+Deterministic provider failure placement and event ordering are covered in the
+hosted producer's credential-free financial-provider and webhook-inbox
+integration suites. Those tests exercise production journal, retry,
+reconciliation, inbox, and idempotency behavior under provider-neutral
+scripted outcomes and do not establish Stripe behavior.
+
+Alkahest remains an independent mechanism E2E:
+
+```console
+make -C e2e-tests test-buyer-machine \
+  BUYER_MODULE=e2e_alkahest_escrow_codecs
+```
+
+Local EAS/allowlisted-arbiter tests are condition-boundary work only. There is
+currently no standalone hosted local-EAS operator target, and focused
+condition evidence does not establish hosted finance or Stripe behavior.

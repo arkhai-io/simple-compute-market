@@ -63,28 +63,48 @@ The settlement cutover deliberately rejects runtime aliases. Migration tooling i
 
 Typed settlement metadata generates role-appropriate templates, edit validation, schema fragments, and reference output. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
 
-## Optional hosted local composition
+## Protected hosted test composition
 
-Local hosted composition follows the same artifact boundary as deployment.
-Preflight verifies a signed production manifest and exact client wheel, then
-emits a non-secret Compose environment containing digest-qualified image and
-contract coordinates. Hermetic mode additionally verifies a signed,
-production-compatible private E2E manifest and exact service/fixture wheels;
-it never treats a locally rebuilt tag or sibling checkout as equivalent.
+Hosted financial system E2E follows the production supply-chain boundary.
+Preflight verifies one signed production manifest and its exact client wheel,
+service image, migration schema, OpenAPI/conformance artifacts, provenance,
+hosted source commit, and producer workflow identity. It then emits non-secret
+Compose coordinates with a digest-qualified image. A local tag, sibling
+checkout, editable source, alternate service distribution, or compatible-major
+substitution is not equivalent.
 
-The production-like, hermetic, local EAS, and real Stripe profiles are
-deliberately separate. Hermetic mode substitutes only provider, clock, and
-event-delivery ports inside the authority assembly. The storefront remains a
-normal wallet-free consumer and receives no simulator control or provider
-credential. Local EAS adds chain infrastructure only for condition-boundary
-conformance. Real Stripe uses the ordinary authority image and its own
-secret-bearing operator lane.
+The protected composition starts only the ordinary hosted migration, API, and
+reconciliation worker roles against Stripe test mode. The marketplace reaches
+the authority through the released client and public authority address; it
+does not receive provider or administrator access. Stripe CLI forwards signed
+events only to a loopback authority mapping, and Chromium drives the transient
+Checkout action without persisting it.
 
-Authority state, deterministic provider state, and controlled time use
-separate named volumes. Clean execution removes them; restart evidence retains
-them to prove recovery from durable operation identities. Control and provider
-surfaces stay on isolated internal networks, while any development host
-mapping is explicitly loopback-only.
+Authority state uses one durable volume. Clean scenarios remove it, while
+explicit restart and missed-webhook scenarios retain it so the API or worker
+can reconcile authoritative Stripe state under the original durable operation
+and idempotency identities. The composition has no second provider, test clock,
+event-control service, synthetic provider worker, control network, fixture
+release, or test-only production entry point.
+
+Preflight is a mutation boundary. It verifies the exact marketplace commit and
+hosted release, test-mode credentials and returned objects, Stripe
+connectivity, allowlisted connected-account ownership and capabilities,
+loopback webhook delivery, and browser availability before publication or
+financial mutation. Each credential is delivered only to its consuming role.
+The default and fork workflows receive none of them.
+
+Protected evidence keeps consumer and producer identity independent: the
+marketplace repository and exact commit are reported separately from the
+hosted manifest digest, client wheel hash, image digest, hosted source commit,
+and producer workflow/run identity. Reports are schema-validated allowlists;
+they exclude secrets, action URLs, provider account/customer/card data, raw
+webhooks, and unrestricted service or provider payloads.
+
+Alkahest E2E remains an independent mechanism composition. Local
+EAS/allowlisted-arbiter validation is a condition-boundary concern, not a
+hosted financial-provider profile; this repository currently exposes no
+standalone hosted local-EAS operator target.
 
 ## Current limits
 

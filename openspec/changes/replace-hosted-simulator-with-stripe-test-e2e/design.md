@@ -74,7 +74,7 @@ Retain the current `e2e-tests/src/hosted_real_stripe` architecture: gates, runti
 The lifecycle bridge must drive ordinary marketplace paths, not direct authority-only shortcuts:
 
 1. verify consumer commit and signed production hosted manifest/image/client identities;
-2. preflight `sk_test` mode, API connectivity, allowlisted connected account ownership and capabilities, and loopback webhook mapping;
+2. preflight a test-mode secret (`sk_test` or least-privilege `rk_test`), non-live returned objects, API connectivity, allowlisted connected account ownership and capabilities, and loopback webhook mapping;
 3. start migration/API/worker plus marketplace services;
 4. publish and discover the `fiat.stripe.v1` option;
 5. negotiate and materialize one accepted obligation;
@@ -183,12 +183,35 @@ Rollback before the consumer cutover restores the checkpointed simulator-capable
 
 ## Design promotion record
 
-| Accepted decision | Permanent location |
+The replacement decisions are promoted as current behavior at the following
+permanent destinations. Consumer documentation is in this repository;
+producer documentation named below is owned and published independently by
+`hosted-settlement-service`.
+
+| Accepted decision | Permanent owner and location |
 |---|---|
-| Provider-specific behavior is accepted only against Stripe test mode | `openspec/specs/test-compatibility/{spec,architecture}.md`; `docs/development/TESTING.md` |
-| Deterministic Arkhai recovery uses scripted outcomes at the hosted financial-provider interface | `openspec/specs/test-compatibility/{spec,architecture}.md`; hosted producer testing architecture |
-| Protected E2E consumes only the ordinary signed production hosted release | `openspec/specs/deployment-state/{spec,architecture}.md`; `docs/development/{ARCHITECTURE,DEPLOYMENT_AND_CONFIG}.md` |
-| Public/fork and protected hosted checks have distinct credential/evidence boundaries | `openspec/specs/test-compatibility/spec.md`; `docs/development/{TESTING,DEPLOYMENT_AND_CONFIG}.md` |
-| Simulator artifacts, controls, stores, protocols, and profiles are absent from active surfaces | `openspec/specs/deployment-state/{spec,architecture}.md`; `docs/development/ARCHITECTURE.md` |
-| Connect onboarding is periodic while readiness is checked per protected run | `openspec/specs/test-compatibility/architecture.md`; protected E2E runbook |
-| No roadmap impact unless the final implementation changes the hosted settlement product goal rather than its evidence strategy | Record final disposition here and update `docs/development/ROADMAP.md` only if applicable |
+| Provider-specific Checkout, webhook, connected-account, retrieval, transfer, refund, decline, and authentication behavior is accepted only against Stripe test mode | Consumer evidence contract: `openspec/specs/test-compatibility/{spec,architecture}.md`; developer guidance: `docs/development/TESTING.md`; operator stages: `e2e-tests/tests/e2e/roles/README.md` |
+| Timeout placement, unknown acknowledgement, delayed visibility, provider unavailability, exact-attempt failure, event duplication/order, journal recovery, and idempotency are Arkhai claims tested with provider-neutral scripted outcomes at the hosted financial-provider or webhook-inbox boundary | Consumer ownership statement: `openspec/specs/test-compatibility/{spec,architecture}.md`; producer normative implementation boundary: `hosted-settlement-service/openspec/specs/test-compatibility/{spec,architecture}.md`; developer explanation: `docs/development/{ARCHITECTURE,TESTING}.md` |
+| The scripted provider is a direct test injection with no HTTP/provider-shaped API, credential, reusable control surface, clock/event endpoint, production entry point, dependency, or release artifact | Consumer prohibition: `openspec/specs/deployment-state/{spec,architecture}.md`; producer artifact/composition contract: `hosted-settlement-service/openspec/specs/deployment-state/{spec,architecture}.md` and `hosted-settlement-service/docs/{ARCHITECTURE,DEPLOYMENT,RELEASING}.md` |
+| Protected financial E2E consumes only one ordinary signed production hosted manifest, exact released client wheel, digest-pinned service image, ordinary migration/API/worker roles, and public network/client contracts | `openspec/specs/deployment-state/{spec,architecture}.md`; `docs/development/{ARCHITECTURE,DEPLOYMENT_AND_CONFIG}.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Marketplace owns publication, discovery, negotiation, materialization, buyer action, VM fulfillment, collection/reclaim, status, restart, and recovery scenarios; hosted owns financial authority, provider adapter, operation journal, webhook inbox, and reconciliation | `docs/development/ARCHITECTURE.md`; `openspec/specs/test-compatibility/architecture.md`; producer boundary in `hosted-settlement-service/docs/ARCHITECTURE.md` |
+| Exact run identity keeps marketplace repository/commit separate from hosted manifest digest, client wheel version/hash, image digest, hosted source commit, and producer workflow/run identity; operation identity remains opaque and durable | `openspec/specs/test-compatibility/{spec,architecture}.md`; `docs/development/TESTING.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Protected preflight proves the exact release, a test-mode secret (`sk_test` or least-privilege `rk_test`), non-live objects, Stripe connectivity, allowlisted connected-account ownership/capabilities/readiness, exact loopback webhook mapping, and Chromium before the applicable mutation boundary | `openspec/specs/deployment-state/{spec,architecture}.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Protected outcomes use `product`, `account`, `environment`, and `timeout`; classification never converts a failed assertion into success | `openspec/specs/test-compatibility/{spec,architecture}.md`; `docs/development/TESTING.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Evidence is allowlisted and excludes credentials, action/onboarding URLs, account/customer/card data, raw webhooks, unrestricted provider payloads, unrelated objects, and secret-bearing process output | `openspec/specs/{test-compatibility,deployment-state}/spec.md`; `docs/development/{TESTING,DEPLOYMENT_AND_CONFIG}.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Setup/read-only observation may retry within bounds; financial mutation and recovery retain the original durable production idempotency identity; exact related objects, never latest-account objects, satisfy assertions | `openspec/specs/test-compatibility/{spec,architecture}.md`; `docs/development/TESTING.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Connect onboarding is manual/scheduled account lifecycle work, while exact allowlisted-account readiness is checked on every protected transaction run | `openspec/specs/test-compatibility/architecture.md`; `docs/development/{TESTING,DEPLOYMENT_AND_CONFIG}.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Missed-webhook and process-restart evidence uses real forwarding/process omissions, preserved authority state, and the original operation identity; it does not imitate provider faults | `openspec/specs/test-compatibility/{spec,architecture}.md`; `docs/development/{ARCHITECTURE,TESTING}.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Default/fork CI remains credential-free and does not discover secret-bearing tests; the only protected hosted financial target is `hosted-stripe-test` | `openspec/specs/{test-compatibility,deployment-state}/spec.md`; `docs/development/{TESTING,DEPLOYMENT_AND_CONFIG}.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Alkahest E2E remains independent. Local EAS/allowlisted-arbiter work is only condition-boundary conformance and currently has no standalone hosted operator target | `openspec/specs/test-compatibility/architecture.md`; `docs/development/TESTING.md`; `e2e-tests/tests/e2e/roles/README.md` |
+| Active deployment, packaging, workflow, configuration, release-verification, schema, and permanent-documentation surfaces expose no alternate provider artifact, control topology, or test-only hosted release | `openspec/specs/deployment-state/{spec,architecture}.md`; `docs/development/{ARCHITECTURE,DEPLOYMENT_AND_CONFIG}.md` |
+| Completed simulator-era implementation remains historical but its incomplete acceptance and closeout are superseded by this replacement | `openspec/changes/add-local-hosted-settlement-e2e/{proposal,design,tasks}.md` |
+| This evidence cutover does not change the hosted settlement product goal | No `docs/development/ROADMAP.md` change |
+
+Concrete producer artifacts are run outputs, not documentation constants. A
+production-only release generated after the coordinated cutover becomes valid
+handoff evidence only when its signature and complete identity tuple pass
+`hosted-preflight`; each protected report records that tuple alongside, and
+separately from, its exact marketplace commit. The pre-cutover implementation
+checkpoints above preserve provenance but are not substitutes for that release
+or for a protected Stripe run.

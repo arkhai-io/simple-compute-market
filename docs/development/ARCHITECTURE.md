@@ -441,12 +441,28 @@ states, action kind/expiry, condition anchors, safe fulfillment references,
 and opaque receipts. Checkout URLs are retrieved for an immediate response
 and are not written to marketplace databases or run logs.
 
-Hosted system evidence preserves the same ownership boundary. The hosted
-repository publishes service conformance and a separately signed private E2E
-fixture release; this repository verifies those immutable artifacts and owns
-the consumer VM lifecycle scenarios. Hermetic finance/time/event controls stay
-inside the private fixture network and never enter marketplace packages or
-public APIs. Wallet-free portable-condition evidence, local EAS/arbiter
-conformance, and real Stripe Checkout/webhook/Connect evidence are separate
-lanes with separate release and run identities.
+Hosted system evidence preserves the same production ownership boundary. The
+hosted repository owns the financial-provider interface, Stripe adapter,
+operation journal, webhook inbox, reconciliation lifecycle, focused
+provider-port tests, and one ordinary signed production release containing only
+the released client and service. Its provider-neutral scripted test
+collaborator is injected directly at the internal test seam and is not an HTTP
+service, provider implementation, credential consumer, or production artifact.
+
+This repository owns the protected marketplace system scenario and consumes
+that exact production release through the released client, digest-pinned
+image, ordinary migration/API/worker roles, and public network contracts.
+Stripe-specific Checkout, webhook, connected-account, retrieval, transfer, and
+refund assertions come only from Stripe test mode. Restart and missed-webhook
+evidence pauses ordinary processes or real forwarding while preserving the
+authority store and original operation identity; arbitrary provider outcomes
+remain provider-port tests and assert only Arkhai behavior.
+
+Each protected report identifies the marketplace repository and exact consumer
+commit separately from the hosted manifest, client wheel, service image, hosted
+source commit, and producer workflow/run identity. Role-scoped preflight and
+sanitized evidence boundaries are defined by the deployment and testing
+capabilities. Alkahest E2E remains an independent mechanism lane, while local
+EAS/allowlisted-arbiter checks concern only the condition boundary and do not
+establish hosted financial behavior.
 

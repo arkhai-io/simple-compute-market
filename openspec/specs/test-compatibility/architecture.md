@@ -45,27 +45,57 @@ Scenario fixtures create the precise resource and policy state they assert, rema
 
 A moved or extracted boundary may require wheel-content checks, typing markers, dependency-direction tests, consumer suites, composition startup, duplicate-registration checks, and retry/idempotency coverage in addition to ordinary unit tests. Which checks apply follows the authority being changed.
 
-## Hosted settlement evidence lanes
+## Hosted settlement evidence ownership
 
-Hosted settlement uses a producer/consumer split. The independently released
-authority owns service conformance, deterministic provider behavior, private
-control artifacts, and signed release identity. This repository owns the
-marketplace lifecycle scenario and consumes only exact release artifacts.
-Neither repository imports the other's implementation source.
+Hosted settlement has one provider-authentic system lane and two lower-level
+evidence boundaries. Each boundary proves only behavior it owns:
 
-The hermetic lane supplies deterministic finance, time, and event delivery
-behind authenticated private controls. The marketplace still reaches the
-authority and storefront only through their ordinary public clients; the
-private runner may plan outcomes and inspect a bounded normalized effect by
-stable operation reference. Clean runs remove authority, simulator, and clock
-volumes, while restart scenarios deliberately retain them.
+| Evidence boundary | Owner | What it proves |
+|---|---|---|
+| Financial-provider and webhook-inbox integration | Hosted producer | Production journal, immutable fingerprints, leases, retries, idempotency, reconciliation, inbox deduplication, and lifecycle transitions under provider-neutral scripted outcomes |
+| Client, adapter, configuration, packaging, and marketplace orchestration | Owning producer or marketplace package | Released public contracts and credential-free composition without provider mutation |
+| Protected `stripe-test` system E2E | Marketplace consumer | The complete marketplace lifecycle composed with an exact ordinary hosted production release and supported Stripe test-mode Checkout, webhook, connected-account, retrieval, transfer, refund, decline, and authentication behavior |
 
-Real Stripe compatibility is a separate evidence lane because Checkout UI,
-webhook signing, connected-account readiness, provider retrieval, transfer,
-and refund behavior cannot be inferred from a simulator. Its report carries
-the consumer commit and hosted release/workflow identities independently from
-the hermetic report. Local EAS/arbiter conformance is likewise separate from
-the default wallet-free portable-condition path.
+The hosted producer's scripted collaborator is a direct test injection at its
+financial-provider interface. It has no HTTP server, provider-shaped public
+model, credential, clock/event control API, production entry point, or release
+artifact. Scripts prescribe typed interface outcomes; names and assertions
+describe Arkhai behavior under those outcomes rather than attributing them to
+Stripe. Focused Stripe adapter tests verify SDK request construction and
+normalization, but only the protected lane establishes real Stripe behavior.
+
+The marketplace owns protected publication, discovery, negotiation,
+materialization, buyer action, VM fulfillment, collection, reclaim, status,
+restart, and recovery scenarios. It consumes the hosted implementation only
+through the signed production manifest, released client, digest-pinned image,
+ordinary migration, API, worker, and public network contracts. Missed-webhook
+and restart evidence pauses real forwarding or ordinary processes and retains
+the authority store and original operation identity; arbitrary provider fault
+placement remains at the provider port.
+
+Every protected run creates a unique namespace but keeps financial
+idempotency derived from durable operation identity. Retrieval follows the
+exact Checkout, payment, transfer, or refund relations created by that run
+rather than accepting an account's latest object. Reports identify the
+marketplace repository and exact consumer commit separately from the hosted
+manifest digest, client wheel hash, service image digest, hosted source
+commit, and producer workflow/run identity.
+
+Preflight establishes a verified production release, a test-mode secret
+(`sk_test` or least-privilege `rk_test`), non-live returned objects, Stripe connectivity, an allowlisted capable and
+ready connected account, loopback-only webhook forwarding, and Chromium
+before publication or financial mutation. Terminal results use the
+`product`, `account`, `environment`, and `timeout` classes. Evidence is an
+allowlist of identities, scenario/stage, opaque operation identity, normalized
+state/amount/currency/cardinality, and bounded diagnostics; secrets, action
+URLs, account/customer/card data, raw webhooks, and unrestricted provider
+payloads never enter reports.
+
+Public and fork checks receive no protected credentials and do not discover or
+skip secret-bearing tests. Alkahest system E2E remains a separate mechanism
+lane. Local EAS/allowlisted-arbiter work is condition-boundary conformance
+only; it is not part of hosted financial evidence, and there is currently no
+standalone hosted local-EAS operator target.
 
 ## Current limits
 

@@ -39,3 +39,15 @@ None.
 Marketplace implementation checkpoint `c128b902` preserves the ordinary hosted-release composition, marketplace lifecycle, protected Stripe driver/evidence, and simulator consumer work created under this change. Hosted producer checkpoints `f46ca41` and `d4fd002` preserve the separately released simulator implementation and documentation.
 
 The hermetic Compose acceptance matrix did not complete and this change claims no accepted simulator system evidence. `replace-hosted-simulator-with-stripe-test-e2e` supersedes the simulator strategy: deterministic Arkhai recovery moves to provider-port integration in hosted producer change `replace-e2e-simulator-with-scripted-provider-tests`, while hosted financial system acceptance uses Stripe test mode through the ordinary production release. Completed implementation and real-Stripe evidence remain recorded here; no remaining task should validate or release the simulator.
+
+The delta specs and permanent-document promotion statements in this change are
+retained as proposal history only and MUST NOT be applied as current simulator
+capabilities. Current evidence ownership, production-only composition,
+protected prerequisites, run identity, sanitization, and failure attribution
+are promoted by the replacement into
+`openspec/specs/{test-compatibility,deployment-state}/{spec,architecture}.md`,
+`docs/development/{ARCHITECTURE,TESTING,DEPLOYMENT_AND_CONFIG}.md`, and
+`e2e-tests/tests/e2e/roles/README.md`. The only concrete acceptance still
+credited to this change is the completed work and real Stripe evidence recorded
+above; unchecked simulator acceptance and closeout remain incomplete by
+design.

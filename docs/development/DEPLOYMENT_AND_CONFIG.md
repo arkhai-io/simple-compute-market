@@ -236,30 +236,68 @@ generates `.dist/hosted-settlement-compose.env` with an immutable
 runs the hosted service-owned migration, API, and single reconciliation worker
 against one shared volume; it never builds or imports sibling service source.
 
-### Optional hosted local profiles
+### Protected hosted Stripe test execution
 
-Hosted local execution remains artifact-based. `make hosted-preflight`
-verifies the signed production manifest and exact client wheel.
-`make hosted-hermetic-preflight` additionally verifies the signed private E2E
-manifest, production compatibility, exact service and fixture wheels, image
-digests, schemas, protocols, and capabilities. Both atomically generate only
-non-secret Compose coordinates; they do not build or mount sibling source.
+Hosted financial system E2E has one operator lane:
 
-`make hosted-hermetic` starts a clean digest-pinned authority/simulator
-assembly, admits the configured fixture account, runs the wallet-free
-marketplace lifecycle, and removes the authority, simulator, and controlled
-clock volumes on exit. The restart target retains those named volumes so
-recovery tests can resume the same operation identities. Simulator control and
-provider surfaces remain on isolated internal networks. Marketplace
-storefront/buyer profiles receive only public principals, release pins,
-resolver identifiers, and their own signer credentials.
+```console
+make hosted-stripe-test \
+  HOSTED_RELEASE_DIR=/path/to/production-release \
+  HOSTED_PRODUCTION_MANIFEST_SHA256=<sha256> \
+  HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256=<sha256> \
+  HOSTED_PRODUCTION_SOURCE_COMMIT=<full-hosted-commit> \
+  HOSTED_PRODUCTION_WORKFLOW_RUN_ID=<producer-run> \
+  HOSTED_MARKETPLACE_COMMIT=<full-marketplace-commit> \
+  HOSTED_STRIPE_TEST_RUN_REF=<unique-run-reference> \
+  HOSTED_STRIPE_TEST_SCENARIO=<scenario>
+```
 
-`make hosted-local-eas` adds local chain infrastructure only for
-condition-boundary conformance. `make hosted-real-stripe` instead uses the
-ordinary production-like authority image and separately injected Stripe,
-webhook, account, and operator secrets. These profiles produce distinct
-evidence and never fall back to one another. Public and fork workflows run
-without private artifact, simulator-control, or provider credentials.
+Supply `STRIPE_SECRET_KEY` and `STRIPE_CONNECTED_ACCOUNT_ID` only through the
+approved protected Secret/environment boundary, not as command-line literals.
+`HOSTED_STRIPE_TEST_EVIDENCE` may select the sanitized report destination.
+
+The target uses `hosted-preflight` to verify the signed production manifest,
+trust policy, exact client wheel, service image digest, migration schema,
+OpenAPI/conformance artifacts, provenance, hosted source commit, and producer
+workflow identity. Preflight emits only non-secret Compose coordinates and
+starts no service until the complete release identity agrees. The stack then
+runs the ordinary hosted migration, API, and one reconciliation worker against
+one authority volume; it never builds, mounts, imports, or installs sibling
+hosted source and has no alternate provider, clock, event-control, or test
+service artifact.
+
+Protected activation additionally requires a test-mode secret (`sk_test` or
+least-privilege `rk_test`), Stripe connectivity and non-live returned objects,
+the expected allowlisted connected account with required
+ownership/capabilities/readiness, the Stripe CLI forwarding to
+`http://127.0.0.1:18080/webhooks/stripe`, and Chromium. Failure stops before
+the relevant publication or financial mutation. The authority API/worker
+receive only their provider and account inputs, the webhook process receives
+only the ephemeral signing secret, Stripe CLI receives only its provider
+credential, and marketplace storefront/buyer profiles receive only public
+consumer coordinates and their own signer credentials.
+
+Selected restart scenarios retain the authority volume and original operation
+identities while restarting only ordinary API/worker roles or webhook
+forwarding. Clean execution and every workflow outcome remove transient
+processes, webhook material, and browser state. Accepted external financial
+objects are recovered, transferred, or refunded through their original durable
+identities rather than being deleted or recreated.
+
+The sanitized report identifies the marketplace repository and exact commit
+separately from the hosted manifest digest, client wheel hash, service image
+digest, hosted source commit, and producer workflow/run identity. It includes
+only allowlisted scenario/stage, opaque operation identity, normalized
+state/amount/currency/cardinality, failure class, and bounded diagnostics. It
+contains no credentials, action URLs, account/customer/card data, raw
+webhooks, unrestricted provider payloads, or marketplace configuration secrets.
+
+Default and fork workflows do not receive protected release access, Stripe
+credentials, connected-account identifiers, webhook secrets, or browser
+payment inputs and do not probe this lane. Alkahest E2E is invoked
+independently as documented in `TESTING.md`. Local EAS/allowlisted-arbiter
+checks are condition-boundary work only; there is currently no standalone
+hosted local-EAS operator target.
 
 ## Current limits
 

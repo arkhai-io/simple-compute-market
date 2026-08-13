@@ -32,6 +32,20 @@ An architecture companion does not replace a normative requirement. When explana
 | Storefront publication | [Spec](storefront-publication/spec.md) | [Architecture](storefront-publication/architecture.md) |
 | Testing and compatibility | [Spec](test-compatibility/spec.md) | [Architecture](test-compatibility/architecture.md) |
 
+## Hosted settlement acceptance ownership
+
+Hosted settlement acceptance spans two capabilities, with no third test
+topology contract:
+
+| Durable decision | Owning permanent documentation |
+|---|---|
+| Provider-neutral scripted outcomes prove only Arkhai journal, retry, reconciliation, inbox, and idempotency behavior at the hosted producer's internal provider boundary | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`test-compatibility/architecture.md`](test-compatibility/architecture.md) |
+| Supported Stripe behavior is accepted only by the marketplace-owned protected `stripe-test` system lane | [`test-compatibility/spec.md`](test-compatibility/spec.md), [`test-compatibility/architecture.md`](test-compatibility/architecture.md), and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |
+| Protected reports keep marketplace consumer identity separate from the hosted manifest, client, image, source, and producer-run identity and apply one sanitization/failure taxonomy | [`test-compatibility/spec.md`](test-compatibility/spec.md) and [`docs/development/TESTING.md`](../../docs/development/TESTING.md) |
+| Hosted financial E2E composes only ordinary signed production client/service artifacts, with role-scoped prerequisites and fail-closed activation | [`deployment-state/spec.md`](deployment-state/spec.md), [`deployment-state/architecture.md`](deployment-state/architecture.md), and [`docs/development/DEPLOYMENT_AND_CONFIG.md`](../../docs/development/DEPLOYMENT_AND_CONFIG.md) |
+| Marketplace/authority ownership and the producer/consumer release boundary | [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) |
+| Current operator commands and staged evidence fields | [`e2e-tests/tests/e2e/roles/README.md`](../../e2e-tests/tests/e2e/roles/README.md) |
+
 ## Reading order
 
 For a cross-cutting change:
