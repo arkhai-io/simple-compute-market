@@ -392,8 +392,10 @@ class StripeApi:
         while True:
             try:
                 return inspect()
-            except ProviderNotConverged as exc:
+            except (ProviderNotConverged, StripeUnavailable) as exc:
                 if time.monotonic() >= deadline:
+                    if isinstance(exc, StripeUnavailable):
+                        raise
                     raise ProviderConvergenceTimeout("Stripe resources did not converge") from exc
                 time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
 

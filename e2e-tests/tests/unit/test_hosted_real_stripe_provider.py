@@ -10,6 +10,7 @@ from src.hosted_real_stripe.stripe_api import (
     ExpectedEffect,
     ProviderInvariantError,
     StripeApi,
+    StripeUnavailable,
     TerminalProjection,
 )
 
@@ -116,3 +117,25 @@ def test_exact_retrieval_rejects_duplicate_checkout_or_wrong_destination() -> No
         StripeApi(
             "rk_test_secret", transport=_transport(wrong_destination=True)
         ).inspect_collection(_expected(), terminal)
+
+
+def test_collection_wait_retries_transient_stripe_unavailability() -> None:
+    ready = _transport()
+    attempts = 0
+
+    def transient(path: str, params: Mapping[str, str]) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise StripeUnavailable("transient provider retrieval")
+        return ready(path, params)
+
+    evidence = StripeApi("rk_test_secret", transport=transient).wait_for_collection(
+        _expected(),
+        TerminalProjection("collected", "collected", "fulfilled"),
+        timeout=1,
+        poll_interval=0.001,
+    )
+
+    assert evidence.transfer_count == 1
+    assert attempts > 1
