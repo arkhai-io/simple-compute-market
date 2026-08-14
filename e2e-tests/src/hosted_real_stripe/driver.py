@@ -80,6 +80,7 @@ _SCENARIOS = (
     "insufficient_funds",
     "authentication",
 )
+_REFUND_SERVICING_INTERVAL_SECONDS = 7200.0
 
 
 @dataclass
@@ -187,6 +188,11 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                         stack.start(
                             authority_env_path=authority_env,
                             marketplace_config_path=marketplace_config,
+                            storefront_servicing_interval_seconds=(
+                                _REFUND_SERVICING_INTERVAL_SECONDS
+                                if scenario in {"reclaim", "worker_restart"}
+                                else None
+                            ),
                         )
                         execution.stage = "account_readiness"
                         stack.bind_existing_account(

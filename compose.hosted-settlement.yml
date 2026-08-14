@@ -79,6 +79,8 @@ services:
 
   bob-storefront:
     profiles: [hosted-production, hosted-stripe-test]
+    environment:
+      STOREFRONT_CLAIMS_SWEEP_INTERVAL: ${HOSTED_STOREFRONT_SERVICING_INTERVAL_SECONDS:-30}
     depends_on:
       hosted-settlement-api:
         condition: service_healthy

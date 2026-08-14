@@ -39,6 +39,37 @@ def test_compose_stack_uses_every_declared_compose_file(tmp_path: Path) -> None:
     ]
 
 
+def test_compose_stack_sets_refund_servicing_interval(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    stack = ComposeStack(
+        compose_env=tmp_path / "compose.env",
+        compose_files=(tmp_path / "compose.yml",),
+        executable="docker",
+        cwd=tmp_path,
+    )
+    captured: dict[str, Any] = {}
+
+    def capture(
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str],
+        check: bool,
+        input_text: str | None = None,
+    ) -> None:
+        captured.update(argv=tuple(argv), env=dict(env), check=check)
+
+    monkeypatch.setattr(stack, "_run", capture)
+    stack.start(
+        authority_env_path=tmp_path / "authority.env",
+        marketplace_config_path=tmp_path / "storefront.toml",
+        storefront_servicing_interval_seconds=7200,
+    )
+
+    assert captured["env"]["HOSTED_STOREFRONT_SERVICING_INTERVAL_SECONDS"] == "7200"
+
+
 def test_compose_stack_streams_existing_account_contract_without_provider_argument(
     tmp_path: Path,
     monkeypatch,

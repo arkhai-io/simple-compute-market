@@ -383,10 +383,17 @@ class ComposeStack:
         *,
         authority_env_path: Path,
         marketplace_config_path: Path,
+        storefront_servicing_interval_seconds: float | None = None,
     ) -> None:
         env = {key: value for key, value in os.environ.items() if not _SENSITIVE_ENV.search(key)}
         env["HOSTED_SETTLEMENT_ENV_FILE"] = str(authority_env_path)
         env["VMS_BOB_STRIPE_STOREFRONT_CONFIG"] = str(marketplace_config_path)
+        if storefront_servicing_interval_seconds is not None:
+            if storefront_servicing_interval_seconds <= 0:
+                raise ProcessUnavailable("storefront servicing interval must be positive")
+            env["HOSTED_STOREFRONT_SERVICING_INTERVAL_SECONDS"] = (
+                f"{storefront_servicing_interval_seconds:g}"
+            )
         self._runtime_env = env
         self._run((*self._base, "up", "-d", "--wait"), env=env, check=True)
         self._started = True

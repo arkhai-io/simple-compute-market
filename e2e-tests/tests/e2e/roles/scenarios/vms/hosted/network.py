@@ -150,7 +150,7 @@ class NetworkMarketplacePort:
             caller_role="seller",
             expected_publishers=seller_trust,
         )
-        self._provisioning_trust = TrustedIdentitySet(
+        provisioning_trust = TrustedIdentitySet(
             identities=tuple(
                 Identity.model_validate(principal)
                 for principal in self.storefront_config["provisioning"]["identity"]["principals"]
@@ -159,9 +159,9 @@ class NetworkMarketplacePort:
         self.capacity_admin = SiteCapacityAdminClient(
             self.provisioning_url,
             seller_signer,
-            self._provisioning_trust,
+            provisioning_trust,
         )
-        self._admin_signer = create_signer(
+        admin_signer = create_signer(
             "ed25519",
             _required("HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL"),
         )
@@ -169,8 +169,8 @@ class NetworkMarketplacePort:
         self._host_id = self._resource_id
         with SyncProvisioningClient(
             self.provisioning_url,
-            self._admin_signer,
-            self._provisioning_trust,
+            admin_signer,
+            provisioning_trust,
         ) as provisioning_admin:
             provisioning_admin.register_host(
                 HostCreate(
@@ -253,32 +253,6 @@ class NetworkMarketplacePort:
 
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
-
-    def keep_fulfillment_unresolved_for_refund(self) -> None:
-        with SyncProvisioningClient(
-            self.provisioning_url,
-            self._admin_signer,
-            self._provisioning_trust,
-        ) as client:
-            client._post(
-                "/test/mock-rules",
-                {
-                    "rule_id": "hosted-stripe-refund-unresolved",
-                    "match": {"vm_action": "create"},
-                    "pause_before_result": False,
-                    "fail_with": "protected refund keeps fulfillment unresolved",
-                },
-            )
-            evaluation = client._post(
-                "/test/evaluate-job",
-                {
-                    "host": self._host_id,
-                    "vm_target": "hosted-refund-unresolved",
-                    "vm_action": "create",
-                },
-            )
-        if evaluation.get("rule_matched") != "hosted-stripe-refund-unresolved":
-            raise AssertionError("refund fulfillment failure is not active")
 
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
