@@ -8,8 +8,8 @@ spec carries two things:
   listing.  Drives the structural check on ``POST /agents/{id}/listings``
   and ``POST /api/v1/listings/validate-publish``.
 * ``filters`` — vocabulary the registry honours at ``GET /listings``
-  query time.  Each filter is `{name, path (JSONPath), op, value_type,
-  alias_kind?, on_missing}`.
+  query time. Each filter declares its canonical HTTP ``name`` and may
+  expose a friendly ``query_name`` plus explicit ``query_aliases``.
 
 The endpoint returns the spec verbatim plus an ``etag`` (sha256 over
 canonical-JSON-encoded ``{version, listing_shape, filters}``).  Buyers
@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -52,6 +53,8 @@ Op = Literal["in", "range", "not_in", "exists"]
 AliasKind = Literal["lower_bound", "upper_bound"]
 OnMissing = Literal["fail", "pass"]
 
+_QUERY_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
 
 class FilterDecl(BaseModel):
     """One filter declaration in the registry's filter spec."""
@@ -62,6 +65,15 @@ class FilterDecl(BaseModel):
     path: str = Field(
         min_length=1,
         description="JSONPath (RFC 9535) into the listing document.",
+    )
+    query_name: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Primary field name exposed by the buyer resource DSL.",
+    )
+    query_aliases: list[str] = Field(
+        default_factory=list,
+        description="Additional explicit buyer resource DSL field names.",
     )
     op: Op
     value_type: ValueType
@@ -146,11 +158,29 @@ def load_filter_spec(path: Path | None = None) -> FilterSpec:
         raw = yaml.safe_load(fh)
     spec = FilterSpec.model_validate(raw)
 
-    seen: set[str] = set()
-    for f in spec.filters:
-        if f.name in seen:
-            raise ValueError(f"duplicate filter name in spec: {f.name!r}")
-        seen.add(f.name)
+    seen_filters: set[str] = set()
+    seen_queries: set[str] = set()
+    for declaration in spec.filters:
+        if declaration.name in seen_filters:
+            raise ValueError(f"duplicate filter name in spec: {declaration.name!r}")
+        seen_filters.add(declaration.name)
+        query_names = (
+            declaration.query_name or declaration.name,
+            *declaration.query_aliases,
+        )
+        if len(set(query_names)) != len(query_names):
+            raise ValueError(
+                f"duplicate query name on filter {declaration.name!r}"
+            )
+        for query_name in query_names:
+            if not _QUERY_NAME_RE.fullmatch(query_name):
+                raise ValueError(
+                    f"invalid query name on filter {declaration.name!r}: "
+                    f"{query_name!r}"
+                )
+            if query_name in seen_queries:
+                raise ValueError(f"duplicate query name in spec: {query_name!r}")
+            seen_queries.add(query_name)
     return spec
 
 

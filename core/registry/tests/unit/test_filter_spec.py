@@ -15,7 +15,6 @@ import pytest
 from pydantic import ValidationError
 
 from src.api.filter_spec import (
-    FilterSpec,
     compute_etag,
     load_filter_spec,
 )
@@ -107,6 +106,65 @@ def test_duplicate_filter_names_rejected(tmp_path: Path) -> None:
         load_filter_spec(path)
 
 
+def test_query_names_and_aliases_are_explicit_and_unique(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        version: 1
+        listing_shape: {type: object}
+        filters:
+          - name: ram_gb_min
+            query_name: ram_gb
+            query_aliases: [ram_gb_min]
+            path: $.offer_resource.ram_gb
+            op: range
+            value_type: integer
+            alias_kind: lower_bound
+        """,
+    )
+    declaration = load_filter_spec(path).filters[0]
+    assert declaration.query_name == "ram_gb"
+    assert declaration.query_aliases == ["ram_gb_min"]
+
+
+@pytest.mark.parametrize(
+    ("declarations", "message"),
+    [
+        (
+            """
+            - {name: one, query_name: shared, path: $.one, op: in, value_type: string}
+            - {name: two, query_aliases: [shared], path: $.two, op: in, value_type: string}
+            """,
+            "duplicate query name in spec",
+        ),
+        (
+            """
+            - {name: one, query_name: one, query_aliases: [one], path: $.one, op: in, value_type: string}
+            """,
+            "duplicate query name on filter",
+        ),
+        (
+            """
+            - {name: one, query_name: 'not valid', path: $.one, op: in, value_type: string}
+            """,
+            "invalid query name on filter",
+        ),
+    ],
+)
+def test_invalid_query_vocabulary_is_rejected(
+    tmp_path: Path, declarations: str, message: str
+) -> None:
+    body = (
+        "version: 1\n"
+        "listing_shape: {type: object}\n"
+        "filters:\n"
+        + textwrap.indent(textwrap.dedent(declarations).strip(), "  ")
+    )
+    path = _write(tmp_path, body)
+    with pytest.raises(ValueError, match=message):
+        load_filter_spec(path)
+
+
 def test_unknown_op_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -162,6 +220,9 @@ def test_repo_default_spec_loads() -> None:
     # Sanity: spec must cover the discovery axes the storefront used to
     # mirror, otherwise we've regressed query reach.
     assert {"gpu_model", "region", "ram_gb_min", "token"} <= names
+    by_name = {declaration.name: declaration for declaration in spec.filters}
+    assert by_name["ram_gb_min"].query_name == "ram_gb"
+    assert by_name["ram_gb_min"].query_aliases == ["ram_gb_min"]
     assert isinstance(spec.listing_shape, dict)
     assert spec.listing_shape.get("type") == "object"
     # The shipped spec declares its schema identity — buyer plugins match
