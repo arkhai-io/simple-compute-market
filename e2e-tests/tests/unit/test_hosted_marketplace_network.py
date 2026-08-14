@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import pytest
 
 from tests.e2e.roles.scenarios.vms.hosted import network
 from tests.e2e.roles.scenarios.vms.hosted.network import (
@@ -57,3 +58,42 @@ def test_runtime_readiness_requires_only_destination_transfer_capability(
     assert snapshot.wallet_free is True
     assert snapshot.runtime_ready is True
     assert snapshot.account_ready is True
+
+
+def test_public_status_wait_retries_authority_unavailability(monkeypatch) -> None:
+    marketplace = object.__new__(NetworkMarketplacePort)
+    responses = iter(
+        (
+            RuntimeError("GET http://storefront/settlement -> authenticated HTTP 503: unavailable"),
+            {"status": "funded"},
+        )
+    )
+
+    def buyer_status(_settlement_ref: str):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(marketplace, "_buyer_status", buyer_status)
+    monkeypatch.setattr(network.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "1")
+
+    assert marketplace._wait_public_status("settlement-1", {"funded"}) == {"status": "funded"}
+
+
+def test_public_status_wait_rejects_nontransient_authenticated_errors(
+    monkeypatch,
+) -> None:
+    marketplace = object.__new__(NetworkMarketplacePort)
+    monkeypatch.setattr(
+        marketplace,
+        "_buyer_status",
+        lambda _settlement_ref: (_ for _ in ()).throw(
+            RuntimeError("GET http://storefront/settlement -> authenticated HTTP 401: rejected")
+        ),
+    )
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "1")
+
+    with pytest.raises(RuntimeError, match="authenticated HTTP 401"):
+        marketplace._wait_public_status("settlement-1", {"funded"})

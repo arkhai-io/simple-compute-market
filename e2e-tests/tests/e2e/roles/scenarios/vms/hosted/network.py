@@ -461,9 +461,14 @@ class NetworkMarketplacePort:
         timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            status = self._buyer_status(settlement_ref)
-            if status.get("status") in terminal:
-                return status
+            try:
+                status = self._buyer_status(settlement_ref)
+            except RuntimeError as exc:
+                if "authenticated HTTP 503:" not in str(exc):
+                    raise
+            else:
+                if status.get("status") in terminal:
+                    return status
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         raise TimeoutError("named hosted public status did not converge")
 
