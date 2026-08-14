@@ -25,6 +25,7 @@ from core_storefront.sqlite_migrations import MigrationLike
 from domains.vms.listings.host_csv_importer import upsert_hosts_from_csv
 from domains.vms.listings.reconciler import ensure_derived_compute_listings_table
 from domains.vms.listings.resource_csv_importer import (
+    SettlementClauseCompiler,
     upsert_resources_from_csv,
     upsert_resources_from_csv_content,
 )
@@ -72,6 +73,7 @@ class SQLiteClient(CoreSQLiteClient):
               token TEXT,
               max_duration_seconds INTEGER,
               accepted_escrows TEXT,
+              settlements TEXT,
               created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
               updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
             )
@@ -85,6 +87,7 @@ class SQLiteClient(CoreSQLiteClient):
             "ALTER TABLE resources ADD COLUMN token TEXT",
             "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
             "ALTER TABLE resources ADD COLUMN accepted_escrows TEXT",
+            "ALTER TABLE resources ADD COLUMN settlements TEXT",
         ):
             try:
                 cur.execute(col_ddl)
@@ -286,6 +289,7 @@ class SQLiteClient(CoreSQLiteClient):
         token: str | None = None,
         max_duration_seconds: int | None = None,
         accepted_escrows: list[dict[str, Any]] | None = None,
+        settlements: list[dict[str, Any]] | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row.
 
@@ -322,9 +326,10 @@ class SQLiteClient(CoreSQLiteClient):
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
+                      min_price, token, max_duration_seconds, accepted_escrows, settlements,
+                      created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -336,6 +341,7 @@ class SQLiteClient(CoreSQLiteClient):
                       token=excluded.token,
                       max_duration_seconds=excluded.max_duration_seconds,
                       accepted_escrows=excluded.accepted_escrows,
+                      settlements=excluded.settlements,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -352,6 +358,7 @@ class SQLiteClient(CoreSQLiteClient):
                         json.dumps(accepted_escrows)
                         if accepted_escrows is not None
                         else None,
+                        json.dumps(settlements) if settlements is not None else None,
                         now_iso,
                         now_iso,
                     ),
@@ -371,6 +378,9 @@ class SQLiteClient(CoreSQLiteClient):
                             json.dumps(accepted_escrows)
                             if accepted_escrows is not None
                             else None
+                        ),
+                        settlements_json=(
+                            json.dumps(settlements) if settlements is not None else None
                         ),
                         now_iso=now_iso,
                     )
@@ -407,7 +417,8 @@ class SQLiteClient(CoreSQLiteClient):
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, accepted_escrows, created_at, updated_at
+                           min_price, token, max_duration_seconds, accepted_escrows, settlements,
+                           created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -428,6 +439,7 @@ class SQLiteClient(CoreSQLiteClient):
                     row_token,
                     row_max_duration_seconds,
                     row_accepted_escrows,
+                    row_settlements,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -450,6 +462,14 @@ class SQLiteClient(CoreSQLiteClient):
                                 accepted = parsed_ae
                         except Exception:
                             accepted = None
+                    parsed_settlements: list[dict[str, Any]] | None = None
+                    if isinstance(row_settlements, str) and row_settlements.strip():
+                        try:
+                            value = json.loads(row_settlements)
+                            if isinstance(value, list):
+                                parsed_settlements = value
+                        except Exception:
+                            parsed_settlements = None
                     result.append(
                         {
                             "resource_id": row_resource_id,
@@ -463,6 +483,7 @@ class SQLiteClient(CoreSQLiteClient):
                             "token": row_token,
                             "max_duration_seconds": row_max_duration_seconds,
                             "accepted_escrows": accepted,
+                            "settlements": parsed_settlements,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -482,8 +503,9 @@ class SQLiteClient(CoreSQLiteClient):
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, max_duration_seconds, created_at, updated_at
+                    SELECT resource_id, resource_type, resource_subtype, unit, value,
+                           state, attributes, min_price, token, max_duration_seconds,
+                           accepted_escrows, settlements, created_at, updated_at
                     FROM resources
                     WHERE resource_id = ?
                     LIMIT 1
@@ -505,6 +527,8 @@ class SQLiteClient(CoreSQLiteClient):
                     row_min_price,
                     row_token,
                     row_max_duration_seconds,
+                    row_accepted_escrows,
+                    row_settlements,
                     row_created_at,
                     row_updated_at,
                 ) = row
@@ -516,7 +540,17 @@ class SQLiteClient(CoreSQLiteClient):
                             attrs = parsed
                     except Exception:
                         attrs = {}
-
+                accepted = (
+                    json.loads(row_accepted_escrows)
+                    if isinstance(row_accepted_escrows, str)
+                    and row_accepted_escrows.strip()
+                    else None
+                )
+                settlements = (
+                    json.loads(row_settlements)
+                    if isinstance(row_settlements, str) and row_settlements.strip()
+                    else None
+                )
                 return {
                     "resource_id": row_resource_id,
                     "resource_type": row_resource_type,
@@ -528,6 +562,8 @@ class SQLiteClient(CoreSQLiteClient):
                     "min_price": row_min_price,
                     "token": row_token,
                     "max_duration_seconds": row_max_duration_seconds,
+                    "accepted_escrows": accepted,
+                    "settlements": settlements,
                     "created_at": row_created_at,
                     "updated_at": row_updated_at,
                 }
@@ -562,6 +598,7 @@ class SQLiteClient(CoreSQLiteClient):
         csv_path: str,
         dry_run: bool = False,
         templates: dict[str, Any] | None = None,
+        settlement_compiler: SettlementClauseCompiler | None = None,
     ) -> dict[str, Any]:
         """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
@@ -569,6 +606,7 @@ class SQLiteClient(CoreSQLiteClient):
             sqlite_client=self,
             dry_run=dry_run,
             templates=templates,
+            settlement_compiler=settlement_compiler,
         )
         return report.to_dict()
 
@@ -579,6 +617,7 @@ class SQLiteClient(CoreSQLiteClient):
         source_label: str = "<inline>",
         dry_run: bool = False,
         templates: dict[str, Any] | None = None,
+        settlement_compiler: SettlementClauseCompiler | None = None,
     ) -> dict[str, Any]:
         """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -592,6 +631,7 @@ class SQLiteClient(CoreSQLiteClient):
             sqlite_client=self,
             dry_run=dry_run,
             templates=templates,
+            settlement_compiler=settlement_compiler,
         )
         return report.to_dict()
 
@@ -638,7 +678,7 @@ class SQLiteClient(CoreSQLiteClient):
     @staticmethod
     def _host_row_to_dict(row: tuple) -> dict[str, Any]:
         d: dict[str, Any] = {}
-        for col, val in zip(SQLiteClient._HOST_COLUMNS, row):
+        for col, val in zip(SQLiteClient._HOST_COLUMNS, row, strict=True):
             d[col] = val
         # Normalize types: bools come back as 0/1 ints
         for bcol in ("static_ip", "datacenter_grade", "enabled"):
@@ -1072,6 +1112,7 @@ class SQLiteClient(CoreSQLiteClient):
         token: str | None,
         max_duration_seconds: int | None,
         accepted_escrows_json: str | None,
+        settlements_json: str | None,
         now_iso: str,
     ) -> str:
         attrs = attributes or {}
@@ -1132,9 +1173,9 @@ class SQLiteClient(CoreSQLiteClient):
             INSERT INTO compute_capacity_pools(
               pool_id, resource_type, gpu_model, region, sla, total_gpu_count,
               status, allocation_policy, min_price, token, max_duration_seconds,
-              accepted_escrows, created_at, updated_at
+              accepted_escrows, settlements, created_at, updated_at
             )
-            VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'compute.gpu', ?, ?, ?, ?, ?, 'first_fit', ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(pool_id) DO UPDATE SET
               gpu_model=COALESCE(excluded.gpu_model, compute_capacity_pools.gpu_model),
               region=COALESCE(excluded.region, compute_capacity_pools.region),
@@ -1145,6 +1186,7 @@ class SQLiteClient(CoreSQLiteClient):
               token=COALESCE(excluded.token, compute_capacity_pools.token),
               max_duration_seconds=COALESCE(excluded.max_duration_seconds, compute_capacity_pools.max_duration_seconds),
               accepted_escrows=COALESCE(excluded.accepted_escrows, compute_capacity_pools.accepted_escrows),
+              settlements=COALESCE(excluded.settlements, compute_capacity_pools.settlements),
               updated_at=excluded.updated_at
             """,
             (
@@ -1158,6 +1200,7 @@ class SQLiteClient(CoreSQLiteClient):
                 token,
                 max_duration_seconds,
                 accepted_escrows_json,
+                settlements_json,
                 now_iso,
                 now_iso,
             ),

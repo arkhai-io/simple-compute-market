@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from market_settlement_runtime import (
     QueryValueType,
     ReadinessBlocker,
     SettlementClauseField,
+    SettlementPublicationClause,
     SettlementRole,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -355,6 +357,79 @@ def alkahest_client_factory(
     )
 
 
+def _resource_value(value: Any, name: str) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _alkahest_escrow_from_clause(
+    clause: SettlementPublicationClause,
+    resources: Mapping[str, Any],
+) -> dict[str, Any]:
+    publication = AlkahestPublicationInput.model_validate(clause.mechanism_input)
+    chains = resources.get("chains")
+    chain = chains.get(publication.chain) if isinstance(chains, Mapping) else None
+    if chain is None:
+        raise ValueError(
+            f"Alkahest publication references unknown chain {publication.chain!r}"
+        )
+    if publication.escrow_kind != "erc20_escrow_obligation_default":
+        raise ValueError(
+            f"unsupported Alkahest escrow kind {publication.escrow_kind!r}"
+        )
+    rpc_url = _resource_value(chain, "rpc_url")
+    chain_id = _resource_value(chain, "chain_id")
+    address_config_path = _resource_value(chain, "alkahest_address_config_path")
+    # Registration and clause validation remain dependency-light. Load the
+    # chain client and token resolver only when materializing a public option.
+    from .alkahest import get_erc20_escrow_obligation_default
+    from .token import TokenResolutionError, resolve_token
+
+    try:
+        token = resolve_token(
+            clause.asset,
+            rpc_url=rpc_url,
+            chain_id=chain_id,
+        )
+    except TokenResolutionError as exc:
+        raise ValueError(
+            f"Alkahest asset {clause.asset!r} is unsupported on "
+            f"chain {publication.chain!r}: {exc}"
+        ) from exc
+    rates: list[dict[str, Any]] = []
+    if clause.rate is not None:
+        try:
+            human = Decimal(clause.rate)
+        except InvalidOperation as exc:
+            raise ValueError(f"invalid Alkahest rate {clause.rate!r}") from exc
+        scaled = human * (Decimal(10) ** token.decimals)
+        if scaled != scaled.to_integral_value():
+            raise ValueError(
+                f"Alkahest rate {clause.rate!r} has more than "
+                f"{token.decimals} decimal places"
+            )
+        if scaled < 0:
+            raise ValueError("Alkahest rate must not be negative")
+        rates.append(
+            {
+                "field": "amount",
+                "per": clause.per,
+                "value": str(int(scaled)),
+            }
+        )
+    escrow_address = get_erc20_escrow_obligation_default(
+        publication.chain,
+        config_path=address_config_path,
+    )
+    return {
+        "chain_name": publication.chain,
+        "escrow_address": escrow_address.lower(),
+        "literal_fields": {"token": token.contract_address.lower()},
+        "rates": rates,
+    }
+
+
 def alkahest_option_builder(
     section: BaseModel,
     readiness: MechanismReadiness,
@@ -367,13 +442,22 @@ def alkahest_option_builder(
     config = AlkahestSettlementConfig.model_validate(section)
     if not config.enabled or not readiness.ready:
         raise ValueError("Alkahest settlement is not ready for publication")
-    accepted = resources.get("accepted_escrows")
-    if not isinstance(accepted, (list, tuple)) or not accepted:
-        raise ValueError("Alkahest publication requires accepted escrows")
-    escrow_wires = [
-        value.model_dump(mode="json") if hasattr(value, "model_dump") else dict(value)
-        for value in accepted
-    ]
+    raw_clause = resources.get("publication_clause")
+    if raw_clause is not None:
+        clause = SettlementPublicationClause.model_validate(raw_clause)
+        if clause.mechanism != ALKAHEST_MECHANISM_ID:
+            raise ValueError("publication clause does not select Alkahest")
+        escrow_wires = [_alkahest_escrow_from_clause(clause, resources)]
+    else:
+        accepted = resources.get("accepted_escrows")
+        if not isinstance(accepted, (list, tuple)) or not accepted:
+            raise ValueError("Alkahest publication requires accepted escrows")
+        escrow_wires = [
+            value.model_dump(mode="json")
+            if hasattr(value, "model_dump")
+            else dict(value)
+            for value in accepted
+        ]
     options: list[dict[str, Any]] = []
     for escrow in escrow_wires:
         literals = escrow.get("literal_fields")

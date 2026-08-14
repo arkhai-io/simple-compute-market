@@ -211,4 +211,5 @@ Before new publication/buy activity, rollback restores config/resource backups a
 | Publication rates are explicit human asset quantities normalized once per mechanism | `openspec/specs/{cli-query-language,storefront-publication}/{spec,architecture}.md` |
 | Normal lifecycle commands exclude raw mechanism controls; utilities are namespaced | `openspec/specs/{cli-query-language,settlement-configuration}/{spec,architecture}.md`; `docs/development/ARCHITECTURE.md` |
 | Explain mode is deterministic, sanitized, and mutation-free | `openspec/specs/cli-query-language/{spec,architecture}.md`; buyer role documentation |
-| No roadmap change unless implementation materially changes the current CLI-modernization goal mapping | Record the final disposition in this change and update `docs/development/ROADMAP.md` only if applicable |
+| Publication migration is restrictive, backed up, atomic, and refuses ambiguous dual-mechanism prices | `openspec/specs/{storefront-publication,settlement-configuration}/{spec,architecture}.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| Roadmap assessment: no listed open gap or goal boundary changes; this completes CLI/configuration behavior inside existing settlement and discovery capabilities | No `docs/development/ROADMAP.md` update required |

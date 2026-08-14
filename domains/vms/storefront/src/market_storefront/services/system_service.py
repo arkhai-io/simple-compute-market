@@ -7,14 +7,18 @@ without an HTTP request/response cycle.
 from __future__ import annotations
 
 import asyncio
-import httpx
 import logging
 import os
-import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
+import httpx
 from market_identity import Signer
 
 import market_storefront.container as _container
+from market_storefront.settlement_composition import (
+    build_storefront_publication_clause_compiler,
+)
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
@@ -209,8 +213,6 @@ class SystemService:
             except Exception as exc:
                 return f"error: {exc}"
 
-        import asyncio
-
         results = await asyncio.gather(*[_probe(u) for u in urls])
         if any(r == "ok" for r in results):
             return "ok"
@@ -268,18 +270,21 @@ class SystemService:
                 csv_content=csv_inline,
                 source_label="resources_csv_inline (config)",
                 templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = "resources_csv_inline (config)"
         elif csv_path:
             report = await self._db.upsert_resources_from_csv(
                 csv_path=csv_path,
                 templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = csv_path
         elif os.path.exists(self._DEFAULT_CSV_PATH):
             report = await self._db.upsert_resources_from_csv(
                 csv_path=self._DEFAULT_CSV_PATH,
                 templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
             source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
         else:
@@ -320,6 +325,7 @@ class SystemService:
                 NegotiationRound,
                 run_negotiation_chain,
             )
+
             from market_storefront.utils.sync_negotiation import _load_storefront_chain
 
             chain = _load_storefront_chain()

@@ -21,6 +21,12 @@ class Project:
 
 
 PROJECTS: dict[str, Project] = {
+    "core": Project(
+        "core",
+        "arkhai-core",
+        ("core/tests/unit",),
+        ("dist-core",),
+    ),
     "kit/identity": Project(
         "kit/identity",
         "arkhai-kit-identity",
@@ -198,6 +204,14 @@ PROJECTS: dict[str, Project] = {
 }
 
 IMPACT_EXPANSION: dict[str, tuple[str, ...]] = {
+    "core": (
+        "core/registry-client",
+        "kit/settlement-runtime",
+        "core/buyer",
+        "domains/apicredits/buyer",
+        "domains/vms/buyer",
+        "domains/vms/storefront",
+    ),
     "kit/identity": (
         "core/registry-client",
         "core/registry",
@@ -382,13 +396,14 @@ def main() -> int:
     _validate(expanded)
 
     projects = [PROJECTS[name] for name in sorted(expanded)]
+    validation_projects = [project.path for project in projects]
     payload = {
         "schema_version": 1,
         "source": source,
         "base_ref": args.base_ref if source == "git-diff" else None,
         "changed_files": changed_files,
         "direct_projects": sorted(direct),
-        "validation_projects": [project.path for project in projects],
+        "validation_projects": validation_projects,
         "project_packages": {project.path: project.package for project in projects},
         "project_verify_packages": {
             project.path: list(project.verify_packages or (project.package,))
@@ -404,7 +419,7 @@ def main() -> int:
         "reasons": reasons,
     }
     if args.format == "lines":
-        print("\n".join(payload["validation_projects"]))
+        print("\n".join(validation_projects))
     else:
         json.dump(payload, sys.stdout, indent=2)
         print()

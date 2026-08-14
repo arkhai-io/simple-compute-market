@@ -7,19 +7,19 @@ Three verbs:
            (e.g. provisioning failed post-claim, dispute).
   show   — read-only EVM inspection via the matching escrow codec.
 
-Counterpart on the buyer side: `market escrow reclaim`, which pulls
-tokens back when an escrow expired *unclaimed*. Reclaim is buyer-only;
+Counterpart on the buyer side:
+``market settlement alkahest escrow show|reclaim``. Reclaim is buyer-only;
 claim/refund are seller-only; show is symmetric.
 """
 
 from __future__ import annotations
 
 import typer
+from market_identity import Identity, TrustedIdentitySet
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from storefront_client import StorefrontClientError, SyncStorefrontClient
-from market_identity import Identity
 
 from ..cli_common import resolve_storefront_url
 
@@ -77,7 +77,7 @@ def _seller_client(agent_url: str) -> SyncStorefrontClient:
         agent_url,
         signer=signer,
         caller_role="seller",
-        expected_publisher=signer.identity,
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
     )
 
 
@@ -97,7 +97,7 @@ def _submit_claim(
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
@@ -127,7 +127,7 @@ def _submit_refund(
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
@@ -222,7 +222,7 @@ def refund_cmd(
         "--amount",
         "-n",
         help="Refund amount in base units (decimal-digit string; uint256-safe). "
-        "Defaults to the listing's accepted_escrows[0] primary rate × "
+        "Defaults to the listing's accepted_escrows[0] primary rate x "
         "agreed_duration_seconds // 3600.",
     ),
     token: str | None = typer.Option(
@@ -246,9 +246,8 @@ def refund_cmd(
     """
     console = Console()
     base_url = resolve_storefront_url(storefront_url, default_port=8001)
-    buyer_principal = Identity(
-        scheme=buyer_scheme,
-        identifier=buyer_identifier,
+    buyer_principal = Identity.model_validate(
+        {"scheme": buyer_scheme, "identifier": buyer_identifier}
     )
 
     header = Table.grid(padding=(0, 2))
@@ -325,9 +324,10 @@ def show_cmd(
 ) -> None:
     """Read an escrow attestation from chain state.
 
-    Symmetric with ``market escrow show`` on the buyer side. The chain is
-    selected by ``--chain`` (or implicit when only one is configured); the
-    EAS contract address is read from that chain's alkahest address config.
+    Symmetric with ``market settlement alkahest escrow show`` on the buyer
+    side. The chain is selected by ``--chain`` (or implicitly when only one is
+    configured); the EAS contract address comes from that chain's Alkahest
+    address config.
     """
     import asyncio
 
@@ -387,7 +387,7 @@ def show_cmd(
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
-        raise typer.Exit(2)
+        raise typer.Exit(2) from exc
 
     client = AlkahestClient(
         private_key=private_key,

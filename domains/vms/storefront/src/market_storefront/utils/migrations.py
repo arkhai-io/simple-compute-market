@@ -148,6 +148,7 @@ def _migrate_compute_inventory_pools(conn: sqlite3.Connection) -> None:
           token TEXT,
           max_duration_seconds INTEGER,
           accepted_escrows TEXT,
+          settlements TEXT,
           created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )
@@ -250,10 +251,11 @@ def _backfill_compute_pools(conn: sqlite3.Connection) -> None:
         total = 0
         for row in pool_rows:
             row_attrs = _resource_attrs(row[4])
+            raw_gpu_count: Any = (
+                row[2] if row[2] is not None else row_attrs.get("gpu_count", 1)
+            )
             try:
-                gpu_count = int(
-                    row[2] if row[2] is not None else row_attrs.get("gpu_count", 1)
-                )
+                gpu_count = int(raw_gpu_count)
             except (TypeError, ValueError):
                 gpu_count = 0
             total += max(gpu_count, 0)
@@ -462,6 +464,13 @@ def _migrate_escrow_settlement_identity(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_resource_settlement_clauses(conn: sqlite3.Connection) -> None:
+    """Persist complete structured publication clauses on resources and pools."""
+
+    _add_column_if_missing(conn, "resources", "settlements", "TEXT")
+    _add_column_if_missing(conn, "compute_capacity_pools", "settlements", "TEXT")
+
+
 VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260604_001_compute_allocation_callback_metadata",
@@ -490,5 +499,9 @@ VM_MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         "20260810_009_escrow_settlement_identity",
         _migrate_escrow_settlement_identity,
+    ),
+    Migration(
+        "20260813_010_resource_settlement_clauses",
+        _migrate_resource_settlement_clauses,
     ),
 )

@@ -168,12 +168,9 @@ or gas configuration. Secret or environment input supplies signing material;
 generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
-Role CLIs reject legacy settlement keys and expose the same explicit migration
-contract. A check is read-only and reports paths and actions with values
-redacted. A write requires `--backup`, validates the complete candidate before
-mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically
-replaces the source. Conflicting old and new values fail rather than choosing
-one. Repeating a completed migration is a no-op.
+Role CLIs reject legacy settlement keys and expose the same explicit migration contract. The storefront additionally rejects legacy publication pricing that would synthesize options from `min_price`, `token`, or raw `accepted_escrows`. A check is read-only and reports paths and actions with values redacted. A write requires `--backup`, validates the complete candidate before mutation, creates a restrictive same-directory `.bak`, fsyncs, and atomically replaces the source. Conflicting old and new values fail rather than choosing one. Repeating a completed migration is a no-op.
+
+Publication config and inventory CSV migrate separately from the `[Settlement]` hierarchy. The migration converts an unambiguous single-mechanism legacy price into one complete typed clause. It refuses a dual-mechanism source whose one scalar price has no authoritative asset scale, and refuses CSV rows whose legacy `accepted_escrows` lack a resolvable rate. Resource `settlements` replace command/config defaults as a whole after cutover.
 
 For each buyer and storefront configuration overlay, use this production
 sequence:
@@ -199,6 +196,19 @@ sequence:
      --scope settlement --write --backup
    XDG_CONFIG_HOME=/path/to/buyer-overlay market config migrate \
      --scope settlement --write --backup
+   ```
+
+   Preview and migrate storefront publication defaults and every inventory:
+
+   ```console
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --check
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --write --backup
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --inventory /path/resources.csv --check
+   market-storefront --config /path/storefront.toml config migrate \
+     --scope publication --inventory /path/resources.csv --write --backup
    ```
 
 4. Repeat `--check` for every file and render the Helm or Compose deployment.

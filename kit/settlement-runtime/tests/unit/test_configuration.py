@@ -359,8 +359,7 @@ def test_publication_clause_compiles_dsl_and_round_trips_structured_data() -> No
     )
 
     clause = compile_settlement_publication_clause(
-        "mechanism=demo asset=usd rate=2.50/hour "
-        "public.condition=delivered demo.profile=premium",
+        "mechanism=demo asset=usd rate=2.50/hour demo.profile=premium",
         registry=registry,
         config=config,
         role="seller",
@@ -371,7 +370,6 @@ def test_publication_clause_compiles_dsl_and_round_trips_structured_data() -> No
         asset="usd",
         rate="2.50",
         per="hour",
-        public={"condition": "delivered"},
         mechanism_input={"profile": "premium"},
     )
     encoded = json.dumps(clause.model_dump(mode="json"))
@@ -392,10 +390,6 @@ mechanism = "demo.pay.v1"
 asset = "usd"
 rate = "2.50"
 per = "hour"
-
-[settlements.public]
-condition = "delivered"
-
 [settlements.mechanism_input]
 profile = "premium"
 """
@@ -439,9 +433,9 @@ profile = "premium"
                 "asset": "usd",
                 "rate": "2",
                 "per": "hour",
-                "public": {"ratio": 0.5},
+                "public": {"condition": "delivered"},
             },
-            "binary floating-point",
+            "metadata is unsupported",
         ),
     ],
 )
@@ -458,6 +452,71 @@ def test_publication_clause_rejects_unknown_fields_and_binary_floats(
     with pytest.raises(SettlementConfigurationError, match=message):
         compile_settlement_publication_clause(
             payload,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+
+
+def test_public_cli_namespace_is_rejected() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+
+    with pytest.raises(SettlementConfigurationError, match=r"public\.\*.*unsupported"):
+        compile_settlement_publication_clause(
+            "mechanism=demo asset=usd public.condition=delivered demo.profile=premium",
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+
+
+@pytest.mark.parametrize("sensitive_key", ["credential", "provider", "api_key"])
+def test_nested_sensitive_publication_keys_are_rejected_without_echoing_values(
+    sensitive_key: str,
+) -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+    secret = "credential-canary"
+
+    with pytest.raises(SettlementConfigurationError) as caught:
+        compile_settlement_publication_clause(
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "mechanism_input": {
+                    "profile": "premium",
+                    "metadata": {sensitive_key: secret},
+                },
+            },
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+
+    assert f"mechanism_input.metadata.{sensitive_key} is not public metadata" in str(
+        caught.value
+    )
+    assert secret not in str(caught.value)
+
+
+def test_disabled_mechanism_publication_clause_is_rejected() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve({"demo": {"enabled": False}}, role="seller")
+
+    with pytest.raises(SettlementConfigurationError, match="disabled for publication"):
+        compile_settlement_publication_clause(
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "mechanism_input": {"profile": "premium"},
+            },
             registry=registry,
             config=config,
             role="seller",

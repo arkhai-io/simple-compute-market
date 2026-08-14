@@ -13,13 +13,14 @@ from typing import Any
 
 import typer
 from market_identity import Identity, Signer, TrustedIdentitySet
+from market_core.schemas import SettlementPlan
 
 from .run_log import RunLog, read_run
 
 
 @dataclass
 class DealContext:
-    """What we need to drive stages 3-5 of a deal post-negotiation."""
+    """Authoritative accepted state required to resume a deal."""
 
     buyer_principal: Identity
     publisher_principals: TrustedIdentitySet
@@ -116,10 +117,7 @@ def settlement_acceptance_fields(
         }
 
     mechanisms = {obligation.mechanism for obligation in decoded_plan.obligations}
-    if (
-        decoded_selection is not None
-        and decoded_selection.mechanism not in mechanisms
-    ):
+    if decoded_selection is not None and decoded_selection.mechanism not in mechanisms:
         raise ValueError(
             "accepted settlement selection conflicts with the settlement plan"
         )
@@ -237,12 +235,25 @@ def load_deal_context(
         nonlocal accepted_escrow_proposal, settlement_plan, accepted_escrow_terms
         nonlocal accepted_provision_terms, settlement_selection
         nonlocal settlement_operation_identities
-        nonlocal seller_wallet_address, token_contract
+
         raw_plan = ev.get("settlement_plan")
-        if isinstance(raw_plan, dict):
+        if raw_plan is not None:
+            if not isinstance(raw_plan, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has a malformed accepted settlement plan."
+                )
+            if settlement_plan is not None and settlement_plan != raw_plan:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted settlement plans."
+                )
             settlement_plan = raw_plan
+
         raw_selection = ev.get("settlement_selection")
-        if isinstance(raw_selection, dict):
+        if raw_selection is not None:
+            if not isinstance(raw_selection, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has a malformed accepted settlement selection."
+                )
             if (
                 settlement_selection is not None
                 and settlement_selection != raw_selection
@@ -251,10 +262,15 @@ def load_deal_context(
                     f"Run-log {run_id!r} has conflicting accepted settlement selections."
                 )
             settlement_selection = raw_selection
+
         raw_identities = ev.get("settlement_operation_identities")
-        if isinstance(raw_identities, list) and all(
-            isinstance(item, str) and item for item in raw_identities
-        ):
+        if raw_identities is not None:
+            if not isinstance(raw_identities, list) or not all(
+                isinstance(item, str) and item for item in raw_identities
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed settlement operation identities."
+                )
             identities = tuple(raw_identities)
             if (
                 settlement_operation_identities
@@ -264,16 +280,53 @@ def load_deal_context(
                     f"Run-log {run_id!r} has conflicting settlement operation identities."
                 )
             settlement_operation_identities = identities
+
         raw_terms = ev.get("accepted_escrow_terms")
-        if isinstance(raw_terms, list):
-            accepted_escrow_terms = [
-                item for item in raw_terms if isinstance(item, dict)
-            ]
+        if raw_terms is not None:
+            if not isinstance(raw_terms, list) or not all(
+                isinstance(item, dict) for item in raw_terms
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted escrow terms."
+                )
+            candidate_terms = [dict(item) for item in raw_terms]
+            if (
+                accepted_escrow_terms is not None
+                and accepted_escrow_terms != candidate_terms
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted escrow terms."
+                )
+            accepted_escrow_terms = candidate_terms
+
         raw_proposal = ev.get("accepted_escrow_proposal")
-        if isinstance(raw_proposal, dict):
+        if raw_proposal is not None:
+            if not isinstance(raw_proposal, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has a malformed accepted escrow proposal."
+                )
+            if (
+                accepted_escrow_proposal is not None
+                and accepted_escrow_proposal != raw_proposal
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted escrow proposals."
+                )
             accepted_escrow_proposal = raw_proposal
+
         raw_provision = ev.get("accepted_provision_terms")
-        if isinstance(raw_provision, dict):
+        if raw_provision is not None:
+            if not isinstance(raw_provision, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted provision terms."
+                )
+            if (
+                accepted_provision_terms is not None
+                and accepted_provision_terms != raw_provision
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted provision terms."
+                )
             accepted_provision_terms = raw_provision
 
     def _capture_publisher_principals(ev: dict[str, Any]) -> None:
@@ -478,6 +531,17 @@ def open_run_log(run_id: str, *, signer: Signer) -> RunLog:
     return RunLog.open(run_id, signer=signer)
 
 
+def _settlement_plan_semantics(plan: SettlementPlan) -> SettlementPlan:
+    return plan.model_copy(
+        update={
+            "obligations": [
+                obligation.model_copy(update={"amount": 0})
+                for obligation in plan.obligations
+            ]
+        }
+    )
+
+
 @dataclass
 class NegotiationResumePoint:
     """What ``market negotiate --from`` needs to resume the round loop.
@@ -500,10 +564,17 @@ class NegotiationResumePoint:
     last_seller_proposal: dict | None
     rounds_completed: int
     last_status: str | None
+    initial_price: float
+    max_price: float
     # Negotiation policy recorded at run start — a resume continues
     # under the policy that opened the negotiation, not whatever the
     # config says today.
     policy: str | None = None
+    accepted_provision_terms: dict[str, Any] | None = None
+    accepted_escrow_proposal: dict[str, Any] | None = None
+    settlement_selection: dict[str, Any] | None = None
+    settlement_plan: dict[str, Any] | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
 
 
 def is_negotiation_complete(run_id: str, *, signer: Signer) -> bool:
@@ -544,8 +615,104 @@ def load_negotiation_resume_point(
     last_seller_proposal: dict | None = None
     last_status: str | None = None
     rounds_completed = 0
+    initial_price: float | None = None
+    max_price: float | None = None
+    accepted_provision_terms: dict[str, Any] | None = None
+    accepted_escrow_proposal: dict[str, Any] | None = None
+    settlement_selection: dict[str, Any] | None = None
+    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    settlement_plan: dict[str, Any] | None = None
 
     policy: str | None = None
+
+    def _capture_reply_terms(their: dict[str, Any]) -> None:
+        nonlocal accepted_provision_terms, accepted_escrow_proposal
+        nonlocal settlement_selection, settlement_plan, accepted_escrow_terms
+
+        raw_provision = their.get("accepted_provision_terms")
+        if raw_provision is not None:
+            if not isinstance(raw_provision, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted provision terms."
+                )
+            if (
+                accepted_provision_terms is not None
+                and accepted_provision_terms != raw_provision
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted provision terms."
+                )
+            accepted_provision_terms = raw_provision
+
+        raw_proposal = their.get("accepted_escrow_proposal")
+        if raw_proposal is not None:
+            if not isinstance(raw_proposal, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted escrow proposal."
+                )
+            if (
+                accepted_escrow_proposal is not None
+                and accepted_escrow_proposal != raw_proposal
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted escrow proposals."
+                )
+            accepted_escrow_proposal = raw_proposal
+
+        raw_selection = their.get("settlement_selection")
+        if raw_selection is not None:
+            if not isinstance(raw_selection, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted settlement selection."
+                )
+            if (
+                settlement_selection is not None
+                and settlement_selection != raw_selection
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting settlement selections."
+                )
+            settlement_selection = raw_selection
+        raw_plan = their.get("settlement_plan")
+        if raw_plan is not None:
+            if not isinstance(raw_plan, dict):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted settlement plan."
+                )
+            try:
+                candidate_plan = SettlementPlan.model_validate(raw_plan)
+                existing_plan = (
+                    SettlementPlan.model_validate(settlement_plan)
+                    if settlement_plan is not None
+                    else None
+                )
+            except (TypeError, ValueError) as exc:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted settlement plan."
+                ) from exc
+            if existing_plan is not None and _settlement_plan_semantics(
+                existing_plan
+            ) != _settlement_plan_semantics(candidate_plan):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting settlement plans."
+                )
+            settlement_plan = candidate_plan.model_dump(mode="json")
+
+        raw_terms = their.get("accepted_escrow_terms")
+        if raw_terms is not None:
+            if not isinstance(raw_terms, list) or not all(
+                isinstance(item, dict) for item in raw_terms
+            ):
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has malformed accepted escrow terms."
+                )
+            candidate = [dict(item) for item in raw_terms]
+            if accepted_escrow_terms is not None and accepted_escrow_terms != candidate:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting accepted escrow terms."
+                )
+            accepted_escrow_terms = candidate
+
     for ev in events:
         for name in (
             "publisher_id",
@@ -595,6 +762,27 @@ def load_negotiation_resume_point(
             seller_url = ev.get("seller_url") or seller_url
             listing_id = ev.get("listing_id") or listing_id
             policy = ev.get("policy") or policy
+        if et in {"run_started", "negotiation_started"}:
+            for field_name in ("initial_price", "max_price"):
+                raw_price = ev.get(field_name)
+                if raw_price is None and et == "run_started":
+                    continue
+                if isinstance(raw_price, bool) or not isinstance(
+                    raw_price, (int, float)
+                ):
+                    raise typer.BadParameter(
+                        f"Run-log {run_id!r} has invalid persisted {field_name}."
+                    )
+                parsed_price = float(raw_price)
+                previous = initial_price if field_name == "initial_price" else max_price
+                if previous is not None and previous != parsed_price:
+                    raise typer.BadParameter(
+                        f"Run-log {run_id!r} has conflicting persisted {field_name}."
+                    )
+                if field_name == "initial_price":
+                    initial_price = parsed_price
+                else:
+                    max_price = parsed_price
         elif et == "run_ended":
             last_status = ev.get("status") or last_status
             if ev.get("negotiation_id"):
@@ -602,12 +790,28 @@ def load_negotiation_resume_point(
         elif et == "negotiation_round":
             our = ev.get("our_message") or {}
             their = ev.get("their_reply") or {}
+            _capture_reply_terms(their)
             if their.get("negotiation_id"):
                 negotiation_id = str(their["negotiation_id"])
             round_idx = int(ev.get("round", rounds_completed))
             rounds_completed = max(rounds_completed, round_idx + 1)
             our_action = our.get("action") or "initial"
             our_proposal = our.get("proposal")
+            if isinstance(our_proposal, dict):
+                raw_buyer_selection = our_proposal.get("settlement_selection")
+                if raw_buyer_selection is not None:
+                    if not isinstance(raw_buyer_selection, dict):
+                        raise typer.BadParameter(
+                            f"Run-log {run_id!r} has malformed buyer settlement selection."
+                        )
+                    if (
+                        settlement_selection is not None
+                        and settlement_selection != raw_buyer_selection
+                    ):
+                        raise typer.BadParameter(
+                            f"Run-log {run_id!r} has conflicting settlement selections."
+                        )
+                    settlement_selection = raw_buyer_selection
             transcript.append(
                 NegotiationRound(
                     round_number=round_idx,
@@ -650,6 +854,14 @@ def load_negotiation_resume_point(
         )
         if not v
     ]
+    missing.extend(
+        name
+        for name, value in (
+            ("initial_price", initial_price),
+            ("max_price", max_price),
+        )
+        if value is None
+    )
     if missing:
         raise typer.BadParameter(
             f"Run-log {run_id!r} is missing fields needed to resume: "
@@ -680,4 +892,11 @@ def load_negotiation_resume_point(
         rounds_completed=rounds_completed,
         last_status=last_status,
         policy=policy,
+        initial_price=initial_price,  # type: ignore[arg-type]
+        max_price=max_price,  # type: ignore[arg-type]
+        accepted_provision_terms=accepted_provision_terms,
+        accepted_escrow_proposal=accepted_escrow_proposal,
+        settlement_selection=settlement_selection,
+        settlement_plan=settlement_plan,
+        accepted_escrow_terms=accepted_escrow_terms,
     )

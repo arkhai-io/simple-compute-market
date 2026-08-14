@@ -159,13 +159,15 @@ def _query_registry_for_matches(
                 )
             if bound_query is not None and bound_query.registry_url != normalized_url:
                 raise ValueError("compiled resource query is bound to another registry")
-            response = client.list_listings(
-                status=status,
-                limit=limit,
-                offset=offset,
-                etag=bound_query.etag if bound_query is not None else None,
-                **(bound_query.as_params() if bound_query is not None else {}),
-            )
+            query_params: dict[str, Any] = {
+                "status": status,
+                "limit": limit,
+                "offset": offset,
+                "etag": bound_query.etag if bound_query is not None else None,
+            }
+            if bound_query is not None:
+                query_params.update(bound_query.as_params())
+            response = client.list_listings(**query_params)
     except Exception as exc:
         raise RuntimeError(
             f"Authenticated registry read failed for {normalized_url}: {exc}"
@@ -201,15 +203,49 @@ def query_registry_for_matches(
     )
 
 
-def _compile_registry_resource_query(
+@dataclass(frozen=True, slots=True)
+class RegistryQueryPlan:
+    """Authenticated filter contract and semantic pushdown for one registry."""
+
+    registry_url: str
+    etag: str
+    schema_id: str | None
+    filter_spec_version: int
+    schema_version: int | None
+    canonical_query: str | None
+    parameters: tuple[tuple[str, str], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "registry_url": self.registry_url,
+            "filter_spec": {
+                "etag": self.etag,
+                "version": self.filter_spec_version,
+                "schema_id": self.schema_id,
+                "schema_version": self.schema_version,
+            },
+            "canonical_resource_query": self.canonical_query,
+            "registry_parameters": dict(self.parameters),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryDiscovery:
+    """Listings plus the authenticated query plans that produced them."""
+
+    listings: tuple[dict[str, Any], ...]
+    query_plans: tuple[RegistryQueryPlan, ...]
+
+
+def _prepare_registry_resource_query(
     registry_url: str,
     timeout: float,
     *,
     signer: Signer,
     registry_authority: RegistryAuthority,
-    source: str,
+    source: str | None,
     api_key: str | None,
-) -> CompiledResourceQuery:
+) -> tuple[CompiledResourceQuery | None, RegistryQueryPlan]:
     normalized_url = registry_url.rstrip("/")
     try:
         with SyncRegistryClient(
@@ -221,43 +257,56 @@ def _compile_registry_resource_query(
             timeout=timeout,
             api_key=api_key,
         ) as client:
-            return compile_resource_query(
-                source,
-                filter_spec=client.get_filter_spec(),
-                registry_url=normalized_url,
+            filter_spec = client.get_filter_spec()
+            compiled = (
+                compile_resource_query(
+                    source,
+                    filter_spec=filter_spec,
+                    registry_url=normalized_url,
+                )
+                if source is not None
+                else None
             )
     except Exception as exc:
         raise RuntimeError(
             f"Resource query is not valid for registry {normalized_url}: {exc}"
         ) from exc
+    return compiled, RegistryQueryPlan(
+        registry_url=normalized_url,
+        etag=filter_spec.etag,
+        filter_spec_version=filter_spec.version,
+        schema_id=filter_spec.schema_id,
+        schema_version=filter_spec.schema_version,
+        canonical_query=compiled.canonical_query if compiled is not None else None,
+        parameters=compiled.parameters if compiled is not None else (),
+    )
 
 
-def query_registry_for_matches_multi(
+def _query_registry_for_matches_multi(
     registry_urls: list[str],
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    timeout: float,
     *,
     signer: Signer,
     registry_authorities: dict[str, RegistryAuthority],
-    resource_query: str | None = None,
-    status: str = "open",
-    limit: int = 100,
-    offset: int = 0,
-    api_keys: Optional[dict[str, str]] = None,
-) -> list[dict[str, Any]]:
-    """Compile for every registry, then fan in and deduplicate listings."""
-
+    resource_query: str | None,
+    status: str,
+    limit: int,
+    offset: int,
+    api_keys: dict[str, str],
+    explain: bool,
+) -> RegistryDiscovery:
     urls = [url.rstrip("/") for url in registry_urls]
     if set(registry_authorities) != set(urls):
         raise ValueError("registry authority sets must exactly match registry URLs")
-    api_keys = api_keys or {}
 
     # Complete every authenticated filter-spec compilation before the first
     # listing request. A query must never silently weaken to the subset of
     # registries whose vocabularies happen to accept it.
     compiled_by_url: dict[str, CompiledResourceQuery] = {}
-    if resource_query is not None:
+    plans: list[RegistryQueryPlan] = []
+    if resource_query is not None or explain:
         for url in urls:
-            compiled_by_url[url] = _compile_registry_resource_query(
+            compiled, plan = _prepare_registry_resource_query(
                 url,
                 timeout,
                 signer=signer,
@@ -265,6 +314,9 @@ def query_registry_for_matches_multi(
                 source=resource_query,
                 api_key=api_keys.get(url),
             )
+            if compiled is not None:
+                compiled_by_url[url] = compiled
+            plans.append(plan)
 
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for url in urls:
@@ -282,7 +334,7 @@ def query_registry_for_matches_multi(
                 api_key=api_keys.get(url),
             )
         except RuntimeError as exc:
-            if resource_query is not None:
+            if resource_query is not None or explain:
                 raise
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             continue
@@ -295,7 +347,65 @@ def query_registry_for_matches_multi(
             source["source_registry_authority"] = registry_authorities[url].authority
             key = (registry_authorities[url].authority, str(listing_id))
             merged.setdefault(key, source)
-    return list(merged.values())
+    return RegistryDiscovery(tuple(merged.values()), tuple(plans))
+
+
+def query_registry_for_matches_multi(
+    registry_urls: list[str],
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    signer: Signer,
+    registry_authorities: dict[str, RegistryAuthority],
+    resource_query: str | None = None,
+    status: str = "open",
+    limit: int = 100,
+    offset: int = 0,
+    api_keys: Optional[dict[str, str]] = None,
+) -> list[dict[str, Any]]:
+    """Compile for every registry, then fan in and deduplicate listings."""
+
+    return list(
+        _query_registry_for_matches_multi(
+            registry_urls,
+            timeout,
+            signer=signer,
+            registry_authorities=registry_authorities,
+            resource_query=resource_query,
+            status=status,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys or {},
+            explain=False,
+        ).listings
+    )
+
+
+def explain_registry_query(
+    registry_urls: list[str],
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    signer: Signer,
+    registry_authorities: dict[str, RegistryAuthority],
+    resource_query: str | None = None,
+    status: str = "open",
+    limit: int = 100,
+    offset: int = 0,
+    api_keys: Optional[dict[str, str]] = None,
+) -> RegistryDiscovery:
+    """Execute authenticated read-only discovery and retain its query evidence."""
+
+    return _query_registry_for_matches_multi(
+        registry_urls,
+        timeout,
+        signer=signer,
+        registry_authorities=registry_authorities,
+        resource_query=resource_query,
+        status=status,
+        limit=limit,
+        offset=offset,
+        api_keys=api_keys or {},
+        explain=True,
+    )
 
 
 def fetch_listing_dict(

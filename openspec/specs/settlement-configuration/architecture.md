@@ -25,7 +25,7 @@ New defaults select nothing. An operator must explicitly enable and order mechan
 
 ## Registration and ownership
 
-Each installed mechanism explicitly registers its canonical ID, config key and schema, applicable roles, preflight, client factory, listing-option builder, buyer compatibility hook, and optional operator commands. Shared configuration code validates ordering and projects common status; it does not interpret chain, arbiter, condition, provider, or financial-authority fields.
+Each installed mechanism explicitly registers its canonical ID, config key and schema, applicable roles, preflight, client factory, listing-option builder, buyer compatibility hook, typed public clause projections, and optional operator commands. Mechanism-qualified clause fields stay under the config-key namespace and declare their roles, operators, and value types. Shared configuration code owns grammar integration, ordering, exact option correlation, and common status; it does not interpret chain, arbiter, condition, provider, or financial-authority fields.
 
 A composition root injects only the resources a registration declares. Alkahest may receive wallet and chain clients. Hosted Stripe receives the marketplace signer and manifest-pinned hosted client. Omitting a registration removes that mechanism from status, publication, and selection rather than installing a placeholder.
 
@@ -35,9 +35,9 @@ Registration extends the existing settlement mechanism registry. It does not cre
 
 Preflight normalizes mechanism-owned checks into a public-safe result: canonical ID, configured, enabled, ready, blocker codes and messages, capabilities, and contract/schema versions. Mechanism detail is allowlisted. Status is observational: it does not publish, create transient browser actions, submit transactions, or mutate provider or settlement state.
 
-The storefront evaluates every enabled registration and publishes deterministic options from every ready mechanism in configured priority order. One unready mechanism is suppressed and remains visible through sanitized status; a ready peer remains usable. No-ready is a publication failure, not permission to rewrite accepted state.
+The storefront evaluates every enabled registration, then combines ready registrations with validated publication clauses. Only a clause owned by an enabled, ready mechanism can produce an option. Options follow configured mechanism priority and source clause order. One unready mechanism is suppressed and remains visible through sanitized status; a ready peer with a valid clause remains usable. An enabled mechanism without a clause does not inherit another mechanism's price or publish an implicit option.
 
-Priority is pre-acceptance policy only. The buyer first filters advertised options by compatibility and explicit constraints, then may use configured priority to rank survivors. Accepted Terms pin one exact option. Later enablement, readiness, or ordering changes cannot switch or reinterpret an accepted or in-flight obligation.
+Priority is pre-acceptance policy only. The buyer first filters advertised options by installed/enabled compatibility and authoritative resource constraints. Explicit repeatable settlement clauses then act as ordered alternatives; every predicate in a clause must match one option. Configured priority ranks survivors only when no explicit clause supplies order. Accepted Terms pin one exact option. Later enablement, readiness, ordering, or clause changes cannot switch or reinterpret an accepted or in-flight obligation.
 
 ## Role-appropriate operator surfaces
 
@@ -48,6 +48,8 @@ market-storefront settlement status
 market-storefront settlement stripe onboard
 market-storefront settlement stripe status
 market-storefront settlement alkahest check
+market settlement status
+market settlement alkahest escrow show
 ```
 
 Mechanism subcommands remain asymmetric where the mechanisms differ. Stripe onboarding can return a transient Account Link; Alkahest has no invented equivalent. The hosted client supplies workflow primitives, but marketplace command ownership remains with the storefront. Buyer templates expose selection inputs and omit seller account, onboarding, authority-administration, publication, and provider fields.
@@ -60,9 +62,9 @@ Public principals, trust pins, manifest and capability pins, account references,
 
 ## Clean cutover and recovery
 
-Settlement migration is explicit, previewable, conflict-rejecting, validated, backed up with restrictive permissions, and atomically replaced. It preserves unrelated TOML and leaves identity, wallet, and chain resources under their owners. A repeated migration is a no-op. Runtime accepts only the new hierarchy; old and new names never participate in hidden precedence.
+Settlement configuration migration is explicit, previewable, conflict-rejecting, validated, backed up with restrictive permissions, and atomically replaced. Storefront publication migration separately converts legacy scalar pricing and CSV `accepted_escrows` input into complete typed clauses. A source that would require one ambiguous price to construct multiple mechanism options is rejected for manual resolution. Both migrations preserve unrelated TOML or CSV bytes where possible, require an explicit backup before writing, and are no-ops when repeated. Runtime accepts only the new hierarchy and typed publication inputs; old and new names never participate in hidden precedence.
 
-Deployment stages migration tooling before the rejecting runtime, previews and backs up every role file and overlay, quiesces publication and config automation, migrates all surfaces, validates them, and then activates the clean-cutover release. Before activation, rollback restores matching configuration and artifacts together. After new publication or settlement effects begin, recovery rolls forward.
+Deployment stages migration tooling before the rejecting runtime, previews and backs up every role file, publication config, and inventory, quiesces publication and config automation, migrates all surfaces, validates them, and then activates the clean-cutover release. Before activation, rollback restores matching configuration, inventories, and artifacts together. After new publication or settlement effects begin, recovery rolls forward.
 
 Run logs may retain the public configuration schema version and mechanism-set fingerprint, but durable plans and operation journals remain authoritative. Recovery uses the accepted canonical mechanism and stable operation identities even when that mechanism is disabled for new deals.
 

@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from market_core.schemas import SettlementSelection
+from market_core.schemas import SettlementOption, SettlementSelection
 from market_identity import Identity, Signer, TrustedIdentitySet
 
 from core_buyer.orchestrator import (
@@ -440,6 +440,17 @@ def _negotiate_matches(
         else:
             escrow_proposal = settlement_proposal
             settlement_selection = None
+        advertised_option: SettlementOption | None = None
+        if settlement_selection is not None:
+            selected = match.get("_selected_settlement")
+            selected_option = getattr(selected, "option", None)
+            if selected_option is not None:
+                advertised_option = SettlementOption.model_validate(selected_option)
+        negotiation_policy_params = dict(constraints.policy_params)
+        if advertised_option is not None:
+            negotiation_policy_params["_selected_settlement_option"] = (
+                advertised_option.model_dump(mode="json")
+            )
 
         neg_ctx: dict[str, Any] = {
             "listing_id": listing_id,
@@ -459,8 +470,6 @@ def _negotiate_matches(
         publisher_principals = resolve_seller_principals()
         neg_ctx["publisher_principals"] = publisher_principals.model_dump(mode="json")
 
-        _emit_neg("negotiation_started", seller_url=seller_url)
-
         def _on_round(round_idx: int, our_msg: dict, their_reply: dict) -> None:
             if "negotiation_id" not in neg_ctx:
                 nid = their_reply.get("negotiation_id")
@@ -473,6 +482,8 @@ def _negotiate_matches(
                 their_reply=their_reply,
             )
 
+        initial_price: float
+        max_price: float
         if derive_prices is not None:
             try:
                 initial_price, max_price = derive_prices(match)
@@ -513,6 +524,12 @@ def _negotiate_matches(
                 )
             initial_price = constraints.initial_price
             max_price = constraints.max_price
+        _emit_neg(
+            "negotiation_started",
+            seller_url=seller_url,
+            initial_price=initial_price,
+            max_price=max_price,
+        )
 
         # negotiate_with_seller is sync (blocking urllib); to_thread lets
         # policies run multiple negotiations in parallel via asyncio.gather.
@@ -536,7 +553,7 @@ def _negotiate_matches(
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
                 chain=chain,
-                policy_params=constraints.policy_params,
+                policy_params=negotiation_policy_params,
                 resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
@@ -599,12 +616,15 @@ def _negotiate_matches(
         )
         return outcome
 
-    from .aggregation import load_aggregation_policy
+    from .aggregation import AggregationPolicy, load_aggregation_policy
 
-    policy = load_aggregation_policy(config.aggregation_policy)
+    policy: AggregationPolicy = load_aggregation_policy(config.aggregation_policy)
+
+    async def _run_policy() -> tuple[dict[str, Any], NegotiationOutcome] | None:
+        return await policy(matches, _negotiate)
 
     try:
-        selected = asyncio.run(policy(matches, _negotiate))
+        selected = asyncio.run(_run_policy())
     except RuntimeError as exc:
         return NegotiationResult(
             attempts=attempts,

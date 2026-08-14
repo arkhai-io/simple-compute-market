@@ -32,6 +32,7 @@ def _state_dir(monkeypatch, tmp_path: Path) -> Path:
     directory.mkdir(parents=True)
     return directory
 
+
 def _trust(signer: Ed25519Signer) -> TrustedIdentitySet:
     return TrustedIdentitySet(identities=(signer.identity,))
 
@@ -48,6 +49,8 @@ def test_ed25519_run_log_and_resume_need_no_wallet(monkeypatch, tmp_path) -> Non
         publisher_id="publisher-1",
         source_registry_url="http://registry",
         source_registry_authority="registry",
+        initial_price=10,
+        max_price=12,
     )
     log.event(
         "negotiation_round",
@@ -159,6 +162,8 @@ def test_resume_refreshes_and_persists_retired_publisher_set(
         source_registry_url="http://registry",
         source_registry_authority="registry",
         publisher_principals=_trust(old).model_dump(mode="json"),
+        initial_price=10,
+        max_price=12,
     )
     log.event(
         "negotiation_round",
@@ -179,6 +184,7 @@ def test_resume_refreshes_and_persists_retired_publisher_set(
     assert events[-1]["publisher_principals"] == _trust(replacement).model_dump(
         mode="json"
     )
+
 
 def test_recovery_rejects_another_valid_signer(monkeypatch, tmp_path) -> None:
     _state_dir(monkeypatch, tmp_path)
@@ -259,24 +265,29 @@ def test_legacy_eip191_address_migrates_atomically(monkeypatch, tmp_path) -> Non
         "scheme": "eip191",
         "identifier": address.lower(),
     }
-    assert migrated[1]["our_message"]["buyer_principal"] == migrated[0][
-        "buyer_principal"
-    ]
+    assert (
+        migrated[1]["our_message"]["buyer_principal"] == migrated[0]["buyer_principal"]
+    )
     assert "buyer_address" not in path.read_text()
     assert not list(directory.glob("*.tmp"))
 
 
-def test_malformed_legacy_population_fails_without_rewrite(monkeypatch, tmp_path) -> None:
+def test_malformed_legacy_population_fails_without_rewrite(
+    monkeypatch, tmp_path
+) -> None:
     directory = _state_dir(monkeypatch, tmp_path)
     run_id = "unsafe-run"
     path = directory / f"{run_id}.jsonl"
-    original = json.dumps(
-        {
-            "run_id": run_id,
-            "event": "run_started",
-            "buyer_address": "not-an-address",
-        }
-    ) + "\n"
+    original = (
+        json.dumps(
+            {
+                "run_id": run_id,
+                "event": "run_started",
+                "buyer_address": "not-an-address",
+            }
+        )
+        + "\n"
+    )
     path.write_text(original)
 
     with pytest.raises(RunLogError, match="malformed buyer_address"):
@@ -285,7 +296,9 @@ def test_malformed_legacy_population_fails_without_rewrite(monkeypatch, tmp_path
     assert path.read_text() == original
 
 
-def test_unknown_or_partially_migrated_versions_fail_closed(monkeypatch, tmp_path) -> None:
+def test_unknown_or_partially_migrated_versions_fail_closed(
+    monkeypatch, tmp_path
+) -> None:
     directory = _state_dir(monkeypatch, tmp_path)
     signer = Ed25519Signer(b"\x15" * 32)
     run_id = "unknown-run"
@@ -306,18 +319,22 @@ def test_unknown_or_partially_migrated_versions_fail_closed(monkeypatch, tmp_pat
     with pytest.raises(RunLogError, match="unsupported or inconsistent"):
         read_run(run_id)
 
+
 def test_partially_versioned_legacy_log_is_not_guessed(monkeypatch, tmp_path) -> None:
     directory = _state_dir(monkeypatch, tmp_path)
     run_id = "partial-run"
     path = directory / f"{run_id}.jsonl"
-    original = json.dumps(
-        {
-            "run_id": run_id,
-            "event": "run_started",
-            "buyer_address": "0x" + "ab" * 20,
-            "signature_protocol": "unknown",
-        }
-    ) + "\n"
+    original = (
+        json.dumps(
+            {
+                "run_id": run_id,
+                "event": "run_started",
+                "buyer_address": "0x" + "ab" * 20,
+                "signature_protocol": "unknown",
+            }
+        )
+        + "\n"
+    )
     path.write_text(original)
 
     with pytest.raises(RunLogError, match="partially or unsafely versioned"):
@@ -334,6 +351,7 @@ def test_configured_principal_must_match_resolved_credential() -> None:
     with pytest.raises(ValueError, match="does not match"):
         resolve_buyer_signer(config, b"\x17" * 32)
 
+
 def test_public_identity_and_secret_credential_resolve_separately() -> None:
     signer = Ed25519Signer(b"\x1b" * 32)
     config = resolve_identity_config(
@@ -342,8 +360,9 @@ def test_public_identity_and_secret_credential_resolve_separately() -> None:
     )
 
     assert config.principal == signer.identity
-    assert resolve_identity_credential(
-        {"ARKHAI_IDENTITY_CREDENTIAL": "secret-only-value"}
-    ) == "secret-only-value"
+    assert (
+        resolve_identity_credential({"ARKHAI_IDENTITY_CREDENTIAL": "secret-only-value"})
+        == "secret-only-value"
+    )
     with pytest.raises(RuntimeError, match="ARKHAI_IDENTITY_CREDENTIAL"):
         resolve_identity_credential({})

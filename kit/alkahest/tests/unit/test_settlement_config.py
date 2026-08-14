@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from market_alkahest import (
@@ -13,9 +14,11 @@ from market_alkahest import (
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
 from market_settlement_runtime import (
+    MechanismReadiness,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
     compile_settlement_clause,
+    SettlementPublicationClause,
     settlement_clause_matches,
 )
 from pydantic import ValidationError
@@ -262,3 +265,62 @@ def test_alkahest_publication_input_rejects_secret_canary() -> None:
             config,
             role="seller",
         )
+
+
+def test_alkahest_publication_clause_builds_exact_scaled_option(monkeypatch) -> None:
+    registration = create_alkahest_registration()
+    clause = SettlementPublicationClause(
+        mechanism=ALKAHEST_MECHANISM_ID,
+        asset="0x" + "12" * 20,
+        rate="1.25",
+        per="hour",
+        mechanism_input={
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+        },
+    )
+    monkeypatch.setattr(
+        "market_alkahest.token.resolve_token",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            contract_address=clause.asset,
+            decimals=6,
+        ),
+    )
+    monkeypatch.setattr(
+        "market_alkahest.alkahest.get_erc20_escrow_obligation_default",
+        lambda *_args, **_kwargs: "0x" + "34" * 20,
+    )
+    readiness = MechanismReadiness(
+        mechanism=ALKAHEST_MECHANISM_ID,
+        configured=True,
+        enabled=True,
+        ready=True,
+    )
+
+    artifacts = registration.option_builder(
+        AlkahestSettlementConfig(enabled=True),
+        readiness,
+        {
+            "publication_clause": clause,
+            "chains": {
+                "base_sepolia": {
+                    "rpc_url": "https://rpc.example",
+                    "chain_id": 84532,
+                }
+            },
+        },
+        "seller",
+    )
+
+    escrow = artifacts["accepted_escrows"][0]
+    option = artifacts["settlement_options"][0]
+    assert escrow == {
+        "chain_name": "base_sepolia",
+        "escrow_address": "0x" + "34" * 20,
+        "literal_fields": {"token": clause.asset},
+        "rates": [{"field": "amount", "per": "hour", "value": "1250000"}],
+    }
+    assert option["mechanism"] == ALKAHEST_MECHANISM_ID
+    assert option["asset"] == clause.asset
+    assert option["rates"] == escrow["rates"]
+    assert option["params"] == {"accepted_escrow": escrow}

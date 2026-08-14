@@ -37,10 +37,11 @@ def build_clients() -> dict[str, Any]:
     if not priv_key:
         missing.append("wallet.private_key")
     if missing:
-        raise RuntimeError(
-            "Alkahest chains are configured but required EVM settings are missing: "
-            + ", ".join(missing)
+        logger.warning(
+            "[ALKAHEST] Mechanism unavailable; required EVM settings are missing: %s",
+            ", ".join(missing),
         )
+        return {}
 
     from alkahest_py import AlkahestClient
     from market_alkahest.alkahest import (

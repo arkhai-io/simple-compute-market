@@ -19,8 +19,10 @@ from market_core.schemas import EscrowDemand
 # listing_id is in the URL path for all lifecycle operations.
 # ---------------------------------------------------------------------------
 
+
 class CreateListingRequest(BaseModel):
     """Body for POST /api/v1/listings/create."""
+
     model_config = ConfigDict(extra="forbid")
 
     offer: dict[str, Any] = Field(description="Offered compute resource dict")
@@ -59,6 +61,7 @@ class CreateListingRequest(BaseModel):
     def require_settlement_choice(self) -> "CreateListingRequest":
         if (
             not self.accepted_escrows
+            and not getattr(self, "settlements", ())
             and not self.settlement_options
             and self.settlement_config is None
         ):
@@ -68,8 +71,8 @@ class CreateListingRequest(BaseModel):
 
 class RefundRequest(BaseModel):
     """Explicit EVM refund inputs bound to the authenticated buyer principal."""
-    model_config = ConfigDict(extra="forbid")
 
+    model_config = ConfigDict(extra="forbid")
 
     buyer_principal: Identity
     buyer_evm_address: str
@@ -79,8 +82,8 @@ class RefundRequest(BaseModel):
 
 class ClaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/claim."""
-    model_config = ConfigDict(extra="forbid")
 
+    model_config = ConfigDict(extra="forbid")
 
     escrow_uid: str
     claimant_principal: Identity
@@ -89,8 +92,8 @@ class ClaimRequest(BaseModel):
 
 class ReclaimRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/reclaim."""
-    model_config = ConfigDict(extra="forbid")
 
+    model_config = ConfigDict(extra="forbid")
 
     escrow_uid: str
     payer_principal: Identity
@@ -98,8 +101,8 @@ class ReclaimRequest(BaseModel):
 
 class ArbitrateRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/arbitrate."""
-    model_config = ConfigDict(extra="forbid")
 
+    model_config = ConfigDict(extra="forbid")
 
     escrow_uid: str | None = None
     fulfillment_uid: str | None = None

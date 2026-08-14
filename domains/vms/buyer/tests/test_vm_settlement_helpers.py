@@ -13,6 +13,7 @@ from domains.vms.buyer.escrow_selection import select_escrow_entry
 from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 from market_core.schemas import SettlementOption, derive_settlement_option_id
+from core_buyer.action_policy import BuyerActionPolicy
 from market_identity import Ed25519Signer
 
 _ESCROW = "0x" + "11" * 20
@@ -125,6 +126,126 @@ def test_make_vm_provision_terms_uses_compute_compat_shape():
     assert terms.kind == "compute.v1"
 
 
+def test_alkahest_resume_preserves_accepted_ssh_after_config_rotation(monkeypatch):
+    buyer = Ed25519Signer(b"\x34" * 32)
+    accepted_ssh = "ssh-ed25519 accepted-key"
+    deal = SimpleNamespace(
+        settlement_selection=None,
+        settlement_plan={
+            "obligations": [
+                {
+                    "payer": "buyer",
+                    "claimant": "seller",
+                    "amount": "25",
+                    "asset": _TOKEN,
+                    "expiration_unix": 2_000_000_000,
+                    "mechanism": "alkahest.v1",
+                    "params": {},
+                }
+            ]
+        },
+        accepted_provision_terms=make_vm_provision_terms(
+            duration_seconds=7200,
+            ssh_public_key=accepted_ssh,
+        ).model_dump(mode="json"),
+        duration_seconds=3600,
+        token_contract=_TOKEN,
+        token_decimals=18,
+        accepted_escrow_proposal={"chain_name": "anvil"},
+        accepted_escrow_terms=None,
+        escrow_uid="0x" + "55" * 32,
+        seller_url="http://seller",
+        negotiation_id="neg-accepted-ssh",
+        listing_id="listing-1",
+        agreed_amount=25,
+        seller_wallet_address=None,
+        buyer_principal=buyer.identity,
+    )
+    submitted = {}
+
+    class _Log:
+        def event(self, *_args, **_kwargs):
+            return None
+
+        def end(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        common,
+        "resolve_identity_config",
+        lambda: SimpleNamespace(principal=buyer.identity),
+    )
+    monkeypatch.setattr(common, "resolve_identity_credential", lambda: "credential")
+    monkeypatch.setattr(common, "resolve_buyer_signer", lambda *_args: buyer)
+    monkeypatch.setattr(
+        common,
+        "resolve_buyer_wallet",
+        lambda: ("0x" + "66" * 20, "0x" + "77" * 32),
+    )
+    monkeypatch.setattr(
+        common,
+        "resolve_ssh_public_key",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("accepted SSH was replaced by rotated config")
+        ),
+    )
+    monkeypatch.setattr(
+        common,
+        "chain_by_name",
+        lambda _name: SimpleNamespace(name="anvil", rpc_url="http://rpc"),
+    )
+    monkeypatch.setattr(settle_cli, "load_deal_context", lambda *_a, **_k: deal)
+    monkeypatch.setattr(
+        settle_cli,
+        "make_deal_publisher_trust_resolver",
+        lambda *_a, **_k: lambda: None,
+    )
+    monkeypatch.setattr(settle_cli, "open_run_log", lambda *_a, **_k: _Log())
+    monkeypatch.setattr(
+        settlement_composition,
+        "resolve_alkahest_address_config_path",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "submit_settlement_request",
+        lambda **kwargs: submitted.update(kwargs) or {"status": "provisioning"},
+    )
+    monkeypatch.setattr(
+        settle_cli,
+        "wait_for_settlement",
+        lambda **_kwargs: {"status": "ready"},
+    )
+
+    result = settle_cli.run_settle_from_log(
+        run_id="run-accepted-ssh",
+        poll_interval=0,
+        settlement_timeout=1,
+    )
+
+    assert result == {"status": "ready"}
+    assert submitted["payload"]["ssh_public_key"] == accepted_ssh
+
+
+def test_current_accepted_state_without_provision_terms_never_uses_config():
+    deal = SimpleNamespace(
+        accepted_provision_terms=None,
+        settlement_selection={
+            "mechanism": "alkahest.v1",
+            "option_id": "a" * 64,
+            "expiration_unix": 2_000_000_000,
+        },
+        settlement_plan={"obligations": []},
+        duration_seconds=3600,
+    )
+
+    with pytest.raises(
+        typer.BadParameter,
+        match="current configuration will not reinterpret this run",
+    ):
+        settle_cli._accepted_provision_inputs(deal)
+
+
 def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
     monkeypatch,
 ):
@@ -180,21 +301,12 @@ def test_recovery_never_falls_back_for_uninstalled_accepted_mechanism(
     with pytest.raises(typer.BadParameter, match="will not fall back"):
         settle_cli.run_settle_from_log(
             run_id="run-future",
-            escrow_uid=None,
-            token_contract=None,
-            token_decimals=None,
-            duration_seconds=None,
-            expiration_seconds=3600,
-            ssh_public_key=None,
-            buyer_address=None,
-            buyer_private_key=None,
-            chain_name=None,
             poll_interval=0,
             settlement_timeout=1,
         )
 
 
-def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch):
+def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch, capsys):
     buyer = Ed25519Signer(b"\x32" * 32)
     obligation = {
         "payer": "buyer",
@@ -223,9 +335,11 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch):
         buyer_principal=buyer.identity,
     )
 
+    events: list[tuple[tuple, dict]] = []
+
     class _Log:
-        def event(self, *_args, **_kwargs):
-            return None
+        def event(self, *args, **kwargs):
+            events.append((args, kwargs))
 
         def end(self, *_args, **_kwargs):
             return None
@@ -261,7 +375,15 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch):
     monkeypatch.setattr(
         settle_cli,
         "start_hosted_settlement",
-        lambda **_kwargs: {"settlement_ref": "stripe-operation", "status": "funding"},
+        lambda **_kwargs: {
+            "settlement_ref": "stripe-operation",
+            "status": "funding",
+            "action": {
+                "kind": "browser_redirect",
+                "url": "https://checkout.invalid/transient",
+                "expires_at_unix": 1_800_000_000,
+            },
+        },
     )
     monkeypatch.setattr(
         settle_cli,
@@ -271,20 +393,15 @@ def test_hosted_recovery_is_pinned_and_never_touches_chain_config(monkeypatch):
 
     result = settle_cli.run_settle_from_log(
         run_id="run-hosted",
-        escrow_uid=None,
-        token_contract=None,
-        token_decimals=None,
-        duration_seconds=None,
-        expiration_seconds=3600,
-        ssh_public_key=None,
-        buyer_address=None,
-        buyer_private_key=None,
-        chain_name=None,
         poll_interval=0,
         settlement_timeout=1,
+        action_policy=BuyerActionPolicy.PRINT,
     )
 
     assert result == {"status": "ready"}
+    assert "https://checkout.invalid/transient" in capsys.readouterr().out
+    assert any(args == ("hosted_checkout_required",) for args, _ in events)
+    assert "checkout.invalid" not in repr(events)
 
 
 def test_fiat_only_policy_selection_does_not_resolve_chain_resources(monkeypatch):

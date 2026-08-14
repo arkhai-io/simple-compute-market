@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
-from arkhai_vms import VmProvisionTerms, make_vm_provision_terms
+from arkhai_vms import VmProvisionTerms
 from core_storefront.stage_log import stage_event
 from domains.vms.listings import reconciler as listings_reconciler
 from hosted_settlement_client import ConditionDescriptor
@@ -25,9 +25,11 @@ from market_settlement_runtime import (
     SettlementConfig,
     SettlementConfigurationRegistry,
     SettlementJobCoordinator,
+    SettlementPublicationClause,
     SettlementRuntime,
     SettlementServicingWorker,
     SettlementSQLiteRepository,
+    compile_settlement_publication_clause,
     derive_obligation_ref,
 )
 
@@ -92,19 +94,72 @@ class VmSettlementComposition:
     async def publication_artifacts(
         self,
         resources: Mapping[str, Any],
+        clauses: list[SettlementPublicationClause] | None = None,
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
         merged_resources = {**self.mechanism_resources, **resources}
+        compiled = (
+            [
+                compile_settlement_publication_clause(
+                    clause,
+                    registry=self.configuration_registry,
+                    config=self.settlement_config,
+                    role="seller",
+                )
+                for clause in clauses
+            ]
+            if clauses is not None
+            else None
+        )
+
+        readiness_resources = merged_resources
+        if compiled is not None:
+            alkahest_chains = tuple(
+                dict.fromkeys(
+                    str(clause.mechanism_input["chain"])
+                    for clause in compiled
+                    if clause.mechanism == "alkahest.v1"
+                    and isinstance(clause.mechanism_input.get("chain"), str)
+                )
+            )
+            if alkahest_chains:
+                readiness_resources = {
+                    **merged_resources,
+                    "accepted_escrows": [
+                        {"chain_name": chain_name} for chain_name in alkahest_chains
+                    ],
+                }
+
         readiness = await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",
-            resources=merged_resources,
+            resources=readiness_resources,
         )
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
-        for status in readiness:
+        statuses = {status.mechanism: status for status in readiness}
+        work = (
+            [
+                (
+                    statuses.get(clause.mechanism),
+                    {**merged_resources, "publication_clause": clause},
+                )
+                for clause in compiled
+            ]
+            if compiled is not None
+            else [(status, merged_resources) for status in readiness]
+        )
+        for status, option_resources in work:
+            if status is None:
+                raise RuntimeError(
+                    "publication clause mechanism has no readiness status"
+                )
             if not status.enabled:
+                if compiled is not None:
+                    raise ValueError(
+                        f"settlement publication mechanism {status.mechanism!r} is disabled"
+                    )
                 continue
             if not status.ready:
                 logger.warning(
@@ -113,20 +168,12 @@ class VmSettlementComposition:
                     ",".join(blocker.code for blocker in status.blockers),
                 )
                 continue
-            try:
-                envelope = self.configuration_registry.build_option(
-                    status,
-                    self.settlement_config,
-                    role="seller",
-                    resources=merged_resources,
-                )
-            except (TypeError, ValueError) as exc:
-                logger.warning(
-                    "[SETTLEMENT] option suppressed mechanism=%s reason=%s",
-                    status.mechanism,
-                    str(exc),
-                )
-                continue
+            envelope = self.configuration_registry.build_option(
+                status,
+                self.settlement_config,
+                role="seller",
+                resources=option_resources,
+            )
             if not isinstance(envelope, Mapping):
                 raise RuntimeError(
                     f"settlement option builder {status.mechanism} returned no envelope"
@@ -151,36 +198,20 @@ def build_storefront_settlement_registry() -> SettlementConfigurationRegistry:
     )
 
 
-def _resolve_duration_seconds(
-    thread: Mapping[str, Any], order: Mapping[str, Any]
-) -> int:
-    return int(
-        thread.get("agreed_duration_seconds")
-        or thread.get("requested_duration_seconds")
-        or order.get("max_duration_seconds")
-        or 3600
+def build_storefront_publication_clause_compiler() -> Callable[
+    [Mapping[str, Any]], SettlementPublicationClause
+]:
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(
+        storefront_config.settlement_config_mapping(),
+        role="seller",
     )
-
-
-def _resolve_start_utc(thread: Mapping[str, Any]) -> str | None:
-    raw = thread.get("requested_start_utc")
-    if raw is None:
-        return None
-    text = str(raw).strip()
-    return text or None
-
-
-def _resolve_compute_resource(order: Mapping[str, Any]) -> dict[str, Any] | None:
-    raw = order.get("offer_resource")
-    if isinstance(raw, Mapping):
-        return dict(raw)
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
-    return None
+    return partial(
+        compile_settlement_publication_clause,
+        registry=registry,
+        config=config,
+        role="seller",
+    )
 
 
 def _settlement_plan_obligations(
@@ -294,7 +325,8 @@ async def prepare_vm_settlement(
     request: Any = None,
     sqlite_client: Any,
 ) -> PreparedSettlement:
-    """Reload, verify, and pin the accepted VM obligation before provisioning."""
+    """Reload, verify, and pin accepted VM terms before provisioning."""
+    del request
 
     thread = await sqlite_client.load_negotiation_thread_row(
         negotiation_id=negotiation_id
@@ -319,14 +351,7 @@ async def prepare_vm_settlement(
             "is gone from the local DB"
         )
 
-    request_data = request if isinstance(request, Mapping) else {}
-    ssh_public_key = str(request_data.get("ssh_public_key") or "")
-    provision = make_vm_provision_terms(
-        duration_seconds=_resolve_duration_seconds(thread, order),
-        start_utc=_resolve_start_utc(thread),
-        ssh_public_key=ssh_public_key,
-        compute_resource=_resolve_compute_resource(order),
-    )
+    provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
 
     proposal_raw = thread.get("buyer_escrow_proposal")
     if (
@@ -345,15 +370,19 @@ async def prepare_vm_settlement(
             mechanism_client=mechanism_client,
             sqlite_client=sqlite_client,
         )
-    chain = storefront_config.CHAINS.get(chain_name)
-    if chain is None:
-        raise ValueError(f"chain {chain_name!r} is not configured on this storefront")
-
     if not isinstance(proposal_raw, dict):
         raise ValueError(
             f"Negotiation {negotiation_id} has no persisted accepted escrow proposal"
         )
     proposal = EscrowProposal.model_validate(proposal_raw)
+    accepted_chain = proposal.chain_name
+    if chain_name != accepted_chain:
+        raise ValueError("settlement chain does not match accepted terms")
+    chain = storefront_config.CHAINS.get(accepted_chain)
+    if chain is None:
+        raise ValueError(
+            f"chain {accepted_chain!r} is not configured on this storefront"
+        )
     obligation_index = await escrow_verification.verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=storefront_config.get_evm_wallet_address(),
@@ -361,7 +390,7 @@ async def prepare_vm_settlement(
         agreed_duration_seconds=provision.duration_seconds,
         listing=order,
         alkahest_client=mechanism_client,
-        chain_name=chain_name,
+        chain_name=accepted_chain,
         alkahest_address_config_path=chain.alkahest_address_config_path,
         escrow_proposal=proposal,
     )
@@ -381,14 +410,7 @@ async def prepare_vm_settlement(
         negotiation_id, obligation_index, obligations[obligation_index]
     )
 
-    proposal_chain = proposal.chain_name or chain_name
-    if proposal_chain != chain_name:
-        logger.warning(
-            "[SETTLE_JOB] Proposal chain %r diverges from request chain %r; "
-            "using proposal chain.",
-            proposal_chain,
-            chain_name,
-        )
+    proposal_chain = accepted_chain
 
     return PreparedSettlement(
         agreement_ref=negotiation_id,

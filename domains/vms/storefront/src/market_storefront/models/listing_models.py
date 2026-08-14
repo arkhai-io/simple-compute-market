@@ -1,9 +1,10 @@
 """VM-owned request models for listing settlement composition."""
 
 from __future__ import annotations
-from core_storefront.models.listing_models import CreateListingRequest
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from core_storefront.models.listing_models import CreateListingRequest
+from market_settlement_runtime import SettlementPublicationClause
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class HostedFiatSettlementConfig(BaseModel):
@@ -33,6 +34,10 @@ class HostedFiatSettlementConfig(BaseModel):
 class VmCreateListingRequest(CreateListingRequest):
     """VM listing request with hosted-fiat composition validation."""
 
+    settlements: list[SettlementPublicationClause] = Field(
+        default_factory=list,
+        description="Typed settlement clauses compiled into public options.",
+    )
     settlement_config: HostedFiatSettlementConfig | None = Field(
         default=None,
         description=(
@@ -40,3 +45,14 @@ class VmCreateListingRequest(CreateListingRequest):
             "operator-owned profiles before publication."
         ),
     )
+
+    @model_validator(mode="after")
+    def require_settlement_choice(self) -> VmCreateListingRequest:
+        if (
+            not self.accepted_escrows
+            and not self.settlements
+            and not self.settlement_options
+            and self.settlement_config is None
+        ):
+            raise ValueError("at least one settlement choice is required")
+        return self

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
 from market_storefront.models.listing_models import (
@@ -47,6 +48,106 @@ def test_vm_listing_request_validates_hosted_fiat_settlement_config() -> None:
             offer={},
             settlement_config={**_VALID_CONFIG, "resolver_id": " resolver-main"},
         )
+
+
+def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
+    request = VmCreateListingRequest(
+        offer={
+            "resource_type": "compute",
+            "resource_id": "resource-1",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "region": "California, US",
+            "sla": 99.0,
+        },
+        settlements=[
+            SettlementPublicationClause(
+                mechanism="fiat.stripe.v1",
+                asset="usd",
+                rate="2",
+                per="hour",
+                mechanism_input={
+                    "method": "card",
+                    "funds_flow": "separate_charges_transfers",
+                },
+            )
+        ],
+    )
+    service = ListingService(
+        sqlite_client=object(),
+        marketplace_signer=TEST_MARKETPLACE_SIGNER,
+    )
+
+    _offer, accepted, options, _demands = service._parse_offer_and_escrows(request)
+
+    assert accepted == []
+    assert options == []
+
+
+@pytest.mark.asyncio
+async def test_clause_only_create_persists_canonical_clause_before_publication(
+    monkeypatch,
+) -> None:
+    clause = SettlementPublicationClause(
+        mechanism="fiat.stripe.v1",
+        asset="usd",
+        rate="2",
+        per="hour",
+        mechanism_input={
+            "method": "card",
+            "funds_flow": "separate_charges_transfers",
+        },
+    )
+    option = {
+        "option_id": "stripe-option",
+        "mechanism": "fiat.stripe.v1",
+        "asset": "usd",
+        "rates": [{"field": "amount", "per": "hour", "value": "200"}],
+        "params": {},
+    }
+    db = SimpleNamespace(upsert_listing=AsyncMock())
+    composition = SimpleNamespace(
+        publication_artifacts=AsyncMock(return_value=([], [option], ()))
+    )
+    service = ListingService(
+        sqlite_client=db,
+        marketplace_signer=TEST_MARKETPLACE_SIGNER,
+        settlement_composition_provider=lambda: composition,
+    )
+    monkeypatch.setattr(
+        service,
+        "_compile_publication_clauses",
+        lambda _request, *, composition: (clause,),
+    )
+    monkeypatch.setattr(
+        "market_storefront.services.publication_service.publish_order_to_registry",
+        AsyncMock(return_value={"status": "published"}),
+    )
+    request = VmCreateListingRequest(
+        offer={
+            "resource_type": "compute",
+            "resource_id": "resource-1",
+            "gpu_model": "H200",
+            "gpu_count": 1,
+            "region": "California, US",
+            "sla": 99.0,
+        },
+        settlements=[clause],
+    )
+
+    result = await service.create_listing(request)
+
+    assert result.status == "created"
+    composition.publication_artifacts.assert_awaited_once_with(
+        {
+            "accepted_escrows": [],
+            "claimant_principal": TEST_MARKETPLACE_SIGNER.identity,
+        },
+        clauses=[clause],
+    )
+    assert db.upsert_listing.await_args.kwargs["publication_clauses"] == [
+        clause.model_dump(mode="json", exclude_defaults=True)
+    ]
 
 
 @pytest.mark.asyncio

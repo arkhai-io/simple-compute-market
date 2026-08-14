@@ -6,10 +6,12 @@ from types import SimpleNamespace
 import pytest
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
+    MechanismReadiness,
     compile_settlement_clause,
     settlement_clause_matches,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
+    SettlementPublicationClause,
 )
 from pydantic import ValidationError
 from market_core.schemas import SettlementOption
@@ -361,3 +363,47 @@ def test_stripe_publication_input_rejects_secret_canary() -> None:
             config,
             role="seller",
         )
+
+
+def test_stripe_publication_clause_builds_exact_minor_unit_option() -> None:
+    registration = create_stripe_registration()
+    clause = SettlementPublicationClause(
+        mechanism=MECHANISM,
+        asset="usd",
+        rate="1.25",
+        per="hour",
+        mechanism_input={
+            "method": "card",
+            "funds_flow": "separate_charges_transfers",
+        },
+    )
+    readiness = MechanismReadiness(
+        mechanism=MECHANISM,
+        configured=True,
+        enabled=True,
+        ready=True,
+    )
+
+    artifacts = registration.option_builder(
+        _config(),
+        readiness,
+        {
+            "publication_clause": clause,
+            "claimant_principal": _identity().model_dump(mode="json"),
+            "condition_profile": "untrusted-provider-profile",
+        },
+        "seller",
+    )
+
+    assert artifacts["accepted_escrows"] == []
+    option = artifacts["settlement_options"][0]
+    assert option["mechanism"] == MECHANISM
+    assert option["asset"] == "usd"
+    assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
+    assert option["params"]["account_ref"] == "seller-main"
+    assert option["params"]["payment_method_types"] == ["card"]
+    assert option["params"]["funds_flow"] == "separate_charges_transfers"
+    assert option["params"]["condition"] == _config().condition_profiles[
+        "vm-fulfillment"
+    ].model_dump(mode="json")
+    assert option["params"]["claimant_principal"] == _identity().model_dump(mode="json")

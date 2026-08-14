@@ -121,9 +121,33 @@ See the [marketplace identity contract](../../openspec/specs/marketplace-identit
 
 Marketplace roles configure peer settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `stripe` and `alkahest` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly, inject only the signer or EVM resources each declares, and pass every resulting client into the single `market_settlement_runtime` lifecycle.
 
-Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication derives options from every enabled ready registration in configured order; buyer policy ranks only compatible advertised survivors. Priority applies before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
+The shared CLI comparison grammar has two typed uses. Resource queries derive their fields, aliases, operators, types, and missing-value semantics from the active registry filter specification and carry its ETag. Settlement clauses use common option identity fields plus mechanism-owned public projections. Buyer clauses are correlated ordered alternatives after resource filtering; storefront clauses are complete option-construction inputs. Provider, secret, raw RPC, and administrator fields are outside both languages.
 
-Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md) and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+The only shared lexer, source-spanned AST, comparison operators, typed field
+descriptors, validation, and canonical rendering live in
+`market_core.query_dsl`, shipped by the dependency-light `arkhai-core`
+distribution. That module imports no registry client, settlement runtime, role,
+domain, CLI framework, or provider package. Schema-specific compilation stays
+with the owning lower-level consumers: `arkhai-core-registry-client` converts
+filter specifications into resource descriptors, while
+`arkhai-kit-settlement-runtime` combines common settlement descriptors with
+registration-owned projections and publication-input validators.
+
+The dependency edges point downward and never back into role or domain code:
+
+```text
+buyer/storefront role compositions
+        ├──> arkhai-core-registry-client ──> arkhai-core (`market_core.query_dsl`)
+        └──> arkhai-kit-settlement-runtime ─> arkhai-core (`market_core.query_dsl`)
+```
+
+Role compositions may consume the schema compilers, but they do not own or
+fork the parser. Neither compiler may import an affected buyer/storefront role
+to obtain vocabulary or policy.
+
+Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
+
+Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject hosted provider, administrator, webhook, database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
 ## Runtime service map
 
@@ -255,6 +279,8 @@ Commercial agreement identity does not cross the generic provisioning boundary m
 ### Discovery and negotiation
 
 The buyer discovers listings from a registry and drives signed synchronous request/response rounds against a storefront. Negotiation is a deterministic reduction of the shared message history to agreed terms. Seller policy evaluates listing data, captured side inputs, and the message history; protocol infrastructure does not reinterpret domain policy.
+
+Normal buyer commands apply two separate constraint layers in fixed order: one filter-spec-typed resource query is pushed to the registry, then zero or more settlement clauses are evaluated locally against installed, enabled, compatible advertised options. Every comparison in one settlement clause must match the same option; repeated clauses are alternatives in command order. Explanation stops before negotiation and reports registry-owned predicates, local settlement rejections, and survivor counts without making a physical indexing claim.
 
 Negotiation is a conversation of counter-offers over what capacity is being sold, not over which specific physical resource serves it. A buyer and seller negotiate pooled capacity ("4 GPUs", not "host `kvm-17`"); a counter-offer that changes the requested shape (fewer/more units, a different dimension mix) is a negotiation event, and a durable shape change is expressed by resizing the reservation for that negotiation, never by mutating an existing reservation or committed settlement assignment in place (see "Capacity reservation" below, and `openspec/specs/site-capacity/spec.md`'s reservation-supersede requirement). Today's negotiation rounds exchange hard counters; the same model extends to richer forms (a buyer asking what shape a given price can buy, or what price a given shape costs) without changing this premise.
 

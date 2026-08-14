@@ -14,7 +14,6 @@ from types import MappingProxyType
 from typing import (
     Any,
     Literal,
-    cast,
     get_args,
     get_origin,
 )
@@ -105,7 +104,7 @@ class MechanismReadiness(BaseModel):
 
     def safe_projection(self) -> dict[str, Any]:
         """Return the complete public status representation."""
-        return cast(dict[str, Any], self.model_dump(mode="json"))
+        return self.model_dump(mode="json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +125,10 @@ class SettlementConfig:
     @property
     def configured_keys(self) -> tuple[str, ...]:
         return tuple(sorted(self.mechanisms))
+
+
+def _section_enabled(section: BaseModel) -> bool:
+    return bool(getattr(section, "enabled"))
 
 
 PreflightCallback = Callable[
@@ -431,9 +434,7 @@ class SettlementConfigurationRegistry:
                 f"expected {SETTLEMENT_CONFIG_SCHEMA_VERSION}"
             )
         priority_value = raw.get("priority", ())
-        if not isinstance(priority_value, (list, tuple)) or isinstance(
-            priority_value, (str, bytes)
-        ):
+        if not isinstance(priority_value, (list, tuple)):
             raise SettlementConfigurationError("Settlement.priority must be a list")
         priority = tuple(priority_value)
         if any(not isinstance(item, str) or not item for item in priority):
@@ -507,7 +508,7 @@ class SettlementConfigurationRegistry:
                 raise SettlementConfigurationError(
                     f"Settlement.{config_key} must use {registration.config_model.__name__}"
                 )
-            if section.enabled:
+            if _section_enabled(section):
                 enabled.add(mechanism_id)
         for mechanism_id in config.priority:
             registration = self.registration(mechanism_id)
@@ -515,12 +516,12 @@ class SettlementConfigurationRegistry:
                 raise SettlementConfigurationError(
                     f"settlement mechanism {mechanism_id!r} does not apply to role {role!r}"
                 )
-            section = config.mechanisms.get(registration.config_key)
-            if section is None:
+            priority_section = config.mechanisms.get(registration.config_key)
+            if priority_section is None:
                 raise SettlementConfigurationError(
                     f"priority mechanism {mechanism_id!r} has no configured section"
                 )
-            if not section.enabled:
+            if not _section_enabled(priority_section):
                 raise SettlementConfigurationError(
                     f"priority mechanism {mechanism_id!r} is disabled"
                 )
@@ -576,7 +577,7 @@ class SettlementConfigurationRegistry:
                     )
                 )
                 continue
-            if not section.enabled:
+            if not _section_enabled(section):
                 results.append(
                     MechanismReadiness(
                         mechanism=registration.mechanism_id,
@@ -677,7 +678,7 @@ class SettlementConfigurationRegistry:
         if "buyer" not in registration.roles:
             return False
         section = config.mechanisms.get(registration.config_key)
-        if section is None or not section.enabled:
+        if section is None or not _section_enabled(section):
             return False
         return registration.buyer_compatibility(section, option, public_context or {})
 
@@ -701,7 +702,7 @@ class SettlementConfigurationRegistry:
                     "mechanism": registration.mechanism_id,
                     "config_key": registration.config_key,
                     "configured": section is not None,
-                    "enabled": bool(section is not None and section.enabled),
+                    "enabled": bool(section is not None and _section_enabled(section)),
                     "clause_fields": field_reference_json(descriptors),
                     "publication_input_schema": (
                         registration.publication_input_model.model_json_schema()
@@ -813,7 +814,7 @@ def _reject_unknown_model_keys(
     if unknown:
         raise SettlementConfigurationError(f"unknown {path} keys: {', '.join(unknown)}")
     for key, value in values.items():
-        name, field_info = aliases[cast(str, key)]
+        name, field_info = aliases[key]
         if role not in _field_roles(field_info):
             raise SettlementConfigurationError(
                 f"{path}.{name} does not apply to role {role!r}"
@@ -907,7 +908,7 @@ def _looks_sensitive_key(key: str) -> bool:
             "access_token",
             "api_key",
             "webhook",
-            "provider_id",
+            "provider",
             "admin",
             "database",
         )

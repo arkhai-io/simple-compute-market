@@ -20,3 +20,26 @@ def test_fiat_only_startup_does_not_construct_alkahest_clients(monkeypatch):
     )
 
     assert server._build_alkahest_clients() == {}
+
+
+def test_stripe_startup_survives_unready_configured_alkahest(monkeypatch):
+    import market_storefront.server as server
+    import market_storefront.services.alkahest_service as alkahest_service
+    import market_storefront.utils.config as config
+
+    chain = object()
+    monkeypatch.setattr(
+        config,
+        "settlement_config_mapping",
+        lambda: {
+            "priority": ["fiat.stripe.v1", "alkahest.v1"],
+            "stripe": {"enabled": True},
+            "alkahest": {"enabled": True},
+        },
+    )
+    monkeypatch.setattr(config, "CHAINS", {"anvil": chain})
+    monkeypatch.setattr(alkahest_service, "CHAINS", {"anvil": chain})
+    monkeypatch.setattr(alkahest_service, "get_evm_wallet_address", lambda: "")
+    monkeypatch.setattr(alkahest_service, "get_evm_wallet_private_key", lambda: "")
+
+    assert server._build_alkahest_clients() == {}

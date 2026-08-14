@@ -69,9 +69,11 @@ The storefront validates and migrates listing sellers, negotiation parties and m
 
 ## Settlement option reconciliation
 
-The storefront owns seller settlement status and administration because it is the authority that turns mechanism readiness into market-visible options. It preflights every enabled installed registration and derives deterministic options for all ready mechanisms in configured priority order. A sanitized blocker suppresses only its unready mechanism; ready peers remain publishable. If none are ready, publication fails without modifying accepted negotiations or active settlement state.
+The storefront owns seller settlement status and administration because it is the authority that turns mechanism readiness and seller intent into market-visible options. It preflights every enabled installed registration and passes complete typed publication clauses only to their owning ready builders. Options follow configured mechanism priority and source-clause order. A sanitized blocker suppresses only its unready mechanism; ready peers with valid clauses remain publishable. An enabled mechanism with no clause publishes nothing, and one clause's scalar price never supplies another mechanism.
 
-Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths.
+Command defaults, CSV resource rows, projected reconciliation records, and direct listing requests converge on the same typed clause model before builders run. A resource's clause list replaces command defaults as a whole. Rates are human decimal asset quantities at input and are normalized exactly once by the owning mechanism to currency minor units or token base units; non-exact conversion fails rather than rounding. Legacy publication config and CSV input use an explicit preview/write/backup migration and ambiguous multi-mechanism scalar pricing requires manual resolution.
+
+Readiness recovery may add a deterministic option without changing listing identity. Loss of readiness may remove that option from future offers, but accepted Terms remain pinned. Seller operations live under `market-storefront settlement`: the common status command is observational, while mechanism-owned subcommands expose genuine differences such as hosted onboarding or an Alkahest check without creating separate publication paths. Normal `publish` accepts only mechanism-neutral clauses.
 
 ## Related contracts
 

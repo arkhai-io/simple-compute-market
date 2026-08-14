@@ -75,7 +75,7 @@ A storefront domain MAY interpret a projected pool's `listing_mode`, `max_reserv
 
 A `fungible` pool's publishable capacity range is bounded by what a single member can currently satisfy, never by a sum across members, and MUST be sourced from grouped `site_capacity_buckets` data when it is available; a `specific_resource` pool publishes one independently identified, independently reservable listing candidate per currently enabled member, regardless of member count. No listing/hold hint's projected value may be persisted into storefront-local storage — a consumer reads it live from the current projection each time it is needed.
 
-`region` has no storefront-side override — a storefront overriding where hardware physically sits would misrepresent a fact, not adjust a policy. `sla` and `pricing` (per resource family and, within a family, per model) each resolve through a three-tier precedence, highest to lowest: a storefront-specific override on a specific pool; the pool's own declared hint; the storefront's own configured default. `sla`'s middle tier is additionally gated behind a storefront-wide trust setting — a storefront MAY decline to consult a pool's declared SLA at all, independent of whether any specific pool has an override, since publishing a site's self-reported SLA claim is a trust decision distinct from a per-pool pricing override.
+`region` has no storefront-side override — a storefront overriding where hardware physically sits would misrepresent a fact, not adjust a policy. `sla` and negotiation-floor pricing policy (per resource family and, within a family, per model) each resolve through a three-tier precedence, highest to lowest: a storefront-specific override on a specific pool; the pool's own declared hint; the storefront's own configured default. `sla`'s middle tier is additionally gated behind a storefront-wide trust setting — a storefront MAY decline to consult a pool's declared SLA at all, independent of whether any specific pool has an override. A resolved `min_price` is only a negotiation floor, and a resolved `default_token_address` is only demand-side policy input; neither constructs a settlement option. Settlement option assets, rates, units, and mechanism inputs come only from complete typed clause lists, with resource clauses replacing command clauses and command clauses replacing configured defaults as whole lists.
 
 #### Scenario: Listing mode is absent or invalid
 - **WHEN** a projected pool omits `listing_mode` or supplies a value unsupported by the selected domain
@@ -97,9 +97,9 @@ A `fungible` pool's publishable capacity range is bounded by what a single membe
 - **WHEN** a storefront has not enabled its SLA trust setting
 - **THEN** publication resolves SLA from a per-pool storefront override or the storefront's own default, never from the pool's own declared hint, regardless of whether that pool has one
 
-#### Scenario: A per-pool storefront override sets only one pricing field
-- **WHEN** a storefront's per-pool override sets `min_price` but not `token`
-- **THEN** the unset field resolves independently through the pool hint and configured default, rather than the whole override being ignored or the whole pool falling back to defaults
+#### Scenario: A pool supplies negotiation pricing hints
+- **WHEN** pricing precedence resolves `min_price` or a token-address policy hint for a listing candidate
+- **THEN** the storefront may use those values only for negotiation-floor or demand policy and derives every settlement option exclusively from the effective complete typed clause list
 
 ### Requirement: Domain publication capability
 A domain that supports seller publication MUST provide its publication source and listing interpretation through the domain contract while registry fan-out remains schema-opaque core orchestration.
@@ -333,26 +333,99 @@ Storefront databases MUST validate and migrate buyer, seller, administrator, ser
 
 ### Requirement: Publication derives all ready settlement options
 
-A storefront MUST preflight every enabled installed settlement registration and derive deterministic listing options from every ready mechanism in configured priority order. One unready mechanism MUST be suppressed with an operator-visible sanitized blocker while ready peers remain publishable. If none are ready, publication MUST fail without mutating accepted negotiations or active settlement state.
+A storefront MUST preflight every enabled installed settlement registration and derive deterministic listing options from every ready mechanism in configured priority order and the seller's validated settlement publication clauses. A clause MUST NOT make a disabled or unready mechanism publishable. One unready mechanism MUST be suppressed with an operator-visible sanitized blocker while ready peers remain publishable. If no enabled ready mechanism has a valid publication clause, publication MUST fail without mutating accepted negotiations or active settlement state.
 
 #### Scenario: Stripe is unready and Alkahest is ready
 
-- **WHEN** both are enabled but hosted account readiness is false
+- **WHEN** both have publication clauses but hosted account readiness is false
 - **THEN** the storefront publishes the Alkahest option, omits the Stripe option, and reports the hosted blocker without provider detail
 
 #### Scenario: Readiness returns after publication
 
-- **WHEN** a previously suppressed mechanism becomes ready
+- **WHEN** a previously suppressed mechanism becomes ready and its publication clause remains valid
 - **THEN** reconciliation may add its deterministic option without changing listing identity or any already accepted Terms
+
+#### Scenario: Clause names a disabled mechanism
+
+- **WHEN** seller publication input names a mechanism whose typed configuration is disabled
+- **THEN** publication rejects that clause without using it as an implicit enablement override
 
 ### Requirement: Storefront owns seller settlement UX
 
-Seller configuration, readiness, mechanism administration, and publication MUST be exposed through the storefront CLI and generated role config surface. A hosted client MAY supply workflow primitives, but a separate provider-specific seller executable MUST NOT be the normal marketplace entry point.
+Seller configuration, readiness, mechanism administration, and publication MUST be exposed through the storefront CLI and generated role config surface. Normal publication MUST accept mechanism-neutral settlement clauses and MUST NOT expose provider-, chain-, or escrow-specific flags. Mechanism administration MUST remain under `settlement <mechanism>`. A hosted client MAY supply workflow primitives, but a separate provider-specific seller executable or top-level mechanism-specific publication flow MUST NOT be the normal marketplace entry point.
 
 #### Scenario: Seller inspects all settlement mechanisms
 
 - **WHEN** `market-storefront settlement status --json` runs
 - **THEN** it returns the common status schema for every installed mechanism in configured order without a listing or financial side effect
+
+#### Scenario: Seller publishes two mechanisms
+
+- **WHEN** normal publication receives valid Stripe and Alkahest settlement clauses
+- **THEN** the storefront derives both through their ready registrations without invoking a mechanism-specific publication command
+
+### Requirement: Publication pricing is explicit per settlement clause
+
+Every priced settlement publication clause MUST contain one asset-scoped decimal rate and unit. The owning mechanism MUST normalize it to canonical integer minor or base units using authoritative asset scale, reject non-exact conversion, and include the normalized rate in deterministic option identity. A resource-level `min_price` or other untyped scalar MUST NOT be reused as the price of more than one mechanism.
+
+#### Scenario: Dual listing uses equal human prices
+
+- **WHEN** a seller explicitly publishes USD 2/hour and six-decimal-token 2/hour clauses for one resource
+- **THEN** the resulting options carry 200 and 2000000 canonical units respectively and both display as 2 asset units/hour
+
+#### Scenario: Dual listing omits one mechanism rate
+
+- **WHEN** a resource has one valid mechanism clause and another enabled mechanism has no explicit rate-bearing clause
+- **THEN** publication does not infer the missing mechanism's price from the first clause
+
+### Requirement: Per-resource settlement input uses the common clause contract
+
+Command defaults, imported resource records, and reconciliation inputs that describe settlement options MUST parse to the same typed settlement-clause model before option derivation. Unknown fields, conflicting duplicate values, role-inapplicable fields, and malformed rates MUST fail the affected candidate without creating a partially interpreted option.
+
+#### Scenario: Imported resource overrides settlement defaults
+
+- **WHEN** one resource record supplies its own complete settlement clauses
+- **THEN** those clauses replace the command-level defaults for that resource and are validated through the same grammar and registrations
+
+### Requirement: Publication pricing migration is preview-first and atomic
+
+Storefront publication migration MUST support TOML configuration and resource
+CSV inputs through explicit check and write modes. Check mode MUST produce a
+deterministic preview without changing the source or creating a backup. Write
+mode MUST require a backup, preserve an exact pre-migration copy, validate the
+complete proposed document through the current structured clause model and
+every selected mechanism's typed publication-input validator, and replace the
+source atomically with restrictive permissions. A failed validation or write
+MUST leave the source unchanged. Rechecking an already migrated input MUST be
+idempotent.
+
+Automatic conversion MUST occur only when one enabled mechanism, its asset
+scale, and every legacy pricing input have one complete interpretation.
+Dual-mechanism pricing, hidden reserves, per-row legacy pricing, a missing asset
+scale, conflicting config and row values, malformed legacy values, and any
+other ambiguous population MUST be reported as conflicts without mutation.
+Migration MUST NOT guess units, synthesize partial clauses, or reinterpret
+`min_price` or `default_token_address` as a settlement rate or asset.
+
+#### Scenario: Operator previews publication migration
+
+- **WHEN** the operator runs check mode against a storefront TOML file or resource CSV
+- **THEN** the tool reports the deterministic proposed changes and conflicts while the input bytes and backup set remain unchanged
+
+#### Scenario: Unambiguous publication input is written
+
+- **WHEN** one enabled mechanism and authoritative asset scale make every legacy price unambiguous and the operator requests write with backup
+- **THEN** the tool fully validates the typed result, saves the exact original bytes, and atomically installs the restrictive-permission replacement
+
+#### Scenario: Legacy pricing has competing interpretations
+
+- **WHEN** dual mechanisms, hidden reserve pricing, per-row legacy pricing, a missing scale, or conflicting values could produce different clauses
+- **THEN** check and write modes report the conflict and neither the source nor any existing backup is changed
+
+#### Scenario: Generated clause fails typed mechanism validation
+
+- **WHEN** a proposed migration contains an unknown field, invalid rate, unsupported asset, or invalid mechanism-owned input
+- **THEN** migration fails before backup or mutation rather than persisting a partially validated document
 
 ## Evidence
 
@@ -369,6 +442,7 @@ Seller configuration, readiness, mechanism administration, and publication MUST 
 - Site-scoped derivation keys and collision resistance (VM and bare-metal): `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/bare_metal/tests/test_publication.py`, and `domains/bare_metal/tests/test_storefront_publication.py`.
 - Site-pinned claim routing, including the collision case placement policy would otherwise choose wrongly: `core/storefront/tests/unit/test_aggregation.py`. Mapped-listing routing reached through the real admin, negotiation-hold, and settlement/fulfillment entry points: `domains/vms/storefront/tests/integration/test_admin_api.py`, `domains/vms/storefront/tests/unit/test_two_phase_reserve.py`, and `domains/vms/storefront/tests/unit/test_settlement_jobs.py`.
 - Domain-owned listing-mode resolution, bucket-sourced fungible candidates, multi-member specific-resource derivation, the resource-keyed derivation-key collision fix, and the live (never persisted) hold-preference cap: `domains/vms/storefront/tests/unit/test_reconciler.py`, `domains/vms/storefront/tests/unit/test_listing_mode.py`, `domains/vms/storefront/tests/unit/test_sync_negotiation_hold_cap.py`, and `domains/vms/storefront/tests/unit/test_remote_capacity_client.py`. VM is currently the only domain with a `listing_mode` resolver wired to a real publication consumer; another domain adds its own resolver and evidence line here once it gains a concrete consumer.
-- Region/SLA hint resolution (including SLA's storefront-wide trust gate) and the three-tier pricing precedence (including independent per-field resolution across tiers): `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
+- Region/SLA hint resolution (including SLA's storefront-wide trust gate) and negotiation-floor pricing-policy precedence: `domains/vms/storefront/tests/unit/test_pool_descriptors.py`, `domains/vms/storefront/tests/unit/test_pricing_resolution.py`, `domains/vms/storefront/tests/unit/test_reconciler.py`, and `domains/vms/storefront/tests/unit/test_cli_publish_helpers.py::TestPoolHintResolutionSettings`.
+- Structured publication defaults/imports and preview-first, typed, backed-up atomic migration with ambiguity refusal: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_resource_csv_importer.py`, and `test_publication_migration.py`.
 
 Replacing the domain-owned storefront executables remains proposed work rather than baseline behavior. Bare metal currently supplies domain codecs and publication semantics but not a complete runnable storefront composition.

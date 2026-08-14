@@ -1,12 +1,9 @@
 """ListingService — synchronous listing lifecycle orchestrator.
 
 Each public method is a procedural sequence of steps directly against
-SQLite + the registry client. No policy layer for listing CRUD — the
-seller's intent (offer + accepted escrows + duration + paused flag) is
-the only input the storefront needs to act on.
-
-Startup validation: config prerequisites for escrow operations are checked
-at construction time so failures are visible immediately rather than per-call.
+SQLite + the registry client. Settlement prerequisites are observed per
+mechanism during publication so one unready mechanism does not prevent a
+ready peer from publishing.
 """
 
 from __future__ import annotations
@@ -30,6 +27,10 @@ from core_storefront.models.listing_models import (
 from core_storefront.stage_log import stage_event
 from domains.vms.listings.resources import parse_resource_from_dict
 from market_identity import Signer
+from market_settlement_runtime import (
+    SettlementPublicationClause,
+    compile_settlement_publication_clause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,17 +220,47 @@ class ListingService:
             f"{type(amount_value).__name__}"
         )
 
+    def _compile_publication_clauses(
+        self,
+        request: CreateListingRequest,
+        *,
+        composition: Any | None = None,
+    ) -> tuple[SettlementPublicationClause, ...]:
+        raw_clauses = list(getattr(request, "settlements", ()))
+        if not raw_clauses:
+            return ()
+        active = composition or self._settlement_composition_provider()
+        if active is None:
+            raise RuntimeError("settlement composition is not initialized")
+        return tuple(
+            compile_settlement_publication_clause(
+                clause,
+                registry=active.configuration_registry,
+                config=active.settlement_config,
+                role="seller",
+            )
+            for clause in raw_clauses
+        )
+
     async def _derive_settlement_artifacts(
         self,
         request: CreateListingRequest,
+        *,
+        clauses: tuple[SettlementPublicationClause, ...] | None = None,
+        composition: Any | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if request.settlement_options:
             raise ValueError(
                 "settlement_options are derived from installed mechanism registrations"
             )
-        composition = self._settlement_composition_provider()
+        composition = composition or self._settlement_composition_provider()
         if composition is None:
             raise RuntimeError("settlement composition is not initialized")
+        canonical_clauses = (
+            clauses
+            if clauses is not None
+            else self._compile_publication_clauses(request, composition=composition)
+        )
         resources: dict[str, Any] = {
             "accepted_escrows": list(request.accepted_escrows),
             "claimant_principal": self._marketplace_signer.identity,
@@ -255,9 +286,10 @@ class ListingService:
                     )
         try:
             accepted, options, _readiness = await composition.publication_artifacts(
-                resources
+                resources,
+                clauses=list(canonical_clauses) or None,
             )
-        except RuntimeError as exc:
+        except (RuntimeError, TypeError, ValueError) as exc:
             raise ValueError(str(exc)) from exc
         return accepted, options
 
@@ -286,7 +318,11 @@ class ListingService:
                 "Listing offer must be a compute resource (the buyer-as-maker "
                 "token-offer shape was removed with the demand_resource cutover)."
             )
-        if not request.accepted_escrows and request.settlement_config is None:
+        if (
+            not request.accepted_escrows
+            and not getattr(request, "settlements", ())
+            and request.settlement_config is None
+        ):
             raise ValueError("at least one settlement input is required")
         demands = [
             d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
@@ -317,11 +353,18 @@ class ListingService:
         )
         from market_storefront.utils.config import BASE_URL_OVERRIDE
 
+        composition = self._settlement_composition_provider()
+        canonical_clauses = self._compile_publication_clauses(
+            request,
+            composition=composition,
+        )
         offer, _accepted_inputs, _settlement_inputs, demands = (
             self._parse_offer_and_escrows(request)
         )
-        accepted_escrows, settlement_options = (
-            await self._derive_settlement_artifacts(request)
+        accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
+            request,
+            clauses=canonical_clauses,
+            composition=composition,
         )
 
         listing = Listing(
@@ -348,6 +391,10 @@ class ListingService:
                 offer_resource=listing_dict.get("offer_resource"),
                 accepted_escrows=listing_dict.get("accepted_escrows"),
                 settlement_options=listing_dict.get("settlement_options"),
+                publication_clauses=[
+                    clause.model_dump(mode="json", exclude_defaults=True)
+                    for clause in canonical_clauses
+                ],
                 demands=listing_dict.get("demands"),
                 fulfillment_resource=None,
                 max_duration_seconds=listing_dict.get("max_duration_seconds"),
@@ -401,8 +448,14 @@ class ListingService:
         }
         if resources:
             option_resources.update(resources)
-        accepted_escrows, settlement_options, _readiness = (
-            await composition.publication_artifacts(option_resources)
+        persisted_clauses = list(stored.get("publication_clauses") or ())
+        (
+            accepted_escrows,
+            settlement_options,
+            _readiness,
+        ) = await composition.publication_artifacts(
+            option_resources,
+            clauses=persisted_clauses or None,
         )
         await self._db.update_listing(
             listing_id=listing_id,

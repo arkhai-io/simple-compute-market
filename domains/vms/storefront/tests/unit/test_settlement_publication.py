@@ -9,6 +9,7 @@ from market_settlement_runtime import (
     ReadinessBlocker,
     SettlementConfig,
     SettlementConfigurationRegistry,
+    SettlementPublicationClause,
 )
 from pydantic import BaseModel, ConfigDict
 
@@ -23,6 +24,8 @@ class _Section(BaseModel):
 class _PublicationInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    chain: str | None = None
+
 
 def _registration(
     mechanism: str,
@@ -30,17 +33,25 @@ def _registration(
     *,
     ready: bool,
     calls: list[str],
+    required_chain: str | None = None,
 ) -> MechanismRegistration:
     async def preflight(section, resources, role):
-        del resources, role
+        del role
         calls.append(f"preflight:{mechanism}")
+        selected_chains = {
+            item.get("chain_name")
+            for item in resources.get("accepted_escrows", ())
+            if isinstance(item, dict)
+        }
+        chain_ready = required_chain is None or required_chain in selected_chains
+        is_ready = ready and chain_ready
         return MechanismReadiness(
             mechanism=mechanism,
             configured=True,
             enabled=section.enabled,
-            ready=section.enabled and ready,
+            ready=section.enabled and is_ready,
             blockers=()
-            if ready
+            if is_ready
             else (ReadinessBlocker(code=f"{key}.unready", message="not ready"),),
         )
 
@@ -175,3 +186,141 @@ async def test_publication_fails_safely_when_none_are_ready():
 
     with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):
         await VmSettlementComposition.publication_artifacts(composition, {})
+
+
+@pytest.mark.asyncio
+async def test_explicit_clauses_build_only_requested_mechanisms_in_clause_order():
+    composition, calls = _composition(
+        priority=("alkahest.v1", "fiat.stripe.v1"),
+        stripe_ready=True,
+        alkahest_ready=True,
+    )
+    clauses = [
+        SettlementPublicationClause(
+            mechanism="fiat.stripe.v1",
+            asset="usd",
+            rate="2",
+            per="hour",
+        ),
+        SettlementPublicationClause(
+            mechanism="alkahest.v1",
+            asset="0x" + "12" * 20,
+            rate="2",
+            per="hour",
+        ),
+    ]
+
+    accepted, options, _statuses = await VmSettlementComposition.publication_artifacts(
+        composition,
+        {
+            "stripe_options": [{"mechanism": "fiat.stripe.v1"}],
+            "alkahest_escrows": [{"mechanism": "alkahest.v1"}],
+        },
+        clauses=clauses,
+    )
+
+    assert [value for value in calls if value.startswith("option:")] == [
+        "option:fiat.stripe.v1",
+        "option:alkahest.v1",
+    ]
+    assert options == [{"mechanism": "fiat.stripe.v1"}]
+    assert accepted == [{"mechanism": "alkahest.v1"}]
+
+
+@pytest.mark.asyncio
+async def test_explicit_disabled_clause_is_rejected() -> None:
+    composition, _calls = _composition(
+        priority=("alkahest.v1",),
+        stripe_ready=True,
+        alkahest_ready=True,
+        stripe_enabled=False,
+        alkahest_enabled=True,
+    )
+
+    with pytest.raises(ValueError, match="disabled"):
+        await VmSettlementComposition.publication_artifacts(
+            composition,
+            {},
+            clauses=[
+                SettlementPublicationClause(
+                    mechanism="fiat.stripe.v1",
+                    asset="usd",
+                    rate="2",
+                    per="hour",
+                )
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_builder_validation_error_fails_the_listing(monkeypatch) -> None:
+    composition, _calls = _composition(
+        priority=("fiat.stripe.v1",),
+        stripe_ready=True,
+        alkahest_ready=False,
+        alkahest_enabled=False,
+    )
+    monkeypatch.setattr(
+        composition.configuration_registry,
+        "build_option",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("fractional base units")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="fractional base units"):
+        await VmSettlementComposition.publication_artifacts(
+            composition,
+            {},
+            clauses=[
+                SettlementPublicationClause(
+                    mechanism="fiat.stripe.v1",
+                    asset="usd",
+                    rate="2.001",
+                    per="hour",
+                )
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_clause_chain_is_available_during_alkahest_preflight() -> None:
+    calls: list[str] = []
+    registry = SettlementConfigurationRegistry(
+        (
+            _registration(
+                "alkahest.v1",
+                "alkahest",
+                ready=True,
+                calls=calls,
+                required_chain="base_sepolia",
+            ),
+        )
+    )
+    config = SettlementConfig(
+        priority=("alkahest.v1",),
+        mechanisms={"alkahest": _Section(enabled=True)},
+    )
+    registry.validate(config, role="seller")
+    composition = SimpleNamespace(
+        configuration_registry=registry,
+        settlement_config=config,
+        mechanism_resources={},
+    )
+
+    accepted, _options, readiness = await VmSettlementComposition.publication_artifacts(
+        composition,
+        {"alkahest_escrows": [{"mechanism": "alkahest.v1"}]},
+        clauses=[
+            SettlementPublicationClause(
+                mechanism="alkahest.v1",
+                asset="0x" + "12" * 20,
+                rate="2",
+                per="hour",
+                mechanism_input={"chain": "base_sepolia"},
+            )
+        ],
+    )
+
+    assert readiness[0].ready is True
+    assert accepted == [{"mechanism": "alkahest.v1"}]

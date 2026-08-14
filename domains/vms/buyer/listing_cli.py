@@ -20,7 +20,11 @@ from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from core_buyer import build_buyer_explanation, explain_registry_query
 
+from .buy_orchestrator import query_registry_for_matches_multi
+from .cli_helpers import emit_buyer_explanation
+from .settlement_composition import resolve_buyer_settlement_policy
 from domains.vms.listings import (
     format_accepted_escrows,
     format_demands,
@@ -28,6 +32,7 @@ from domains.vms.listings import (
     short_ts,
     shorten,
 )
+from market_settlement_runtime import settlement_clause_descriptors
 
 
 listing_app = typer.Typer(no_args_is_help=True)
@@ -40,6 +45,20 @@ listing_app = typer.Typer(no_args_is_help=True)
 
 def _normalize_registry_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
+
+
+def settlement_clause_error_message(exc: ValueError, policy) -> str:
+    """Render a clause failure with the generated buyer field vocabulary."""
+
+    descriptors = settlement_clause_descriptors(policy.registry, role="buyer")
+    accepted = sorted(
+        {
+            name
+            for descriptor in descriptors
+            for name in (descriptor.name, *descriptor.aliases)
+        }
+    )
+    return f"{exc}. Accepted settlement fields: {', '.join(accepted)}"
 
 
 def _registry_context(
@@ -108,6 +127,17 @@ def listing_list(
         help="Typed resource constraints, for example "
         "'gpu_model in [H200,A100] ram_gb>=64 static_ip=true'.",
     ),
+    settlement: list[str] | None = typer.Option(
+        None,
+        "--settlement",
+        help="Repeatable typed settlement alternative, for example "
+        "'mechanism=stripe asset=usd stripe.method=card'.",
+    ),
+    explain: bool = typer.Option(
+        False,
+        "--explain",
+        help="Render a read-only selection plan and stop before negotiation.",
+    ),
     # Pagination
     limit: int = typer.Option(
         50, "--limit", "-l", help="Maximum listings to fetch (1-200)."
@@ -115,6 +145,16 @@ def listing_list(
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
     """List open listings matching an optional typed resource query."""
+    try:
+        settlement_policy = resolve_buyer_settlement_policy()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
+        settlement_clauses = settlement_policy.compile_clauses(settlement or ())
+    except ValueError as exc:
+        raise typer.BadParameter(
+            settlement_clause_error_message(exc, settlement_policy)
+        ) from exc
     signer, urls, authorities, api_keys, deadline = _registry_context(
         registry_urls=registry_urls,
         discovery_timeout=discovery_timeout,
@@ -124,22 +164,52 @@ def listing_list(
     if offset < 0:
         raise typer.BadParameter("offset must be >= 0")
 
-    from .buy_orchestrator import query_registry_for_matches_multi
+    discovery = None
+    if explain:
+        discovery = explain_registry_query(
+            urls,
+            timeout=deadline,
+            signer=signer,
+            registry_authorities=authorities,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys,
+        )
+        rows = list(discovery.listings)
+    else:
+        rows = query_registry_for_matches_multi(
+            urls,
+            timeout=deadline,
+            signer=signer,
+            registry_authorities=authorities,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
+            api_keys=api_keys,
+        )
 
-    rows = query_registry_for_matches_multi(
-        urls,
-        timeout=deadline,
-        signer=signer,
-        registry_authorities=authorities,
-        resource_query=resource_query,
-        limit=limit,
-        offset=offset,
-        api_keys=api_keys,
+    if explain:
+        assert discovery is not None
+
+        trace = settlement_policy.explain_listings(
+            rows,
+            expiration_unix=2_000_000_000,
+            clauses=settlement_clauses,
+        )
+        emit_buyer_explanation(build_buyer_explanation(discovery, trace))
+        return
+
+    selected_rows = settlement_policy.select_listings(
+        rows,
+        expiration_unix=2_000_000_000,
+        clauses=settlement_clauses,
     )
-    merged = {
-        str(row["listing_id"]): row for row in rows if row.get("listing_id") is not None
-    }
-    items = list(merged.values())
+    items = []
+    for row, selected in selected_rows:
+        normalized = dict(row)
+        normalized["_selected_settlement"] = selected
+        items.append(normalized)
     console = Console()
     table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Listing ID", style="bold", overflow="fold")
@@ -147,6 +217,7 @@ def listing_list(
     table.add_column("Storefront URL")
     table.add_column("Offer")
     table.add_column("Accepted escrows")
+    table.add_column("Settlement")
     table.add_column("Demands")
     table.add_column("Created", justify="right")
 
@@ -154,6 +225,7 @@ def listing_list(
         offer_display = format_resource(row.get("offer_resource", {}))
         accepted_display = format_accepted_escrows(row.get("accepted_escrows", []))
         demands_display = format_demands(row.get("demands", []))
+        selected = row["_selected_settlement"].option
         table.add_row(
             str(row.get("listing_id", "-")),
             str(row.get("publisher_id", "-")),
@@ -162,6 +234,7 @@ def listing_list(
             accepted_display
             if "\n" in accepted_display
             else shorten(accepted_display, 120),
+            f"{selected.mechanism} {selected.asset}",
             demands_display
             if "\n" in demands_display
             else shorten(demands_display, 120),

@@ -9,12 +9,8 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
 
 - Linux or macOS (Windows: WSL).
 - Python 3.12+.
-- A wallet on the EVM chain the seller publishes on, funded with gas
-  plus whatever ERC-20 the seller accepts. Examples below use Base
-  Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e` (test
-  funds from [faucet.circle.com](https://faucet.circle.com)); any EVM
-  chain with Alkahest deployed works.
-- An RPC URL for that chain.
+- A public marketplace identity plus matching signing material injected through
+  `ARKHAI_IDENTITY_CREDENTIAL`.
 - An SSH keypair for leased VMs:
 
   ```bash
@@ -22,6 +18,12 @@ For the seller side see [`seller-quickstart.md`](./seller-quickstart.md).
   ```
 
   The pubkey gets injected into every VM you lease via cloud-init.
+- For hosted `fiat.stripe.v1`, the seller's listing and hosted authority provide
+  the payment action; no buyer wallet, chain, RPC, gas, or token balance is
+  required.
+- For `alkahest.v1`, configure an EVM wallet, an RPC-backed chain, and the
+  deployed Alkahest address file. Fund the wallet with gas and the advertised
+  token.
 
 ## 1. Install
 
@@ -64,80 +66,104 @@ market --version
 
 ## 2. Configure
 
-`market` reads `~/.config/arkhai/buyer.toml`. Scaffold with
-`market config init-user` or write directly:
+`market` reads `~/.config/arkhai/buyer.toml`. Generate the current typed
+template, including optional EVM resources only when needed:
 
-```toml
-[wallet]
-private_key    = "0x<YOUR_BUYER_PRIVATE_KEY>"
-ssh_public_key = "ssh-ed25519 AAAA...your-key buyer@host"
-
-[chains.base_sepolia]
-chain_id = 84532
-rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
-
-[registry]
-# The Arkhai public listing registry (preprod, Base Sepolia listings):
-urls = ["http://34.41.205.175/registry"]
-# Or point at any other listing registry, e.g. a self-hosted one:
-# urls = ["http://<REGISTRY_HOST>:8080"]
-
-[registry.auth]
-# Required when the listing registry gates reads (REGISTRY_REQUIRE_READ_API_KEY=true).
-# The public preprod listing registry is currently read-open — no token needed.
-# Keys must match the URLs in [registry] urls exactly (scheme, host,
-# port, no trailing slash).
-# "http://<REGISTRY_HOST>:8080" = "<your-token>"
-
-[negotiation]
-# Ordered policy chain run per round. The buyer's default chain pairs
-# `buyer_escrow_shape_guard` (vetoes if the seller mutates a buyer-
-# pinned field) with the `bisection` terminal. Switch the terminal to
-# `"rl"` for the trained pufferlib checkpoint (~1GB torch download).
-# For per-escrow-kind dispatch, replace this list with a
-# [negotiation.policies] table; see docs/configuration.md.
-# See docs/configuration.md for the full reference.
-policies = ["buyer_escrow_shape_guard", "bisection"]
+```bash
+market config init-user
+# Alkahest users:
+market config init-user --include-evm-resources
 ```
 
-## 3. Browse
+Set `[Identity].scheme` and `[Identity].identifier` to the public principal
+derived from `ARKHAI_IDENTITY_CREDENTIAL`, set
+`[provisioning].ssh_public_key`, and configure `[registry].urls` plus each
+registry authority pin. The generated template documents every field.
+
+Settlement mechanisms are explicit and disabled by default. A hosted-only
+buyer uses:
+
+```toml
+[Settlement]
+schema_version = 1
+priority = ["fiat.stripe.v1"]
+
+[Settlement.stripe]
+enabled = true
+# Set the hosted base URL, authority/environment, signed manifest and API/schema
+# pins, required capabilities, and [Settlement.stripe.authority].principals.
+
+[Settlement.alkahest]
+enabled = false
+```
+
+An Alkahest buyer instead enables and prioritizes `alkahest.v1`, supplies
+`[Settlement.alkahest].address_config_path`, and fills the generated `[Wallet]`
+and `[Chains.<name>]` tables. Enabling a mechanism does not make an incompatible
+listing selectable; discovery still requires one advertised compatible option.
+
+Preview and migrate a legacy buyer config explicitly:
+
+```bash
+market config migrate --scope settlement --check
+market config migrate --scope settlement --write --backup
+```
+
+## 3. Browse and explain
+
+The resource-query language is typed by each registry's active filter
+specification. The settlement language is evaluated buyer-side over advertised
+options. One `--settlement` occurrence is a conjunction over one option;
+repeated occurrences are alternatives in command order.
 
 ```bash
 market listing list
-market listing list --gpu-model H200
+market listing list --resource 'gpu_model=H200 gpu_count>=1'
+market listing list \
+  --resource 'gpu_model in [H200,H100] region=us-east' \
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.method=card'
+market listing list \
+  --resource 'gpu_model=H200' \
+  --settlement 'mechanism=alkahest.v1 alkahest.chain=base_sepolia'
+market listing list --resource 'gpu_model=H200' --explain
 market listing show <listing_id>
 ```
 
-`list` queries every URL in `[registry] urls` in parallel and dedupes.
+`list` queries every compatible URL in `[registry].urls` in parallel and
+deduplicates by listing ID. `--explain` reports canonical registry predicates,
+local settlement constraints, survivor counts, and sanitized rejection
+categories, then stops before negotiation or settlement.
 
 ## 4. Buy
 
 ```bash
 market buy \
-  --gpu-model H200 \
+  --resource 'gpu_model=H200 gpu_count>=1' \
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd stripe.method=card' \
   --duration-hours 1 \
   --initial-price 2 \
   --max-price 2 \
+  --action print \
   --settlement-timeout 1800 \
   --yes
 ```
 
-The CLI discovers a matching listing, negotiates via bisection, locks
-escrow on chain, and polls until the seller returns
-`status: ready` with VM credentials.
+The CLI filters resources first, selects one compatible advertised settlement
+option, negotiates, persists the exact accepted option, starts that mechanism,
+and polls until the seller returns `status: ready` with VM credentials.
+`--action open|print|fail` controls any transient buyer action on both fresh and
+resumed runs. `open` uses the browser, `print` is automation-friendly, and
+`fail` stops actionably while preserving resumable accepted state.
 
-Useful flags:
+Useful inputs:
 
-- `--initial-price` / `--max-price` — bid range in human / whole-token
-  units per hour (USDC: `--max-price 2` = $2/hr; the CLI scales by the
-  token's on-chain `decimals()`).
-- `--gpu-count-min`, `--region`, `--vcpu-min`, `--ram-gb-min`,
-  `--disk-gb-min` — additional listing filters.
-- `--settlement-timeout` — default 600s. Real cloud-init can take 5-10
-  min; bump to 1800 if you see timeouts before progress.
-- `--token-contract` — optional filter: only consider listings whose
-  accepted escrow uses this ERC-20. Omit it and the token comes from the
-  chosen listing. `--token-decimals` skips the on-chain `decimals()` lookup.
+- `--resource` — one filter-spec-typed conjunction. Unknown fields and
+  unsupported operators fail before the listing query.
+- repeatable `--settlement` — ordered pre-acceptance alternatives. It never
+  enables a mechanism or authorizes recovery-time failover.
+- `--initial-price` / `--max-price` — negotiation-policy rate bounds. Omit both
+  to use the seller's advertised rate.
+- `--settlement-timeout` — default 600s. Real cloud-init can take 5–10 minutes.
 
 The terminal output includes a `Connection` block. Use the `vm_host_ip`
 field (the printed `ssh_command` references the inventory alias, not the
@@ -158,57 +184,57 @@ market logs show <run_id>         # full event log for one run
 market buy --from <run_id>        # resume from wherever the run stopped
 ```
 
-`buy --from` picks up the same run-log — mid-negotiation, post-escrow,
-or post-submit — and walks it to terminal. `market settle --from` is a
-narrower alias that skips straight to stages 3-5 (escrow.create +
-settle + poll); it assumes the negotiation already agreed.
+`buy --from` picks up the same run log at its last authoritative handoff.
+`market settle --from <run_id>` is the narrower accepted-settlement resume path;
+it derives mechanism, chain/token metadata, and action handling from the run and
+typed configuration rather than accepting mechanism-specific overrides.
 
-If `buy` crashed after escrow creation but before settle, **always**
-resume — re-running a bare `market buy` against the same listing
-creates a second escrow and locks more funds.
+If `buy` crashed after an accepted settlement was created, **always resume**.
+Starting a new buy can create a second commercial commitment or lock more funds.
 
-## 6. Tear down
+## 6. Service and reclaim
 
-Leases auto-expire at `agreed_duration_seconds`. The seller's lease
-watchdog releases the resource and either claims or refunds the escrow
-once the timeout passes.
-
-To exit early after `expiration_unix`:
+Run the mechanism-neutral service loop for heartbeats and expiry recovery:
 
 ```bash
-market escrow reclaim <escrow_uid>
+market service --from <run_id>
+```
+
+Raw Alkahest inspection and mutation utilities are intentionally namespaced:
+
+```bash
+market settlement alkahest escrow show --escrow-uid <escrow_uid>
+market settlement alkahest escrow reclaim --escrow-uid <escrow_uid>
+market settlement alkahest chain check
 ```
 
 ## Hosted Checkout settlement
 
-When a VM listing advertises `fiat.stripe.v1`, select it with
-`--settlement-mechanism fiat.stripe.v1` and optionally constrain the lowercase
-currency using `--settlement-asset usd`. Add `--no-browser` to print the
-current one-time Checkout action instead of opening it. The buyer first
-negotiates an exact advertised option; no hosted-provider call occurs before
-seller acceptance. After acceptance, the CLI starts and polls the settlement
-through the seller storefront, not through a buyer-configured financial
-authority.
+When a listing advertises `fiat.stripe.v1`, constrain it with a settlement
+clause such as `mechanism=fiat.stripe.v1 asset=usd stripe.method=card`.
+Discovery and negotiation use listing data only; no hosted-provider mutation
+occurs before seller acceptance. After acceptance, the CLI starts and polls the
+obligation through the seller storefront, not through a buyer-configured
+financial authority.
 
-The run log retains only the opaque settlement reference, lifecycle status,
-action kind, and expiry. It does not retain the Checkout URL or payment data.
-If interrupted, resume the accepted run rather than starting another
-negotiation. Hosted reclaim is buyer-authorized at the settlement route after
-expiry; it is rejected once fulfillment, satisfied evaluation, or collection
-has won the shared lifecycle reservation.
+Use `--action open` for interactive Checkout, `--action print` to hand the
+transient action to an external automation boundary, or `--action fail` when
+interaction is forbidden. The run log retains only the opaque settlement
+reference, lifecycle status, action kind, and expiry. It never retains an action
+URL or payment data. Resume the accepted run to retrieve a current action.
 
 ## Common pitfalls
 
-- **Prices on the CLI are human / whole-token units per hour.** `2`
-  with 6-decimal USDC = $2/hr. Run-log entries record post-scaling
-  base units.
-- **A bisection opening below the seller's advertised floor can terminate
-  immediately.** Set `--initial-price` to at least the listing's advertised
-  primary rate. The default `listed_price` policy opens at that rate
-  automatically.
-- **`market buy` and `settle` are not idempotent on chain.** A buy
-  that fails after escrow creation locks funds until `expiration_unix`.
-  Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.
+- **Resource and settlement constraints are different layers.** A successful
+  registry resource query can still produce zero compatible settlement
+  options; `--explain` distinguishes the two outcomes.
+- **Every settlement predicate in one clause matches one option.** Fields from
+  separate Stripe and Alkahest options are never combined to satisfy a clause.
+- **Accepted settlement never follows current priority.** Resume the existing
+  run; changing `[Settlement].priority` does not redirect it.
+- **Prices on the CLI are human asset units.** Publication normalizes each
+  mechanism's explicit asset-scoped rate exactly once. Negotiation logs retain
+  canonical values required by the accepted plan.
 - **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
   prints (`tenant<id>@kvm1` etc. — the host name is the seller's
   inventory alias, not DNS).

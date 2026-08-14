@@ -25,9 +25,8 @@ import sqlite3
 import subprocess
 import time
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import typer
 from arkhai_vms.storefront_adapter import (
@@ -55,6 +54,11 @@ from domains.vms.listings.reconciler import (
     reopen_local_derived_listing,
     stale_open_listing_ids,
 )
+from market_identity import TrustedIdentitySet
+from market_settlement_runtime import (
+    SettlementPublicationClause,
+    compile_settlement_publication_clause,
+)
 from registry_client import (
     ListingRequest,
     SyncRegistryClient,
@@ -78,6 +82,10 @@ from .publication_wiring import (
     build_storefront_publication_selection,
     build_vm_publication_source_kwargs,
 )
+
+# ``utils.config`` initializes process-global Dynaconf state from the operator
+# TOML. Command helpers import it only when executing so importing this module
+# for help, pure payload construction, or tests does not read operator config.
 
 logger = logging.getLogger(__name__)
 
@@ -304,13 +312,29 @@ def _member_availability_sync() -> dict[tuple[str | None, str], int] | None:
     return view
 
 
-def _pool_hint_resolution_settings() -> Any:
-    """Build a `PoolHintResolutionSettings` from the storefront's own
-    `[pricing]` config."""
-    from market_storefront.utils.config import settings
+def _pool_hint_resolution_settings(
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
+) -> Any:
+    """Build pool-hint policy with whole-list settlement precedence."""
+    from market_storefront.utils.config import (
+        settings,
+        settlement_publication_defaults,
+    )
 
     pricing = getattr(settings, "pricing", None)
-
+    selected_settlements = (
+        command_settlements
+        if command_settlements is not None
+        else settlement_publication_defaults()
+    )
+    command_settlement_values = (
+        [
+            clause.model_dump(mode="json", exclude_defaults=True)
+            for clause in command_settlements
+        ]
+        if command_settlements is not None
+        else None
+    )
     flat_default = GpuPricingFields(
         min_price=(getattr(pricing, "default_min_price", "") or None),
         token=(getattr(pricing, "default_token_address", "") or None),
@@ -318,6 +342,10 @@ def _pool_hint_resolution_settings() -> Any:
             getattr(pricing, "default_max_duration_seconds", 0) or None
         ),
         accepted_escrows=None,
+        settlements=[
+            clause.model_dump(mode="json", exclude_defaults=True)
+            for clause in selected_settlements
+        ],
     )
 
     defaults_by_model: dict[str, GpuPricingFields] = {}
@@ -330,6 +358,11 @@ def _pool_hint_resolution_settings() -> Any:
                 token=fields.get("token"),
                 max_duration_seconds=fields.get("max_duration_seconds"),
                 accepted_escrows=fields.get("accepted_escrows"),
+                settlements=(
+                    command_settlement_values
+                    if command_settlement_values is not None
+                    else fields.get("settlements")
+                ),
             )
 
     return PoolHintResolutionSettings(
@@ -342,7 +375,10 @@ def _pool_hint_resolution_settings() -> Any:
     )
 
 
-def _available_resources(db_path: str) -> list[dict]:
+def _available_resources(
+    db_path: str,
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
+) -> list[dict]:
     home_site, _ = _site_topology_sync()
     if home_site is None:
         return []
@@ -355,7 +391,7 @@ def _available_resources(db_path: str) -> list[dict]:
         site_capacity_buckets=(
             _site_capacity_buckets_sync() if projection is not None else None
         ),
-        hint_resolution=_pool_hint_resolution_settings(),
+        hint_resolution=_pool_hint_resolution_settings(command_settlements),
     )
 
 
@@ -446,6 +482,7 @@ def _publish_offer(
     demands: list[dict],
     max_duration_seconds: int | None,
     *,
+    settlements: list[dict[str, Any]] | None = None,
     settlement_config: dict[str, Any] | None = None,
 ) -> dict:
     """POST /listings/create and return the callback response mapping."""
@@ -456,12 +493,13 @@ def _publish_offer(
         agent_url,
         signer=signer,
         caller_role="seller",
-        expected_publisher=signer.identity,
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
     ) as client:
         try:
             resp = client.create_listing(
                 offer=offer,
                 accepted_escrows=accepted_escrows,
+                settlements=settlements,
                 settlement_config=settlement_config,
                 demands=demands,
                 max_duration_seconds=max_duration_seconds,
@@ -636,7 +674,7 @@ def _close_order(
         agent_url,
         signer=signer,
         caller_role="seller",
-        expected_publisher=signer.identity,
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
     ) as client:
         try:
             resp = client.close_listing(order_id)
@@ -712,14 +750,19 @@ def _reopen_vm_listing_if_present(
     )
 
 
-def _vm_publication_source_callbacks() -> VmPublicationSourceCallbacks:
+def _vm_publication_source_callbacks(
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
+) -> VmPublicationSourceCallbacks:
     return VmPublicationSourceCallbacks(
         open_keys=_open_listing_resource_keys,
         close_stale=lambda db_path, base_url: _close_stale_derived_listings(
             db_path=db_path,
             base_url=base_url,
         ),
-        available_candidates=_available_resources,
+        available_candidates=lambda db_path: _available_resources(
+            db_path,
+            command_settlements,
+        ),
         offer_resource=_offer_resource_for_listing,
         record_published=_record_published_vm_listing,
         reopen_existing=_reopen_vm_listing_if_present,
@@ -747,6 +790,7 @@ def _bare_metal_publication_source_kwargs() -> dict[str, Any]:
 
 def _publication_source_selection(
     source_names: tuple[str, ...] = ("vms",),
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
 ) -> PublicationSourceSelection:
     """Storefront publication source selection.
 
@@ -757,7 +801,7 @@ def _publication_source_selection(
     """
     return build_storefront_publication_selection(
         source_names=source_names,
-        vm_callbacks=_vm_publication_source_callbacks(),
+        vm_callbacks=_vm_publication_source_callbacks(command_settlements),
         bare_metal_callbacks=_bare_metal_publication_source_callbacks(),
     )
 
@@ -775,126 +819,6 @@ def _publication_adapters() -> tuple[PublicationSource, ...]:
 
 def _open_publication_keys(db_path: str) -> set[str]:
     return _publication_source_selection().open_keys(db_path)
-
-
-def _resolve_pricing(
-    res: dict,
-    *,
-    default_min_price: str | None,
-    default_token_address: str | None,
-) -> tuple[str | None, str | None]:
-    """Pick the (min_price, token_address) for a resource: row > defaults > None.
-
-    Returns (min_price, token_address). Both fall through to defaults
-    when the row column is empty; ``"0"`` for min_price is honored as a
-    real value (free offering) and does not trigger the fallback.
-
-    The ``token`` column on the row must be a 0x ERC-20 address — symbol
-    shorthand was removed in favour of chain-resolved metadata. The
-    address itself is the canonical token identity; symbols are derived
-    via ``market_alkahest.token.resolve_token``.
-    """
-    row_min_price = res.get("min_price")
-    if row_min_price is None or row_min_price == "":
-        min_price = default_min_price
-    else:
-        min_price = row_min_price
-    token_address = (res.get("token") or default_token_address) or None
-    return min_price, token_address
-
-
-def _scale_template_entries(
-    entries: list[dict[str, Any]],
-    chains: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Scale template-materialized rate values to base units, in place.
-
-    The CSV importer stores ``accepted_escrows`` entries with rate values
-    as the raw human strings from the slot assignments (``"0.5"`` for
-    half a USDC). At publish time we look up token decimals against the
-    entry's chain and scale to a uint256-safe decimal-digit string.
-
-    Raises ``ValueError`` (per entry) with a row-actionable message when
-    the entry references an unknown chain or a token whose metadata
-    can't be resolved on that chain.
-    """
-    from market_alkahest.token import TokenResolutionError, resolve_token
-
-    scaled: list[dict[str, Any]] = []
-    for raw_entry in entries:
-        entry = dict(raw_entry)
-        chain_name = entry.get("chain_name")
-        if not chain_name or chain_name not in chains:
-            raise ValueError(
-                f"accepted_escrows entry references unknown chain "
-                f"{chain_name!r}; configured: {sorted(chains)}"
-            )
-        chain = chains[chain_name]
-        literal_fields = dict(entry.get("literal_fields") or {})
-        token_address = literal_fields.get("token")
-        if not isinstance(token_address, str) or not token_address:
-            raise ValueError(
-                f"accepted_escrows entry on chain {chain_name!r} is "
-                f"missing literal_fields.token; cannot scale rates"
-            )
-        try:
-            token_meta = resolve_token(
-                token_address,
-                rpc_url=chain.rpc_url,
-                chain_id=chain.chain_id,
-            )
-        except TokenResolutionError as exc:
-            raise ValueError(
-                f"accepted_escrows: token {token_address} unresolvable on "
-                f"chain {chain_name!r}: {exc}"
-            ) from exc
-        literal_fields["token"] = token_meta.contract_address.lower()
-        decimals = token_meta.decimals
-
-        new_rates: list[dict[str, Any]] = []
-        for rate in entry.get("rates") or []:
-            raw_value = rate.get("value")
-            if raw_value is None or raw_value == "":
-                raise ValueError(
-                    f"accepted_escrows entry on chain {chain_name!r} "
-                    f"has a rate with no value (field={rate.get('field')!r})"
-                )
-            try:
-                human = Decimal(str(raw_value))
-            except (InvalidOperation, ValueError, TypeError) as exc:
-                raise ValueError(
-                    f"accepted_escrows rate value {raw_value!r} on chain "
-                    f"{chain_name!r} is not numeric"
-                ) from exc
-            base_units = human * (Decimal(10) ** decimals)
-            if base_units != base_units.to_integral_value():
-                raise ValueError(
-                    f"accepted_escrows rate value {raw_value!r} on chain "
-                    f"{chain_name!r} has more decimals than the token's "
-                    f"{decimals}"
-                )
-            if base_units < 0:
-                raise ValueError(
-                    f"accepted_escrows rate value {raw_value!r} on chain "
-                    f"{chain_name!r} is negative"
-                )
-            new_rates.append(
-                {
-                    "field": rate.get("field"),
-                    "per": rate.get("per"),
-                    "value": str(int(base_units)),
-                }
-            )
-
-        scaled.append(
-            {
-                "chain_name": chain_name,
-                "escrow_address": str(entry.get("escrow_address") or "").lower(),
-                "literal_fields": literal_fields,
-                "rates": new_rates,
-            }
-        )
-    return scaled
 
 
 def _recipient_demands_for_chains(
@@ -1043,205 +967,9 @@ def _offer_resource_for_listing(res: dict[str, Any]) -> dict[str, Any]:
     return vm_offer_resource_for_listing(res, interruptible=interruptible)
 
 
-def _default_alkahest_payload(
-    *,
-    resource: dict[str, Any],
-    default_min_price: str | None,
-    default_token_address: str | None,
-    default_max_duration_seconds: int | None,
-    wallet_address: str,
-    publish_priceless: bool,
-) -> tuple[list[dict], list[dict], int | None] | str:
-    template_entries = resource.get("accepted_escrows")
-    if template_entries:
-        from .utils.config import CHAINS
-
-        if not CHAINS:
-            return "no [chains.<name>] tables configured"
-        try:
-            accepted_escrows = _scale_template_entries(template_entries, CHAINS)
-        except ValueError as exc:
-            return str(exc)
-        chain_names = {
-            str(e.get("chain_name"))
-            for e in accepted_escrows
-            if isinstance(e, dict) and e.get("chain_name")
-        }
-        try:
-            demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
-        except Exception as exc:
-            return f"listing demands: {exc}"
-        raw_max_duration_seconds = (
-            resource.get("max_duration_seconds")
-            if resource.get("max_duration_seconds") is not None
-            else default_max_duration_seconds
-        )
-        max_duration_seconds = _normalize_max_duration_seconds(raw_max_duration_seconds)
-        return accepted_escrows, demands, max_duration_seconds
-
-    min_price, token_address = _resolve_pricing(
-        resource,
-        default_min_price=default_min_price,
-        default_token_address=default_token_address,
-    )
-    if not token_address:
-        return (
-            "no token (set the CSV `token` column to a 0x ERC-20 address, "
-            "or [seller.pricing].default_token_address in config.toml)"
-        )
-    if not token_address.startswith("0x") or len(token_address) != 42:
-        return (
-            f"invalid token {token_address!r} — must be a 0x ERC-20 address "
-            f"(symbol shorthand is no longer supported)"
-        )
-    from market_alkahest.token import TokenResolutionError, resolve_token
-
-    from .utils.config import CHAINS
-
-    if not CHAINS:
-        return "no [chains.<name>] tables configured"
-    token_meta = None
-    token_resolve_errors: list[str] = []
-    for chain in CHAINS.values():
-        try:
-            token_meta = resolve_token(
-                token_address,
-                rpc_url=chain.rpc_url,
-                chain_id=chain.chain_id,
-            )
-            break
-        except TokenResolutionError as exc:
-            token_resolve_errors.append(f"{chain.name}: {exc}")
-            continue
-    if token_meta is None:
-        return f"chain resolve failed for {token_address}: " + "; ".join(
-            token_resolve_errors
-        )
-    token_address = token_meta.contract_address.lower()
-    token_decimals = token_meta.decimals
-
-    if min_price is None:
-        if not publish_priceless:
-            return (
-                "no min_price (set per-row in CSV or [seller.pricing].default_min_price, "
-                "or set [seller.pricing].publish_priceless=true to advertise as hidden-reserve)"
-            )
-        advertised_amount: Any = None
-    else:
-        try:
-            human = Decimal(str(min_price))
-        except (InvalidOperation, ValueError, TypeError):
-            return f"unparseable min_price={min_price!r}; expected numeric string"
-        scaled = human * (Decimal(10) ** token_decimals)
-        if scaled != scaled.to_integral_value():
-            return (
-                f"min_price={min_price!r} has more decimals than the "
-                f"token's {token_decimals}"
-            )
-        if scaled < 0:
-            return f"min_price={min_price!r} is negative"
-        advertised_amount = str(int(scaled))
-
-    raw_max_duration_seconds = (
-        resource.get("max_duration_seconds")
-        if resource.get("max_duration_seconds") is not None
-        else default_max_duration_seconds
-    )
-    max_duration_seconds = _normalize_max_duration_seconds(raw_max_duration_seconds)
-    from market_alkahest.alkahest import get_erc20_escrow_obligation_default
-
-    accepted_escrows: list[dict] = []
-    per_chain_errors: list[str] = []
-    for chain in CHAINS.values():
-        try:
-            escrow_address = get_erc20_escrow_obligation_default(
-                chain.name,
-                config_path=chain.alkahest_address_config_path,
-            )
-        except Exception as exc:
-            per_chain_errors.append(f"{chain.name}: {exc}")
-            continue
-        accepted_escrows.append(
-            {
-                "chain_name": chain.name,
-                "escrow_address": escrow_address.lower(),
-                "literal_fields": {"token": token_address},
-                "rates": [
-                    {
-                        "field": "amount",
-                        "per": "hour",
-                        "value": advertised_amount,
-                    }
-                ]
-                if advertised_amount is not None
-                else [],
-            }
-        )
-    if not accepted_escrows:
-        return (
-            "alkahest config could not resolve ERC20 escrow address on any "
-            f"configured chain: {'; '.join(per_chain_errors)}"
-        )
-    chain_names = {
-        str(e.get("chain_name"))
-        for e in accepted_escrows
-        if isinstance(e, dict) and e.get("chain_name")
-    }
-    try:
-        demands = _demands_for_chains(CHAINS, chain_names, wallet_address)
-    except Exception as exc:
-        return f"listing demands: {exc}"
-    return accepted_escrows, demands, max_duration_seconds
-
-
-def _alkahest_payload_for_candidate(
-    *,
-    pricing_resource: dict[str, Any],
-    default_min_price: str | None,
-    default_token_address: str | None,
-    default_max_duration_seconds: int | None,
-    wallet_address: str,
-    publish_priceless: bool,
-) -> tuple[list[dict], list[dict], int | None] | str:
-    return _default_alkahest_payload(
-        resource=pricing_resource,
-        default_min_price=default_min_price,
-        default_token_address=default_token_address,
-        default_max_duration_seconds=default_max_duration_seconds,
-        wallet_address=wallet_address,
-        publish_priceless=publish_priceless,
-    )
-
-
-def _stripe_listing_input(
-    *,
-    pricing_resource: dict[str, Any],
-    stripe: dict[str, Any],
-    default_min_price: str | None,
-) -> dict[str, Any] | str:
-    min_price, _token = _resolve_pricing(
-        pricing_resource,
-        default_min_price=default_min_price,
-        default_token_address=None,
-    )
-    if min_price is None:
-        return "Stripe publication requires an explicit integer rate in minor units"
-    try:
-        rate = Decimal(str(min_price))
-    except (InvalidOperation, TypeError, ValueError):
-        return f"unparseable Stripe rate={min_price!r}; expected integer minor units"
-    if rate != rate.to_integral_value() or rate <= 0:
-        return "Stripe publication rate must be a positive integer in minor units"
-    return {
-        "account_ref": stripe.get("account_ref"),
-        "currency": stripe.get("currency"),
-        "rate_minor_units": int(rate),
-        "condition_profile": stripe.get("condition_profile"),
-        "resolver_id": stripe.get("resolver_id"),
-    }
-
-
-def _enabled_settlement_sections() -> tuple[dict[str, Any], dict[str, Any]]:
+def _compile_publication_clauses(
+    values: list[str] | list[dict[str, Any]],
+) -> tuple[SettlementPublicationClause, ...]:
     from market_storefront.settlement_composition import (
         build_storefront_settlement_registry,
     )
@@ -1249,17 +977,39 @@ def _enabled_settlement_sections() -> tuple[dict[str, Any], dict[str, Any]]:
     from .utils.config import settlement_config_mapping
 
     registry = build_storefront_settlement_registry()
-    settlement = registry.resolve(settlement_config_mapping(), role="seller")
-    stripe = settlement.mechanism_config("stripe")
-    alkahest = settlement.mechanism_config("alkahest")
-    return (
-        stripe.model_dump(mode="python")
-        if stripe is not None and stripe.enabled
-        else {},
-        alkahest.model_dump(mode="python")
-        if alkahest is not None and alkahest.enabled
-        else {},
+    config = registry.resolve(settlement_config_mapping(), role="seller")
+    return tuple(
+        compile_settlement_publication_clause(
+            value,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        for value in values
     )
+
+
+def _demands_for_publication_clauses(
+    clauses: tuple[SettlementPublicationClause, ...],
+    *,
+    wallet_address: str,
+) -> list[dict[str, Any]]:
+    chain_names = {
+        str(clause.mechanism_input["chain"])
+        for clause in clauses
+        if clause.mechanism == "alkahest.v1"
+        and isinstance(clause.mechanism_input.get("chain"), str)
+    }
+    if not chain_names:
+        return []
+    from .utils.config import CHAINS
+
+    unknown = chain_names.difference(CHAINS)
+    if unknown:
+        raise ValueError(
+            f"settlement clause references unknown chain {sorted(unknown)[0]!r}"
+        )
+    return _demands_for_chains(CHAINS, chain_names, wallet_address)
 
 
 def _publish_command_round(
@@ -1267,36 +1017,15 @@ def _publish_command_round(
     db_path: str,
     base_url: str,
     wallet_address: str,
-    default_min_price: str | None,
-    default_token_address: str | None,
     default_max_duration_seconds: int | None,
-    publish_priceless: bool = False,
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
     skip_ids: set[str] | None = None,
     close_stale: bool = False,
     skip_open: bool = False,
 ) -> PublicationCommandResult:
-    """Publish one listing for every priced available resource slice.
+    """Publish one listing per available slice from complete settlement clauses."""
 
-    Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
-    over the [seller.pricing] defaults. Tristate publish behaviour:
-
-      * Row ``min_price > 0``  → publish with a single amount/hour rate
-        (public price).
-      * Row ``min_price = "0"`` → publish with the rate value ``"0"``
-        (free / public-test offering; explicit per-row, defaults don't
-        override).
-      * Row ``min_price`` unset and no default → controlled by
-        ``publish_priceless``:
-          - True  → publish with ``rates = []`` (hidden reserve;
-            buyer proposes; seller's strategy uses
-            ``[seller.pricing].default_min_price`` as the negotiation floor).
-          - False → skip the row, surfaced in ``failed``.
-
-    Returns the core publication command result with published, failed, skipped,
-    and closed collections.
-    """
-    stripe, alkahest = _enabled_settlement_sections()
-    listing_inputs: dict[int, dict[str, Any]] = {}
+    listing_clauses: dict[int, list[dict[str, Any]]] = {}
 
     def build_payload(
         adapter: PublicationSource,
@@ -1304,52 +1033,41 @@ def _publish_command_round(
         offer: dict[str, Any],
     ) -> tuple[list[dict], list[dict], int | None] | str:
         pricing_resource = adapter.pricing_resource(candidate, offer)
+        raw_clauses = pricing_resource.get("settlements")
+        if raw_clauses is None:
+            from .utils.config import settlement_publication_defaults
+
+            defaults = (
+                command_settlements
+                if command_settlements is not None
+                else settlement_publication_defaults()
+            )
+            raw_clauses = [
+                clause.model_dump(mode="json", exclude_defaults=True)
+                for clause in defaults
+            ]
+        if not isinstance(raw_clauses, list) or not raw_clauses:
+            return (
+                "no settlement clauses (set a resource `settlements` array, "
+                "repeat --settlement, or configure [pricing].settlements)"
+            )
+        try:
+            clauses = _compile_publication_clauses(raw_clauses)
+            demands = _demands_for_publication_clauses(
+                clauses,
+                wallet_address=wallet_address,
+            )
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+        listing_clauses[id(offer)] = [
+            clause.model_dump(mode="json", exclude_defaults=True) for clause in clauses
+        ]
         raw_max_duration = (
             pricing_resource.get("max_duration_seconds")
             if pricing_resource.get("max_duration_seconds") is not None
             else default_max_duration_seconds
         )
-        payload: tuple[list[dict], list[dict], int | None] | str = (
-            [],
-            [],
-            _normalize_max_duration_seconds(raw_max_duration),
-        )
-        if alkahest:
-            payload = _alkahest_payload_for_candidate(
-                pricing_resource=pricing_resource,
-                default_min_price=default_min_price,
-                default_token_address=default_token_address,
-                default_max_duration_seconds=default_max_duration_seconds,
-                wallet_address=wallet_address,
-                publish_priceless=publish_priceless,
-            )
-            if isinstance(payload, str) and not stripe:
-                return payload
-            if isinstance(payload, str):
-                logger.warning(
-                    "[PUBLISH] Alkahest option suppressed: %s",
-                    payload,
-                )
-                payload = (
-                    [],
-                    [],
-                    _normalize_max_duration_seconds(raw_max_duration),
-                )
-        if stripe:
-            stripe_input = _stripe_listing_input(
-                pricing_resource=pricing_resource,
-                stripe=stripe,
-                default_min_price=default_min_price,
-            )
-            if isinstance(stripe_input, str):
-                if not alkahest or isinstance(payload, str):
-                    return stripe_input
-                logger.warning("[PUBLISH] Stripe option suppressed: %s", stripe_input)
-            else:
-                listing_inputs[id(offer)] = stripe_input
-        if not alkahest and not stripe:
-            return "no settlement mechanism is enabled"
-        return payload
+        return [], demands, _normalize_max_duration_seconds(raw_max_duration)
 
     def publish_offer(
         offer: dict[str, Any],
@@ -1358,28 +1076,19 @@ def _publish_command_round(
         max_duration_seconds: int | None,
     ) -> dict[str, Any]:
         try:
-            stripe_input = listing_inputs.pop(id(offer), None)
-            if stripe_input is None:
-                return _publish_offer(
-                    base_url,
-                    offer,
-                    accepted_escrows,
-                    demands,
-                    max_duration_seconds,
-                )
             return _publish_offer(
                 base_url,
                 offer,
                 accepted_escrows,
                 demands,
                 max_duration_seconds,
-                settlement_config=stripe_input,
+                settlements=listing_clauses.pop(id(offer), None),
             )
         except typer.Exit as exc:
             raise RuntimeError("HTTP error (see above)") from exc
 
     return run_storefront_publication_command(
-        _publication_source_selection(),
+        _publication_source_selection(command_settlements=command_settlements),
         config=StorefrontPublicationCommandConfig(
             db_path=db_path,
             base_url=base_url,
@@ -1399,19 +1108,17 @@ def run_watch_loop(
     db_path: str,
     base_url: str,
     wallet_address: str,
-    default_min_price: str | None,
-    default_token_address: str | None,
     default_max_duration_seconds: int | None,
-    publish_priceless: bool = False,
     poll_interval: float,
+    command_settlements: tuple[SettlementPublicationClause, ...] | None = None,
     console: Console | None = None,
     log_silent_cycles: bool = True,
 ) -> None:
     """Long-running publish loop. Used by `publish --watch` and by `serve`.
 
-    Each cycle: skip resources that already have an open listing, try to
-    publish the rest (per-row pricing > config defaults). Sleeps
-    ``poll_interval`` seconds between cycles. Exits on KeyboardInterrupt.
+    Each cycle skips resources that already have an open listing and
+    publishes the rest using resource clauses over command clauses over
+    configured defaults. Sleeps ``poll_interval`` seconds between cycles.
 
     ``log_silent_cycles=False`` quiets cycles where nothing happened —
     useful when this is running as a background task inside `serve`
@@ -1429,10 +1136,8 @@ def run_watch_loop(
                     db_path=db_path,
                     base_url=base_url,
                     wallet_address=wallet_address,
-                    default_min_price=default_min_price,
-                    default_token_address=default_token_address,
                     default_max_duration_seconds=default_max_duration_seconds,
-                    publish_priceless=publish_priceless,
+                    command_settlements=command_settlements,
                     close_stale=True,
                     skip_open=True,
                 )
@@ -1466,7 +1171,9 @@ def run_watch_loop(
                 )
                 _print_publish_table(out_console, result.published, result.failed)
             elif log_silent_cycles:
-                available_count = len(_available_resources(db_path))
+                available_count = len(
+                    _available_resources(db_path, command_settlements)
+                )
                 out_console.print(
                     f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
                     f"(available={available_count}, already-open={result.skipped_count})"
@@ -1561,9 +1268,18 @@ def register(app: typer.Typer) -> None:
             None,
             "--inventory",
             "-i",
-            help="Path to a CSV file describing compute resources to import before publishing. "
-            "Each row may set min_price and token columns; otherwise [seller.pricing] defaults apply.",
+            help="Path to a CSV resource inventory. Each row may provide a "
+            "structured settlements JSON array that replaces command/config defaults.",
         ),
+        settlement: Annotated[
+            list[str] | None,
+            typer.Option(
+                "--settlement",
+                help="Complete settlement publication clause. Repeat for ordered options; "
+                "resource settlements replace this list, which replaces "
+                "[pricing].settlements.",
+            ),
+        ] = None,
         abort_all: bool = typer.Option(
             False,
             "--abort-all",
@@ -1600,23 +1316,33 @@ def register(app: typer.Typer) -> None:
             "(default: db_path from storefront.toml).",
         ),
     ) -> None:
-        """Publish sell orders for every priced compute resource on the storefront.
+        """Publish sell orders from typed settlement publication clauses.
 
-        Pricing is per-resource: each row's `min_price` / `token` columns
-        win over the [pricing] defaults. Resources without either a
-        row-level price or a default are skipped (reported as failed).
+        Whole-list precedence is resource `settlements`, then repeated
+        `--settlement`, then `[pricing].settlements`. `min_price` remains a
+        negotiation-policy floor and never constructs a settlement option.
         """
         console = Console()
         from .utils.config import (
-            CHAINS,
             get_evm_wallet_address,
             settings,
-            settlement_config_mapping,
+            settlement_publication_defaults,
         )
 
         base_url = resolve_storefront_url(storefront_url, default_port=8001)
         wallet_address = get_evm_wallet_address()
         db_path = _resolve_db_path(db)
+        try:
+            command_settlements = (
+                _compile_publication_clauses(settlement) if settlement else None
+            )
+            effective_defaults = (
+                command_settlements
+                if command_settlements is not None
+                else settlement_publication_defaults()
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--settlement") from exc
         if not db_path:
             typer.secho(
                 "Could not resolve storefront DB. Pass --db or set "
@@ -1626,8 +1352,6 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(1)
 
-        default_min_price = settings.pricing.default_min_price
-        default_token_address = settings.pricing.default_token_address
         default_max_duration_seconds = (
             max_duration_seconds
             if max_duration_seconds is not None
@@ -1637,24 +1361,12 @@ def register(app: typer.Typer) -> None:
             default_max_duration_seconds
         )
 
-        alkahest = settlement_config_mapping().get("alkahest", {})
-        alkahest_enabled = isinstance(alkahest, dict) and bool(
-            alkahest.get("enabled", False)
-        )
-        if alkahest_enabled and not CHAINS and not abort_all:
-            typer.secho(
-                "Settlement.alkahest is enabled but no [Chains.<name>] "
-                "tables are configured.",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(1)
-
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:
-            if inventory or watch:
+            if inventory or watch or settlement:
                 raise typer.BadParameter(
-                    "--abort-all is mutually exclusive with --inventory and --watch."
+                    "--abort-all is mutually exclusive with --inventory, --watch, "
+                    "and --settlement."
                 )
             order_ids = _open_listing_ids(db_path)
             if not order_ids:
@@ -1717,10 +1429,8 @@ def register(app: typer.Typer) -> None:
                 db_path=db_path,
                 base_url=base_url,
                 wallet_address=wallet_address,
-                default_min_price=default_min_price,
-                default_token_address=default_token_address,
                 default_max_duration_seconds=default_max_duration_seconds,
-                publish_priceless=settings.pricing.publish_priceless,
+                command_settlements=command_settlements,
                 skip_ids=_open_publication_keys(db_path),
                 close_stale=True,
                 skip_open=True,
@@ -1739,10 +1449,7 @@ def register(app: typer.Typer) -> None:
             totals.add_row("Published", str(result.published_count))
             totals.add_row("Failed", str(result.failed_count))
             totals.add_row("Agent", base_url)
-            totals.add_row(
-                "Default price",
-                f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
-            )
+            totals.add_row("Settlement defaults", str(len(effective_defaults)))
             console.print(
                 Panel(
                     totals,
@@ -1762,10 +1469,7 @@ def register(app: typer.Typer) -> None:
         header.add_column(style="bold")
         header.add_column()
         header.add_row("Agent", base_url)
-        header.add_row(
-            "Default price",
-            f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
-        )
+        header.add_row("Settlement defaults", str(len(effective_defaults)))
         header.add_row("Poll interval", f"{poll_interval:.0f}s")
         header.add_row(
             "Default max duration",
@@ -1784,10 +1488,8 @@ def register(app: typer.Typer) -> None:
             db_path=db_path,
             base_url=base_url,
             wallet_address=wallet_address,
-            default_min_price=default_min_price,
-            default_token_address=default_token_address,
             default_max_duration_seconds=default_max_duration_seconds,
-            publish_priceless=settings.pricing.publish_priceless,
+            command_settlements=command_settlements,
             poll_interval=poll_interval,
             console=console,
         )

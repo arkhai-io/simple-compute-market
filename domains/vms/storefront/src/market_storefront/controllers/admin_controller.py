@@ -33,8 +33,8 @@ from core_storefront.models.system_models import (
 )
 from core_storefront.stage_log import stage_event
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from market_identity import RotationRequest
 from fastapi_utils.cbv import cbv
+from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.failure_actions import (
@@ -62,6 +62,9 @@ from market_storefront.models.capacity_admin_models import (
 )
 from market_storefront.server import _set_globally_paused
 from market_storefront.services.capacity_client import remote_site_clients
+from market_storefront.settlement_composition import (
+    build_storefront_publication_clause_compiler,
+)
 from market_storefront.utils.config import ESCROW_TEMPLATES
 
 logger = logging.getLogger(__name__)
@@ -82,7 +85,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 class AdminController:
     def __init__(
         self,
-        db=Depends(lambda: _container.resolved_sqlite_client),
+        db=Depends(lambda: _container.resolved_sqlite_client),  # noqa: B008
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
@@ -293,7 +296,9 @@ class AdminController:
     )
     async def import_resources(
         self,
-        file: UploadFile = File(..., description="Compute resource CSV file."),
+        file: UploadFile = File(  # noqa: B008
+            ..., description="Compute resource CSV file."
+        ),
     ) -> ImportResourcesResponse:
         """Upload a CSV file and upsert resource rows into the portfolio.
 
@@ -319,15 +324,16 @@ class AdminController:
         except Exception as exc:
             raise HTTPException(
                 status_code=400, detail=f"Could not read uploaded file: {exc}"
-            )
+            ) from exc
         try:
             report = await self._db.upsert_resources_from_csv_content(
                 csv_content=csv_content,
                 source_label=f"admin-import:{file.filename or 'upload'}",
                 templates=ESCROW_TEMPLATES,
+                settlement_compiler=build_storefront_publication_clause_compiler(),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         logger.info(
             "[ADMIN] Resource import: %d imported, %d failed, %d total rows (file=%s)",
             report.get("imported_count", 0),
@@ -685,7 +691,7 @@ class AdminController:
                     status_code=502,
                     detail=f"Could not release reservation {capacity_reservation_id!r} "
                     f"at the site authority: {exc}",
-                )
+                ) from exc
             if released is not None:
                 result = released
                 result.setdefault("gpu_count", released.get("allocated_gpu_count"))
@@ -1037,7 +1043,7 @@ class AdminController:
                 },
                 site=site_id,
             )
-        except KeyError:
+        except KeyError as exc:
             # The listing's own recorded site_id doesn't match any
             # currently configured site -- a stale mapping, not a
             # capacity answer. Distinct from "no capacity" so an
@@ -1046,7 +1052,7 @@ class AdminController:
                 status_code=500,
                 detail=f"Listing {body.listing_id!r} is mapped to site "
                 f"{site_id!r}, which is not currently configured",
-            )
+            ) from exc
         except Exception as exc:
             if site_id is None:
                 raise
@@ -1056,7 +1062,7 @@ class AdminController:
                 status_code=502,
                 detail=f"Could not reach site {site_id!r} for listing "
                 f"{body.listing_id!r}: {exc}",
-            )
+            ) from exc
         if not reserved:
             raise HTTPException(
                 status_code=409,

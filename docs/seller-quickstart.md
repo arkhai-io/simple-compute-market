@@ -1,7 +1,7 @@
 # VM seller quickstart
 
-How to bring up a compute storefront: publish listings (signed with
-your wallet key), and (optionally) provision real KVM VMs to buyers.
+How to bring up a compute storefront, publish typed settlement options under a
+canonical marketplace identity, and optionally provision real KVM VMs.
 
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 To run your own listing registry instead of pointing at an existing one,
@@ -15,14 +15,15 @@ To sell request quota for an OpenAI-compatible vLLM server instead, see the
 
 ## Prerequisites
 
-- Linux host with Docker + `docker compose` v2.
-- A wallet on the EVM chain you'll operate on, funded with gas plus
-  whatever ERC-20 you'll accept as payment. The examples in this guide
-  use Base Sepolia + USDC at `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-  (test funds from [faucet.circle.com](https://faucet.circle.com)), but
-  any EVM chain with Alkahest contracts deployed works.
-- An RPC URL for that chain.
-- A listing registry URL + (if private) bearer token to publish to.
+- A canonical public marketplace identity and matching signing material
+  injected through `ARKHAI_IDENTITY_CREDENTIAL`.
+- A listing registry URL, authority principal pin, and any write-scoped bearer
+  token required to publish.
+- For Alkahest settlement only: an EVM wallet funded with gas and the accepted
+  token, an RPC URL, and the deployed Alkahest address file.
+- For hosted Stripe settlement only: the hosted authority URL and trust,
+  release manifest/API/schema pins, ready seller account reference, and
+  condition profile. No EVM wallet or chain is required.
 - **Live provisioning only** — KVM-capable host: `egrep -c "(vmx|svm)"
   /proc/cpuinfo > 0`, `libvirtd` running, your ansible user has
   passwordless sudo and is in the `libvirt` group.
@@ -47,23 +48,19 @@ which the compose mounts from `./config.seller.toml` (override with
 `SELLER_CONFIG_PATH=$PWD/your-path.toml`).
 
 ```toml
-agent_id         = "seller_one"          # Python identifier; no dashes
+agent_id = "seller_one"                  # Python identifier; no dashes
+port = 8001
+base_url = "http://<YOUR_PUBLIC_IP>:8001/"
+db_path = "./src/market_storefront/data/storefront/agent.db"
+log_file_path = "./logs/seller.log"
 
-port             = 8001
-base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
+[identity.principal]
+scheme = "ed25519"
+identifier = "<unpadded-base64url-public-key>"
 
-db_path          = "./src/market_storefront/data/storefront/agent.db"
-log_file_path    = "./logs/seller.log"
-admin_api_key    = "<choose-a-secret>"   # storefront credential for configured provisioning sites
-
-[wallet]
-private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
-# placeholder; not used in buyer-driven flows
-ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
-
-[chains.base_sepolia]
-chain_id = 84532
-rpc_url  = "https://sepolia.base.org"   # public RPC; or your own provider
+[provisioning]
+service_url = "http://seller-provisioning:8081"
+mode = "http"                            # "mock" for a dry run
 
 [registry]
 # The Arkhai public listing registry (preprod, Base Sepolia listings):
@@ -72,32 +69,58 @@ urls = ["http://34.41.205.175/registry"]
 # urls = ["http://<REGISTRY_HOST>:8080"]
 
 [registry.auth]
-# Required when the listing registry gates writes (REGISTRY_REQUIRE_WRITE_API_KEY=true);
-# the key must be write-scoped. The Arkhai public listing registry gates writes —
-# request a write key from the operator, or run your own listing registry.
-# Keys must exactly match the URLs in [registry] urls (scheme, host,
-# port, trailing slash).
-"http://34.41.205.175/registry" = "<your-write-token>"
+# Supply any write token through the deployment Secret overlay. Its key must
+# match the registry URL exactly.
 
-[provisioning]
-service_url = "http://seller-provisioning:8081"
-mode        = "http"                     # "mock" for a dry run
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/path/to/alkahest.json"
+
+[wallet]
+address = "0x<YOUR_SELLER_ADDRESS>"
+# Supply private_key through the deployment Secret overlay.
+
+[chains.base_sepolia]
+chain_id = 84532
+rpc_url = "https://sepolia.base.org"
 
 [negotiation]
-# Ordered policy chain run per round. Guards short-circuit
-# (`reject`/`exit`); the terminal policy (`bisection` here; `rl` for the
-# trained pufferlib checkpoint — requires torch) always returns
-# counter/accept/exit. See docs/configuration.md for the full list of
-# bundled policies + how to register custom ones.
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
-# Human / whole-token units, per hour. The publish CLI scales by the
-# token's on-chain decimals — "2" with 6-decimal USDC = $2/hr.
-default_min_price            = "2"
-default_token_address        = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+# Complete option-construction clauses. Each mechanism has its own asset/rate.
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x036CbD53842c5426634e7929541eC2318f3dCF7e", rate = "2", per = "hour", mechanism_input = { chain = "base_sepolia", escrow_kind = "erc20_escrow_obligation_default" } },
+]
+default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
+
+For hosted-only publication, set priority to `["fiat.stripe.v1"]`, configure
+the generated `[Settlement.stripe]` trust/account/condition fields, omit wallet
+and chains, and use a clause such as:
+
+```toml
+[pricing]
+settlements = [
+  { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour", mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
+]
+```
+
+The equivalent command-level override combines the decimal rate and unit in
+`rate=<decimal>/<unit>` and accepts only the registered public Stripe fields:
+
+```bash
+market-storefront publish --inventory /app/resources.csv \
+  --settlement 'mechanism=fiat.stripe.v1 asset=usd rate=2/hour stripe.method=card stripe.funds_flow=separate_charges_transfers'
+```
+
+Hosted account, condition-profile, authority trust, and provider configuration
+remain in `[Settlement.stripe]`; they are not publication-clause fields.
 
 The full schema is at
 [`domains/vms/storefront/src/market_storefront/settings.toml`](../domains/vms/storefront/src/market_storefront/settings.toml).
@@ -113,13 +136,16 @@ shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
 `vm_host`, authority URLs, API keys, or internal capacity-bucket IDs.
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
-listing-slice-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,default,H200,"California, US",1,8,32,100
+resource_id,resource_type,resource_subtype,unit,value,state,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
+listing-slice-001,compute.gpu,H200,count,1,available,86400,default,H200,"California, US",1,8,32,100
 ```
 
-`min_price` remains a human whole-token hourly rate and `token` is the ERC-20
-contract. Capacity admission, physical selection, prepared execution, and
-teardown are owned by the selected provisioning site rather than this CSV.
+The `[pricing].settlements` list above supplies complete defaults. A resource
+CSV may instead provide a `settlements` JSON-array column; that row-level list
+replaces command and config clauses in full. `min_price` remains only a
+negotiation-policy floor and never constructs a settlement option. Capacity
+admission, physical selection, prepared execution, and teardown are owned by
+the selected provisioning site rather than this CSV.
 
 ## 4. Bring it up
 
@@ -136,34 +162,48 @@ docker compose -f compose/seller.yml up -d
 docker compose -f compose/seller.yml logs -f seller-storefront
 ```
 
-The `admin_api_key` you set in §2 is the only secret — the
-provisioning service reads it from the same mounted TOML, so you
-don't repeat it anywhere else. Likewise `[provisioning].mode` in
-the TOML drives mock-vs-live; no separate env knob.
+Keep `admin_api_key`, `ARKHAI_IDENTITY_CREDENTIAL`, and any Alkahest wallet
+private key in the deployment's secret boundary rather than a committed
+configuration. `[provisioning].mode` selects mock versus live behavior.
 
-There is no registration step: your identity is the wallet. Every
-publish is EIP-191-signed, and the listing registry creates your publisher
-record from the signature the first time you publish.
+There is no publisher preregistration step. Every publication is signed by the
+configured canonical marketplace principal, and the registry creates the
+stable publisher subject on its first valid publication.
 
-## 5. Publish
+## 5. Preview and publish
+
+Legacy settlement configuration and publication pricing require separate,
+explicit migrations:
+
+```bash
+market-storefront config migrate --scope settlement --check
+market-storefront config migrate --scope settlement --write --backup
+market-storefront config migrate --scope publication --check
+market-storefront config migrate --scope publication --write --backup
+market-storefront config migrate --scope publication \
+  --inventory /app/resources.csv --check
+market-storefront config migrate --scope publication \
+  --inventory /app/resources.csv --write --backup
+```
+
+Then publish through the mechanism-neutral storefront command:
 
 ```bash
 docker compose -f compose/seller.yml exec seller-storefront \
   market-storefront publish --inventory /app/resources.csv
 ```
 
-Verify directly against the storefront and the listing registry:
+Repeat `--settlement '<complete clause>'` to override configured clauses in
+command order. Resource-row `settlements` still take highest whole-list
+precedence. Inspect readiness without publishing:
 
 ```bash
-curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings | jq '.listings[]'
-
-# Registry: filter listings by your publishing wallet address:
-curl -s "http://34.41.205.175/registry/listings?publisher=<YOUR_WALLET_ADDRESS>" \
-  | jq '.items[]'
+market-storefront settlement status --json
 ```
 
-A buyer can now `market buy --gpu-model H200` and (in mock mode) get
-simulated VM credentials.
+A buyer can now run
+`market buy --resource 'gpu_model=H200' --settlement 'mechanism=alkahest.v1'`
+and, in mock mode, receive simulated VM credentials.
 
 ## 6. Live KVM provisioning
 
@@ -243,12 +283,18 @@ touching libvirt. To create real VMs:
 
 ## Optional hosted fiat publication
 
-Hosted settlement is disabled by default. Configure the storefront's
-`[hosted_settlement]` consumer trust/API pin plus an operator-owned condition
-profile, resolver ID, connected-account reference, lowercase currency, and
-positive integer minor-unit rate. Publication preflights the account and
-condition capability. A failed hosted preflight suppresses only the fiat
-option and continues serving valid Alkahest listings.
+Hosted settlement is disabled by default. Add `fiat.stripe.v1` to
+`[Settlement].priority`, configure the public client/trust/account/condition
+fields under `[Settlement.stripe]`, and publish a complete clause such as
+`mechanism=fiat.stripe.v1 asset=usd rate=20/hour stripe.method=card
+stripe.funds_flow=separate_charges_transfers`. Account, condition-profile,
+authority-trust, currency, and provider settings remain configuration-owned
+under `[Settlement.stripe]` and are rejected as clause fields. Use
+`market-storefront config init-user` and
+`market-storefront settlement stripe onboard|status` for the exact installed
+schema and account workflow. Publication preflights account and condition
+readiness; a failed Stripe preflight suppresses only that option while valid
+Alkahest options remain publishable.
 
 The storefront never receives Stripe credentials or provider IDs and never
 stores Checkout or account-link URLs. It persists one opaque settlement
@@ -276,9 +322,10 @@ anchor is audit/predicate evidence, not custody.
   `GET /api/v1/system/status`; zero usually means the importer wrote a
   different database. Prefer an explicit importer `--db-path` or
   `STOREFRONT_DB_PATH`.
-- **`resources.csv` prices are human / whole-token units.** Use
-  fractional strings (`"0.50"`) for sub-token rates. `0` is a literal
-  free offering.
+- **`resources.csv` `min_price` is only the negotiation floor.** It never
+  supplies a settlement option's asset or rate. Put each decimal asset rate
+  and unit in that resource's complete `settlements` clause list or in the
+  selected command/config default list.
 - **Do not publish `vm_host`.** Listings use trusted projected `pool_id` or
   `resource_id`; physical host selection is provisioning-owned. The admin
   settle evaluate endpoint validates canonical schedule/begin requests without

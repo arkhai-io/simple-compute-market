@@ -34,6 +34,18 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         },
         "accepted_escrows": [],
         "settlement_options": [],
+        "publication_clauses": [
+            {
+                "mechanism": "fiat.stripe.v1",
+                "asset": "usd",
+                "rate": "1.25",
+                "per": "hour",
+                "mechanism_input": {
+                    "method": "card",
+                    "funds_flow": "separate_charges_transfers",
+                },
+            }
+        ],
         "demands": [],
         "max_duration_seconds": 3600,
         "oracle_address": None,
@@ -74,6 +86,10 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         listing_id="listing-stable",
         accepted_escrows=[],
         settlement_options=[new_option],
+    )
+    assert (
+        composition.publication_artifacts.await_args.kwargs["clauses"]
+        == stored["publication_clauses"]
     )
     assert stored["accepted_terms"] is accepted_terms
     assert stored["accepted_terms"]["option_id"] == "accepted-option"

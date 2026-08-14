@@ -35,6 +35,8 @@ from core_storefront.auth import ReplayClaim
 from .sqlite_migrations import MigrationLike, apply_schema_migrations
 
 logger = logging.getLogger(__name__)
+
+
 def _principal_columns(principal: Identity) -> tuple[str, str]:
     return principal.scheme.value, principal.identifier
 
@@ -50,12 +52,12 @@ def _principal_value(
     if not isinstance(scheme, str) or not isinstance(identifier, str):
         raise RuntimeError(f"durable {field} principal is incomplete")
     try:
-        principal = Identity(scheme=scheme, identifier=identifier)
+        principal = Identity.model_validate(
+            {"scheme": scheme, "identifier": identifier}
+        )
     except ValueError as exc:
         raise RuntimeError(f"durable {field} principal is malformed") from exc
     return principal.model_dump(mode="json")
-
-
 
 
 def _amount_to_db_text(value: Any) -> str | None:
@@ -541,6 +543,7 @@ class SQLiteClient:
                   paused INTEGER NOT NULL DEFAULT 0,
                   accepted_escrows TEXT,
                   settlement_options TEXT,
+                  publication_clauses TEXT,
                   demands TEXT
                 )
                 """
@@ -554,6 +557,10 @@ class SQLiteClient:
                 pass  # Column already exists
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN settlement_options TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE listings ADD COLUMN publication_clauses TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             try:
@@ -1122,9 +1129,11 @@ class SQLiteClient:
         paused: bool = False,
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
+        publication_clauses: Any | None = None,
         demands: Any | None = None,
     ) -> None:
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
+
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1146,9 +1155,10 @@ class SQLiteClient:
                       paused,
                       accepted_escrows,
                       settlement_options,
+                      publication_clauses,
                       demands
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -1162,6 +1172,7 @@ class SQLiteClient:
                       paused=excluded.paused,
                       accepted_escrows=excluded.accepted_escrows,
                       settlement_options=excluded.settlement_options,
+                      publication_clauses=excluded.publication_clauses,
                       demands=excluded.demands
                     """,
                     (
@@ -1179,6 +1190,7 @@ class SQLiteClient:
                         1 if paused else 0,
                         self._serialize_resource(accepted_escrows),
                         self._serialize_resource(settlement_options),
+                        self._serialize_resource(publication_clauses),
                         self._serialize_resource(demands),
                     ),
                 )
@@ -1202,6 +1214,7 @@ class SQLiteClient:
         oracle_address: str | None = None,
         accepted_escrows: Any | None = None,
         settlement_options: Any | None = None,
+        publication_clauses: Any | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -1226,6 +1239,7 @@ class SQLiteClient:
             add("oracle_address", oracle_address)
             add("accepted_escrows", accepted_escrows, serialize=True)
             add("settlement_options", settlement_options, serialize=True)
+            add("publication_clauses", publication_clauses, serialize=True)
 
             if not updates:
                 return
@@ -1259,6 +1273,7 @@ class SQLiteClient:
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
+                           publication_clauses,
                            demands
                     FROM listings WHERE listing_id = ?
                     """,
@@ -1282,6 +1297,7 @@ class SQLiteClient:
                     "paused",
                     "accepted_escrows",
                     "settlement_options",
+                    "publication_clauses",
                     "demands",
                 ]
                 d = dict(zip(keys, row))
@@ -1296,6 +1312,9 @@ class SQLiteClient:
                 )
                 d["settlement_options"] = self._deserialize_accepted_escrows(
                     d.get("settlement_options"),
+                )
+                d["publication_clauses"] = self._deserialize_accepted_escrows(
+                    d.get("publication_clauses"),
                 )
                 d["demands"] = self._deserialize_accepted_escrows(
                     d.get("demands"),
@@ -1338,6 +1357,7 @@ class SQLiteClient:
         """
 
         sender_scheme, sender_identifier = _principal_columns(sender_principal)
+
         def _save() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1568,9 +1588,13 @@ class SQLiteClient:
         buyer_value = buyer_principal.model_dump(mode="json")
         seller_value = seller_principal.model_dump(mode="json")
         if settlement_plan.get("buyer_principal") != buyer_value:
-            raise ValueError("settlement plan buyer principal does not match negotiation")
+            raise ValueError(
+                "settlement plan buyer principal does not match negotiation"
+            )
         if settlement_plan.get("seller_principal") != seller_value:
-            raise ValueError("settlement plan seller principal does not match negotiation")
+            raise ValueError(
+                "settlement plan seller principal does not match negotiation"
+            )
         encoded = json.dumps(
             settlement_plan,
             ensure_ascii=False,
@@ -1590,10 +1614,20 @@ class SQLiteClient:
                 ).fetchone()
                 if row is None:
                     raise KeyError(f"unknown negotiation {negotiation_id!r}")
-                if _principal_value(row[1], row[2], field="negotiation buyer") != buyer_value:
-                    raise ValueError("settlement plan buyer principal does not match durable thread")
-                if _principal_value(row[3], row[4], field="negotiation seller") != seller_value:
-                    raise ValueError("settlement plan seller principal does not match durable thread")
+                if (
+                    _principal_value(row[1], row[2], field="negotiation buyer")
+                    != buyer_value
+                ):
+                    raise ValueError(
+                        "settlement plan buyer principal does not match durable thread"
+                    )
+                if (
+                    _principal_value(row[3], row[4], field="negotiation seller")
+                    != seller_value
+                ):
+                    raise ValueError(
+                        "settlement plan seller principal does not match durable thread"
+                    )
                 if row[0] is not None and row[0] != encoded:
                     raise ValueError("accepted settlement plan is immutable")
                 conn.execute(
@@ -1830,6 +1864,7 @@ class SQLiteClient:
         seller = Identity.model_validate(record.get("seller_principal"))
         buyer_scheme, buyer_identifier = _principal_columns(buyer)
         seller_scheme, seller_identifier = _principal_columns(seller)
+
         def _insert() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1872,6 +1907,7 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_count)
+
     async def get_replay_reservation(
         self,
         principal: Identity,
@@ -2089,7 +2125,6 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
-
 
     async def insert_escrow(
         self,
@@ -3053,6 +3088,7 @@ class SQLiteClient:
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows,
                            settlement_options,
+                           publication_clauses,
                            demands
                     FROM listings {where}
                     ORDER BY created_at DESC
@@ -3075,6 +3111,7 @@ class SQLiteClient:
                     "paused",
                     "accepted_escrows",
                     "settlement_options",
+                    "publication_clauses",
                     "demands",
                 ]
                 rows = cur.fetchall()
@@ -3092,6 +3129,9 @@ class SQLiteClient:
                     )
                     d["settlement_options"] = self._deserialize_accepted_escrows(
                         d.get("settlement_options"),
+                    )
+                    d["publication_clauses"] = self._deserialize_accepted_escrows(
+                        d.get("publication_clauses"),
                     )
                     d["demands"] = self._deserialize_accepted_escrows(
                         d.get("demands"),

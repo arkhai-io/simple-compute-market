@@ -82,17 +82,51 @@ async def negotiate_continue_auth(
 
 
 async def settle_escrow_auth(
-    escrow_uid: str, body, request: Request
+    escrow_uid: str,
+    body,
+    request: Request,
+    *,
+    negotiation_thread: Any = None,
 ) -> AuthenticatedPrincipal:
     from market_storefront.models.settle_models import VmSettleRequest
 
     if not isinstance(body, VmSettleRequest):
         raise HTTPException(status_code=400, detail="Invalid request body type")
+    thread = negotiation_thread
+    if thread is None:
+        replay_store = _container.resolved_sqlite_client
+        if replay_store is None:
+            raise HTTPException(
+                status_code=503, detail="authentication store is unavailable"
+            )
+        thread = await replay_store.load_negotiation_thread_row(
+            negotiation_id=body.negotiation_id
+        )
+    if not isinstance(thread, dict):
+        raise HTTPException(status_code=404, detail="accepted negotiation not found")
+    persisted_negotiation_id = str(thread.get("negotiation_id") or "")
+    if persisted_negotiation_id and persisted_negotiation_id != body.negotiation_id:
+        raise HTTPException(
+            status_code=403,
+            detail="settlement negotiation does not match persisted binding",
+        )
+    try:
+        persisted_buyer = Identity.model_validate(thread.get("buyer_principal"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="accepted negotiation has no valid buyer owner",
+        ) from exc
+    if body.buyer_principal != persisted_buyer:
+        raise HTTPException(
+            status_code=403,
+            detail="settlement buyer does not match persisted owner",
+        )
     return await _verify(
         request,
         "settle_escrow",
         escrow_uid,
-        body.buyer_principal,
+        persisted_buyer,
         body.model_dump(mode="json"),
     )
 

@@ -155,6 +155,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-core"
+version = "0.2.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_core-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-core-registry"
 version = "0.2.0"
 source = { editable = "." }
@@ -216,6 +227,7 @@ name = "arkhai-core-registry-client"
 version = "0.11.0"
 source = { registry = "../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]

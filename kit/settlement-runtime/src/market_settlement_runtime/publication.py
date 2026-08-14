@@ -15,6 +15,7 @@ from .configuration import (
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
     SettlementRole,
+    _looks_sensitive_key,
 )
 
 _DECIMAL_RATE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
@@ -31,6 +32,8 @@ def _validate_public_json(value: Any, *, path: str) -> Any:
         for key, item in value.items():
             if not isinstance(key, str) or not key:
                 raise ValueError(f"{path} keys must be non-empty strings")
+            if _looks_sensitive_key(key):
+                raise ValueError(f"{path}.{key} is not public metadata")
             result[key] = _validate_public_json(item, path=f"{path}.{key}")
         return result
     if isinstance(value, (list, tuple)):
@@ -50,8 +53,8 @@ class SettlementPublicationClause(BaseModel):
     asset: str = Field(min_length=1)
     rate: str | None = None
     per: str | None = None
-    public: dict[str, Any] = Field(default_factory=dict)
     mechanism_input: dict[str, Any] = Field(
+        default_factory=dict,
         description="Mechanism-owned public publication input.",
     )
 
@@ -84,7 +87,7 @@ class SettlementPublicationClause(BaseModel):
             raise ValueError("per must be a canonical lowercase unit")
         return value
 
-    @field_validator("public", "mechanism_input")
+    @field_validator("mechanism_input")
     @classmethod
     def validate_public_mappings(
         cls, value: dict[str, Any], info: Any
@@ -116,7 +119,6 @@ def _parse_cli_clause(source: str) -> dict[str, Any]:
         raise SettlementConfigurationError("settlement publication clause is empty")
 
     scalar: dict[str, str] = {}
-    public: dict[str, str] = {}
     mechanism_fields: dict[str, str] = {}
     seen: set[str] = set()
     for token in tokens:
@@ -132,8 +134,10 @@ def _parse_cli_clause(source: str) -> dict[str, Any]:
         seen.add(key)
         if key in {"mechanism", "asset", "rate"}:
             scalar[key] = raw_value
-        elif key.startswith("public.") and len(key) > len("public."):
-            public[key.removeprefix("public.")] = raw_value
+        elif key.startswith("public."):
+            raise SettlementConfigurationError(
+                "public.* settlement publication fields are unsupported"
+            )
         else:
             mechanism_fields[key] = raw_value
 
@@ -146,7 +150,6 @@ def _parse_cli_clause(source: str) -> dict[str, Any]:
         scalar["per"] = per
     return {
         **scalar,
-        "public": public,
         "_mechanism_fields": mechanism_fields,
     }
 
@@ -173,12 +176,30 @@ def compile_settlement_publication_clause(
         raise SettlementConfigurationError(
             "settlement publication clause must be DSL text or a structured mapping"
         )
+    if "public" in raw:
+        raise SettlementConfigurationError(
+            "public settlement publication metadata is unsupported"
+        )
+    try:
+        mechanism_fields = _validate_public_json(
+            mechanism_fields,
+            path="mechanism_input",
+        )
+    except ValueError as exc:
+        raise SettlementConfigurationError(
+            f"invalid settlement publication clause: {exc}"
+        ) from exc
 
     requested_mechanism = raw.get("mechanism")
     if not isinstance(requested_mechanism, str) or not requested_mechanism:
         raise SettlementConfigurationError("settlement publication requires mechanism")
     mechanism = registry.canonical_mechanism_id(requested_mechanism, role=role)
     registration = registry.registration(mechanism)
+    section = config.mechanisms.get(registration.config_key)
+    if section is None or getattr(section, "enabled", False) is not True:
+        raise SettlementConfigurationError(
+            f"settlement mechanism {mechanism!r} is disabled for publication"
+        )
 
     if isinstance(value, str):
         prefix = f"{registration.config_key}."

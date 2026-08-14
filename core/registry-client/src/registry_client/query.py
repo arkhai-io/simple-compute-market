@@ -148,7 +148,9 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
     try:
         field_reference_json(field.descriptor for field in fields)
     except ValueError as exc:
-        raise FilterVocabularyError("registry filter query names are ambiguous") from exc
+        raise FilterVocabularyError(
+            "registry filter query names are ambiguous"
+        ) from exc
     return tuple(fields)
 
 
@@ -189,7 +191,10 @@ def _operators(
     if filter_op == "range":
         if alias_kind == "lower_bound":
             return frozenset(
-                {ComparisonOperator.GREATER_THAN, ComparisonOperator.GREATER_THAN_OR_EQUAL}
+                {
+                    ComparisonOperator.GREATER_THAN,
+                    ComparisonOperator.GREATER_THAN_OR_EQUAL,
+                }
             )
         if alias_kind == "upper_bound":
             return frozenset(
@@ -203,9 +208,7 @@ def _operators(
                 ComparisonOperator.GREATER_THAN_OR_EQUAL,
             }
         )
-    raise FilterVocabularyError(
-        f"registry filter declaration {index} has invalid op"
-    )
+    raise FilterVocabularyError(f"registry filter declaration {index} has invalid op")
 
 
 def _compile_comparison(
@@ -216,7 +219,12 @@ def _compile_comparison(
     if field.filter_op == "in":
         if operator is ComparisonOperator.EQUAL:
             assert not isinstance(value, tuple)
-            return field.parameter, _scalar(value)
+            rendered = _scalar(value)
+            if isinstance(value, str) and _wire_reinterprets_scalar(rendered):
+                raise ResourceQueryCompilationError(
+                    "registry wire cannot represent the supplied scalar equality value"
+                )
+            return field.parameter, rendered
         assert isinstance(value, tuple)
         return field.parameter, f"in:{_list(value)}"
     if field.filter_op == "not_in":
@@ -247,6 +255,20 @@ def _compile_comparison(
         assert operator is ComparisonOperator.LESS_THAN_OR_EQUAL
         interval = f"(,{rendered}]"
     return field.parameter, f"range:{interval}"
+
+
+def _wire_reinterprets_scalar(value: str) -> bool:
+    for operator in ("not_in", "range", "exists", "in"):
+        prefix = f"{operator}:"
+        if not value.startswith(prefix):
+            continue
+        payload = value[len(prefix) :]
+        if operator in ("in", "not_in"):
+            return payload.startswith("[")
+        if operator == "range":
+            return payload.startswith(("[", "("))
+        return payload.lower() in ("true", "false", "1", "0", "yes", "no")
+    return False
 
 
 def _list(values: tuple[Any, ...]) -> str:

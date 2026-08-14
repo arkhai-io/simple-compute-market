@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
+import tomllib
 import typer
+from dynaconf import Dynaconf
 from market_config.config_loader import (
     get_dotted,
     load_storefront_config,
@@ -30,7 +32,13 @@ from market_config.settlement_migration import (
     migrate_settlement_config,
     reject_legacy_settlement_path,
 )
-from market_settlement_runtime import SettlementRole
+from market_settlement_runtime import SettlementPublicationClause, SettlementRole
+
+from market_storefront.publication_migration import (
+    format_publication_migration_result,
+    migrate_publication_config,
+    migrate_publication_csv,
+)
 
 config_app = typer.Typer(no_args_is_help=True)
 
@@ -38,6 +46,9 @@ config_app = typer.Typer(no_args_is_help=True)
 def _validate_settlement_candidate(
     document: Mapping[str, Any], role: SettlementRole
 ) -> None:
+    # Mechanism packages and the process-global storefront settings stay lazy:
+    # config path/help commands must not initialize operator configuration, and
+    # this validator must evaluate the supplied in-memory candidate instead.
     from market_alkahest import create_alkahest_registration
     from market_hosted_settlement import create_stripe_registration
     from market_settlement_runtime import SettlementConfigurationRegistry
@@ -46,6 +57,48 @@ def _validate_settlement_candidate(
         [create_alkahest_registration(), create_stripe_registration()]
     )
     registry.resolve(document.get("Settlement", {}), role=role)
+
+    from market_storefront.utils.config import settlement_publication_defaults
+
+    candidate = Dynaconf(environments=False, merge_enabled=False)
+    candidate.update(dict(document))
+    settlement_publication_defaults(candidate)
+
+
+def _seller_publication_clause_compiler(
+    document: Mapping[str, Any],
+) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
+    from market_alkahest import create_alkahest_registration
+    from market_hosted_settlement import create_stripe_registration
+    from market_settlement_runtime import (
+        SettlementConfigurationRegistry,
+        compile_settlement_publication_clause,
+    )
+
+    registry = SettlementConfigurationRegistry(
+        [create_alkahest_registration(), create_stripe_registration()]
+    )
+    settlement = document.get("Settlement", document.get("settlement", {}))
+    if not isinstance(settlement, Mapping):
+        raise SettlementMigrationError("Settlement must be a table")
+    try:
+        resolved = registry.resolve(settlement, role="seller")
+    except (TypeError, ValueError) as exc:
+        raise SettlementMigrationError(
+            f"invalid seller settlement configuration: {exc}"
+        ) from exc
+
+    def compile_clause(
+        raw: Mapping[str, Any],
+    ) -> SettlementPublicationClause:
+        return compile_settlement_publication_clause(
+            raw,
+            registry=registry,
+            config=resolved,
+            role="seller",
+        )
+
+    return compile_clause
 
 
 @config_app.command("path")
@@ -159,28 +212,60 @@ def config_migrate(
         "--backup",
         help="Create the required same-directory backup in write mode.",
     ),
+    inventory: str | None = typer.Option(
+        None,
+        "--inventory",
+        help="Resource CSV to migrate when --scope publication is selected.",
+    ),
 ) -> None:
-    """Migrate a legacy seller configuration through an explicit clean cutover."""
+    """Migrate settlement configuration or legacy publication pricing."""
 
-    if scope != "settlement":
+    if scope not in {"settlement", "publication"}:
         typer.secho(
-            "Only --scope settlement is supported.", err=True, fg=typer.colors.RED
+            "Supported scopes: settlement, publication.",
+            err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(2)
+    if scope == "settlement" and inventory is not None:
+        raise typer.BadParameter("--inventory applies only to --scope publication")
     try:
-        result = migrate_settlement_config(
-            storefront_config_file(),
-            role="seller",
-            check=check,
-            write=write,
-            backup=backup,
-            environ=os.environ,
-            validator=_validate_settlement_candidate,
-        )
+        if scope == "settlement":
+            result = migrate_settlement_config(
+                storefront_config_file(),
+                role="seller",
+                check=check,
+                write=write,
+                backup=backup,
+                environ=os.environ,
+                validator=_validate_settlement_candidate,
+            )
+            lines = format_migration_result(result)
+        elif inventory is None:
+            result = migrate_publication_config(
+                storefront_config_file(),
+                check=check,
+                write=write,
+                backup=backup,
+                validator=_validate_settlement_candidate,
+            )
+            lines = format_publication_migration_result(result)
+        else:
+            config_path = storefront_config_file()
+            config_document = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            result = migrate_publication_csv(
+                inventory,
+                storefront_config=config_document,
+                check=check,
+                write=write,
+                backup=backup,
+                clause_compiler=_seller_publication_clause_compiler(config_document),
+            )
+            lines = format_publication_migration_result(result)
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(1) from exc
-    for line in format_migration_result(result):
+    for line in lines:
         typer.echo(line)
 
 
@@ -327,19 +412,14 @@ _INIT_USER_TEMPLATE = """\
 #     mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
 # ]
 # Per-resource or command clauses replace this list; fields are never merged.
-# default_min_price = "1"                      # human / whole-token units (per-hour rate). The publish CLI
-                                                # scales by the token's on-chain decimals: "1" with USDC
-                                                # (6 decimals) = 1_000_000 base units = $1/hr. Fallback for
-                                                # blank `min_price` columns in resources.csv; also the
-                                                # negotiation floor for hidden-reserve listings.
-# default_token_address = "0x..."              # 0x ERC-20 address used when CSV row has no token column;
-                                                # also the demand-side token for the resource-imbalance policy
+# default_min_price = "1"                      # negotiation floor when a resource row has no min_price;
+                                                # it never constructs a settlement option. Each settlement
+                                                # clause owns its explicit asset, decimal rate, and unit.
+# default_token_address = "0x..."              # demand-side token for the resource-imbalance policy only;
+                                                # it never supplies a settlement option asset or rate.
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
-# publish_priceless = false                    # publish rows without a min_price as demand.amount=null
-                                                # (hidden reserve; buyer proposes; seller negotiates against
-                                                # default_min_price as the floor). Per-row min_price="0"
-                                                # publishes as demand.amount=0 (free / public-test offering),
-                                                # distinct from hidden reserve.
+# publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
+                                                # publication still requires complete typed clauses.
 """
 
 

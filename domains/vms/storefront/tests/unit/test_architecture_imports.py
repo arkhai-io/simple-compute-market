@@ -1,13 +1,12 @@
 """Dependency-direction guardrail for the core/kit/domain split.
 
-The target graph (docs/development/ARCHITECTURE.md, "Organizing Principle"):
-kit packages and the VM domain *concept* modules (listings, negotiation,
-settlement) are composed from below — they implement core hook shapes without
-importing core. Storefront-owned provisioning orchestration lives under the VM
-storefront composition root, while the executable provisioning service and its
-client facade live under ``domains/vms/provisioning``. Only composition roots
-(the VM buyer/storefront executables and the provisioning service) may import
-core packages. Kit additionally takes no domain dependencies.
+The target graph (docs/development/ARCHITECTURE.md, "Package and dependency
+layers") permits kit foundations to consume dependency-light ``market_core``
+carriers, while forbidding role implementations, clients, composition roots,
+and domain adapters. VM domain concept modules implement core hook shapes from
+below without importing core packages. Only composition roots (the VM
+buyer/storefront executables and the provisioning service) may import every
+layer.
 
 This test walks the actual import statements so the rule is enforced,
 not just documented.
@@ -22,7 +21,11 @@ from pathlib import Path
 def _repo_root() -> Path:
     p = Path(__file__).resolve()
     for parent in p.parents:
-        if (parent / "docs").is_dir() and (parent / "kit").is_dir() and (parent / "domains").is_dir():
+        if (
+            (parent / "docs").is_dir()
+            and (parent / "kit").is_dir()
+            and (parent / "domains").is_dir()
+        ):
             return parent
     raise AssertionError("repo root not found above test file")
 
@@ -37,6 +40,10 @@ CORE_PREFIXES = (
     "market_core",
     "registry_client",
     "storefront_client",
+)
+
+KIT_FORBIDDEN_PREFIXES = tuple(
+    prefix for prefix in CORE_PREFIXES if prefix != "market_core"
 )
 
 # Composition-root / executable import names that from-below code must
@@ -99,12 +106,15 @@ def _violations(roots, forbidden_prefixes):
     return out
 
 
-def test_kit_imports_no_core_or_domain_packages():
+def test_kit_imports_no_role_core_or_domain_packages():
     assert KIT_ROOTS, "no kit packages found"
     violations = _violations(
-        KIT_ROOTS, CORE_PREFIXES + COMPOSITION_PREFIXES + DOMAIN_PREFIXES
+        KIT_ROOTS,
+        KIT_FORBIDDEN_PREFIXES + COMPOSITION_PREFIXES + DOMAIN_PREFIXES,
     )
-    assert not violations, "kit must stay core- and domain-free:\n" + "\n".join(violations)
+    assert not violations, "kit must stay role-core- and domain-free:\n" + "\n".join(
+        violations
+    )
 
 
 def test_domain_concept_modules_import_no_core_packages():

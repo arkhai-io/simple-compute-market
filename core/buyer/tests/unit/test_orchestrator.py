@@ -12,6 +12,7 @@ from core_buyer import (
     BuyResult,
     NegotiationResult,
     RegistryAuthority,
+    explain_registry_query,
     query_registry_for_matches_multi,
     run_buy,
 )
@@ -20,6 +21,7 @@ from core_buyer.orchestration import make_publisher_trust_resolver
 
 def _trusted(*signers: Ed25519Signer) -> TrustedIdentitySet:
     return TrustedIdentitySet(identities=tuple(signer.identity for signer in signers))
+
 
 def _authority(name: str, *signers: Ed25519Signer) -> RegistryAuthority:
     return RegistryAuthority(authority=name, principals=_trusted(*signers))
@@ -34,6 +36,7 @@ def _config() -> BuyConfig:
         principal=signer.identity,
         signer=signer,
     )
+
 
 def test_buy_config_rejects_signer_principal_mismatch() -> None:
     owner = Ed25519Signer(b"\x03" * 32)
@@ -135,7 +138,10 @@ def test_run_buy_composes_injected_negotiate_and_settle_hooks() -> None:
     assert result.status == "ready"
     assert result.negotiation_id == "N1"
     assert result.seller_url == "http://seller"
-    assert ("aggregated", {"policy": "domain-policy", "match_count_after_cap": 1}) in events
+    assert (
+        "aggregated",
+        {"policy": "domain-policy", "match_count_after_cap": 1},
+    ) in events
     assert ("domain_negotiate", {"count": 1}) in events
     assert ("domain_settle", {"listing_id": "L1"}) in events
 
@@ -223,24 +229,39 @@ def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None
                 def to_dict(self):
                     return {
                         "listing_id": "L1",
-                        "publisher_principals": _trusted(registry).model_dump(mode="json"),
+                        "publisher_principals": _trusted(registry).model_dump(
+                            mode="json"
+                        ),
                     }
 
             return type("Response", (), {"listings": [Listing()]})()
 
     with patch("core_buyer.orchestrator.SyncRegistryClient", FakeClient):
-        result = query_registry_for_matches_multi(
+        result = explain_registry_query(
             ["http://registry/"],
             signer=buyer,
-            registry_authorities={
-                "http://registry": _authority("registry", registry)
-            },
+            registry_authorities={"http://registry": _authority("registry", registry)},
             resource_query="region=eu",
             limit=7,
             api_keys={"http://registry": "optional-bearer"},
         )
 
-    assert result[0]["publisher_principals"] == _trusted(registry).model_dump(mode="json")
+    assert result.listings[0]["publisher_principals"] == _trusted(registry).model_dump(
+        mode="json"
+    )
+    assert [plan.to_dict() for plan in result.query_plans] == [
+        {
+            "registry_url": "http://registry",
+            "filter_spec": {
+                "version": 1,
+                "etag": "filter-v1",
+                "schema_id": None,
+                "schema_version": None,
+            },
+            "canonical_resource_query": "region=eu",
+            "registry_parameters": {"region": "eu"},
+        }
+    ]
     expected_client = {
         "base_url": "http://registry",
         "signer": buyer,
@@ -318,7 +339,9 @@ def test_multi_registry_query_rejects_partial_vocabulary_before_listing() -> Non
     assert list_calls == 0
 
 
-def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listing() -> None:
+def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listing() -> (
+    None
+):
     old = Ed25519Signer(b"\x1a" * 32)
     replacement = Ed25519Signer(b"\x1b" * 32)
     listing = {

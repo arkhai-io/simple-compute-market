@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from arkhai_vms import make_vm_provision_terms
 from market_hosted_settlement import StripeResolverConfig
 from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
@@ -28,6 +29,10 @@ _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x32" * 32)
 _BUYER = _BUYER_SIGNER.identity
 _SELLER = _SELLER_SIGNER.identity
+_ACCEPTED_PROVISION = make_vm_provision_terms(
+    duration_seconds=3600,
+    ssh_public_key="ssh-ed25519 accepted",
+).model_dump(mode="json")
 
 
 def _obligation(index: int = 0) -> dict:
@@ -158,6 +163,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
             "our_listing_id": "listing-1",
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": proposal,
+            "provision_terms": _ACCEPTED_PROVISION,
         }
     )
     db.load_listing = AsyncMock(
@@ -198,7 +204,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
         local_principal=_SELLER,
         mechanism_client=object(),
         chain_name="anvil",
-        request={"ssh_public_key": "ssh-ed25519 AAAA"},
+        request={"ssh_public_key": "ssh-ed25519 substituted"},
         sqlite_client=db,
     )
 
@@ -210,6 +216,7 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
     assert context.obligation_ref == derive_obligation_ref("neg-1", 1, obligations[1])
     assert context.obligation_index == 1
     verify.assert_awaited_once()
+    assert prepared.fulfillment_input.provision.ssh_public_key == "ssh-ed25519 accepted"
 
 
 @pytest.mark.asyncio
@@ -256,6 +263,7 @@ async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeyp
             "our_listing_id": "listing-hosted",
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": {"settlement_selection": selection},
+            "provision_terms": _ACCEPTED_PROVISION,
         }
     )
     db.load_listing = AsyncMock(
@@ -314,6 +322,7 @@ async def test_prepare_rejects_missing_accepted_proposal_without_fallback(
             "our_listing_id": "listing-1",
             "buyer_principal": _BUYER.model_dump(mode="json"),
             "buyer_escrow_proposal": None,
+            "provision_terms": _ACCEPTED_PROVISION,
         }
     )
     db.load_listing = AsyncMock(

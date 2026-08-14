@@ -104,8 +104,10 @@ def test_friendly_and_canonical_aliases_compile_to_same_parameter() -> None:
         registry_url="https://registry.example",
     )
 
-    assert friendly.parameters == canonical_alias.parameters == (
-        ("ram_gb_min", "range:(64,)"),
+    assert (
+        friendly.parameters
+        == canonical_alias.parameters
+        == (("ram_gb_min", "range:(64,)"),)
     )
     assert canonical_alias.canonical_query == "ram_gb>64"
 
@@ -145,6 +147,38 @@ def test_rejects_unrepresentable_set_values_without_echoing_them() -> None:
         )
 
     assert secret not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "in:[A100]",
+        "not_in:[A100]",
+        "range:(1,2]",
+        "exists:true",
+    ],
+)
+def test_rejects_scalar_equality_values_that_collide_with_wire_set_form(
+    literal: str,
+) -> None:
+    with pytest.raises(ResourceQueryCompilationError) as caught:
+        compile_resource_query(
+            f'gpu_model="{literal}"',
+            filter_spec=_spec(),
+            registry_url="https://registry.example",
+        )
+
+    assert literal not in str(caught.value)
+
+
+def test_scalar_equality_without_set_form_shape_preserves_literal_value() -> None:
+    compiled = compile_resource_query(
+        'gpu_model="in:thing"',
+        filter_spec=_spec(),
+        registry_url="https://registry.example",
+    )
+
+    assert compiled.parameters == (("gpu_model", "in:thing"),)
 
 
 @pytest.mark.parametrize(
@@ -219,7 +253,9 @@ def test_sync_client_binds_compiled_params_to_etag_and_surfaces_412() -> None:
                 "etag": "rotated-from-this",
                 "filters": _spec().filters,
             },
-            RegistryClientError("GET", "https://registry.example/listings", 412, "rotated"),
+            RegistryClientError(
+                "GET", "https://registry.example/listings", 412, "rotated"
+            ),
         ]
     )
     client._request = request
@@ -234,7 +270,5 @@ def test_sync_client_binds_compiled_params_to_etag_and_surfaces_412() -> None:
         client.list_listings(etag=compiled.etag, **compiled.as_params())
 
     assert caught.value.status_code == 412
-    assert request.call_args.kwargs["headers"] == {
-        "If-Match": '"rotated-from-this"'
-    }
+    assert request.call_args.kwargs["headers"] == {"If-Match": '"rotated-from-this"'}
     assert request.call_args.kwargs["params"]["ram_gb_min"] == "64"

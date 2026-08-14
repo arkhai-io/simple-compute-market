@@ -45,9 +45,7 @@ def _quiet_config(monkeypatch):
             {
                 url: RegistryAuthority(
                     authority="registry",
-                    principals=TrustedIdentitySet(
-                        identities=(registry.identity,)
-                    ),
+                    principals=TrustedIdentitySet(identities=(registry.identity,)),
                 )
                 for url in urls
             },
@@ -89,22 +87,28 @@ def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypa
             offset=offset,
             api_keys=api_keys,
         )
-        return [{
-            "listing_id": "L1",
-            "offer_resource": {"anything": 1},
-            "source_registry_url": "http://reg.example",
-            "source_registry_authority": "registry",
-        }]
+        return [
+            {
+                "listing_id": "L1",
+                "offer_resource": {"anything": 1},
+                "source_registry_url": "http://reg.example",
+                "source_registry_authority": "registry",
+            }
+        ]
 
     monkeypatch.setattr(cli_mod, "query_registry_for_matches_multi", fake_query)
 
     result = runner.invoke(
         build_app(domains=[]),
         [
-            "listing", "list",
-            "-r", "http://reg.example/",
-            "--resource", "gpu_model=H200 region=eu",
-            "--limit", "7",
+            "listing",
+            "list",
+            "-r",
+            "http://reg.example/",
+            "--resource",
+            "gpu_model=H200 region=eu",
+            "--limit",
+            "7",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -125,11 +129,13 @@ def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypa
 def test_generic_listing_show_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
-        cli_mod, "fetch_listing_dict_multi",
+        cli_mod,
+        "fetch_listing_dict_multi",
         lambda urls, listing_id, **_kwargs: {"listing_id": listing_id},
     )
     result = runner.invoke(
-        build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],
+        build_app(domains=[]),
+        ["listing", "show", "L9", "-r", "http://reg.example"],
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"listing_id": "L9"}
@@ -138,11 +144,13 @@ def test_generic_listing_show_prints_raw_json(monkeypatch):
 def test_generic_listing_show_missing_listing_exits_nonzero(monkeypatch):
     _quiet_config(monkeypatch)
     monkeypatch.setattr(
-        cli_mod, "fetch_listing_dict_multi",
+        cli_mod,
+        "fetch_listing_dict_multi",
         lambda urls, listing_id, **_kwargs: None,
     )
     result = runner.invoke(
-        build_app(domains=[]), ["listing", "show", "L9", "-r", "http://reg.example"],
+        build_app(domains=[]),
+        ["listing", "show", "L9", "-r", "http://reg.example"],
     )
     assert result.exit_code == 1
 
@@ -150,7 +158,8 @@ def test_generic_listing_show_missing_listing_exits_nonzero(monkeypatch):
 def test_buy_without_plugin_is_a_helpful_stub():
     # Extra args must not produce a usage error; the stub owns the message.
     result = runner.invoke(
-        build_app(domains=[]), ["buy", "--gpu-model", "H200", "--max-price", "5"],
+        build_app(domains=[]),
+        ["buy", "--resource", "gpu_model=H200"],
     )
     assert result.exit_code == 2
     assert "buyer market domain" in _all_output(result)
@@ -215,7 +224,8 @@ def _vm_like_plugin() -> MarketDomainContract:
 
 def test_plugin_buy_replaces_stub():
     result = runner.invoke(
-        build_app(domains=[_vm_like_plugin()]), ["buy", "--max-price", "5"],
+        build_app(domains=[_vm_like_plugin()]),
+        ["buy", "--max-price", "5"],
     )
     assert result.exit_code == 0, result.output
     assert "plugin buy at 5.0" in result.output

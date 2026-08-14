@@ -149,20 +149,24 @@ def derive_scalar_prices(
     because no candidate carries a usable advertised rate
     (hidden-reserve listings).
     """
-    initial_price: Optional[float] = params.get("initial_price")
-    max_price: Optional[float] = params.get("max_price")
+    raw_initial_price = params.get("initial_price")
+    raw_max_price = params.get("max_price")
+    initial_price = int(raw_initial_price) if raw_initial_price is not None else None
+    max_price = int(raw_max_price) if raw_max_price is not None else None
     price_markup = float(params.get("price_markup") or 1.5)
 
     if initial_price is not None and max_price is not None:
         return initial_price, max_price
 
     anchor: Optional[int] = None
-    priced = [(extract_seller_min_price(m), m) for m in matches]
+    priced_candidates = [(extract_seller_min_price(m), m) for m in matches]
     # Keep listings with amount=0 (free) as legitimate anchors; only filter
     # out None (hidden reserve) where we genuinely have no price signal.
-    priced = [(p, m) for p, m in priced if p is not None]
+    priced: list[tuple[float, dict[str, Any]]] = [
+        (price, match) for price, match in priced_candidates if price is not None
+    ]
     if priced:
-        priced.sort(key=lambda pm: pm[0])
+        priced.sort(key=lambda item: item[0])
         anchor = int(priced[0][0])
 
     if max_price is None and anchor is not None:

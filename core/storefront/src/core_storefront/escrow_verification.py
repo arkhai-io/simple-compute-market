@@ -394,8 +394,12 @@ async def verify_escrow_for_settlement(
                     f"Cannot read escrow {escrow_uid}: {exc}"
                 ) from exc
 
-        async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
+        assert _codec is not None
+
+        async def _get_obligation(client: Any, uid: str) -> Any:
             return await _codec.get_obligation(client, uid)
+
+        get_obligation_fn = _get_obligation
 
     if (
         not expected_candidates
@@ -408,12 +412,13 @@ async def verify_escrow_for_settlement(
 
     if not expected_candidates and expected_obligation_raw is None:
         # Legacy thread with no concrete proposal; keep the old ERC20 path.
-        if build_obligation_data_fn is None:
-            from market_alkahest.alkahest import (
-                build_payment_obligation_data as build_obligation_data_fn,
-            )
+        obligation_data_builder = build_obligation_data_fn
+        if obligation_data_builder is None:
+            from market_alkahest.alkahest import build_payment_obligation_data
+
+            obligation_data_builder = build_payment_obligation_data
         try:
-            expected_obligation_raw = build_obligation_data_fn(
+            expected_obligation_raw = obligation_data_builder(
                 demands=None,
                 recipient=effective_recipient,
                 agreed_amount=int(agreed_price),

@@ -41,6 +41,8 @@ def _start_log(**fields):
     )
     fields.setdefault("source_registry_url", "http://registry:8080")
     fields.setdefault("source_registry_authority", "registry")
+    fields.setdefault("initial_price", 50)
+    fields.setdefault("max_price", 100)
     return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
 
 
@@ -66,7 +68,11 @@ def test_load_resume_point_recovers_neg_id_and_seller_price():
         "negotiation_round",
         round=0,
         our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
-        their_reply={"negotiation_id": "neg-9", "action": "counter", "proposal": {"fields": {"amount": 90}}},
+        their_reply={
+            "negotiation_id": "neg-9",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 90}},
+        },
     )
 
     point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
@@ -76,6 +82,8 @@ def test_load_resume_point_recovers_neg_id_and_seller_price():
     assert point.negotiation_id == "neg-9"
     assert point.last_seller_proposal["fields"]["amount"] == 90
     assert point.rounds_completed == 1
+    assert point.initial_price == 50
+    assert point.max_price == 100
     # Transcript is two NegotiationRound entries (us + them) per round.
     assert len(point.transcript) == 2
     assert point.transcript[0].sender == "us"
@@ -83,19 +91,59 @@ def test_load_resume_point_recovers_neg_id_and_seller_price():
     assert point.transcript[1].proposal["fields"]["amount"] == 90
 
 
+def test_load_resume_point_carries_round_zero_accepted_provision_terms():
+    provision = {
+        "kind": "compute.v1",
+        "version": 1,
+        "payload": {
+            "duration_seconds": 3600,
+            "ssh_public_key": "ssh-ed25519 accepted",
+        },
+    }
+    log = _start_log(seller_url="http://seller:8001", listing_id="L-1")
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-accepted-provision",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 90}},
+            "accepted_provision_terms": provision,
+        },
+    )
+
+    point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
+
+    assert point.accepted_provision_terms == provision
+
+
 def test_load_resume_point_uses_latest_seller_counter_across_rounds():
     """When the log has multiple counter rounds, last_seller_proposal
     is the most recent counter (not the first)."""
     log = _start_log(seller_url="http://s", listing_id="L")
-    log.event("negotiation_round", round=0,
-              our_message={"action": "initial", "proposal": {"fields": {"amount": 30}}},
-              their_reply={"negotiation_id": "neg-A", "action": "counter", "proposal": {"fields": {"amount": 95}}})
-    log.event("negotiation_round", round=1,
-              our_message={"action": "counter", "proposal": {"fields": {"amount": 60}}},
-              their_reply={"action": "counter", "proposal": {"fields": {"amount": 80}}})
-    log.event("negotiation_round", round=2,
-              our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
-              their_reply={"action": "counter", "proposal": {"fields": {"amount": 75}}})
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 30}}},
+        their_reply={
+            "negotiation_id": "neg-A",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 95}},
+        },
+    )
+    log.event(
+        "negotiation_round",
+        round=1,
+        our_message={"action": "counter", "proposal": {"fields": {"amount": 60}}},
+        their_reply={"action": "counter", "proposal": {"fields": {"amount": 80}}},
+    )
+    log.event(
+        "negotiation_round",
+        round=2,
+        our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
+        their_reply={"action": "counter", "proposal": {"fields": {"amount": 75}}},
+    )
 
     point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
@@ -110,14 +158,24 @@ def test_load_resume_point_terminal_seller_reply_does_not_overwrite_price():
     last_seller_proposal should reflect the previous counter — the
     round-loop needs a `their_proposed_price` to feed the strategy."""
     log = _start_log(seller_url="http://s", listing_id="L")
-    log.event("negotiation_round", round=0,
-              our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
-              their_reply={"negotiation_id": "neg-T", "action": "counter", "proposal": {"fields": {"amount": 80}}})
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-T",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 80}},
+        },
+    )
     # Suppose the buyer crashed mid-write of round 1: the reply was
     # an accept echo with price=70, but no run_ended yet.
-    log.event("negotiation_round", round=1,
-              our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
-              their_reply={"action": "accept", "proposal": {"fields": {"amount": 70}}})
+    log.event(
+        "negotiation_round",
+        round=1,
+        our_message={"action": "counter", "proposal": {"fields": {"amount": 70}}},
+        their_reply={"action": "accept", "proposal": {"fields": {"amount": 70}}},
+    )
 
     point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
@@ -133,9 +191,16 @@ def test_load_resume_point_picks_up_negotiation_id_from_run_ended():
     negotiation_id can still be recovered from run_ended."""
     log = _start_log(seller_url="http://s", listing_id="L")
     # No rounds, but run_ended carries the neg_id
-    log.event("negotiation_round", round=0,
-              our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
-              their_reply={"negotiation_id": "neg-from-end", "action": "counter", "proposal": {"fields": {"amount": 60}}})
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-from-end",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 60}},
+        },
+    )
     log.end("agreed", negotiation_id="neg-from-end", agreed_amount=60, rounds=0)
 
     point = load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
@@ -160,9 +225,16 @@ def test_load_resume_point_missing_seller_url_raises():
     """A log without seller_url in run_started can't be resumed (we
     don't know who to POST to)."""
     log = _start_log(listing_id="L-1")  # no seller_url
-    log.event("negotiation_round", round=0,
-              our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
-              their_reply={"negotiation_id": "neg-1", "action": "counter", "proposal": {"fields": {"amount": 80}}})
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-1",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 80}},
+        },
+    )
     with pytest.raises(typer.BadParameter, match="seller_url"):
         load_negotiation_resume_point(log.run_id, signer=BUYER_SIGNER)
 
@@ -174,9 +246,16 @@ def test_load_resume_point_missing_seller_url_raises():
 
 def test_is_negotiation_complete_false_for_mid_stream_run():
     log = _start_log(seller_url="http://s", listing_id="L")
-    log.event("negotiation_round", round=0,
-              our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
-              their_reply={"negotiation_id": "neg-1", "action": "counter", "proposal": {"fields": {"amount": 90}}})
+    log.event(
+        "negotiation_round",
+        round=0,
+        our_message={"action": "initial", "proposal": {"fields": {"amount": 50}}},
+        their_reply={
+            "negotiation_id": "neg-1",
+            "action": "counter",
+            "proposal": {"fields": {"amount": 90}},
+        },
+    )
     assert is_negotiation_complete(log.run_id, signer=BUYER_SIGNER) is False
 
 
@@ -221,11 +300,13 @@ def test_load_deal_context_recovers_accepted_proposal_and_demands():
         "escrow_address": "0x" + "ef" * 20,
         "fields": {"token": token},
         "literal_fields": {"token": token},
-        "demands": [{
-            "chain_name": "anvil",
-            "arbiter": "0x" + "12" * 20,
-            "demand_data": {"recipient": recipient},
-        }],
+        "demands": [
+            {
+                "chain_name": "anvil",
+                "arbiter": "0x" + "12" * 20,
+                "demand_data": {"recipient": recipient},
+            }
+        ],
         "expiration_unix": 1_800_000_000,
     }
     provision = {"duration_seconds": 3600, "ssh_public_key": "ssh-ed25519 AAAA"}

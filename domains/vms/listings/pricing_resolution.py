@@ -26,7 +26,13 @@ from typing import Any, Mapping
 
 GPU_FAMILY_KEY = "gpu"
 
-_FIELD_NAMES = ("min_price", "token", "max_duration_seconds", "accepted_escrows")
+_FIELD_NAMES = (
+    "min_price",
+    "token",
+    "max_duration_seconds",
+    "accepted_escrows",
+    "settlements",
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,7 @@ class GpuPricingFields:
     token: Any = None
     max_duration_seconds: Any = None
     accepted_escrows: Any = None
+    settlements: Any = None
 
 
 def resolve_gpu_pricing(
@@ -53,7 +60,7 @@ def resolve_gpu_pricing(
 ) -> GpuPricingFields:
     """Resolve one GPU model's pricing through the three-tier chain.
 
-    Each of the four fields is resolved independently: storefront
+    Each field is resolved independently: storefront
     override (if set) wins outright; otherwise the pool's own pricing
     hint for this model (if the hint declares that field *and* it has a
     valid shape for that field -- see `_VALID_HINT_FIELD`, below);
@@ -65,9 +72,7 @@ def resolve_gpu_pricing(
     failure mode this resolver invents.
     """
     hint_fields = _hint_fields_for_model(policy_tags, gpu_model)
-    config_fields = (
-        config_defaults_by_model.get(gpu_model) if gpu_model else None
-    )
+    config_fields = config_defaults_by_model.get(gpu_model) if gpu_model else None
 
     def _resolve(field: str) -> Any:
         override_value = getattr(storefront_override, field)
@@ -102,11 +107,13 @@ _VALID_HINT_FIELD: Mapping[str, Any] = {
     "token": lambda v: isinstance(v, str),
     "max_duration_seconds": _is_nonnegative_int,
     "accepted_escrows": lambda v: isinstance(v, list),
+    "settlements": lambda v: isinstance(v, list),
 }
 
 
 def _hint_fields_for_model(
-    policy_tags: Mapping[str, Any], gpu_model: str | None,
+    policy_tags: Mapping[str, Any],
+    gpu_model: str | None,
 ) -> Mapping[str, Any] | None:
     if not gpu_model:
         return None

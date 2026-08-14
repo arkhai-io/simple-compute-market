@@ -11,8 +11,10 @@ from unittest import mock
 
 import pytest
 from arkhai_vms import make_vm_provision_terms
+from core_buyer.action_policy import BuyerActionPolicy
 from core_buyer.registry_config import RegistryAuthority
 from domains.vms.buyer.buy_cli import _make_hosted_settle_hook
+from domains.vms.buyer.negotiate_cli import _pricing_listing_for_selection
 from domains.vms.buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -116,7 +118,7 @@ def test_select_hosted_option_pins_exact_listed_choice():
 
     selected = policy.select(
         listing,
-        option_id=option.option_id,
+        clauses=(f"option_id={option.option_id}",),
         expiration_unix=1_800_000_000,
     )
 
@@ -139,11 +141,45 @@ def test_select_hosted_option_rejects_unlisted_choice():
     assert (
         policy.select(
             {"settlement_options": [option.model_dump(mode="json")]},
-            option_id="0" * 64,
+            clauses=('option_id="' + "0" * 64 + '"',),
             expiration_unix=1_800_000_000,
         )
         is None
     )
+
+
+def test_standalone_pricing_uses_selected_option_rate_and_units():
+    option = _hosted_option()
+    legacy_alkahest_entry = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "aa" * 20,
+        "literal_fields": {"token": "0x" + "bb" * 20},
+        "rates": [{"field": "amount", "per": "hour", "value": "999000000"}],
+    }
+    listing = {
+        "accepted_escrows": [legacy_alkahest_entry],
+        "settlement_options": [option.model_dump(mode="json")],
+    }
+    policy = resolve_buyer_settlement_policy(
+        {
+            "Settlement": {
+                "schema_version": 1,
+                "priority": ["fiat.stripe.v1"],
+                "stripe": {"enabled": True},
+            }
+        }
+    )
+    selected = policy.select(listing, expiration_unix=1_800_000_000)
+    assert selected is not None
+
+    pricing_listing = _pricing_listing_for_selection(
+        listing,
+        selected,
+        accepted_escrow=None,
+    )
+
+    assert pricing_listing["accepted_escrows"] == []
+    assert extract_seller_min_price(pricing_listing) == 125
 
 
 def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
@@ -190,7 +226,9 @@ def test_hosted_settle_uses_storefront_and_never_calls_authority_directly(
         poll_interval=0,
         total_timeout=5,
         sleep=lambda _seconds: None,
+        action_policy=BuyerActionPolicy.OPEN,
         open_url=lambda url: opened.append(url),
+        print_url=lambda _url: None,
     )
     outcome = NegotiationOutcome(
         status="agreed",
@@ -467,8 +505,7 @@ class TestQueryRegistryResources:
         captured = self._patch_client(monkeypatch)
         self._query(
             resource_query=(
-                "gpu_model=H200 gpu_count>=4 "
-                "datacenter_grade=true static_ip=false"
+                "gpu_model=H200 gpu_count>=4 datacenter_grade=true static_ip=false"
             )
         )
         assert captured["params"] == {

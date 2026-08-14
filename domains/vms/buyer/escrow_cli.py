@@ -1,13 +1,9 @@
-"""`market escrow` — buyer-side escrow lifecycle commands.
+"""Raw Alkahest escrow inspection and mutation commands.
 
-Three verbs:
-  create   — stage 3 only: alkahest approve + escrow.create on-chain
-  reclaim  — post-expiration reclaim_expired via the matching escrow codec
-  show     — read-only EVM inspection via the matching escrow codec
-
-Refunds (post-claim manual return of tokens by the seller) live under
-`market-storefront escrow refund`. The full create+submit+poll
-composite lives at `market settle`.
+``market settlement alkahest escrow`` exposes create, reclaim, and show for
+operator-directed on-chain work. The normal buyer lifecycle remains
+``market buy`` / ``market settle`` and derives chain, token, decimals, and
+obligation identity from accepted state.
 """
 
 from __future__ import annotations
@@ -273,7 +269,13 @@ def reclaim_cmd(
     if escrow_address:
         header.add_row("Escrow contract", escrow_address)
     header.add_row("RPC", chain_cfg.rpc_url)
-    console.print(Panel(header, title="market escrow reclaim", border_style="cyan"))
+    console.print(
+        Panel(
+            header,
+            title="market settlement alkahest escrow reclaim",
+            border_style="cyan",
+        )
+    )
 
     try:
         escrow_kind, receipt = asyncio.run(
@@ -505,7 +507,13 @@ def create_cmd(
         header.add_row(
             "Token", f"{chain.token_contract} (decimals={chain.token_decimals})"
         )
-    console.print(Panel(header, title="market escrow create", border_style="cyan"))
+    console.print(
+        Panel(
+            header,
+            title="market settlement alkahest escrow create",
+            border_style="cyan",
+        )
+    )
 
     if deal.accepted_escrow_terms is not None:
         from market_alkahest.schemas import EscrowTerms

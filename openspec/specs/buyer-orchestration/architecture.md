@@ -27,20 +27,11 @@ The split prevents generic orchestration from acquiring pricing semantics and pr
 
 ## Settlement preference
 
-Settlement compatibility remains an authoritative orchestration constraint, while
-preference is buyer-local policy. Core first filters by chain, token, and the policy's
-format predicate. Only a noninteractive choice with several survivors reaches the optional
-preference hook.
+Settlement compatibility remains an authoritative orchestration constraint, while preference is buyer-local policy. Resource filtering completes first. The buyer then removes options whose registrations are absent, disabled, or incompatible. Repeatable explicit settlement clauses are ordered alternatives across listings: all comparisons inside one clause must match the same advertised option, and the first clause with survivors wins before configured mechanism priority.
 
-The hook receives frozen scalar views with opaque identities instead of mutable listing or
-orchestration state. Core invokes it twice with identical inputs and accepts only one
-identity or an ordered tuple of unique identities drawn from that input set. Exceptions,
-unknown or duplicate identities, and inconsistent results produce a warning and retain the
-constrained fallback path. A valid preference precedes positive token balance and original
-candidate order; explicit interactive user choice bypasses preference entirely.
+Only a noninteractive choice with several survivors reaches the optional preference hook. The hook receives frozen scalar views with opaque identities instead of mutable listing or orchestration state. Core invokes it twice with identical inputs and accepts only one identity or an ordered tuple of unique identities drawn from that input set. Exceptions, unknown or duplicate identities, and inconsistent results produce a warning and retain the constrained fallback path. A valid preference precedes deterministic option identity fallback; explicit interactive user choice bypasses preference entirely.
 
-This split lets policy express payment choice without acquiring authority to make an
-incompatible settlement mechanism selectable.
+This split lets policy express payment choice without acquiring authority to make an incompatible settlement mechanism selectable. It also distinguishes “resources matched but settlement did not” from an empty registry result.
 
 ## Persisted runs
 
@@ -60,11 +51,13 @@ Marketplace identity and transaction credentials have independent lifetimes. Wal
 
 Run logs persist the canonical public principal, signature-contract version, accepted obligation and operation identities, and domain state required to resume. They do not serialize credential material. Recovery checks the complete recorded principal and permits a different credential only when a completed rotation authorizes it as an active replacement, before submitting another authenticated or settlement mutation.
 
-## Configured mechanism choice
+## Configured mechanism choice and buyer actions
 
-The buyer receives installed and enabled mechanisms through the shared settlement configuration registry. It filters advertised options for compatibility first, then uses canonical configured priority only as policy input among surviving pre-acceptance choices. Mechanism prerequisites are late-bound: hosted fiat does not resolve wallet, chain, RPC, token, or gas inputs; an EVM selection resolves them through its owning adapter.
+The buyer receives installed and enabled mechanisms through the shared settlement configuration registry. With no explicit settlement clause, canonical configured priority is policy input among compatible pre-acceptance choices. Mechanism prerequisites are late-bound after resource and settlement selection: hosted fiat does not resolve wallet, chain, RPC, token, or gas inputs; an EVM selection resolves them through its owning adapter.
 
-Priority never authorizes recovery-time failover. Accepted Terms, the obligation reference, and stable operation identities remain authoritative even if current priority or readiness changes. Generated buyer configuration therefore contains shared selection vocabulary but omits seller account, onboarding, publication, authority-administration, and provider fields.
+Transient buyer actions use one mechanism-neutral `open`, `print`, or `fail` policy on fresh and resumed runs. An action URL may be opened or printed for the current invocation but is never written to the run log. Raw setup and inspection utilities live below `market settlement <mechanism>`; normal buy, settle, resume, and service commands derive mechanism details from advertised or accepted state.
+
+Priority and explicit clauses never authorize recovery-time failover. Accepted Terms, the obligation reference, and stable operation identities remain authoritative even if current priority, readiness, enablement, or command inputs change. Generated buyer configuration therefore contains shared selection vocabulary but omits seller account, onboarding, publication, authority-administration, and provider fields.
 
 ## Current limits
 

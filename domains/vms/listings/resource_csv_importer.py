@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from domains.vms.listings.resources import get_resource_adapter
+from market_settlement_runtime import SettlementPublicationClause
+
+
+SettlementClauseCompiler = Callable[[Mapping[str, Any]], SettlementPublicationClause]
+_EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 
 
 class ResourceStore(Protocol):
-    async def upsert_resource(self, **kwargs: Any) -> Any:
-        ...
+    async def upsert_resource(self, **kwargs: Any) -> Any: ...
 
 
 class EscrowTemplateRateSlot(Protocol):
@@ -38,6 +43,7 @@ CORE_COLUMNS = {
     "token",
     "max_duration_seconds",
     "accepted_escrows",
+    "settlements",
 }
 
 ATTRIBUTE_PREFIX = "attribute."
@@ -46,6 +52,42 @@ ALLOCATION_MODE_ATTR = "allocation_mode"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
 SHAREABLE_ALLOCATION_MODE = "shareable"
 VM_HOST_ATTR = "vm_host"
+
+
+def parse_settlements_cell(
+    cell: str,
+    *,
+    compiler: SettlementClauseCompiler | None = None,
+) -> list[dict[str, Any]]:
+    """Parse and compile one structured settlement-clause JSON array."""
+
+    raw = (cell or "").strip()
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("settlements must be a valid JSON array") from exc
+    if not isinstance(value, list):
+        raise ValueError("settlements must be a JSON array")
+    if compiler is None:
+        raise ValueError(
+            "settlements requires a resolved seller settlement clause compiler"
+        )
+    clauses: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"settlements[{index}] must be an object")
+        try:
+            clause = compiler(item)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"settlements[{index}] is invalid: {exc}") from exc
+        if not isinstance(clause, SettlementPublicationClause):
+            raise ValueError(
+                f"settlements[{index}] compiler returned an invalid clause"
+            )
+        clauses.append(clause.model_dump(mode="json", exclude_defaults=True))
+    return clauses
 
 
 def parse_accepted_escrows_cell(
@@ -146,11 +188,13 @@ def _materialize_entry(
 
     rates: list[dict[str, Any]] = []
     for slot_name, slot in rate_slots.items():
-        rates.append({
-            "field": slot.field,
-            "per": slot.per,
-            "value": slot_values[slot_name],
-        })
+        rates.append(
+            {
+                "field": slot.field,
+                "per": slot.per,
+                "value": slot_values[slot_name],
+            }
+        )
     return {
         "chain_name": template.chain,
         "escrow_address": template.escrow_address.lower(),
@@ -280,6 +324,7 @@ def _normalize_compute_resource_attributes(
 def _build_db_resource_from_csv_row(
     row: dict[str, Any],
     templates: Mapping[str, EscrowTemplateLike] | None = None,
+    settlement_compiler: SettlementClauseCompiler | None = None,
 ) -> dict[str, Any]:
     resource_id = _clean_cell(row.get("resource_id"))
     resource_type = _clean_cell(row.get("resource_type"))
@@ -295,12 +340,13 @@ def _build_db_resource_from_csv_row(
     min_price_raw = _clean_cell(row.get("min_price"))
     token_raw = _clean_cell(row.get("token"))
     if token_raw:
-        if not token_raw.startswith("0x") or len(token_raw) != 42:
+        if not _EVM_ADDRESS.fullmatch(token_raw):
             raise ValueError(
                 f"Invalid token {token_raw!r} — the `token` column must be "
-                f"a 0x ERC-20 address. Symbol shorthand (e.g. 'USDC') is "
-                f"no longer supported."
+                f"a canonical 0x-prefixed 20-byte hexadecimal address. "
+                f"Symbol shorthand (e.g. 'USDC') is no longer supported."
             )
+        token_raw = token_raw.lower()
     max_duration_seconds_raw = _clean_cell(row.get("max_duration_seconds"))
 
     value: int | float | None = None
@@ -344,8 +390,19 @@ def _build_db_resource_from_csv_row(
                 "storefront config or drop the column"
             )
         accepted_escrows = parse_accepted_escrows_cell(
-            accepted_escrows_raw, templates,
+            accepted_escrows_raw,
+            templates,
         )
+
+    settlements_raw = _clean_cell(row.get("settlements"))
+    settlements = (
+        parse_settlements_cell(
+            settlements_raw,
+            compiler=settlement_compiler,
+        )
+        if settlements_raw
+        else None
+    )
 
     return {
         "resource_id": resource_id,
@@ -359,6 +416,7 @@ def _build_db_resource_from_csv_row(
         "token": token_raw or None,
         "max_duration_seconds": max_duration_seconds,
         "accepted_escrows": accepted_escrows,
+        "settlements": settlements,
     }
 
 
@@ -368,6 +426,7 @@ async def upsert_resources_from_csv(
     sqlite_client: ResourceStore,
     dry_run: bool = False,
     templates: Mapping[str, EscrowTemplateLike] | None = None,
+    settlement_compiler: SettlementClauseCompiler | None = None,
 ) -> ImportReport:
     path = Path(csv_path)
     if not path.exists():
@@ -382,6 +441,7 @@ async def upsert_resources_from_csv(
         sqlite_client=sqlite_client,
         dry_run=dry_run,
         templates=templates,
+        settlement_compiler=settlement_compiler,
     )
 
 
@@ -392,6 +452,7 @@ async def upsert_resources_from_csv_content(
     sqlite_client: ResourceStore,
     dry_run: bool = False,
     templates: Mapping[str, EscrowTemplateLike] | None = None,
+    settlement_compiler: SettlementClauseCompiler | None = None,
 ) -> ImportReport:
     """Import resources from a CSV string and upsert rows into the resources table.
 
@@ -419,7 +480,11 @@ async def upsert_resources_from_csv_content(
             schema_status="invalid",
         )
         try:
-            db_resource = _build_db_resource_from_csv_row(raw_row, templates)
+            db_resource = _build_db_resource_from_csv_row(
+                raw_row,
+                templates,
+                settlement_compiler,
+            )
             row_result.resource_id = str(db_resource["resource_id"])
             row_result.resource_type = str(db_resource["resource_type"])
 
@@ -450,9 +515,12 @@ async def upsert_resources_from_csv_content(
                     token=db_resource.get("token"),
                     max_duration_seconds=db_resource.get("max_duration_seconds"),
                     accepted_escrows=db_resource.get("accepted_escrows"),
+                    settlements=db_resource.get("settlements"),
                 )
             else:
-                row_result.warnings.append("Dry-run mode: row validated but not persisted.")
+                row_result.warnings.append(
+                    "Dry-run mode: row validated but not persisted."
+                )
             row_result.imported = True
             report.imported_count += 1
         except Exception as exc:

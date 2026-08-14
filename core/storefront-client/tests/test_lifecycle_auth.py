@@ -33,6 +33,7 @@ _RESPONSE = {
     "state": "released",
 }
 
+
 def _signed_response(request):
     authenticated = sign_response(
         signer=_PUBLISHER,
@@ -106,7 +107,6 @@ class _SyncTransport(httpx.BaseTransport):
         return _signed_response(request)
 
 
-
 class _AsyncCreateTransport(httpx.AsyncBaseTransport):
     def __init__(self) -> None:
         self.requests = []
@@ -123,6 +123,7 @@ class _SyncCreateTransport(httpx.BaseTransport):
     def handle_request(self, request):
         self.requests.append(request)
         return _signed_create_response(request)
+
 
 def _envelope(request, body):
     scheme = request.headers[IDENTITY_SCHEME_HEADER]
@@ -163,9 +164,7 @@ def test_capacity_release_sync_async_contract_is_byte_equivalent(monkeypatch):
             "http://test",
             signer=_SIGNER,
             caller_role="service",
-            expected_publishers=TrustedIdentitySet(
-                identities=(_PUBLISHER.identity,)
-            ),
+            expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
             transport=async_transport,
         ) as client:
             await client.notify_capacity_released("reservation-1", **kwargs)
@@ -175,9 +174,7 @@ def test_capacity_release_sync_async_contract_is_byte_equivalent(monkeypatch):
         "http://test",
         signer=_SIGNER,
         caller_role="service",
-        expected_publishers=TrustedIdentitySet(
-            identities=(_PUBLISHER.identity,)
-        ),
+        expected_publishers=TrustedIdentitySet(identities=(_PUBLISHER.identity,)),
         transport=sync_transport,
     ) as client:
         client.notify_capacity_released("reservation-1", **kwargs)
@@ -206,9 +203,7 @@ def test_capacity_release_sync_async_contract_is_byte_equivalent(monkeypatch):
         expected_method="POST",
         expected_operation="fulfillment_capacity_released",
         expected_resource="reservation-1",
-        expected_principals=TrustedIdentitySet(
-            identities=(_SIGNER.identity,)
-        ),
+        expected_principals=TrustedIdentitySet(identities=(_SIGNER.identity,)),
     )
     assert result.verified
 
@@ -261,6 +256,7 @@ def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent
         "paused": False,
         "settlement_config": settlement_config,
         "settlement_options": [],
+        "settlements": [],
     }
     assert async_request.content == sync_request.content
     for name in AUTH_HEADERS:
@@ -278,8 +274,6 @@ def test_create_listing_settlement_config_sync_async_contract_is_byte_equivalent
         expected_method="POST",
         expected_operation="create_listing",
         expected_resource="",
-        expected_principals=TrustedIdentitySet(
-            identities=(_SIGNER.identity,)
-        ),
+        expected_principals=TrustedIdentitySet(identities=(_SIGNER.identity,)),
     )
     assert result.verified

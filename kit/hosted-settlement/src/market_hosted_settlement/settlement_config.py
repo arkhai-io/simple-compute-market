@@ -7,6 +7,7 @@ import inspect
 import json
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 from collections.abc import Mapping
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -26,6 +27,7 @@ from market_settlement_runtime import (
     ReadinessBlocker,
     SettlementClauseField,
     SettlementRole,
+    SettlementPublicationClause,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -62,6 +64,28 @@ _CLAUSE_OPERATORS = frozenset(
         ComparisonOperator.NOT_IN,
     }
 )
+
+_ZERO_DECIMAL_CURRENCIES = frozenset(
+    {
+        "bif",
+        "clp",
+        "djf",
+        "gnf",
+        "jpy",
+        "kmf",
+        "krw",
+        "mga",
+        "pyg",
+        "rwf",
+        "ugx",
+        "vnd",
+        "vuv",
+        "xaf",
+        "xof",
+        "xpf",
+    }
+)
+_THREE_DECIMAL_CURRENCIES = frozenset({"bhd", "jod", "kwd", "omr", "tnd"})
 
 
 class StripePublicationInput(BaseModel):
@@ -517,6 +541,39 @@ def _principal_json(value: Any) -> Any:
     raise ValueError("hosted option requires a claimant principal")
 
 
+def _stripe_rate_minor_units(
+    clause: SettlementPublicationClause,
+    *,
+    configured_currency: str | None,
+) -> int:
+    if clause.asset != configured_currency:
+        raise ValueError(
+            f"hosted asset {clause.asset!r} does not match configured "
+            f"currency {configured_currency!r}"
+        )
+    if clause.rate is None:
+        raise ValueError("hosted publication requires a rate")
+    exponent = (
+        0
+        if clause.asset in _ZERO_DECIMAL_CURRENCIES
+        else 3
+        if clause.asset in _THREE_DECIMAL_CURRENCIES
+        else 2
+    )
+    try:
+        human = Decimal(clause.rate)
+    except InvalidOperation as exc:
+        raise ValueError(f"invalid hosted rate {clause.rate!r}") from exc
+    scaled = human * (Decimal(10) ** exponent)
+    if scaled != scaled.to_integral_value():
+        raise ValueError(
+            f"hosted rate {clause.rate!r} has more than {exponent} decimal places"
+        )
+    if scaled <= 0:
+        raise ValueError("hosted rate must be positive")
+    return int(scaled)
+
+
 def stripe_option_builder(
     section: BaseModel,
     readiness: MechanismReadiness,
@@ -530,12 +587,31 @@ def stripe_option_builder(
     config = StripeSettlementConfig.model_validate(section)
     if not config.enabled or not readiness.ready:
         raise ValueError("hosted settlement is not ready for publication")
+    raw_clause = resources.get("publication_clause")
+    publication_input: StripePublicationInput | None = None
+    rate: Any
+    if raw_clause is not None:
+        clause = SettlementPublicationClause.model_validate(raw_clause)
+        if clause.mechanism != MECHANISM:
+            raise ValueError("publication clause does not select hosted settlement")
+        publication_input = StripePublicationInput.model_validate(
+            clause.mechanism_input
+        )
+        currency = clause.asset
+        profile_name = config.condition_profile
+        rate = _stripe_rate_minor_units(
+            clause,
+            configured_currency=config.currency,
+        )
+        rate_per = clause.per
+    else:
+        currency = resources.get("currency") or config.currency
+        profile_name = config.condition_profile
+        rate = resources.get("rate_minor_units")
+        rate_per = "hour"
     account_ref = resources.get("account_ref") or config.account_ref
-    currency = resources.get("currency") or config.currency
-    profile_name = resources.get("condition_profile") or config.condition_profile
     condition = config.condition_profiles.get(profile_name or "")
     claimant = resources.get("claimant_principal")
-    rate = resources.get("rate_minor_units")
     if not isinstance(account_ref, str) or not account_ref:
         raise ValueError("hosted option requires an account reference")
     if not isinstance(currency, str) or not _CURRENCY.fullmatch(currency):
@@ -544,12 +620,18 @@ def stripe_option_builder(
         raise ValueError("hosted option requires a configured condition profile")
     if isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0:
         raise ValueError("hosted option requires a positive integer minor-unit rate")
-    rates = [{"field": "amount", "per": "hour", "value": str(rate)}]
+    rates = [{"field": "amount", "per": rate_per, "value": str(rate)}]
     params = {
         "account_ref": account_ref,
         "claimant_principal": _principal_json(claimant),
-        "funds_flow": "separate_charges_transfers",
-        "payment_method_types": ["card"],
+        "funds_flow": (
+            publication_input.funds_flow
+            if publication_input is not None
+            else "separate_charges_transfers"
+        ),
+        "payment_method_types": [
+            publication_input.method if publication_input is not None else "card"
+        ],
         "condition": condition.model_dump(mode="json"),
     }
     identity_payload = {

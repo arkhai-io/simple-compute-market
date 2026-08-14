@@ -30,7 +30,7 @@ import os
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from sqlalchemy import text
 
@@ -59,6 +59,7 @@ def _read_version() -> str:
     """Return the service version string."""
     try:
         from importlib.metadata import version, PackageNotFoundError
+
         try:
             return version("arkhai-compute-provisioning-service")
         except PackageNotFoundError:
@@ -225,9 +226,7 @@ class SystemService:
                 else None
             )
             checks["job_processor"] = (
-                "ok"
-                if (job_queue is not None and job_queue.is_alive())
-                else "degraded"
+                "ok" if (job_queue is not None and job_queue.is_alive()) else "degraded"
             )
         except Exception:
             checks["job_processor"] = "degraded"
@@ -257,7 +256,7 @@ class SystemService:
                     host_count=host_count,
                 )
                 ssh_keys = collect_ssh_keys_from_hosts(enabled_hosts)
-            except Exception as exc:
+            except Exception:
                 inventory_info = InventoryInfo(
                     source="database",
                     path=str(self._settings.database_url),
@@ -281,7 +280,9 @@ class SystemService:
 
         return AnsibleReadinessResponse(
             ansible_version=ansible_version(),
-            ansible_mode=("mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"),
+            ansible_mode=(
+                "mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"
+            ),
             inventory=inventory_info,
             playbook=FileInfo(
                 path=str(playbook_path),
@@ -290,7 +291,6 @@ class SystemService:
             ),
             ssh_keys=ssh_keys,
         )
-
 
     async def get_status(self) -> dict:
         """Return a full diagnostic status dict for the system status endpoint.
@@ -315,6 +315,7 @@ class SystemService:
         """
         from storefront_client import StorefrontClient, StorefrontClientError
         from compute_provisioning_service.identity import resolve_identity_context
+        from market_identity import TrustedIdentitySet
 
         checks: dict[str, str] = {}
 
@@ -333,7 +334,9 @@ class SystemService:
                 # Any structured response (ok or degraded) means the storefront is reachable
                 checks["storefront"] = "ok"
             except StorefrontClientError as exc:
-                checks["storefront"] = f"http_{exc.status_code}" if exc.status_code else "error"
+                checks["storefront"] = (
+                    f"http_{exc.status_code}" if exc.status_code else "error"
+                )
             except Exception as exc:
                 name = type(exc).__name__
                 if "Connect" in name or "connection" in str(exc).lower():
@@ -356,7 +359,9 @@ class SystemService:
                             base_url=storefront_url,
                             signer=identity.signer,
                             caller_role="service",
-                            expected_publisher=identity.storefront_principal,
+                            expected_publishers=TrustedIdentitySet(
+                                identities=(identity.storefront_principal,)
+                            ),
                         ) as sf:
                             await sf.get_system_status()
                         checks["storefront_auth"] = "ok"
@@ -370,10 +375,7 @@ class SystemService:
                                 else "error"
                             )
                     except Exception as exc:
-                        checks["storefront_auth"] = (
-                            f"error: {type(exc).__name__}"
-                        )
-
+                        checks["storefront_auth"] = f"error: {type(exc).__name__}"
 
         # Lease watchdog state
         if self._lease_lifecycle_service is None:
@@ -406,6 +408,7 @@ class SystemService:
 
         all_ok = all(_is_healthy(k, v) for k, v in checks.items())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
     async def force_fulfillment_convergence(self) -> dict:
         """Run one production fulfillment convergence cycle."""
         if self._fulfillment_convergence_watchdog is None:

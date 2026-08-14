@@ -37,7 +37,8 @@ def _app_with(policy: BuyerPolicy) -> typer.Typer:
 
 def test_policy_params_become_flags_and_land_in_kwargs():
     policy = BuyerPolicy(
-        name="t", middlewares=("listed_price",),
+        name="t",
+        middlewares=("listed_price",),
         cli_params=(
             PolicyParam(name="initial_price", help="opening"),
             PolicyParam(name="budget", annotation=Optional[float], help="opaque"),
@@ -60,7 +61,8 @@ def test_escape_hatch_collects_repeated_pairs():
     policy = BuyerPolicy(name="t", middlewares=("listed_price",))
     app = _app_with(policy)
     result = runner.invoke(
-        app, ["--policy-param", "a=1", "-P", "b=two"],
+        app,
+        ["--policy-param", "a=1", "-P", "b=two"],
     )
     assert result.exit_code == 0, result.output
     assert "('policy_param', ['a=1', 'b=two'])" in result.output
@@ -72,8 +74,12 @@ def test_assembled_buy_and_negotiate_surface_the_default_policy_flags():
     for verb in ("buy", "negotiate"):
         result = runner.invoke(app, [verb, "--help"])
         assert result.exit_code == 0, result.output
-        for flag in ("--initial-price", "--max-price", "--price-markup",
-                     "--policy-param"):
+        for flag in (
+            "--initial-price",
+            "--max-price",
+            "--price-markup",
+            "--policy-param",
+        ):
             assert flag in result.output, f"{verb} missing {flag}"
 
 
@@ -84,8 +90,6 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR,
-        _BUYER_PK,
         _MockResponse,
         _escrow_proposal,
         _provision,
@@ -106,6 +110,7 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
             "negotiation_id": "neg-1",
             "action": "accept",
             "proposal": {"fields": {"amount": 100}},
+            "accepted_provision_terms": _provision(3600).model_dump(mode="json"),
         }
         return _MockResponse(
             status=200,
@@ -117,13 +122,19 @@ def test_negotiate_with_seller_delivers_policy_params_to_the_chain():
         "core_buyer.negotiation_client.urllib.request.urlopen",
         side_effect=fake_urlopen,
     ):
-        negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="lst-1",
-        initial_price=50,
-        max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-        chain=[capturing_terminal],
-        policy_params={"oracle": "0xabc"},)
+        negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="lst-1",
+            initial_price=50,
+            max_price=100,
+            provision_terms=_provision(3600),
+            escrow_proposal=_escrow_proposal(),
+            chain=[capturing_terminal],
+            policy_params={"oracle": "0xabc"},
+        )
 
     assert seen_intermediates
     assert all(i.get("oracle") == "0xabc" for i in seen_intermediates)
@@ -144,6 +155,8 @@ def test_resume_point_carries_the_recorded_policy(tmp_path, monkeypatch):
         source_registry_url="http://registry:8080",
         source_registry_authority="registry",
         policy="bisection",
+        initial_price=50,
+        max_price=100,
     )
     log.event(
         "negotiation_round",
@@ -184,7 +197,8 @@ def test_round_0_exit_never_contacts_the_seller():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR, _BUYER_PK, _escrow_proposal, _provision,
+        _escrow_proposal,
+        _provision,
     )
 
     def refusing(history, context):
@@ -193,11 +207,18 @@ def test_round_0_exit_never_contacts_the_seller():
     with patch(
         "core_buyer.negotiation_client.urllib.request.urlopen",
     ) as urlopen:
-        outcome = negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="lst-1",
-        initial_price=50, max_price=100,
-        provision_terms=_provision(3600),
-        escrow_proposal=_escrow_proposal(),
-        chain=[refusing],)
+        outcome = negotiate_with_seller(
+            seller_url="http://seller:8001",
+            principal=BUYER_SIGNER.identity,
+            signer=BUYER_SIGNER,
+            resolve_seller_principals=seller_principals,
+            listing_id="lst-1",
+            initial_price=50,
+            max_price=100,
+            provision_terms=_provision(3600),
+            escrow_proposal=_escrow_proposal(),
+            chain=[refusing],
+        )
 
     assert outcome.status == "exited"
     assert outcome.reason == "not_today"
@@ -218,8 +239,10 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
 
     from domains.vms.buyer.buyer_client import negotiate_with_seller
     from domains.vms.buyer.tests.test_buyer_client import (
-        _BUYER_ADDR, _BUYER_PK, _MockResponse, _escrow_proposal,
-        _provision, _seller_proposal,
+        _MockResponse,
+        _escrow_proposal,
+        _provision,
+        _seller_proposal,
     )
 
     def opens_then_passes(history, context):
@@ -238,6 +261,7 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
             "negotiation_id": "neg-1",
             "action": "counter",
             "proposal": _seller_proposal(80),
+            "accepted_provision_terms": _provision(3600).model_dump(mode="json"),
         }
         return _MockResponse(
             status=200,
@@ -250,11 +274,18 @@ def test_chain_exhaustion_errors_and_releases_the_seller():
         side_effect=fake_urlopen,
     ):
         with pytest.raises(NegotiationChainExhausted):
-            negotiate_with_seller(seller_url="http://seller:8001", principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER, resolve_seller_principals=seller_principals, listing_id="lst-1",
-            initial_price=50, max_price=100,
-            provision_terms=_provision(3600),
-            escrow_proposal=_escrow_proposal(),
-            chain=[opens_then_passes],)
+            negotiate_with_seller(
+                seller_url="http://seller:8001",
+                principal=BUYER_SIGNER.identity,
+                signer=BUYER_SIGNER,
+                resolve_seller_principals=seller_principals,
+                listing_id="lst-1",
+                initial_price=50,
+                max_price=100,
+                provision_terms=_provision(3600),
+                escrow_proposal=_escrow_proposal(),
+                chain=[opens_then_passes],
+            )
 
     assert posted_bodies[-1]["action"] == "exit"
     assert posted_bodies[-1]["reason"] == "buyer_chain_no_decision"

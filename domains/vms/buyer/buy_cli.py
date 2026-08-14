@@ -22,10 +22,19 @@ import time
 import webbrowser
 from collections.abc import Callable
 from typing import Any
+from core_buyer import build_buyer_explanation, explain_registry_query
+from core_buyer.action_policy import (
+    ACTION_REQUIRED_EXIT_CODE,
+    BuyerActionHandler,
+    BuyerActionPolicy,
+    BuyerActionRequired,
+    resolve_buyer_action_policy,
+)
 
 import typer
 from arkhai_vms import make_vm_provision_terms
 from market_alkahest.schemas import EscrowProposal
+from market_alkahest.token import TokenResolutionError, resolve_token
 from market_identity import Identity
 from market_core.schemas import SettlementSelection
 from market_settlement_runtime import derive_obligation_ref
@@ -45,8 +54,10 @@ from .buy_orchestrator import (
     run_buy,
 )
 from .buyer_client import ResumeState, negotiate_with_seller
+from .settlement_composition import resolve_buyer_settlement_policy
 from .common import resolve_config_value
 from .cli_helpers import (
+    emit_buyer_explanation,
     resolve_prices_from_matches as _resolve_prices_from_matches,
 )
 from .deal_helpers import (
@@ -55,6 +66,7 @@ from .deal_helpers import (
     make_publisher_trust_resolver,
     open_run_log,
 )
+from .listing_cli import settlement_clause_error_message
 from .hosted_settlement import (
     start_hosted_settlement,
     wait_for_hosted_settlement,
@@ -79,7 +91,9 @@ def _make_hosted_settle_hook(
     poll_interval: float,
     total_timeout: float,
     sleep: Callable[[float], None],
+    action_policy: BuyerActionPolicy,
     open_url: Callable[[str], Any],
+    print_url: Callable[[str], Any],
     confirm: Callable[[int, dict[str, Any]], bool] | None = None,
 ):
     del provision
@@ -132,38 +146,33 @@ def _make_hosted_settle_hook(
             raise RuntimeError(
                 "storefront returned no opaque hosted settlement reference"
             )
-        opened_actions: set[tuple[str, int | None]] = set()
-
-        def handle_action(action: dict[str, Any]) -> None:
-            action_url = action.get("url")
-            if not isinstance(action_url, str) or not action_url:
-                return
-            marker = (action_url, action.get("expires_at_unix"))
-            if marker in opened_actions:
-                return
-            opened_actions.add(marker)
-            on_event(
+        action_handler = BuyerActionHandler(
+            action_policy,
+            open_url=open_url,
+            print_url=print_url,
+            on_required=lambda metadata: on_event(
                 "hosted_checkout_required",
                 {
                     "settlement_ref": settlement_ref,
-                    "action_kind": action.get("kind"),
-                    "action_expires_at_unix": action.get("expires_at_unix"),
+                    "action_policy": action_policy.value,
+                    **metadata.as_event(),
                 },
-            )
-            open_url(action_url)
+            ),
+        )
 
         initial_action = started.get("action")
-        if isinstance(initial_action, dict):
-            handle_action(initial_action)
+        public_action = initial_action if isinstance(initial_action, dict) else {}
         on_event(
             "settlement_started",
             {
                 "settlement_ref": settlement_ref,
                 "status": started.get("status"),
-                "action_kind": started.get("action_kind"),
-                "action_expires_at_unix": started.get("action_expires_at_unix"),
+                "action_kind": public_action.get("kind"),
+                "action_expires_at_unix": public_action.get("expires_at_unix"),
             },
         )
+        if public_action:
+            action_handler.handle(public_action)
         try:
             final = wait_for_hosted_settlement(
                 seller_url=seller_url,
@@ -173,15 +182,17 @@ def _make_hosted_settle_hook(
                 resolve_seller_principals=resolve_seller_principals,
                 poll_interval=poll_interval,
                 total_timeout=total_timeout,
-                on_action=handle_action,
+                on_action=action_handler.handle,
                 on_poll=lambda attempt, body: on_event(
                     "hosted_settlement_poll",
                     {
                         "attempt": attempt,
                         "settlement_ref": settlement_ref,
                         "status": body.get("status"),
-                        "action_kind": body.get("action_kind"),
-                        "action_expires_at_unix": body.get("action_expires_at_unix"),
+                        "action_kind": (body.get("action") or {}).get("kind"),
+                        "action_expires_at_unix": (body.get("action") or {}).get(
+                            "expires_at_unix"
+                        ),
                     },
                 ),
                 sleep=sleep,
@@ -247,15 +258,11 @@ def _run_resume_from(
     *,
     from_run: str,
     max_price: float | None,
-    ssh_public_key: str | None,
-    token_contract: str | None,
-    token_decimals: int | None,
-    chain_name: str | None,
-    expiration_seconds: int,
     max_rounds: int,
     poll_interval: float,
     settlement_timeout: float,
     console: Console,
+    action_policy: BuyerActionPolicy,
 ) -> None:
     """Composite resume: finish negotiation if mid-stream, then settle.
 
@@ -275,45 +282,15 @@ def _run_resume_from(
         resolve_identity_credential(),
     )
     if not is_negotiation_complete(from_run, signer=signer):
-        if max_price is None:
-            typer.secho(
-                "--max-price is required when resuming a mid-stream "
-                "negotiation (the strategy needs the buyer's ceiling).",
-                err=True,
-                fg=typer.colors.RED,
+        if max_price is not None:
+            raise typer.BadParameter(
+                "--max-price applies only to fresh buys; resume uses the "
+                "persisted scaled negotiation ceiling"
             )
-            raise typer.Exit(2)
-
-        # Scale --max-price from human / whole-token units to base units.
-        # Sellers publish ``price_per_hour`` already in base units, so a
-        # buyer ceiling of "2" against 6-decimal USDC means $2/hr → 2_000_000.
-        # Resolve token_decimals via the user override or on-chain decimals().
-        if token_decimals is None and token_contract:
-            # When the buyer's resuming mid-stream, the chain hasn't been
-            # selected yet. Use the chain pulled from the run-log via
-            # _chain_name_from_run_log; falls back to skipping decimals
-            # if the chain isn't yet known.
-            from market_alkahest.token import TokenResolutionError, resolve_token
-
-            from .common import chain_by_name
-            from .settle_cli import _chain_name_from_run_log
-
-            cname = chain_name or _chain_name_from_run_log(from_run, signer=signer)
-            if cname:
-                try:
-                    chain_cfg = chain_by_name(cname)
-                    meta = resolve_token(
-                        token_contract,
-                        rpc_url=chain_cfg.rpc_url,
-                        chain_id=chain_cfg.chain_id,
-                    )
-                    token_decimals = meta.decimals
-                except (TokenResolutionError, RuntimeError):
-                    token_decimals = None
-        if token_decimals is not None:
-            max_price = max_price * (10 ** int(token_decimals))
 
         resume_point = load_negotiation_resume_point(from_run, signer=signer)
+        resumed_initial_price = resume_point.initial_price
+        resumed_max_price = resume_point.max_price
         run_log = open_run_log(from_run, signer=signer)
         run_log.event(
             "negotiation_resumed",
@@ -331,7 +308,7 @@ def _run_resume_from(
         header.add_row("Listing", resume_point.listing_id)
         header.add_row("Negotiation", resume_point.negotiation_id)
         header.add_row("Rounds completed", str(resume_point.rounds_completed))
-        header.add_row("Ceiling", str(max_price))
+        header.add_row("Ceiling", str(resumed_max_price))
         console.print(Panel(header, title="market buy --from", border_style="cyan"))
 
         def _observe(round_idx: int, our_msg: dict, reply: dict) -> None:
@@ -370,8 +347,8 @@ def _run_resume_from(
                 principal=resume_point.buyer_principal,
                 signer=signer,
                 listing_id=resume_point.listing_id,
-                initial_price=0,
-                max_price=max_price,
+                initial_price=resumed_initial_price,
+                max_price=resumed_max_price,
                 max_rounds=max_rounds,
                 chain=resume_chain,
                 on_round=_observe,
@@ -380,6 +357,11 @@ def _run_resume_from(
                     transcript=resume_point.transcript,
                     last_seller_proposal=resume_point.last_seller_proposal,
                     rounds_completed=resume_point.rounds_completed,
+                    accepted_provision_terms=resume_point.accepted_provision_terms,
+                    accepted_escrow_proposal=resume_point.accepted_escrow_proposal,
+                    settlement_selection=resume_point.settlement_selection,
+                    settlement_plan=resume_point.settlement_plan,
+                    accepted_escrow_terms=resume_point.accepted_escrow_terms,
                 ),
                 resolve_seller_principals=resolve_seller_principals,
             )
@@ -448,18 +430,10 @@ def _run_resume_from(
 
     run_settle_from_log(
         run_id=from_run,
-        escrow_uid=None,
-        token_contract=token_contract,
-        token_decimals=token_decimals,
-        duration_seconds=None,
-        expiration_seconds=expiration_seconds,
-        ssh_public_key=ssh_public_key,
-        buyer_address=None,
-        buyer_private_key=None,
-        chain_name=chain_name,
         poll_interval=poll_interval,
         settlement_timeout=settlement_timeout,
         console=console,
+        action_policy=action_policy,
     )
 
 
@@ -542,44 +516,22 @@ def register(app: typer.Typer) -> None:
             help="Per-registry deadline in seconds (default: "
             "registry.discovery_timeout from config.toml, fallback 5).",
         ),
-        token_contract: str | None = typer.Option(
+        settlement: list[str] | None = typer.Option(
             None,
-            "--token-contract",
-            help="Optional filter: only consider listings whose accepted "
-            "escrow uses this ERC-20. Omit to accept whatever token the "
-            "seller's listing offers on your chain (the token, escrow "
-            "contract, and chain all come from the chosen listing).",
+            "--settlement",
+            help="Repeatable typed settlement alternative, for example "
+            "'mechanism=stripe asset=usd stripe.method=card'.",
         ),
-        token_decimals: int | None = typer.Option(
-            None,
-            "--token-decimals",
-            help="ERC-20 token decimals override. When omitted, decimals "
-            "are resolved on chain via the token contract's "
-            "decimals() view (and cached at "
-            "$XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json). "
-            "Pass this only when you want to skip the RPC lookup.",
-        ),
-        chain_name: str | None = typer.Option(
-            None,
-            "--chain",
-            help="Pick which configured [chains.<name>] entry to operate on. "
-            "Required when --yes is set and the buyer has more than one "
-            "chain configured; otherwise the buyer prompts.",
-        ),
-        settlement_asset: str | None = typer.Option(
-            None,
-            "--settlement-asset",
-            help="Select an exact advertised settlement asset (for example usd).",
-        ),
-        settlement_option_id: str | None = typer.Option(
-            None,
-            "--settlement-option-id",
-            help="Select one exact mechanism-neutral listing option ID.",
-        ),
-        no_browser: bool = typer.Option(
+        explain: bool = typer.Option(
             False,
-            "--no-browser",
-            help="Print hosted Checkout actions without opening a browser.",
+            "--explain",
+            help="Render a read-only selection plan and stop before negotiation.",
+        ),
+        action: BuyerActionPolicy | None = typer.Option(
+            None,
+            "--action",
+            help="Handle transient settlement actions: open, print, or fail. "
+            "Defaults to open in an interactive terminal and print otherwise.",
         ),
         expiration_seconds: int = typer.Option(
             3600,
@@ -623,18 +575,21 @@ def register(app: typer.Typer) -> None:
         ),
         **policy_values: Any,
     ) -> None:
-        """Run a buy end-to-end as a pure HTTP/web3 client.
+        """Run or resume a complete buyer lifecycle without a buyer daemon.
 
-        No buyer agent is started or consulted; every step is either a
-        signed HTTP call to a seller, a registry query, or a direct
-        on-chain call.
+        Discovery and negotiation use authenticated registry and seller HTTP
+        calls. The accepted settlement plan then dispatches to its installed
+        hosted or Alkahest mechanism; any required buyer interaction follows
+        ``--action``.
 
-        When ``--from <run_id>`` is supplied, picks up wherever the
-        prior run left off: finishes the negotiation if it stopped
-        mid-stream, then drives stages 3-5 (escrow → submit → poll).
+        ``--from <run_id>`` resumes the recorded negotiation and accepted
+        settlement identities rather than discovering or buying again.
         """
         console = Console()
-
+        action_policy = resolve_buyer_action_policy(
+            action,
+            interactive=os.isatty(0) and os.isatty(1),
+        )
 
         # The configured policy's parameters arrive through the injected
         # flags. They live in one policy-owned namespace: declared flag
@@ -653,22 +608,22 @@ def register(app: typer.Typer) -> None:
         max_price: float | None = policy_params_all.get("max_price")
 
         if from_run:
+            if explain:
+                raise typer.BadParameter(
+                    "--explain applies to fresh discovery; it cannot resume a run"
+                )
             _run_resume_from(
                 from_run=from_run,
                 max_price=max_price,
-                ssh_public_key=ssh_public_key,
-                token_contract=token_contract,
-                token_decimals=token_decimals,
-                chain_name=chain_name,
-                expiration_seconds=expiration_seconds,
                 max_rounds=max_rounds,
                 poll_interval=poll_interval,
                 settlement_timeout=settlement_timeout,
                 console=console,
+                action_policy=action_policy,
             )
             return
 
-        if duration_hours is None or duration_hours <= 0:
+        if not explain and (duration_hours is None or duration_hours <= 0):
             typer.secho(
                 "Fresh `market buy` runs require --duration-hours "
                 "(the buyer's lease ask).",
@@ -676,13 +631,13 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        duration_seconds = round(duration_hours * 3600)
+        duration_seconds = (
+            round(duration_hours * 3600) if duration_hours is not None else 0
+        )
         requested_start_utc = _normalize_start_utc(start_utc)
 
         explicit_prices = initial_price is not None and max_price is not None
-        if not explicit_prices and (initial_price is not None) != (
-            max_price is not None
-        ):
+        if not explain and (initial_price is not None) != (max_price is not None):
             typer.secho(
                 "Pass both --initial-price and --max-price, or neither "
                 "(in which case prices are derived from seller min_price).",
@@ -710,7 +665,21 @@ def register(app: typer.Typer) -> None:
             identity_config,
             resolve_identity_credential(),
         )
-        ssh = resolve_ssh_public_key(override=ssh_public_key)
+        ssh = None if explain else resolve_ssh_public_key(override=ssh_public_key)
+        try:
+            settlement_policy = resolve_buyer_settlement_policy()
+        except ValueError as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2) from exc
+        try:
+            settlement_clauses = settlement_policy.compile_clauses(settlement or ())
+        except ValueError as exc:
+            typer.secho(
+                settlement_clause_error_message(exc, settlement_policy),
+                err=True,
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(2) from exc
         configured_reg_urls = resolve_indexer_urls(override=registry_urls)
         registry_authorities = resolve_registry_authorities(configured_reg_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
@@ -727,18 +696,10 @@ def register(app: typer.Typer) -> None:
             for url, key in resolve_registry_api_keys().items()
             if url in registry_authorities
         }
-        from .settlement_composition import resolve_buyer_settlement_policy
 
-        try:
-            settlement_policy = resolve_buyer_settlement_policy()
-        except ValueError as exc:
-            typer.secho(str(exc), err=True, fg=typer.colors.RED)
-            raise typer.Exit(2) from exc
-
-        required_values = [
-            ("ssh_public_key", ssh),
-            ("registry_urls", reg_urls),
-        ]
+        required_values = [("registry_urls", reg_urls)]
+        if not explain:
+            required_values.append(("ssh_public_key", ssh))
         missing = [name for name, value in required_values if not value]
         if missing:
             typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
@@ -753,56 +714,57 @@ def register(app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
             raise typer.Exit(2)
-        tc = token_contract
         # Compile the same resource query against every selected registry
         # before retrieving candidates.
+        discovery = None
         try:
-            matches = query_registry_for_matches_multi(
-                reg_urls,
-                timeout=deadline,
-                signer=signer,
-                registry_authorities=registry_authorities,
-                resource_query=resource_query,
-                api_keys=registry_api_keys,
-            )
+            if explain:
+                discovery = explain_registry_query(
+                    reg_urls,
+                    timeout=deadline,
+                    signer=signer,
+                    registry_authorities=registry_authorities,
+                    resource_query=resource_query,
+                    api_keys=registry_api_keys,
+                )
+                matches = list(discovery.listings)
+            else:
+                matches = query_registry_for_matches_multi(
+                    reg_urls,
+                    timeout=deadline,
+                    signer=signer,
+                    registry_authorities=registry_authorities,
+                    resource_query=resource_query,
+                    api_keys=registry_api_keys,
+                )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3) from exc
-        compatible_matches: list[dict[str, Any]] = []
         expiration_unix = int(time.time()) + int(expiration_seconds)
-        for match in matches:
-            selected = settlement_policy.select(
-                match,
-                option_id=settlement_option_id,
-                asset=settlement_asset,
+        if explain:
+            assert discovery is not None
+
+            trace = settlement_policy.explain_listings(
+                matches,
+                clauses=settlement_clauses,
                 expiration_unix=expiration_unix,
             )
-            if selected is None:
-                continue
+            emit_buyer_explanation(build_buyer_explanation(discovery, trace))
+            return
+        selected_matches = settlement_policy.select_listings(
+            matches,
+            clauses=settlement_clauses,
+            expiration_unix=expiration_unix,
+        )
+        matches = []
+        for match, selected in selected_matches:
             normalized = dict(match)
             normalized["_selected_settlement"] = selected
             normalized["settlement_options"] = [selected.option.model_dump(mode="json")]
-            compatible_matches.append(normalized)
-        matches = compatible_matches
-        preferred_mechanism = next(
-            (
-                registration.mechanism_id
-                for registration in settlement_policy.ordered_registrations()
-                if any(
-                    candidate["_selected_settlement"].selection.mechanism
-                    == registration.mechanism_id
-                    for candidate in matches
-                )
-            ),
-            None,
+            matches.append(normalized)
+        preferred_mechanism = (
+            matches[0]["_selected_settlement"].selection.mechanism if matches else None
         )
-        if preferred_mechanism is not None:
-            matches = [
-                candidate
-                for candidate in matches
-                if candidate["_selected_settlement"].selection.mechanism
-                == preferred_mechanism
-            ]
 
         if not matches:
             typer.secho(
@@ -815,7 +777,7 @@ def register(app: typer.Typer) -> None:
         chain_cfg = None
         selected_chain_name = ""
         rpc = ""
-        addr_cfg = ""
+        addr_cfg: str | None = None
         addr = ""
         pk = ""
         build_escrow_terms = None
@@ -832,6 +794,7 @@ def register(app: typer.Typer) -> None:
 
             evm_matches: list[dict[str, Any]] = []
             advertised_chains: list[str] = []
+            advertised_tokens: list[str] = []
             for candidate in matches:
                 selected = candidate["_selected_settlement"]
                 entry = alkahest_entry_from_selection(selected)
@@ -842,38 +805,35 @@ def register(app: typer.Typer) -> None:
                     continue
                 if not _policy.compatible(entry):
                     continue
-                if chain_name is not None and advertised_chain != chain_name:
-                    continue
-                entry_token = accepted_token_address(entry)
-                if (
-                    tc is not None
-                    and isinstance(entry_token, str)
-                    and entry_token.lower() != tc.lower()
-                ):
-                    continue
                 evm_matches.append(candidate)
                 advertised_chains.append(advertised_chain)
+                entry_token = accepted_token_address(entry)
+                if isinstance(entry_token, str) and entry_token:
+                    advertised_tokens.append(entry_token)
             matches = evm_matches
             available_chains = tuple(dict.fromkeys(advertised_chains))
             if not available_chains:
                 typer.secho(
-                    "No selected Alkahest options match the requested chain/token.",
+                    "No selected Alkahest option has usable accepted escrow state.",
                     err=True,
                     fg=typer.colors.YELLOW,
                 )
                 raise typer.Exit(0)
-            if chain_name is None and len(available_chains) != 1:
+            if len(available_chains) != 1:
                 typer.secho(
-                    "Selected Alkahest options span multiple chains; pass --chain.",
+                    "Selected Alkahest options span multiple chains; constrain "
+                    "selection with --settlement 'mechanism=alkahest "
+                    "alkahest.chain=<name>'.",
                     err=True,
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
-            selected_chain_name = chain_name or available_chains[0]
+            selected_chain_name = available_chains[0]
             chain_cfg = chain_by_name(selected_chain_name)
             rpc = chain_cfg.rpc_url
             alkahest_section = settlement_policy.config.mechanism_config("alkahest")
-            addr_cfg = getattr(alkahest_section, "address_config_path", None)
+            raw_addr_cfg = getattr(alkahest_section, "address_config_path", None)
+            addr_cfg = raw_addr_cfg if isinstance(raw_addr_cfg, str) else None
             addr, pk = resolve_buyer_wallet()
             if not addr or not pk:
                 typer.secho(
@@ -882,27 +842,26 @@ def register(app: typer.Typer) -> None:
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
-            if explicit_prices and not tc:
-                typer.secho(
-                    "Explicit prices for Alkahest require --token-contract.",
-                    err=True,
-                    fg=typer.colors.RED,
+            if explicit_prices:
+                unique_tokens = tuple(
+                    dict.fromkeys(token.lower() for token in advertised_tokens)
                 )
-                raise typer.Exit(2)
-            if explicit_prices and token_decimals is None:
-                from market_alkahest.token import TokenResolutionError, resolve_token
+                if len(unique_tokens) != 1:
+                    raise typer.BadParameter(
+                        "explicit Alkahest prices require one selected asset; "
+                        "constrain it with --settlement asset=<token>"
+                    )
 
                 try:
                     token_decimals = resolve_token(
-                        tc,
+                        unique_tokens[0],
                         rpc_url=rpc,
                         chain_id=chain_cfg.chain_id,
                     ).decimals
                 except (TokenResolutionError, RuntimeError) as exc:
                     raise typer.BadParameter(
-                        "could not resolve the selected Alkahest token decimals"
+                        "could not resolve the selected Alkahest asset decimals"
                     ) from exc
-            if explicit_prices:
                 scale = 10 ** int(token_decimals)
                 initial_price = initial_price * scale
                 max_price = max_price * scale
@@ -1068,9 +1027,14 @@ def register(app: typer.Typer) -> None:
                 st = (body.get("body") or {}).get("status")
                 console.print(f"[dim]poll #{body.get('attempt')}[/dim]  status={st}")
             elif stage == "hosted_checkout_required":
-                console.print(
-                    "[cyan]Checkout[/cyan]  complete payment in the opened browser"
-                )
+                selected_action = body.get("action_policy")
+                if selected_action == "open":
+                    detail = "complete the action in the opened browser"
+                elif selected_action == "print":
+                    detail = "complete the action at the printed URL"
+                else:
+                    detail = "interaction is required"
+                console.print(f"[cyan]Buyer action[/cyan]  {detail}")
             elif stage == "hosted_settlement_poll":
                 console.print(
                     f"[dim]funding poll #{body.get('attempt')}[/dim]  "
@@ -1114,11 +1078,6 @@ def register(app: typer.Typer) -> None:
             chain=negotiation_chain,
         )
         if hosted_mode:
-            if (
-                settlement_asset is not None
-                and settlement_asset != settlement_asset.lower()
-            ):
-                raise RuntimeError("--settlement-asset must be lowercase")
 
             def confirm_hosted(amount: int, listing: dict[str, Any]) -> bool:
                 console.print(
@@ -1127,13 +1086,8 @@ def register(app: typer.Typer) -> None:
                 )
                 return typer.confirm("Proceed to hosted Checkout?", default=False)
 
-            def show_hosted_action(url: str) -> None:
-                console.print("Complete payment in the hosted Checkout page.")
-                if no_browser:
-                    console.print(url)
-                    return
-
-                webbrowser.open(url)
+            def print_hosted_action(url: str) -> None:
+                console.print(url, markup=False)
 
             settle_hook = _make_hosted_settle_hook(
                 config=config,
@@ -1141,7 +1095,9 @@ def register(app: typer.Typer) -> None:
                 poll_interval=poll_interval,
                 total_timeout=settlement_timeout,
                 sleep=time.sleep,
-                open_url=show_hosted_action,
+                action_policy=action_policy,
+                open_url=webbrowser.open,
+                print_url=print_hosted_action,
                 confirm=(confirm_hosted if not assume_yes and os.isatty(0) else None),
             )
         else:
@@ -1170,6 +1126,9 @@ def register(app: typer.Typer) -> None:
                 max_matches_to_try=max_matches,
                 on_event=_observe,
             )
+        except BuyerActionRequired as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)
+            raise typer.Exit(ACTION_REQUIRED_EXIT_CODE) from exc
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)

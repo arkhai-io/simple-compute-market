@@ -136,14 +136,20 @@ def _start_log(**fields):
     return RunLog.start(principal=BUYER_SIGNER.identity, **fields)
 
 
-def _seed_partial_negotiation(seller_url: str, listing_id: str) -> str:
-    """Write a run-log resembling an interrupted `market negotiate`:
-    one round logged (seller countered at 90), no run_ended yet.
-    """
+def _seed_partial_negotiation(
+    seller_url: str,
+    listing_id: str,
+    *,
+    initial_price: float = 50,
+    max_price: float = 100,
+) -> str:
+    """Write an interrupted negotiation with its immutable price policy."""
     log = _start_log(
         command="market negotiate",
         seller_url=seller_url,
         listing_id=listing_id,
+        initial_price=initial_price,
+        max_price=max_price,
     )
     log.event(
         "negotiation_round",
@@ -164,6 +170,8 @@ def _seed_agreed_negotiation(seller_url: str, listing_id: str) -> str:
         command="market negotiate",
         seller_url=seller_url,
         listing_id=listing_id,
+        initial_price=50,
+        max_price=100,
     )
     log.event(
         "negotiation_round",
@@ -213,29 +221,33 @@ class TestNegotiateFrom:
                 "negotiate",
                 "--from",
                 run_id,
-                "--max-price",
-                "100",
-                "--token-decimals",
-                "0",
             ],
         )
 
         assert result.exit_code == 0, result.output
 
-    def test_resume_without_max_price_errors(self, runner):
-        """The strategy needs the buyer's ceiling — without --max-price
-        the resume path bails out before any HTTP work."""
-        run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
-        result = runner.invoke(
-            app,
-            [
-                "negotiate",
-                "--from",
-                run_id,
-            ],
+    def test_resume_recovers_scaled_alkahest_ceiling_from_run_log(
+        self,
+        runner,
+        monkeypatch,
+    ):
+        run_id = _seed_partial_negotiation(
+            "http://seller:8001",
+            "L-1",
+            initial_price=50_000_000,
+            max_price=100_000_000,
         )
-        assert result.exit_code == 2
-        assert "max-price" in result.output.lower()
+        monkeypatch.setattr(
+            "core_buyer.negotiation_client.urllib.request.urlopen",
+            _urlopen_for(
+                [{"action": "accept", "proposal": {"fields": {"amount": 70}}}]
+            ),
+        )
+
+        result = runner.invoke(app, ["negotiate", "--from", run_id])
+
+        assert result.exit_code == 0, result.output
+        assert "100000000" in result.output
 
     def test_resume_appends_resumed_from_to_new_log(self, runner, monkeypatch):
         """Each `negotiate` invocation opens its own run-log; resume
@@ -254,10 +266,6 @@ class TestNegotiateFrom:
                 "negotiate",
                 "--from",
                 original_run,
-                "--max-price",
-                "100",
-                "--token-decimals",
-                "0",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -318,10 +326,6 @@ class TestBuyFrom:
                 "buy",
                 "--from",
                 run_id,
-                "--max-price",
-                "100",
-                "--token-decimals",
-                "0",
             ],
         )
 
@@ -405,10 +409,6 @@ class TestBuyFrom:
                 "buy",
                 "--from",
                 run_id,
-                "--max-price",
-                "100",
-                "--token-decimals",
-                "0",
             ],
         )
 
@@ -559,9 +559,6 @@ class TestBuyFrom:
                 "ssh-ed25519 AAAA buyer@test",
                 "--registry-urls",
                 "http://reg",
-                "--chain",
-                "anvil",
-                "--yes",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -570,16 +567,12 @@ class TestBuyFrom:
         assert captured["config"].registry_urls == ["http://reg"]
         assert captured["proposal"].chain_name == "anvil"
 
-    def test_buy_from_mid_stream_without_max_price_errors(
+    def test_buy_from_rejects_current_max_price_override(
         self,
         runner,
         monkeypatch,
     ):
-        """`buy --from` with mid-stream negotiation requires --max-price."""
         run_id = _seed_partial_negotiation("http://seller:8001", "L-1")
-
-        # Patch settle so a stray invocation would be visible (it
-        # shouldn't be reached at all here).
         monkeypatch.setattr(
             "domains.vms.buyer.buy_cli.run_settle_from_log",
             lambda **kw: pytest.fail("settle should not run when validation fails"),
@@ -591,7 +584,9 @@ class TestBuyFrom:
                 "buy",
                 "--from",
                 run_id,
+                "--max-price",
+                "101",
             ],
         )
         assert result.exit_code == 2
-        assert "max-price" in result.output.lower()
+        assert "persisted scaled negotiation ceiling" in result.output

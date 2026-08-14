@@ -191,8 +191,9 @@ def _lookup(container: Mapping[str, Any], parts: tuple[str, ...]) -> Any | None:
     for index, part in enumerate(parts):
         if not isinstance(current, Mapping) or part not in current:
             return None
-        if index == len(parts) - 1 and callable(getattr(current, "item", None)):
-            return current.item(part)
+        item = getattr(current, "item", None)
+        if index == len(parts) - 1 and callable(item):
+            return item(part)
         current = current[part]
     return current
 
@@ -288,7 +289,9 @@ def _same_value(left: Any, right: Any) -> bool:
 
 
 class _Planner:
-    def __init__(self, document: MutableMapping[str, Any], role: SettlementRole) -> None:
+    def __init__(
+        self, document: MutableMapping[str, Any], role: SettlementRole
+    ) -> None:
         self.document = document
         self.role = role
         self.actions: list[MigrationAction] = []
@@ -314,8 +317,12 @@ class _Planner:
         if value is not None:
             _copy_trivia(source_item, moved_item)
         destination_item = _lookup(self.document, destination)
-        if destination_item is not None and not _same_value(destination_item, moved_item):
-            raise SettlementMigrationConflict(_path_text(source), _path_text(destination))
+        if destination_item is not None and not _same_value(
+            destination_item, moved_item
+        ):
+            raise SettlementMigrationConflict(
+                _path_text(source), _path_text(destination)
+            )
         if destination_item is None:
             parent = _ensure_table(self.document, destination[:-1])
             parent[destination[-1]] = moved_item
@@ -417,9 +424,7 @@ class _Planner:
         if not occurrences:
             return
         self.alkahest_seen = True
-        self.enablement_sources.setdefault(
-            "alkahest", _path_text(occurrences[0][0])
-        )
+        self.enablement_sources.setdefault("alkahest", _path_text(occurrences[0][0]))
         nonempty = [
             entry for entry in occurrences if str(_plain(entry[1]) or "").strip()
         ]
@@ -429,8 +434,7 @@ class _Planner:
                 (
                     entry
                     for entry in nonempty[1:]
-                    if str(_plain(entry[1])).strip()
-                    != str(_plain(first_item)).strip()
+                    if str(_plain(entry[1])).strip() != str(_plain(first_item)).strip()
                 ),
                 None,
             )
@@ -442,7 +446,9 @@ class _Planner:
         if nonempty:
             first_path, first_item = nonempty[0]
             destination_item = _lookup(self.document, destination)
-            if destination_item is not None and not _same_value(destination_item, first_item):
+            if destination_item is not None and not _same_value(
+                destination_item, first_item
+            ):
                 raise SettlementMigrationConflict(
                     _path_text(first_path), _path_text(destination)
                 )
@@ -474,15 +480,23 @@ class _Planner:
 
         destination = ("Settlement", "priority")
         current_item = _lookup(self.document, destination)
-        current = _normalized_priority(current_item) if current_item is not None else None
+        current = (
+            _normalized_priority(current_item) if current_item is not None else None
+        )
         derived = list(self.legacy_priority or current or [])
         if self.alkahest_seen and ALKAHEST_MECHANISM not in derived:
             derived.append(ALKAHEST_MECHANISM)
         if self.stripe_enabled and STRIPE_MECHANISM not in derived:
             derived.append(STRIPE_MECHANISM)
 
-        if self.legacy_priority is not None and current is not None and current != derived:
-            raise SettlementMigrationConflict("settlement.mechanism_priority", "Settlement.priority")
+        if (
+            self.legacy_priority is not None
+            and current is not None
+            and current != derived
+        ):
+            raise SettlementMigrationConflict(
+                "settlement.mechanism_priority", "Settlement.priority"
+            )
         if derived and current is None:
             parent = _ensure_table(self.document, ("Settlement",))
             if (
@@ -499,9 +513,7 @@ class _Planner:
                 iter(self.enablement_sources.values()),
                 "settlement.mechanism_priority",
             )
-            raise SettlementMigrationConflict(
-                conflict_source, "Settlement.priority"
-            )
+            raise SettlementMigrationConflict(conflict_source, "Settlement.priority")
 
         if self.actions and derived:
             self._set_enabled("alkahest", ALKAHEST_MECHANISM in derived)
@@ -665,8 +677,10 @@ def _validate_candidate(
                     raise SettlementMigrationValidationError(
                         f"Settlement.{key} contains an unknown key (value redacted)"
                     )
-            if isinstance(section, dict) and "enabled" in section and not isinstance(
-                section["enabled"], bool
+            if (
+                isinstance(section, dict)
+                and "enabled" in section
+                and not isinstance(section["enabled"], bool)
             ):
                 raise SettlementMigrationValidationError(
                     f"Settlement.{key}.enabled must be a boolean"
@@ -724,7 +738,9 @@ def _reject_remaining_legacy(parsed: Mapping[str, Any]) -> None:
             )
     for name in _LEGACY_ALKAHEST_FIELDS:
         if name in parsed:
-            raise SettlementMigrationValidationError(f"legacy settlement path {name} remains")
+            raise SettlementMigrationValidationError(
+                f"legacy settlement path {name} remains"
+            )
     if "settlement" in parsed:
         raise SettlementMigrationValidationError(
             "legacy settlement path settlement remains"
@@ -844,6 +860,23 @@ def _atomic_write_with_backup(
             backup_path.unlink(missing_ok=True)
             _fsync_directory(path.parent)
         raise
+
+
+def atomic_write_with_backup(
+    path: Path,
+    *,
+    original: bytes,
+    candidate: bytes,
+    original_stat: os.stat_result,
+) -> Path:
+    """Atomically replace one unchanged restrictive file after exact backup."""
+
+    return _atomic_write_with_backup(
+        path,
+        original=original,
+        candidate=candidate,
+        original_stat=original_stat,
+    )
 
 
 def migrate_settlement_config(

@@ -1,23 +1,32 @@
-"""`market settle` — composite stages 3-5 of a deal.
+"""Resume an accepted settlement and provisioning lifecycle.
 
-Resumes a buy from the post-negotiation point: creates the on-chain
-escrow if not already created, POSTs `/settle/{escrow_uid}` to the
-seller, polls until terminal. Driven by a buyer run-log produced by
-`market negotiate` (or a partially-completed `market buy`).
+The accepted plan selects the mechanism. Hosted Stripe recovery starts or
+resumes its opaque settlement reference and applies the configured buyer
+action policy. Alkahest recovery creates the accepted on-chain obligation when
+needed, submits it to the seller, and polls the deal to terminal state.
 
-Composite by design — for the rare cases where you want only stage 3
-(escrow.create) without involving the seller, use
-`market escrow create --run <id>`.
+Raw Alkahest inspection and mutation remain under
+``market settlement alkahest escrow``.
 """
 
 from __future__ import annotations
 
+import os
+import webbrowser
 from types import SimpleNamespace
 
 import typer
+from arkhai_vms.provision_terms import VmProvisionPayload, VmProvisionTerms
 from market_core.schemas import SettlementPlan
 from market_identity import Identity
 from market_settlement_runtime import derive_obligation_ref
+from core_buyer.action_policy import (
+    ACTION_REQUIRED_EXIT_CODE,
+    BuyerActionHandler,
+    BuyerActionPolicy,
+    BuyerActionRequired,
+    resolve_buyer_action_policy,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -107,33 +116,54 @@ def _hosted_obligation(deal) -> dict | None:
     return hosted[0].model_dump(mode="json")
 
 
+def _accepted_provision_inputs(deal) -> tuple[str | None, int]:
+    """Recover immutable provision inputs, reserving config for legacy absence."""
+
+    raw = deal.accepted_provision_terms
+    if raw is None:
+        if deal.settlement_selection is not None or deal.settlement_plan is not None:
+            raise typer.BadParameter(
+                "accepted settlement state omitted accepted_provision_terms; "
+                "current configuration will not reinterpret this run"
+            )
+        return None, int(deal.duration_seconds)
+    try:
+        if isinstance(raw, dict) and "payload" in raw:
+            payload = VmProvisionTerms.model_validate(raw).payload
+            accepted = VmProvisionPayload.model_validate(payload)
+        else:
+            accepted = VmProvisionPayload.model_validate(raw)
+    except (TypeError, ValueError) as exc:
+        raise typer.BadParameter(
+            "run-log has malformed accepted VM provision terms"
+        ) from exc
+    ssh_public_key = accepted.ssh_public_key.strip()
+    if not ssh_public_key:
+        raise typer.BadParameter(
+            "accepted VM provision terms have no SSH public key; current "
+            "configuration will not reinterpret this run"
+        )
+    return ssh_public_key, accepted.duration_seconds
+
+
 def run_settle_from_log(
     *,
     run_id: str,
-    escrow_uid: str | None,
-    token_contract: str | None,
-    token_decimals: int | None,
-    duration_seconds: int | None,
-    expiration_seconds: int,
-    ssh_public_key: str | None,
-    buyer_address: str | None,
-    buyer_private_key: str | None,
-    chain_name: str | None,
     poll_interval: float,
     settlement_timeout: float,
     console: Console | None = None,
+    action_policy: BuyerActionPolicy | None = None,
 ) -> dict:
-    """Drive stages 3-5 of a deal from a buyer run-log.
+    """Resume one accepted deal from its buyer run log.
 
-    Reusable by both ``market settle`` and ``market buy --from``.
-    Reads the run-log for ``run_id``, creates the on-chain escrow if
-    not already present, POSTs ``/settle/{escrow_uid}`` to the seller,
-    and polls until terminal. Logs each stage transition back into
-    the same run-log.
+    Reusable by both ``market settle`` and ``market buy --from``. The accepted
+    mechanism and operation identities remain authoritative: hosted recovery
+    resumes its opaque reference, while Alkahest recovery creates a missing
+    accepted escrow. Both paths persist transitions to the same run log and
+    drive the seller lifecycle to a terminal state.
 
-    Returns the final settle-status body. Raises ``typer.Exit`` on
-    fatal errors (resolution failures, on-chain failures, polling
-    timeout, non-``ready`` terminal status).
+    Returns the final status body. Raises ``typer.Exit`` on fatal resolution,
+    mechanism, provider/chain, timeout, or non-ready terminal failures.
     """
     console = console or Console()
     from .common import (
@@ -176,7 +206,8 @@ def run_settle_from_log(
             raise typer.BadParameter(
                 "accepted settlement operation identity conflicts with the run-log"
             )
-        settlement_ref = escrow_uid or deal.settlement_ref
+        started: dict | None = None
+        settlement_ref = deal.settlement_ref
         if settlement_ref is None:
             started = start_hosted_settlement(
                 seller_url=deal.seller_url,
@@ -208,13 +239,30 @@ def run_settle_from_log(
                 ),
             )
 
-        def _open_action(action: dict) -> None:
-            url = action.get("url")
-            if isinstance(url, str) and url:
-                import webbrowser
+        resolved_action_policy = action_policy or BuyerActionPolicy.PRINT
 
-                console.print("[dim]opening hosted checkout action[/dim]")
-                webbrowser.open(url)
+        def _open_action_url(url: str) -> None:
+
+            console.print("[dim]opening buyer settlement action[/dim]")
+            webbrowser.open(url)
+
+        action_handler = BuyerActionHandler(
+            resolved_action_policy,
+            open_url=_open_action_url,
+            print_url=lambda url: console.print(url, markup=False),
+            on_required=lambda metadata: log.event(
+                "hosted_checkout_required",
+                settlement_ref=settlement_ref,
+                action_policy=resolved_action_policy.value,
+                **metadata.as_event(),
+            ),
+        )
+        if started is not None and isinstance(started.get("action"), dict):
+            try:
+                action_handler.handle(started["action"])
+            except BuyerActionRequired as exc:
+                typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)
+                raise typer.Exit(ACTION_REQUIRED_EXIT_CODE) from exc
 
         def _hosted_poll(attempt: int, body: dict) -> None:
             action = body.get("action") or {}
@@ -227,17 +275,21 @@ def run_settle_from_log(
                 action_expires_at_unix=action.get("expires_at_unix"),
             )
 
-        final = wait_for_hosted_settlement(
-            seller_url=deal.seller_url,
-            settlement_ref=settlement_ref,
-            principal=deal.buyer_principal,
-            signer=signer,
-            poll_interval=poll_interval,
-            total_timeout=settlement_timeout,
-            on_poll=_hosted_poll,
-            on_action=_open_action,
-            resolve_seller_principals=resolve_seller_principals,
-        )
+        try:
+            final = wait_for_hosted_settlement(
+                seller_url=deal.seller_url,
+                settlement_ref=settlement_ref,
+                principal=deal.buyer_principal,
+                signer=signer,
+                poll_interval=poll_interval,
+                total_timeout=settlement_timeout,
+                on_poll=_hosted_poll,
+                on_action=action_handler.handle,
+                resolve_seller_principals=resolve_seller_principals,
+            )
+        except BuyerActionRequired as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.YELLOW)
+            raise typer.Exit(ACTION_REQUIRED_EXIT_CODE) from exc
         status = str(final.get("status") or "unknown")
         log.event(
             "hosted_settlement_terminal",
@@ -257,22 +309,20 @@ def run_settle_from_log(
     from .settlement_composition import resolve_alkahest_address_config_path
 
     alkahest_address_config_path = resolve_alkahest_address_config_path()
+    accepted_ssh_public_key, effective_duration = _accepted_provision_inputs(deal)
 
-    effective_token = token_contract or deal.token_contract
+    effective_token = deal.token_contract
     effective_token_decimals: int | None = (
-        int(token_decimals)
-        if token_decimals is not None
-        else (int(deal.token_decimals) if deal.token_decimals is not None else None)
+        int(deal.token_decimals) if deal.token_decimals is not None else None
     )
     chain_cfg_name = (
         _accepted_proposal_chain(deal)
         or _chain_name_from_run_log(run_id, signer=signer)
-        or chain_name
         or _first_listing_chain(deal)
     )
     if not chain_cfg_name:
         typer.secho(
-            "Could not determine the selected EVM chain. Pass --chain.",
+            "Could not derive the selected EVM chain from accepted state.",
             err=True,
             fg=typer.colors.RED,
         )
@@ -281,11 +331,12 @@ def run_settle_from_log(
     if deal.accepted_escrow_proposal is not None:
         from .common import resolve_buyer_wallet, resolve_ssh_public_key
 
-        resolved_buyer_address, resolved_buyer_private_key = resolve_buyer_wallet(
-            override_addr=buyer_address,
-            override_pk=buyer_private_key,
+        resolved_buyer_address, resolved_buyer_private_key = resolve_buyer_wallet()
+        resolved_ssh_public_key = (
+            accepted_ssh_public_key
+            if accepted_ssh_public_key is not None
+            else resolve_ssh_public_key()
         )
-        resolved_ssh_public_key = resolve_ssh_public_key(override=ssh_public_key)
         missing: list[str] = []
         if not resolved_buyer_address:
             missing.append("wallet.address")
@@ -312,19 +363,16 @@ def run_settle_from_log(
         )
     else:
         chain = resolve_chain_settings(
-            buyer_address=buyer_address,
-            buyer_private_key=buyer_private_key,
-            ssh_public_key=ssh_public_key,
+            buyer_address=None,
+            buyer_private_key=None,
+            ssh_public_key=accepted_ssh_public_key,
             chain=chain_cfg,
             token_contract=effective_token,
             token_decimals=effective_token_decimals,
         )
         chain.alkahest_addr_config = alkahest_address_config_path
 
-    resolved_uid = escrow_uid or deal.escrow_uid
-    effective_duration = (
-        duration_seconds if duration_seconds is not None else deal.duration_seconds
-    )
+    resolved_uid = deal.escrow_uid
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -396,7 +444,7 @@ def run_settle_from_log(
                 escrow_address=escrow_address,
                 fields={"token": chain.token_contract},
                 literal_fields={"token": chain.token_contract},
-                expiration_unix=int(_time.time()) + expiration_seconds,
+                expiration_unix=int(_time.time()) + 3600,
             )
 
         if deal.accepted_escrow_terms is None:
@@ -526,52 +574,8 @@ def register(app: typer.Typer) -> None:
             "--from",
             "--run",
             "-r",
-            help="Buyer run-id from a prior `market negotiate` to resume "
-            "from (see `market logs runs`).",
-        ),
-        escrow_uid: str | None = typer.Option(
-            None,
-            "--escrow-uid",
-            "-u",
-            help="Skip escrow.create when the on-chain escrow already exists. "
-            "If absent, the run-log is checked for an `escrow_created` event.",
-        ),
-        token_contract: str | None = typer.Option(
-            None,
-            "--token-contract",
-            help="Legacy ERC-20 token override for old run-logs without an "
-            "accepted escrow proposal. Current run-logs settle from the "
-            "seller-accepted proposal.",
-        ),
-        token_decimals: int | None = typer.Option(
-            None,
-            "--token-decimals",
-            help="Legacy ERC-20 decimals override for old run-logs without "
-            "an accepted escrow proposal.",
-        ),
-        duration_hours: float | None = typer.Option(
-            None,
-            "--duration-hours",
-            "-t",
-            help="Override the lease duration the escrow funds (hours, fractional ok). "
-            "Default: from the run-log if recorded.",
-        ),
-        expiration_seconds: int = typer.Option(
-            3600,
-            "--expiration",
-            help="Escrow deadline (seconds from now) for the reclaim_expired escape hatch.",
-        ),
-        ssh_public_key: str | None = typer.Option(
-            None,
-            "--ssh-public-key",
-            help="SSH public key for provisioning (default: wallet.ssh_public_key).",
-        ),
-        chain_name: str | None = typer.Option(
-            None,
-            "--chain",
-            help="Override which configured [chains.<name>] entry to settle on. "
-            "When omitted, reads chain_name from the accepted proposal "
-            "or escrow_created event.",
+            help="Buyer run-id with an accepted settlement to resume "
+            "(see `market logs runs`).",
         ),
         poll_interval: float = typer.Option(
             DEFAULT_SETTLEMENT_POLL_INTERVAL,
@@ -583,33 +587,30 @@ def register(app: typer.Typer) -> None:
             "--settlement-timeout",
             help="Max seconds to wait for provisioning before giving up.",
         ),
+        action: BuyerActionPolicy | None = typer.Option(
+            None,
+            "--action",
+            help="Handle transient settlement actions: open, print, or fail. "
+            "Defaults to open in an interactive terminal and print otherwise.",
+        ),
     ) -> None:
         """Resume a buy from the post-negotiation point.
 
-        Reads the buyer run-log for `<run_id>`, creates the on-chain
-        escrow if not already present, POSTs `/settle/{escrow_uid}` to
-        the seller, and polls until terminal. Logs each stage transition
-        back into the same run-log so a future `market logs show <id>`
-        captures the full deal history.
+        Reads the accepted settlement from the buyer run-log, starts or resumes
+        its pinned obligation, submits fulfillment to the seller, and polls until
+        terminal. The same run-log is appended throughout.
 
-        Requires the run-log to contain an `agreed` negotiation outcome.
+        Requires the run-log to contain an accepted negotiation outcome.
         For mid-negotiation resume use `market buy --from <id>` instead.
         """
-        # Convert user-friendly hours flag to the wire's seconds.
-        duration_seconds_override = (
-            round(duration_hours * 3600) if duration_hours is not None else None
+
+        action_policy = resolve_buyer_action_policy(
+            action,
+            interactive=os.isatty(0) and os.isatty(1),
         )
         run_settle_from_log(
             run_id=run_id,
-            escrow_uid=escrow_uid,
-            token_contract=token_contract,
-            token_decimals=token_decimals,
-            duration_seconds=duration_seconds_override,
-            expiration_seconds=expiration_seconds,
-            ssh_public_key=ssh_public_key,
-            buyer_address=None,
-            buyer_private_key=None,
-            chain_name=chain_name,
             poll_interval=poll_interval,
             settlement_timeout=settlement_timeout,
+            action_policy=action_policy,
         )

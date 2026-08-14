@@ -38,6 +38,10 @@ execute, or reject if meaning changed
 
 This is stronger than ordinary cache freshness. It is semantic concurrency control. Clients that omit the precondition do not receive that protection, and the ETag does not by itself provide rolling compatibility across non-additive schema changes.
 
+The resource-query compiler therefore reads the active filter specification before parsing field semantics. Aliases, accepted operators, types, and missing-value rules come from that document rather than a VM-specific CLI table. The compiled canonical parameters retain the same ETag and behavior-affecting values enter the signed semantic request body.
+
+This pushdown boundary is semantic, not a promise about physical execution. A declared predicate can be evaluated through the registry's current scan path whether or not metadata mentions indexing. Explanation reports that the registry owns the predicate; it does not claim an index or alternate route. A future indexed path must first prove semantic equivalence under its own activation contract.
+
 ## Configuration boundary
 
 A registry may load another vocabulary on restart, but safe live rotation and coexistence of incompatible client generations are separate rollout concerns. The baseline does not treat a configured registry as a universal domain interpreter.

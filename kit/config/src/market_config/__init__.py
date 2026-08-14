@@ -18,6 +18,7 @@ from .settlement_migration import (
     SettlementMigrationError,
     SettlementMigrationResult,
     SettlementMigrationValidationError,
+    atomic_write_with_backup,
     environment_renames,
     format_migration_result,
     is_legacy_settlement_path,
@@ -39,6 +40,7 @@ __all__ = [
     "SettlementMigrationError",
     "SettlementMigrationResult",
     "SettlementMigrationValidationError",
+    "atomic_write_with_backup",
     "environment_renames",
     "format_migration_result",
     "is_legacy_settlement_path",
@@ -47,4 +49,3 @@ __all__ = [
     "reject_legacy_settlement_path",
     "resolve_model",
 ]
-

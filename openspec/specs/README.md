@@ -15,6 +15,7 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|---|
 | API credits | [Spec](api-credits/spec.md) | [Architecture](api-credits/architecture.md) |
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
+| CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |

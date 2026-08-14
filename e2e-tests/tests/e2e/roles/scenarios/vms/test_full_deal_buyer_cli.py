@@ -126,7 +126,7 @@ DEMAND_RESOURCE = {
         # tokens against this contract so the storefront's pre-settlement
         # on-chain verifier (commit 03e47bf) finds the EAS attestation.
         "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-        "decimals": 0,   # listing-display only; raw amounts are what land on-chain
+        "decimals": 0,  # listing-display only; raw amounts are what land on-chain
     },
     "amount": 10_000,
 }
@@ -140,33 +140,37 @@ _ALKAHEST_ADDRESSES_PATH = str(
     resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
 )
 _ALKAHEST_CFG = resolve_alkahest_address_config(
-    get_alkahest_network("anvil"), config_path=_ALKAHEST_ADDRESSES_PATH,
+    get_alkahest_network("anvil"),
+    config_path=_ALKAHEST_ADDRESSES_PATH,
 )
-ACCEPTED_ESCROWS = [{
-    "chain_name": "anvil",
-    "escrow_address": str(
-        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_default
-    ).lower(),
-    "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-    "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
-}]
+ACCEPTED_ESCROWS = [
+    {
+        "chain_name": "anvil",
+        "escrow_address": str(_ALKAHEST_CFG.erc20_addresses.escrow_obligation_default).lower(),
+        "literal_fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+        "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
+    }
+]
 
 
 def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [{
-        "chain_name": "anvil",
-        "arbiter": get_recipient_arbiter(
-            "anvil", config_path=_ALKAHEST_ADDRESSES_PATH,
-        ).lower(),
-        "demand_data": {"recipient": seller_wallet.lower()},
-    }]
+    return [
+        {
+            "chain_name": "anvil",
+            "arbiter": get_recipient_arbiter(
+                "anvil",
+                config_path=_ALKAHEST_ADDRESSES_PATH,
+            ).lower(),
+            "demand_data": {"recipient": seller_wallet.lower()},
+        }
+    ]
 
 
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
+BUYER_INITIAL_PRICE = 7_000  # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
-REMOVE_RULE_ID = "e2e-remove-pause"   # mock rule that pauses provider teardown
+REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
 compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm1
@@ -176,23 +180,18 @@ compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2
 # Phase 0 — E2E readiness
 # ===========================================================================
 
+
 class TestStage00a_StorefrontHealth:
-    def test_00a_storefront_is_healthy(
-        self, storefront_admin_client, deal_state: DealState
-    ):
+    def test_00a_storefront_is_healthy(self, storefront_admin_client, deal_state: DealState):
         """GET /health → status=ok, database=ok.
 
         Validates storefront process is up and SQLite is reachable before
         any state-changing call is made.
         """
         health = storefront_admin_client.get_health()
-        assert health.status == "ok", (
-            f"Storefront health degraded before test run: {health}"
-        )
+        assert health.status == "ok", f"Storefront health degraded before test run: {health}"
         db_check = (health.checks or {}).get("database", "absent")
-        assert db_check == "ok", (
-            f"Storefront database check failed: checks.database={db_check!r}"
-        )
+        assert db_check == "ok", f"Storefront database check failed: checks.database={db_check!r}"
         deal_state._storefront_healthy = True
         log.info("[00a] Storefront healthy: status=%s database=%s", health.status, db_check)
 
@@ -220,9 +219,7 @@ class TestStage00b_RegistryReachable:
 
 
 class TestStage00c_ProvisioningHealth:
-    def test_00c_provisioning_is_healthy(
-        self, provisioning_client, deal_state: DealState
-    ):
+    def test_00c_provisioning_is_healthy(self, provisioning_client, deal_state: DealState):
         """GET /api/v1/system/ansible/readiness → playbook.exists=True.
 
         Uses the ansible readiness endpoint rather than /health because it
@@ -240,8 +237,11 @@ class TestStage00c_ProvisioningHealth:
             f"Full response: {resp}"
         )
         deal_state._provisioning_healthy = True
-        log.info("[00c] Provisioning ansible readiness: playbook.exists=%s ansible=%s",
-                 playbook_exists, resp.get("ansible_version"))
+        log.info(
+            "[00c] Provisioning ansible readiness: playbook.exists=%s ansible=%s",
+            playbook_exists,
+            resp.get("ansible_version"),
+        )
 
 
 class TestStage00d_NegotiationStrategy:
@@ -271,9 +271,7 @@ class TestStage00d_NegotiationStrategy:
 
 
 class TestStage00e_ProvisioningMockMode:
-    def test_00e_provisioning_is_in_mock_mode(
-        self, provisioning_client, deal_state: DealState
-    ):
+    def test_00e_provisioning_is_in_mock_mode(self, provisioning_client, deal_state: DealState):
         """GET /api/v1/system/ansible/readiness → ansible_mode=mock.
 
         Guards the full e2e deal flow from accidentally targeting a production
@@ -336,9 +334,7 @@ class TestStage00f_ResourceSeed:
 
 
 class TestStage00g_AlkahestConfigured:
-    def test_00g_alkahest_is_configured(
-        self, storefront_admin_client, deal_state: DealState
-    ):
+    def test_00g_alkahest_is_configured(self, storefront_admin_client, deal_state: DealState):
         """GET /api/v1/system/status → checks.alkahest reports configured chain names.
 
         After the multi-chain refactor, ``checks.alkahest`` is a comma-joined
@@ -421,13 +417,15 @@ class TestStage00h_ProvisioningStorefrontLink:
         deal_state._provisioning_storefront_ok = True
         log.info(
             "[00h] Provisioning→storefront link ok: storefront=%s storefront_auth=%s",
-            sf_check, auth_check,
+            sf_check,
+            auth_check,
         )
 
 
 # ===========================================================================
 # Phase 2 — Listing creation (paused)
 # ===========================================================================
+
 
 class TestStage02b_CreateListingPaused:
     def test_02b_create_listing_paused_local_only(
@@ -460,9 +458,7 @@ class TestStage02b_CreateListingPaused:
 
         # Confirm locally visible with paused=True
         listing = storefront_admin_client.get_listing(listing_id)
-        assert listing.status == "open", (
-            f"Expected status=open, got {listing.status!r}"
-        )
+        assert listing.status == "open", f"Expected status=open, got {listing.status!r}"
         assert listing.paused is True, (
             f"Expected paused=True after paused create, got paused={listing.paused}"
         )
@@ -487,6 +483,7 @@ class TestStage02b_CreateListingPaused:
 # Phase 3a — Validate publish payload (registry dry-run)
 # ===========================================================================
 
+
 class TestStage03a_ValidatePublish:
     def test_03a_listing_payload_validates_against_registry(
         self, registry_client, deal_state: DealState
@@ -500,6 +497,7 @@ class TestStage03a_ValidatePublish:
         """
         require_state(deal_state, "seller_listing_id")
         from registry_client import ValidatePublishRequest
+
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
             storefront_url="http://bob-storefront:8001/",
@@ -516,8 +514,12 @@ class TestStage03a_ValidatePublish:
             f"accepted_escrows_count={result.accepted_escrows_count}"
         )
         deal_state._registry_validate_passed = True
-        log.info("[03a] Registry validate-publish: valid=%s offer=%s escrows=%d",
-                 result.valid, result.offer_resource_type, result.accepted_escrows_count)
+        log.info(
+            "[03a] Registry validate-publish: valid=%s offer=%s escrows=%d",
+            result.valid,
+            result.offer_resource_type,
+            result.accepted_escrows_count,
+        )
 
 
 class TestStage03b_ResumePublishesToRegistry:
@@ -533,9 +535,7 @@ class TestStage03b_ResumePublishesToRegistry:
         require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
-        assert result.paused is False, (
-            f"Expected paused=False after resume, got: {result}"
-        )
+        assert result.paused is False, f"Expected paused=False after resume, got: {result}"
         assert result.registry_status == "published", (
             f"Registry publish failed during resume. registry_status={result.registry_status!r}.\n"
             f"Check that registry.url in config.toml is reachable from the storefront container.\n"
@@ -560,8 +560,11 @@ class TestStage03b_ResumePublishesToRegistry:
         )
 
         deal_state.resume_confirmed = True
-        log.info("[03b] Listing %s resumed; registry_status=%s, registry confirmed",
-                 deal_state.seller_listing_id, result.registry_status)
+        log.info(
+            "[03b] Listing %s resumed; registry_status=%s, registry confirmed",
+            deal_state.seller_listing_id,
+            result.registry_status,
+        )
 
 
 # ===========================================================================
@@ -577,10 +580,9 @@ class TestStage03b_ResumePublishesToRegistry:
 # it to the published port (http://localhost:8080).
 _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 
+
 class TestStage04a_PrimaryRegistryPublish:
-    def test_04a_listing_appears_in_primary_registry(
-        self, deal_state: DealState
-    ):
+    def test_04a_listing_appears_in_primary_registry(self, deal_state: DealState):
         """The seller publishes the resumed listing to the primary registry."""
         require_state(deal_state, "resume_confirmed", "seller_listing_id")
         import httpx
@@ -588,7 +590,8 @@ class TestStage04a_PrimaryRegistryPublish:
         listing_id = deal_state.seller_listing_id
         for url in (_REGISTRY_A,):
             resp = httpx.get(
-                f"{url}/listings/{listing_id}", timeout=5.0,
+                f"{url}/listings/{listing_id}",
+                timeout=5.0,
             )
             assert resp.status_code == 200, (
                 f"{url} returned {resp.status_code} for listing "
@@ -606,6 +609,7 @@ class TestStage04a_PrimaryRegistryPublish:
 # Phase 5 — Negotiation lifecycle
 # (Phase 4 admin pause/resume removed from e2e — see smoke test TODO above)
 # ===========================================================================
+
 
 class TestStage05a_EvaluateNegotiate:
     def test_05a_evaluate_negotiate_would_not_exit(
@@ -649,8 +653,12 @@ class TestStage05a_EvaluateNegotiate:
             "already-terminal negotiation."
         )
         deal_state._evaluate_negotiate_passed = True
-        log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
-                 result.decision, result.decision_reason, result.strategy)
+        log.info(
+            "[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
+            result.decision,
+            result.decision_reason,
+            result.strategy,
+        )
 
 
 class TestStage05b_BuyerCliDrivesNegotiation:
@@ -685,14 +693,20 @@ class TestStage05b_BuyerCliDrivesNegotiation:
         run = buyer_cli.run(
             [
                 "negotiate",
-                "--listing-id", deal_state.seller_listing_id,
-                "--seller", str(settings.SELLER.API_URL),
-                "--initial-price", str(BUYER_INITIAL_PRICE),
-                "--max-price", str(BUYER_MAX_PRICE),
-                "--duration-hours", str(DURATION_HOURS),
-                "--token-contract", DEMAND_RESOURCE["token"]["contract_address"],
-                "--token-decimals", str(DEMAND_RESOURCE["token"]["decimals"]),
-                "--max-rounds", "10",
+                "--listing-id",
+                deal_state.seller_listing_id,
+                "--seller",
+                str(settings.SELLER.API_URL),
+                "--initial-price",
+                str(BUYER_INITIAL_PRICE),
+                "--max-price",
+                str(BUYER_MAX_PRICE),
+                "--duration-hours",
+                str(DURATION_HOURS),
+                "--settlement",
+                f"mechanism=alkahest.v1 asset={DEMAND_RESOURCE['token']['contract_address']}",
+                "--max-rounds",
+                "10",
                 "--yes",
             ],
             timeout=120.0,
@@ -741,7 +755,10 @@ class TestStage05b_BuyerCliDrivesNegotiation:
         log.info(
             "[05b] `market negotiate` run=%s agreed at %s after %s round(s); "
             "seller stage events: %d round_decided",
-            run.run_id, agreed_amount, terminal.get("rounds"), len(round_events),
+            run.run_id,
+            agreed_amount,
+            terminal.get("rounds"),
+            len(round_events),
         )
 
 
@@ -749,9 +766,12 @@ class TestStage05b_BuyerCliDrivesNegotiation:
 # Phase 7 — Provisioning gate setup (no buyer action — pure test infra)
 # ===========================================================================
 
+
 class TestStage07_ArmProvisioningGate:
     def test_07_arm_provisioning_gate(
-        self, provisioning_test_client, deal_state: DealState,
+        self,
+        provisioning_test_client,
+        deal_state: DealState,
     ):
         """Arm the provisioning mock rule (pause_before_result=True).
 
@@ -766,8 +786,9 @@ class TestStage07_ArmProvisioningGate:
         escrow under the buyer's wallet, the same way a buyer would in
         production. The test verifies the resulting uid in 07b.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_amount",
-                      "_provisioning_mock_mode")
+        require_state(
+            deal_state, "negotiation_terminal_state", "agreed_amount", "_provisioning_mock_mode"
+        )
 
         delete_mock_rules_if_present(
             provisioning_test_client,
@@ -796,18 +817,20 @@ class TestStage07_ArmProvisioningGate:
 # Phase 8i — Buyer CLI initiates settlement (background subprocess)
 # ===========================================================================
 
+
 class TestStage08i_BuyerCliInitiatesSettle:
     def test_08i_market_settle_creates_escrow_and_submits(
-        self, buyer_cli, deal_state: DealState,
+        self,
+        buyer_cli,
+        deal_state: DealState,
     ):
-        """Spawn `market settle --from <run_id>` background; capture escrow uid.
+        """Resume the accepted settlement without mechanism overrides.
 
-        The subprocess performs three stages in order:
-          1. Read the buyer run-log produced by stage 05b
-          2. Create the on-chain escrow under the buyer's wallet
-             (same alkahest path the storefront verifier reads)
-          3. POST /settle/{escrow_uid} to the seller
-          4. Poll /settle/{escrow_uid}/status until terminal
+        The subprocess reads the accepted settlement and duration from the
+        buyer run log, creates the missing on-chain obligation under the
+        buyer's wallet, submits it to the seller, and polls status until
+        terminal. No chain, token, decimals, duration, or expiration override
+        may reinterpret that accepted state.
 
         We block here only until `escrow_created` surfaces in the run-log
         — that's enough to give downstream phases the uid for dry-run
@@ -820,13 +843,12 @@ class TestStage08i_BuyerCliInitiatesSettle:
         run = buyer_cli.run(
             [
                 "settle",
-                "--from", deal_state.buyer_run_id,
-                "--token-contract", DEMAND_RESOURCE["token"]["contract_address"],
-                "--token-decimals", str(DEMAND_RESOURCE["token"]["decimals"]),
-                "--duration-hours", str(DURATION_HOURS),
-                "--poll-interval", "1.0",
-                "--settlement-timeout", "600",
-                "--expiration", "3600",
+                "--from",
+                deal_state.buyer_run_id,
+                "--poll-interval",
+                "1.0",
+                "--settlement-timeout",
+                "600",
             ],
             background=True,
         )
@@ -838,13 +860,15 @@ class TestStage08i_BuyerCliInitiatesSettle:
         deal_state.real_escrow_uid = str(uid)
         log.info(
             "[08i] `market settle` created on-chain escrow %s (run=%s)",
-            uid, run.run_id,
+            uid,
+            run.run_id,
         )
 
 
 # ===========================================================================
 # Phase 7b — Verify on-chain escrow via storefront (getRecordFromChain dry-run)
 # ===========================================================================
+
 
 class TestStage07b_VerifyEscrow:
     def test_07b_storefront_verifies_on_chain_escrow(
@@ -855,8 +879,13 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_amount",
-                      "_alkahest_configured")
+        require_state(
+            deal_state,
+            "real_escrow_uid",
+            "seller_listing_id",
+            "agreed_amount",
+            "_alkahest_configured",
+        )
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
@@ -892,10 +921,15 @@ class TestStage07b_VerifyEscrow:
 # Phase 8b — Settlement pipeline (post-submit observation)
 # ===========================================================================
 
+
 class TestStage08b_SettlementSubmittedAndJobQueued:
     def test_08b_settle_submitted_and_provisioning_job_queued(
-        self, storefront_client, storefront_admin_client, provisioning_client,
-        buyer_config, deal_state: DealState
+        self,
+        storefront_client,
+        storefront_admin_client,
+        provisioning_client,
+        buyer_config,
+        deal_state: DealState,
     ):
         """Buyer's subprocess submitted /settle; observe in-flight state.
 
@@ -913,19 +947,27 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         because the mock pause gate (armed in 07) holds the job before
         it returns success.
         """
-        require_state(deal_state, "negotiation_id", "real_escrow_uid",
-                      "provisioning_gate_armed", "settle_run_handle")
+        require_state(
+            deal_state,
+            "negotiation_id",
+            "real_escrow_uid",
+            "provisioning_gate_armed",
+            "settle_run_handle",
+        )
 
         run = deal_state.settle_run_handle
         submitted = run.wait_for_event("settle_submitted", timeout=30.0)
         deal_state.settlement_submitted = True
-        log.info("[08b] settle_submitted event body: %s",
-                 {k: submitted.get(k) for k in ("ts", "body")})
+        log.info(
+            "[08b] settle_submitted event body: %s", {k: submitted.get(k) for k in ("ts", "body")}
+        )
 
         from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
+
         _wait(
             storefront_admin_client,
-            "provision", "job_submitted",
+            "provision",
+            "job_submitted",
             listing_id=deal_state.seller_listing_id,
             timeout=15.0,
         )
@@ -939,14 +981,12 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         # See core_storefront.models.settle_models.SettleStatusResponse.
         fulfillment_id = status_resp.fulfillment_id
         assert fulfillment_id, (
-            f"fulfillment_id absent from settle status after job_submitted event: "
-            f"{status_resp}"
+            f"fulfillment_id absent from settle status after job_submitted event: {status_resp}"
         )
 
         status = provisioning_client.get_fulfillment_status(fulfillment_id)
         assert status.get("state") == "dispatching", (
-            f"Expected fulfillment dispatched but gated on the paused mock "
-            f"rule, got: {status}"
+            f"Expected fulfillment dispatched but gated on the paused mock rule, got: {status}"
         )
         deal_state.fulfillment_id = fulfillment_id
         log.info("[08b] Fulfillment %s in state %s", fulfillment_id, status.get("state"))
@@ -955,6 +995,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 # ===========================================================================
 # Phase 9 — Provisioning completion
 # ===========================================================================
+
 
 class TestStage09a_ProvisioningCompletes:
     def test_09a_release_gate_and_job_succeeds(
@@ -979,9 +1020,7 @@ class TestStage09a_ProvisioningCompletes:
             f"Expected fulfillment to converge to active, got: {status}"
         )
         deal_state.provisioning_result_injected = True
-        log.info(
-            "[09a] Fulfillment %s converged to active", deal_state.fulfillment_id
-        )
+        log.info("[09a] Fulfillment %s converged to active", deal_state.fulfillment_id)
 
 
 class TestStage09b_BuyerObservesReadyAndCleanExit:
@@ -1001,8 +1040,14 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
           - per-negotiation primary escrow → status=ready,
             fulfillment_uid populated
         """
-        require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
-                      "seller_listing_id", "negotiation_id", "settle_run_handle")
+        require_state(
+            deal_state,
+            "real_escrow_uid",
+            "provisioning_result_injected",
+            "seller_listing_id",
+            "negotiation_id",
+            "settle_run_handle",
+        )
 
         run = deal_state.settle_run_handle
         terminal = run.wait_for_event(
@@ -1011,13 +1056,9 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
             timeout=120.0,
         )
         body = terminal.get("body") or {}
-        assert body.get("status") == "ready", (
-            f"settle_terminal status not ready: {body!r}"
-        )
+        assert body.get("status") == "ready", f"settle_terminal status not ready: {body!r}"
         tenant_credentials = body.get("tenant_credentials") or body.get("connection_details")
-        assert tenant_credentials, (
-            f"settle_terminal missing tenant credentials: {body!r}"
-        )
+        assert tenant_credentials, f"settle_terminal missing tenant credentials: {body!r}"
 
         rc = run.wait(timeout=20.0)
         assert rc == 0, (
@@ -1035,7 +1076,8 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         # (was previously rolled up into the registry's now-removed
         # /system/stats/attestations).
         detail = storefront_admin_client.get_negotiation(
-            deal_state.seller_listing_id, deal_state.negotiation_id,
+            deal_state.seller_listing_id,
+            deal_state.negotiation_id,
         )
         assert detail.escrows, (
             f"Expected escrows[] non-empty after settlement, got {detail.escrows!r}"
@@ -1061,14 +1103,13 @@ class TestStage09b_BuyerObservesReadyAndCleanExit:
         log.info(
             "[09b] Buyer subprocess settle_terminal=ready (rc=0); listing status=%s; "
             "primary escrow fulfillment_uid=%s",
-            listing.status, primary["fulfillment_uid"],
+            listing.status,
+            primary["fulfillment_uid"],
         )
 
 
 class TestStage09c_LeaseRegistered:
-    def test_09c_provisioning_lease_registered(
-        self, provisioning_client, deal_state: DealState
-    ):
+    def test_09c_provisioning_lease_registered(self, provisioning_client, deal_state: DealState):
         """Provisioning owns the happy-path lease row after fulfillment.
 
         Resource identity is confirmed here, not at stage 08b -- see
@@ -1093,8 +1134,7 @@ class TestStage09c_LeaseRegistered:
             f"Lease missing vm_host; required for stage 10a provider teardown operation: {lease!r}"
         )
         assert lease.get("create_job_id"), (
-            f"Expected a tracked Ansible create job on the admin lease view, "
-            f"got: {lease}"
+            f"Expected a tracked Ansible create job on the admin lease view, got: {lease}"
         )
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
@@ -1114,18 +1154,22 @@ class TestStage09c_LeaseRegistered:
             "ledger" if lease_view.is_ledger else "legacy",
         )
 
+
 # ===========================================================================
 # Phase 10 — Explicit interruption enters durable teardown
 # ===========================================================================
 
+
 class TestStage10a_ExplicitInterruptionSetup:
     def test_10a_interrupt_deal_and_arm_teardown_gate(
-        self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, deal_state: DealState,
+        self,
+        provisioning_client,
+        provisioning_test_client,
+        storefront_admin_client,
+        deal_state: DealState,
     ):
         """Request external interruption and hold provider teardown at its gate."""
-        require_state(deal_state, "lease_id", "real_escrow_uid",
-                      "reserved_resource_id")
+        require_state(deal_state, "lease_id", "real_escrow_uid", "reserved_resource_id")
         assert provisioning_client.pause_lease_watchdog().get("paused") is True
         delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
         provisioning_test_client.add_mock_rule(
@@ -1143,10 +1187,12 @@ class TestStage10a_ExplicitInterruptionSetup:
 
 class TestStage10b_LeaseCycleBeginsTeardown:
     def test_10b_lease_cycle_records_fulfillment_id(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState,
+        self,
+        provisioning_client,
+        storefront_admin_client,
+        deal_state: DealState,
     ):
-        require_state(deal_state, "_termination_requested", "deal_lease",
-                      "reserved_resource_id")
+        require_state(deal_state, "_termination_requested", "deal_lease", "reserved_resource_id")
         summary = provisioning_client.check_leases()
         assert summary.get("checked", 0) >= 1, summary
         lease = deal_state.deal_lease.refresh()
@@ -1166,9 +1212,13 @@ class TestStage10b_LeaseCycleBeginsTeardown:
 # Phase 11 — Fulfillment convergence and observable release
 # ===========================================================================
 
+
 class TestStage11a_TeardownDispatch:
     def test_11a_convergence_dispatches_teardown_while_capacity_stays_held(
-        self, provisioning_client, storefront_admin_client, deal_state: DealState,
+        self,
+        provisioning_client,
+        storefront_admin_client,
+        deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "reserved_resource_id")
         diagnostics = provisioning_client.run_fulfillment_convergence_cycle()
@@ -1182,11 +1232,13 @@ class TestStage11a_TeardownDispatch:
 
 class TestStage11b_TeardownCompletion:
     def test_11b_provider_completion_releases_lease_and_capacity(
-        self, provisioning_client, provisioning_test_client,
-        storefront_admin_client, deal_state: DealState,
+        self,
+        provisioning_client,
+        provisioning_test_client,
+        storefront_admin_client,
+        deal_state: DealState,
     ):
-        require_state(deal_state, "fulfillment_id", "lease_id",
-                      "reserved_resource_id")
+        require_state(deal_state, "fulfillment_id", "lease_id", "reserved_resource_id")
         sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
@@ -1203,8 +1255,8 @@ class TestStage11b_TeardownCompletion:
         assert lease.get("status") == "released", lease
 
         from tests.e2e.roles.scenarios.vms.conftest import wait_for_stage_event as _wait
-        _wait(storefront_admin_client, sync_stage, sync_event,
-              since_id=since_id, timeout=10.0)
+
+        _wait(storefront_admin_client, sync_stage, sync_event, since_id=since_id, timeout=10.0)
         assert not deal_state.deal_lease.resource_consumed(
             storefront_admin_client, deal_state.reserved_resource_id
         )
@@ -1214,8 +1266,6 @@ class TestStage11b_TeardownCompletion:
             escrow_uid=f"{deal_state.real_escrow_uid}-reuse",
         )
         assert reserved_again.resource_id == deal_state.reserved_resource_id
-        storefront_admin_client.admin_release_one_reservation(
-            reserved_again.resource_id
-        )
+        storefront_admin_client.admin_release_one_reservation(reserved_again.resource_id)
         deal_state.lease_status = "released"
         provisioning_client.resume_lease_watchdog()

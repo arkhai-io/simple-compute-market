@@ -8,6 +8,7 @@ import time
 import uuid
 from typing import Any
 
+from arkhai_vms import VmProvisionTerms
 from core_storefront.models.settle_models import (
     EvaluateSettleRequest,
     EvaluateSettleResponse,
@@ -67,13 +68,18 @@ class SettleController:
         body: VmSettleRequest,
         request: Request,
     ) -> Any:
-
-        auth = await buyer_auth._verify(
-            request,
-            "settle_escrow",
+        thread = await self._db.load_negotiation_thread_row(
+            negotiation_id=body.negotiation_id
+        )
+        if not isinstance(thread, dict) or thread.get("terminal_state") != "success":
+            raise HTTPException(
+                status_code=404, detail="accepted negotiation not found"
+            )
+        auth = await buyer_auth.settle_escrow_auth(
             escrow_uid,
-            body.buyer_principal,
-            body.model_dump(mode="json"),
+            body,
+            request,
+            negotiation_thread=thread,
         )
         if auth.exact_retry:
             if auth.recorded_outcome is None:
@@ -81,18 +87,45 @@ class SettleController:
             status_code, payload = auth.recorded_outcome
             return JSONResponse(content=payload, status_code=status_code)
 
-        composition = _container.resolved_settlement_composition
-        if composition is None:
+        persisted_negotiation_id = str(
+            thread.get("negotiation_id") or body.negotiation_id
+        )
+        existing = await self._db.load_escrow(escrow_uid=escrow_uid)
+        if (
+            existing is not None
+            and existing.get("negotiation_id") != persisted_negotiation_id
+        ):
             raise HTTPException(
-                status_code=503, detail="settlement runtime is unavailable"
+                status_code=403,
+                detail="escrow does not match persisted negotiation binding",
             )
-        thread = await self._db.load_negotiation_thread_row(
-            negotiation_id=body.negotiation_id
-        )
-        proposal = (thread or {}).get("buyer_escrow_proposal")
-        selection = (
-            proposal.get("settlement_selection") if isinstance(proposal, dict) else None
-        )
+        try:
+            persisted_buyer = Identity.model_validate(thread.get("buyer_principal"))
+            provision = VmProvisionTerms.model_validate(thread.get("provision_terms"))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="accepted negotiation terms are invalid",
+            ) from exc
+        accepted_ssh_public_key = provision.ssh_public_key
+        if not accepted_ssh_public_key.strip():
+            raise HTTPException(
+                status_code=409,
+                detail="accepted provision terms have no SSH public key",
+            )
+        if body.ssh_public_key != accepted_ssh_public_key:
+            raise HTTPException(
+                status_code=403,
+                detail="SSH public key does not match accepted provision terms",
+            )
+
+        proposal = thread.get("buyer_escrow_proposal")
+        if not isinstance(proposal, dict):
+            raise HTTPException(
+                status_code=409,
+                detail="accepted negotiation has no settlement selection",
+            )
+        selection = proposal.get("settlement_selection")
         mechanism = (
             selection.get("mechanism") if isinstance(selection, dict) else "alkahest.v1"
         )
@@ -101,29 +134,44 @@ class SettleController:
                 status_code=400,
                 detail="hosted obligations use /api/v1/settlements",
             )
+        accepted_chain = proposal.get("chain_name")
+        if not isinstance(accepted_chain, str) or not accepted_chain:
+            raise HTTPException(
+                status_code=409,
+                detail="accepted settlement terms have no chain",
+            )
+        if body.chain_name != accepted_chain:
+            raise HTTPException(
+                status_code=403,
+                detail="settlement chain does not match accepted terms",
+            )
+
+        composition = _container.resolved_settlement_composition
+        if composition is None:
+            raise HTTPException(
+                status_code=503, detail="settlement runtime is unavailable"
+            )
         mechanism_client = composition.mechanism_clients.get(mechanism)
         if mechanism_client is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"settlement mechanism {mechanism!r} is not configured",
             )
-        if mechanism == "alkahest.v1" and body.chain_name not in (
-            _container.configured_chain_names()
-        ):
+        if accepted_chain not in _container.configured_chain_names():
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"chain {body.chain_name!r} not configured on this storefront — "
+                    f"chain {accepted_chain!r} not configured on this storefront — "
                     f"available chains: {sorted(_container.configured_chain_names())}"
                 ),
             )
         try:
             result = await composition.coordinator.start(
                 escrow_uid=escrow_uid,
-                negotiation_id=body.negotiation_id,
+                negotiation_id=persisted_negotiation_id,
                 mechanism_client=mechanism_client,
-                chain_name=body.chain_name,
-                request={"ssh_public_key": body.ssh_public_key},
+                chain_name=accepted_chain,
+                request=None,
             )
         except EscrowVerificationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -142,7 +190,7 @@ class SettleController:
                 "status": result.get("status"),
             }
         )
-        serialized["buyer_principal"] = body.buyer_principal.model_dump(mode="json")
+        serialized["buyer_principal"] = persisted_buyer.model_dump(mode="json")
         serialized["seller_principal"] = composition.local_principal.model_dump(
             mode="json"
         )
@@ -253,20 +301,6 @@ class SettlementsController:
         request: Request,
     ) -> SettlementPublicResponse:
         composition = self._composition()
-        auth = await buyer_auth._verify(
-            request,
-            "settlement_start",
-            body.obligation_ref,
-            body.payer_principal,
-            body.model_dump(mode="json"),
-        )
-        if auth.exact_retry:
-            if auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            status_code, payload = auth.recorded_outcome
-            if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=payload)
-            return SettlementPublicResponse.model_validate(payload)
         try:
             agreement = await load_hosted_agreement(
                 sqlite_client=self._db,
@@ -280,6 +314,20 @@ class SettlementsController:
             or body.claimant_principal != composition.local_principal
         ):
             raise HTTPException(status_code=403, detail="settlement parties mismatch")
+        auth = await buyer_auth._verify(
+            request,
+            "settlement_start",
+            agreement.obligation_ref,
+            agreement.buyer_principal,
+            body.model_dump(mode="json"),
+        )
+        if auth.exact_retry:
+            if auth.recorded_outcome is None:
+                raise HTTPException(status_code=409, detail="request retry is pending")
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return SettlementPublicResponse.model_validate(payload)
 
         records = await composition.runtime.register_plan(
             agreement_ref=agreement.negotiation_id,
@@ -290,7 +338,7 @@ class SettlementsController:
         try:
             await composition.runtime.materialize(
                 obligation_ref=record.obligation_ref,
-                local_principal=body.payer_principal,
+                local_principal=agreement.buyer_principal,
                 worker_id=worker_id,
             )
             row = await composition.repository.load_settlement_obligation(

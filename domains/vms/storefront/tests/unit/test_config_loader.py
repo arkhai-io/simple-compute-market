@@ -113,7 +113,7 @@ def test_structured_publication_defaults_reject_partial_or_secret_input() -> Non
         ],
     )
 
-    with pytest.raises(ValueError, match="invalid publication input"):
+    with pytest.raises(ValueError, match="not public metadata"):
         agent_config.settlement_publication_defaults(source)
 
 

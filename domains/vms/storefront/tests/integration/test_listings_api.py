@@ -615,7 +615,8 @@ async def seller_auth_full_client(db):
     from market_storefront.services.listing_service import ListingService
 
     class _AcceptedEscrowComposition:
-        async def publication_artifacts(self, resources):
+        async def publication_artifacts(self, resources, *, clauses=None):
+            assert clauses is None
             return list(resources["accepted_escrows"]), [], ()
 
     listing_svc = ListingService(

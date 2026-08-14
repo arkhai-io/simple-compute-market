@@ -1246,6 +1246,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
+        settlements: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
         settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
@@ -1257,6 +1258,7 @@ class StorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows or [],
+            "settlements": settlements or [],
             "settlement_options": settlement_options or [],
             "settlement_config": settlement_config,
             "demands": demands or [],
@@ -2489,6 +2491,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         offer: dict[str, Any],
         accepted_escrows: list[dict[str, Any]] | None = None,
+        settlements: list[dict[str, Any]] | None = None,
         settlement_options: list[dict[str, Any]] | None = None,
         settlement_config: dict[str, Any] | None = None,
         demands: list[dict[str, Any]] | None = None,
@@ -2500,6 +2503,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         body = {
             "offer": offer,
             "accepted_escrows": accepted_escrows or [],
+            "settlements": settlements or [],
             "settlement_options": settlement_options or [],
             "settlement_config": settlement_config,
             "demands": demands or [],

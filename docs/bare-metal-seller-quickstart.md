@@ -23,6 +23,8 @@ your own listing registry instead of pointing at an existing one, see
 ## Prerequisites
 
 - Linux host with Docker + `docker compose` v2.
+- A canonical public marketplace identity and matching signer credential
+  injected through `ARKHAI_IDENTITY_CREDENTIAL`.
 - A wallet on the EVM chain you'll operate on, funded with gas plus whatever
   ERC-20 you'll accept as payment. The examples use Base Sepolia + USDC at
   `0x036CbD53842c5426634e7929541eC2318f3dCF7e`.
@@ -56,34 +58,47 @@ base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
 
 db_path          = "./src/market_storefront/data/storefront/agent.db"
 log_file_path    = "./logs/seller.log"
-admin_api_key    = "<choose-a-secret>"
+
+[identity.principal]
+scheme = "ed25519"
+identifier = "<unpadded-base64url-public-key>"
 
 [wallet]
-private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
+address = "0x<YOUR_SELLER_ADDRESS>"
+# Supply private_key through the deployment Secret overlay.
 ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
 
 [chains.base_sepolia]
 chain_id = 84532
 rpc_url  = "https://sepolia.base.org"
+alkahest_address_config_path = "/path/to/alkahest.json"
 
 [registry]
 urls = ["http://34.41.205.175/registry"]
 
 [registry.auth]
-"http://34.41.205.175/registry" = "<your-write-token>"
+# Supply any write token through the deployment Secret overlay. Its key must
+# match the registry URL exactly.
 
 [provisioning]
 service_url = "http://seller-provisioning:8081"
 mode        = "http"
 
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+address_config_path = "/path/to/alkahest.json"
+
 [pricing]
-default_min_price            = "10"
-default_token_address        = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+default_min_price = "10"                # negotiation floor only
 default_max_duration_seconds = 86400
 ```
 
 For co-selling with a VM storefront, use a distinct `agent_id`, `base_url`,
-port, database, and wallet identity as appropriate for the bare-metal
+port, database, and canonical marketplace principal for the bare-metal
 storefront. Both storefronts can point at the same provisioning service.
 
 ## 3. resources.csv
@@ -91,8 +106,8 @@ storefront. Both storefronts can point at the same provisioning service.
 Use one `resources.csv` row per whole machine:
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.machine_id,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb,attribute.virtualization_type
-whole-host-001,compute.gpu,H200,count,8,available,10,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",,host-ca-h200-01,exclusive,bm-host-ca-h200-01,192,2048,20000,bare_metal
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.machine_id,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb,attribute.virtualization_type,settlements
+whole-host-001,compute.gpu,H200,count,8,available,10,,86400,H200,99.0,"California, US",,host-ca-h200-01,exclusive,bm-host-ca-h200-01,192,2048,20000,bare_metal,"[{""mechanism"":""alkahest.v1"",""asset"":""0x036CbD53842c5426634e7929541eC2318f3dCF7e"",""rate"":""10"",""per"":""hour"",""mechanism_input"":{""chain"":""base_sepolia"",""escrow_kind"":""erc20_escrow_obligation_default""}}]"
 ```
 
 Important fields:
