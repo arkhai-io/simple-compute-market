@@ -73,8 +73,8 @@ class _RefundMarketplace(_Marketplace):
     def select_stripe_test_case(self, case: str):
         self.calls.append(f"select:{case}")
 
-    def hold_fulfillment_for_refund(self):
-        self.calls.append("hold_fulfillment")
+    def keep_fulfillment_unresolved_for_refund(self):
+        self.calls.append("keep_fulfillment_unresolved")
 
 
 def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness() -> None:
@@ -109,7 +109,7 @@ def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness(
     ]
 
 
-def test_bridge_holds_fulfillment_before_returning_refund_checkout() -> None:
+def test_bridge_keeps_fulfillment_unresolved_before_refund_checkout() -> None:
     marketplace = _RefundMarketplace()
     prepared = LifecycleBridge(marketplace).request({"action": "prepare_refund"})
 
@@ -123,7 +123,7 @@ def test_bridge_holds_fulfillment_before_returning_refund_checkout() -> None:
         "discover",
         "negotiate",
         "materialize",
-        "hold_fulfillment",
+        "keep_fulfillment_unresolved",
     ]
 
 

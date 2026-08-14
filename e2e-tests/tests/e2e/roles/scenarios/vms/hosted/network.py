@@ -114,6 +114,12 @@ class NetworkMarketplacePort:
             _required("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL"),
         )
         buyer_signer = self._buyer_signer
+        self._buyer_authority = released_authority_client(
+            config_path=storefront_path,
+            signer=buyer_signer,
+            caller_role="buyer",
+            base_url=self.authority_url,
+        )
         seller_signer = _signer(
             self.storefront_config,
             _required("HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL"),
@@ -248,7 +254,7 @@ class NetworkMarketplacePort:
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
 
-    def hold_fulfillment_for_refund(self) -> None:
+    def keep_fulfillment_unresolved_for_refund(self) -> None:
         with SyncProvisioningClient(
             self.provisioning_url,
             self._admin_signer,
@@ -257,21 +263,22 @@ class NetworkMarketplacePort:
             client._post(
                 "/test/mock-rules",
                 {
-                    "rule_id": "hosted-stripe-refund-hold",
+                    "rule_id": "hosted-stripe-refund-unresolved",
                     "match": {"vm_action": "create"},
-                    "pause_before_result": True,
+                    "pause_before_result": False,
+                    "fail_with": "protected refund keeps fulfillment unresolved",
                 },
             )
             evaluation = client._post(
                 "/test/evaluate-job",
                 {
                     "host": self._host_id,
-                    "vm_target": "hosted-refund-hold",
+                    "vm_target": "hosted-refund-unresolved",
                     "vm_action": "create",
                 },
             )
-        if evaluation.get("would_pause") is not True:
-            raise AssertionError("refund fulfillment hold is not active")
+        if evaluation.get("rule_matched") != "hosted-stripe-refund-unresolved":
+            raise AssertionError("refund fulfillment failure is not active")
 
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
@@ -399,11 +406,17 @@ class NetworkMarketplacePort:
         )
 
     def wait_funded(self, settlement_ref: str) -> bool:
-        status = self._wait_public_status(
-            settlement_ref,
-            {"funded", "ready", "collecting", "collected"},
-        )
-        return status.get("status") in {"funded", "ready", "collecting", "collected"}
+        timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self._buyer_authority.get_status(
+                settlement_ref,
+                request_id=f"stripe-test-status-{uuid.uuid4().hex}",
+            )
+            if status.financial_state.value in {"funded", "collected", "refunded"}:
+                return True
+            time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
+        return False
 
     def complete_vm_fulfillment(self, settlement_ref: str) -> FulfillmentSnapshot:
         status = self._buyer_status(settlement_ref)
