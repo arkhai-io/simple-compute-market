@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from types import SimpleNamespace
 from pathlib import Path
 import pytest
 from hosted_settlement_client import (
@@ -12,6 +13,7 @@ from hosted_settlement_client import (
 from src.hosted_real_stripe.driver import (
     _browser_outcome,
     _maintained_account_binding,
+    _pay_with_forwarding_paused,
     _prepared_effect,
     _wait_until_reclaim_eligible,
     _terminal_projection,
@@ -67,6 +69,40 @@ def test_maintained_account_binding_is_owner_signed_for_opaque_reference(
         authority_id="hosted-test",
         now_unix=2_000_000_000,
     )
+
+
+class _Forwarder:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def pause(self) -> None:
+        self._events.append("pause")
+
+    def resume(self) -> None:
+        self._events.append("resume")
+
+
+class _Browser:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def pay(self, _checkout_url: str, *, outcome: str) -> SimpleNamespace:
+        self._events.append(f"pay:{outcome}")
+        return SimpleNamespace(checkout_session_id="cs_test_private", outcome=outcome)
+
+
+def test_missed_webhook_resumes_forwarding_after_checkout() -> None:
+    events: list[str] = []
+
+    result = _pay_with_forwarding_paused(
+        _Forwarder(events),
+        _Browser(events),
+        "https://checkout.stripe.com/c/pay/cs_test_private",
+        outcome="success",
+    )
+
+    assert result.checkout_session_id == "cs_test_private"
+    assert events == ["pause", "pay:success", "resume"]
 
 
 def test_prepared_effect_binds_public_lifecycle_to_exact_checkout_terms() -> None:

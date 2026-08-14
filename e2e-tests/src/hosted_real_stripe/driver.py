@@ -18,6 +18,7 @@ from market_identity import create_signer
 from .browser import (
     CheckoutContractError,
     CheckoutOutcome,
+    BrowserPaymentResult,
     ChromiumCheckout,
     ChromiumUnavailable,
     checkout_session_id,
@@ -342,6 +343,20 @@ def _maintained_account_binding(
     )
 
 
+def _pay_with_forwarding_paused(
+    forwarder: StripeWebhookForwarder,
+    browser: ChromiumCheckout,
+    checkout_url: str,
+    *,
+    outcome: CheckoutOutcome,
+) -> BrowserPaymentResult:
+    forwarder.pause()
+    try:
+        return browser.pay(checkout_url, outcome=outcome)
+    finally:
+        forwarder.resume()
+
+
 def _execute_scenario(
     *,
     scenario: Scenario,
@@ -370,8 +385,12 @@ def _execute_scenario(
     browser_outcome = _browser_outcome(scenario)
     execution.stage = "browser_checkout"
     if scenario == "missed_webhook":
-        forwarder.stop()
-        payment = browser.pay(checkout_url, outcome=browser_outcome)
+        payment = _pay_with_forwarding_paused(
+            forwarder,
+            browser,
+            checkout_url,
+            outcome=browser_outcome,
+        )
         execution.stage = "recovery"
         stack.restart("worker")
     else:
