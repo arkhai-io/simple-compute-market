@@ -117,7 +117,7 @@ class NetworkMarketplacePort:
         self._buyer_authority = released_authority_client(
             config_path=storefront_path,
             signer=buyer_signer,
-            caller_role="buyer",
+            caller_role="payer",
             base_url=self.authority_url,
         )
         seller_signer = _signer(
