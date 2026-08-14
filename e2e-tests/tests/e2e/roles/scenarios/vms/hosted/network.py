@@ -291,7 +291,7 @@ class NetworkMarketplacePort:
         option = [
             item for item in listing.settlement_options if item.get("mechanism") == "fiat.stripe.v1"
         ][0]
-        expiration_unix = int(time.time()) + (10 if self._stripe_test_case == "refund" else 3600)
+        expiration_unix = int(time.time()) + (120 if self._stripe_test_case == "refund" else 3600)
         selection = {
             "mechanism": "fiat.stripe.v1",
             "option_id": option["option_id"],
