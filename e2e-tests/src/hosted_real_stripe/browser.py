@@ -120,6 +120,7 @@ class ChromiumCheckout:
                         ("input[name='postalCode']", "#billingPostalCode"),
                         test_inputs.postal_code,
                     )
+                    _disable_optional_save_details(page)
                     submit = _first_visible(
                         page,
                         (
@@ -200,6 +201,12 @@ def _fill_optional(page: Any, selectors: tuple[str, ...], value: str) -> None:
     locator = _first_visible(page, selectors)
     if locator is not None:
         locator.fill(value)
+
+
+def _disable_optional_save_details(page: Any) -> None:
+    save_details = _first_visible(page, ("#enableStripePass",))
+    if save_details is not None and save_details.is_checked():
+        save_details.uncheck()
 
 
 def _wait_for_decline(page: Any, timeout_ms: int) -> None:
