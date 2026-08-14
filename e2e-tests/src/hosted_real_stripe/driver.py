@@ -168,6 +168,12 @@ def run(args: argparse.Namespace) -> tuple[StripeTestEvidence, int]:
                 with EphemeralServiceEnv(
                     api_key=secret,
                     webhook_secret=webhook_secret,
+                    manifest_digest=release.hosted_manifest_digest,
+                    release_authority_id=release.hosted_authority_id,
+                    release_authority_address=release.hosted_authority_address,
+                    release_repository="arkhai/hosted-settlement-service",
+                    release_workflow_ref=release.hosted_workflow_ref,
+                    release_source_commit=release.hosted_source_commit,
                     base_path=args.hosted_service_env_base,
                     shared_directory=args.compose_env.parent,
                 ) as authority_env:

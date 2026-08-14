@@ -119,8 +119,30 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
     with EphemeralServiceEnv(
         api_key="sk_test_example",
         webhook_secret="whsec_example",
+        manifest_digest="sha256:" + ("2" * 64),
+        release_authority_id="release-authority",
+        release_authority_address="0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+        release_repository="arkhai/hosted-settlement-service",
+        release_workflow_ref=".github/workflows/release.yml@refs/tags/v0.1.0",
+        release_source_commit="3" * 40,
         shared_directory=tmp_path,
     ) as authority_env:
         assert authority_env.parent.parent == tmp_path
+        values = dict(
+            line.split("=", 1) for line in authority_env.read_text(encoding="utf-8").splitlines()
+        )
+        assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
+        assert values["HOSTED_SETTLEMENT_RELEASE_PATH"] == "/release/release-manifest.json"
+        assert values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID"] == "release-authority"
+        assert (
+            values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS"]
+            == "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
+        )
+        assert values["HOSTED_SETTLEMENT_RELEASE_REPOSITORY"] == "arkhai/hosted-settlement-service"
+        assert (
+            values["HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF"]
+            == ".github/workflows/release.yml@refs/tags/v0.1.0"
+        )
+        assert values["HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT"] == "3" * 40
 
     assert tuple(tmp_path.iterdir()) == ()

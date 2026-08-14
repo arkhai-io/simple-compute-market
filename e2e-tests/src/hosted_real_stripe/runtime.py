@@ -142,6 +142,12 @@ class EphemeralServiceEnv:
         *,
         api_key: str,
         webhook_secret: str,
+        manifest_digest: str,
+        release_authority_id: str,
+        release_authority_address: str,
+        release_repository: str,
+        release_workflow_ref: str,
+        release_source_commit: str,
         base_path: Path | None = None,
         shared_directory: Path,
     ) -> None:
@@ -150,6 +156,13 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_MODE": "test",
             "HOSTED_SETTLEMENT_STRIPE_SECRET_KEY": api_key,
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
+            "HOSTED_SETTLEMENT_MANIFEST_DIGEST": manifest_digest,
+            "HOSTED_SETTLEMENT_RELEASE_PATH": "/release/release-manifest.json",
+            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
+            "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,
+            "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
+            "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
+            "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
         }
         self._base_path = base_path
         self._shared_directory = shared_directory
