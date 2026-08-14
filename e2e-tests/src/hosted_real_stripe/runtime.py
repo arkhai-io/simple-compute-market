@@ -165,6 +165,27 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
             "HOSTED_SETTLEMENT_RELEASE_WORKFLOW_REF": release_workflow_ref,
             "HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT": release_source_commit,
+            "HOSTED_SETTLEMENT_RESOLVER_CALLERS": (f"eip191:{release_authority_address}"),
+            "HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON": json.dumps(
+                [
+                    {
+                        "resolver_id": "vm-portable",
+                        "evaluator_id": "vm-portable",
+                        "base_url": "http://127.0.0.1:8080",
+                        "authority_id": release_authority_id,
+                        "principals": [
+                            {
+                                "scheme": "eip191",
+                                "identifier": release_authority_address,
+                            }
+                        ],
+                        "portable_authority_address": release_authority_address,
+                        "allow_insecure_loopback": True,
+                    }
+                ],
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
         }
         self._base_path = base_path
         self._shared_directory = shared_directory

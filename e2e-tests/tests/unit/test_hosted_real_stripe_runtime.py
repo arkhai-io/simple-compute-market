@@ -155,5 +155,25 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
             == ".github/workflows/release.yml@refs/tags/v0.1.0"
         )
         assert values["HOSTED_SETTLEMENT_RELEASE_SOURCE_COMMIT"] == "3" * 40
+        assert values["HOSTED_SETTLEMENT_RESOLVER_CALLERS"] == (
+            "eip191:0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"
+        )
+        remote_resolvers = json.loads(values["HOSTED_SETTLEMENT_REMOTE_RESOLVERS_JSON"])
+        assert remote_resolvers == [
+            {
+                "allow_insecure_loopback": True,
+                "authority_id": "release-authority",
+                "base_url": "http://127.0.0.1:8080",
+                "evaluator_id": "vm-portable",
+                "portable_authority_address": ("0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008"),
+                "principals": [
+                    {
+                        "identifier": "0x1fe2aa7fbaf5720f79a22a4ada4b8b37d4e0c008",
+                        "scheme": "eip191",
+                    }
+                ],
+                "resolver_id": "vm-portable",
+            }
+        ]
 
     assert tuple(tmp_path.iterdir()) == ()
