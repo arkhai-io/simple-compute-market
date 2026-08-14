@@ -1,8 +1,8 @@
 ## 1. Shared query-language foundation
 
-- [ ] 1.1 Add frozen source-spanned token/AST, comparison-operator, scalar/list-literal, field-descriptor, validation, and canonical-rendering types in `core/src/market_core/query_dsl.py`; export only role-neutral public types from `market_core`; keep imports carrier-pure and add parser/validation/error-location tests under `core/tests/unit/`.
-- [ ] 1.2 Add exact `arkhai-core` dependencies to `core/registry-client` and `kit/settlement-runtime`, refresh their scoped `uv.lock` files and review-wheelhouse/package manifests, and prove installed-wheel imports plus existing core carrier-purity/dependency-layer checks.
-- [ ] 1.3 Generate stable human and JSON field-reference/error output from the shared descriptors, including operator/type/missing-value metadata and secret-safe rendering; cover deterministic ordering, quoting, conflicting duplicates, and malformed-input cases in `core/tests/unit/`.
+- [x] 1.1 Added the pure `market_core.query_dsl` lexer, source-spanned AST, typed descriptors, validation, and canonical rendering with focused parser and carrier-purity coverage.
+- [x] 1.2 Added exact `arkhai-core==0.2.0` dependencies to registry-client and settlement-runtime, refreshed locks and reinit commands, and verified both installed environments import the shared DSL while carrier-purity checks pass.
+- [x] 1.3 Added deterministic human/JSON field references and value-redacted positioned diagnostics covering ordering, quoting, duplicates, unknown fields, and malformed input.
 
 ## 2. Filter-spec-owned resource queries
 

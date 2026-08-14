@@ -12,6 +12,7 @@ init: ## Create or update the environment
 
 reinit: ## Reinstall the local package environment
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) \
+		--upgrade-package arkhai-core --reinstall-package arkhai-core \
 		--upgrade-package arkhai-kit-identity --reinstall-package arkhai-kit-identity
 
 test: reinit ## Run the focused unit suite
