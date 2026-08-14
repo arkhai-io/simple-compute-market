@@ -1,53 +1,10 @@
-"""VM-domain buyer/listing CLI helpers.
-
-VM listing semantics live here: named filter flags and rendering of VM
-offer resources, accepted escrows, and demands.
-"""
+"""VM-domain buyer/listing rendering helpers."""
 
 from __future__ import annotations
 
 import json
-from typing import Any
 
 
-def build_vm_filter_params(
-    *,
-    gpu_model: str | None = None,
-    gpu_count_min: int | float | None = None,
-    vcpu_count_min: int | float | None = None,
-    ram_gb_min: int | float | None = None,
-    disk_gb_min: int | float | None = None,
-    region: str | None = None,
-    virtualization_type: str | None = None,
-    cpu_type: str | None = None,
-    host_cpu_cores_min: int | float | None = None,
-    host_ram_gb_min: int | float | None = None,
-    gpu_interconnect: str | None = None,
-    datacenter_grade: bool | None = None,
-    static_ip: bool | None = None,
-) -> dict[str, str | int | float]:
-    """Build registry filter params from VM named filter options."""
-    spec_filters: dict[str, object] = {
-        "gpu_model": gpu_model,
-        "gpu_count_min": gpu_count_min,
-        "vcpu_count_min": vcpu_count_min,
-        "ram_gb_min": ram_gb_min,
-        "disk_gb_min": disk_gb_min,
-        "region": region,
-        "virtualization_type": virtualization_type,
-        "cpu_type": cpu_type,
-        "host_cpu_cores_min": host_cpu_cores_min,
-        "host_ram_gb_min": host_ram_gb_min,
-        "gpu_interconnect": gpu_interconnect,
-        "datacenter_grade": datacenter_grade,
-        "static_ip": static_ip,
-    }
-    out: dict[str, str | int | float] = {}
-    for key, val in spec_filters.items():
-        if val is None:
-            continue
-        out[key] = str(val).lower() if isinstance(val, bool) else val
-    return out
 
 
 def short_contract_address(value: str) -> str:

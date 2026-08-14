@@ -116,6 +116,7 @@ def test_repeatable_field_is_preserved_in_source_order() -> None:
 @pytest.mark.parametrize(
     ("source", "code", "position"),
     [
+        ("", "empty_query", 0),
         ("gpu_model=(H200)", "unsupported_syntax", 10),
         ('gpu_model="unterminated', "unterminated_string", 10),
         ("gpu_model in [H200 A100]", "expected_comma", 19),
@@ -188,7 +189,7 @@ def test_descriptor_collisions_are_rejected() -> None:
         operators=frozenset({ComparisonOperator.EQUAL}),
     )
     with pytest.raises(ValueError, match="duplicate query field or alias"):
-        compile_query("", (*_descriptors(), duplicate))
+        field_reference_json((*_descriptors(), duplicate))
 
 
 def test_field_reference_human_and_json_are_stable_and_equivalent() -> None:

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from registry_client import FilterSpecResponse
 
 from core_buyer import (
     BuyConfig,
@@ -148,7 +149,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
         "http://r2": _authority("registry-ha", second),
     }
 
-    def query(url, **kwargs):
+    def query(url, *_args, **kwargs):
         assert kwargs["signer"] is buyer
         assert kwargs["registry_authority"] == authorities[url]
         if url == "http://r1":
@@ -159,7 +160,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
         ]
 
     with patch(
-        "core_buyer.orchestrator.query_registry_for_matches",
+        "core_buyer.orchestrator._query_registry_for_matches",
         side_effect=query,
     ):
         result = query_registry_for_matches_multi(
@@ -184,7 +185,7 @@ def test_query_registry_for_matches_multi_dedupes_first_seen_listing() -> None:
     ]
 
 
-def test_registry_query_uses_buyer_signer_and_exact_authority_pin() -> None:
+def test_registry_query_compiles_resource_and_uses_exact_authority_pin() -> None:
     buyer = Ed25519Signer(b"\x0a" * 32)
     registry = Ed25519Signer(b"\x0b" * 32)
     calls: list[dict] = []
@@ -198,6 +199,22 @@ def test_registry_query_uses_buyer_signer_and_exact_authority_pin() -> None:
 
         def __exit__(self, *_exc):
             return None
+
+        def get_filter_spec(self):
+            return FilterSpecResponse.from_dict(
+                {
+                    "version": 1,
+                    "etag": "filter-v1",
+                    "filters": [
+                        {
+                            "name": "region",
+                            "path": "$.offer_resource.region",
+                            "op": "in",
+                            "value_type": "string",
+                        }
+                    ],
+                }
+            )
 
         def list_listings(self, **kwargs):
             calls.append({"listing_args": kwargs})
@@ -218,12 +235,13 @@ def test_registry_query_uses_buyer_signer_and_exact_authority_pin() -> None:
             registry_authorities={
                 "http://registry": _authority("registry", registry)
             },
-            filters={"region": "eu", "limit": 7},
+            resource_query="region=eu",
+            limit=7,
             api_keys={"http://registry": "optional-bearer"},
         )
 
     assert result[0]["publisher_principals"] == _trusted(registry).model_dump(mode="json")
-    assert calls[0] == {
+    expected_client = {
         "base_url": "http://registry",
         "signer": buyer,
         "caller_role": "buyer",
@@ -232,12 +250,72 @@ def test_registry_query_uses_buyer_signer_and_exact_authority_pin() -> None:
         "timeout": 30.0,
         "api_key": "optional-bearer",
     }
-    assert calls[1]["listing_args"] == {
+    assert calls[0] == expected_client
+    assert calls[1] == expected_client
+    assert calls[2]["listing_args"] == {
         "status": "open",
         "limit": 7,
         "offset": 0,
+        "etag": "filter-v1",
         "region": "eu",
     }
+
+
+def test_multi_registry_query_rejects_partial_vocabulary_before_listing() -> None:
+    buyer = Ed25519Signer(b"\x0a" * 32)
+    registries = {
+        "http://r1": Ed25519Signer(b"\x0b" * 32),
+        "http://r2": Ed25519Signer(b"\x0c" * 32),
+    }
+    list_calls = 0
+
+    class FakeClient:
+        def __init__(self, base_url, **_kwargs):
+            self.base_url = base_url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return None
+
+        def get_filter_spec(self):
+            field = "region" if self.base_url == "http://r1" else "gpu_model"
+            return FilterSpecResponse.from_dict(
+                {
+                    "version": 1,
+                    "etag": f"{field}-v1",
+                    "filters": [
+                        {
+                            "name": field,
+                            "path": f"$.offer_resource.{field}",
+                            "op": "in",
+                            "value_type": "string",
+                        }
+                    ],
+                }
+            )
+
+        def list_listings(self, **_kwargs):
+            nonlocal list_calls
+            list_calls += 1
+            raise AssertionError("listing request occurred before complete compilation")
+
+    authorities = {
+        url: _authority("registry", signer) for url, signer in registries.items()
+    }
+    with (
+        patch("core_buyer.orchestrator.SyncRegistryClient", FakeClient),
+        pytest.raises(RuntimeError, match="not valid for registry http://r2"),
+    ):
+        query_registry_for_matches_multi(
+            list(registries),
+            signer=buyer,
+            registry_authorities=authorities,
+            resource_query="region=eu",
+        )
+
+    assert list_calls == 0
 
 
 def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listing() -> None:

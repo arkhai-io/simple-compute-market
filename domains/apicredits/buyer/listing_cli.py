@@ -21,7 +21,6 @@ from rich.table import Table
 from core_buyer.policy_surface import extract_seller_min_price
 from domains.apicredits.listings import coerce_resource_dict
 
-from .common import build_token_filter_params
 
 
 listing_app = typer.Typer(no_args_is_help=True)
@@ -106,21 +105,11 @@ def listing_list(
         help="Per-registry deadline in seconds (default: "
         "registry.discovery_timeout from config.toml, fallback 5).",
     ),
-    listing_id: str | None = typer.Option(
-        None, "--listing-id", help="Filter by listing ID."
-    ),
-    service_name: str | None = typer.Option(
+    resource_query: str | None = typer.Option(
         None,
-        "--service-name",
-        help="Filter by service name (registry-side contains match).",
-    ),
-    raw_filters: list[str] | None = typer.Option(
-        None,
-        "--filter",
-        "-f",
-        help="Registry filter-spec parameter as name=value. Repeatable. "
-        "Use this for schema-specific filters that do not have a "
-        "convenience flag.",
+        "--resource",
+        help="Typed resource constraints, for example "
+        "'service_name=weather token in [0xabc,0xdef]'.",
     ),
     limit: int = typer.Option(
         50, "--limit", "-l", help="Maximum listings to fetch (1-200)."
@@ -128,7 +117,6 @@ def listing_list(
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
     """List open API-credit listings from the listing registry."""
-    from core_buyer.cli import parse_filter_options
 
     from .common import (
         APICREDITS_SCHEMA_ID,
@@ -165,15 +153,6 @@ def listing_list(
     if offset < 0:
         raise typer.BadParameter("offset must be >= 0")
 
-    query_params: dict[str, str | int] = {
-        "status": "open",
-        "limit": limit,
-        "offset": offset,
-    }
-    if listing_id:
-        query_params["listing_id"] = listing_id
-    query_params.update(build_token_filter_params(service_name=service_name))
-    query_params.update(parse_filter_options(raw_filters))
     from core_buyer.orchestrator import query_registry_for_matches_multi
 
     try:
@@ -182,7 +161,9 @@ def listing_list(
             timeout=deadline,
             signer=signer,
             registry_authorities=authorities,
-            filters=query_params,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
             api_keys=api_keys,
         )
     except RuntimeError as exc:

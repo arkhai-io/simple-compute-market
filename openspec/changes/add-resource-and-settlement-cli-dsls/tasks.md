@@ -8,8 +8,8 @@
 
 - [x] 2.1 Extended registry filter declarations with validated `query_name`/`query_aliases`, added friendly names plus canonical aliases for all lower-bound VM filters, and covered duplicate/invalid vocabulary and the shipped spec.
 - [x] 2.2 Added registry-client filter-spec descriptor conversion and resource-query compilation with typed operators, friendly/canonical aliases, exact wire encoding, schema and URL+ETag binding, fail-closed vocabulary checks, and sync/async 412 coverage; the full client suite and typing pass.
-- [ ] 2.3 Replace generic core buyer `-f/--filter name=value` handling with one `--resource '<query>'` path in `core/buyer/src/core_buyer/cli.py`, compiling independently against every selected authenticated registry before listing requests and rejecting partial multi-registry vocabulary matches; update focused core buyer CLI tests.
-- [ ] 2.4 Replace VM buyer resource convenience flags and direct `build_vm_filter_params` construction in `domains/vms/buyer/` with the shared `--resource` compiler across listing, discovery, negotiation, and buy entry points; remove obsolete parsers/helpers/tests and add typed numeric/list/boolean and multi-registry behavior coverage.
+- [x] 2.3 Replaced core buyer `-f/--filter` passthrough with one value-redacting `--resource` query path; every selected authenticated registry now compiles its own URL+ETag-bound query before any listing request, and partial vocabulary matches or rotations fail closed.
+- [x] 2.4 Replaced VM and API-credit listing/buy resource convenience flags and direct filter dictionaries with the shared query compiler, removed obsolete filter parsers/builders and raw query persistence/output, refreshed dependent-wheel reinit rules, and covered typed numeric/list/boolean compilation plus multi-registry rejection.
 
 ## 3. Settlement clause contracts and mechanism projections
 

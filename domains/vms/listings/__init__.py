@@ -1,7 +1,6 @@
 """VM listing schema helpers."""
 
 from domains.vms.listings.buyer_cli import (
-    build_vm_filter_params,
     format_accepted_escrows,
     format_demands,
     format_resource,
@@ -74,7 +73,6 @@ from domains.vms.listings.strategy import (
 )
 
 __all__ = [
-    "build_vm_filter_params",
     "adapt_db_resource_to_domain_resource",
     "adapt_domain_resource_to_db_resource",
     "allocation_table_exists",
@@ -112,6 +110,7 @@ __all__ = [
     "load_derived_listing_for_slice",
     "mark_derived_listings_closed",
     "mark_derived_listings_open",
+    "open_listing_resource_keys",
     "parse_resource_from_dict",
     "parse_accepted_escrows_cell",
     "Region",

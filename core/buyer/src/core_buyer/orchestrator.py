@@ -17,7 +17,12 @@ from typing import Any, Callable, Optional
 
 from market_identity import Identity, Signer
 from core_buyer.registry_config import RegistryAuthority
-from registry_client import RegistryClientError, SyncRegistryClient
+from registry_client import (
+    CompiledResourceQuery,
+    RegistryClientError,
+    SyncRegistryClient,
+    compile_resource_query,
+)
 
 
 DEFAULT_HTTP_TIMEOUT = 30.0
@@ -121,24 +126,23 @@ SettleFn = Callable[
 ]
 
 
-def query_registry_for_matches(
+def _query_registry_for_matches(
     registry_url: str,
-    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    timeout: float,
     *,
     signer: Signer,
     registry_authority: RegistryAuthority,
-    filters: Optional[dict[str, Any]] = None,
-    api_key: Optional[str] = None,
+    resource_query: str | None,
+    compiled_query: CompiledResourceQuery | None,
+    status: str,
+    limit: int,
+    offset: int,
+    api_key: str | None,
 ) -> list[dict[str, Any]]:
-    """Read open listings through a signed, authority-pinned registry client."""
-
-    params = dict(filters or {})
-    status = params.pop("status", "open")
-    limit = int(params.pop("limit", 100))
-    offset = int(params.pop("offset", 0))
+    normalized_url = registry_url.rstrip("/")
     try:
         with SyncRegistryClient(
-            registry_url,
+            normalized_url,
             signer=signer,
             caller_role="buyer",
             expected_registries=registry_authority.principals,
@@ -146,17 +150,86 @@ def query_registry_for_matches(
             timeout=timeout,
             api_key=api_key,
         ) as client:
+            bound_query = compiled_query
+            if resource_query is not None and bound_query is None:
+                bound_query = compile_resource_query(
+                    resource_query,
+                    filter_spec=client.get_filter_spec(),
+                    registry_url=normalized_url,
+                )
+            if bound_query is not None and bound_query.registry_url != normalized_url:
+                raise ValueError("compiled resource query is bound to another registry")
             response = client.list_listings(
                 status=status,
                 limit=limit,
                 offset=offset,
-                **params,
+                etag=bound_query.etag if bound_query is not None else None,
+                **(bound_query.as_params() if bound_query is not None else {}),
             )
     except Exception as exc:
         raise RuntimeError(
-            f"Authenticated registry read failed for {registry_url.rstrip('/')}: {exc}"
+            f"Authenticated registry read failed for {normalized_url}: {exc}"
         ) from exc
     return [listing.to_dict() for listing in response.listings]
+
+
+def query_registry_for_matches(
+    registry_url: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    signer: Signer,
+    registry_authority: RegistryAuthority,
+    resource_query: str | None = None,
+    status: str = "open",
+    limit: int = 100,
+    offset: int = 0,
+    api_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Compile and read listings through one signed, pinned registry client."""
+
+    return _query_registry_for_matches(
+        registry_url,
+        timeout,
+        signer=signer,
+        registry_authority=registry_authority,
+        resource_query=resource_query,
+        compiled_query=None,
+        status=status,
+        limit=limit,
+        offset=offset,
+        api_key=api_key,
+    )
+
+
+def _compile_registry_resource_query(
+    registry_url: str,
+    timeout: float,
+    *,
+    signer: Signer,
+    registry_authority: RegistryAuthority,
+    source: str,
+    api_key: str | None,
+) -> CompiledResourceQuery:
+    normalized_url = registry_url.rstrip("/")
+    try:
+        with SyncRegistryClient(
+            normalized_url,
+            signer=signer,
+            caller_role="buyer",
+            expected_registries=registry_authority.principals,
+            registry_authority=registry_authority.authority,
+            timeout=timeout,
+            api_key=api_key,
+        ) as client:
+            return compile_resource_query(
+                source,
+                filter_spec=client.get_filter_spec(),
+                registry_url=normalized_url,
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Resource query is not valid for registry {normalized_url}: {exc}"
+        ) from exc
 
 
 def query_registry_for_matches_multi(
@@ -165,27 +238,52 @@ def query_registry_for_matches_multi(
     *,
     signer: Signer,
     registry_authorities: dict[str, RegistryAuthority],
-    filters: Optional[dict[str, Any]] = None,
+    resource_query: str | None = None,
+    status: str = "open",
+    limit: int = 100,
+    offset: int = 0,
     api_keys: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
-    """Fan in signed registry listings and deduplicate by listing identity."""
+    """Compile for every registry, then fan in and deduplicate listings."""
 
     urls = [url.rstrip("/") for url in registry_urls]
     if set(registry_authorities) != set(urls):
         raise ValueError("registry authority sets must exactly match registry URLs")
     api_keys = api_keys or {}
+
+    # Complete every authenticated filter-spec compilation before the first
+    # listing request. A query must never silently weaken to the subset of
+    # registries whose vocabularies happen to accept it.
+    compiled_by_url: dict[str, CompiledResourceQuery] = {}
+    if resource_query is not None:
+        for url in urls:
+            compiled_by_url[url] = _compile_registry_resource_query(
+                url,
+                timeout,
+                signer=signer,
+                registry_authority=registry_authorities[url],
+                source=resource_query,
+                api_key=api_keys.get(url),
+            )
+
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for url in urls:
         try:
-            items = query_registry_for_matches(
+            items = _query_registry_for_matches(
                 url,
-                timeout=timeout,
+                timeout,
                 signer=signer,
                 registry_authority=registry_authorities[url],
-                filters=filters,
+                resource_query=None,
+                compiled_query=compiled_by_url.get(url),
+                status=status,
+                limit=limit,
+                offset=offset,
                 api_key=api_keys.get(url),
             )
         except RuntimeError as exc:
+            if resource_query is not None:
+                raise
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             continue
         for item in items:

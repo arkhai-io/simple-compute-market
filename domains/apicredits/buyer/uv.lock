@@ -284,6 +284,7 @@ name = "arkhai-core-registry-client"
 version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]

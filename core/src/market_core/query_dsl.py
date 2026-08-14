@@ -281,6 +281,12 @@ def parse_query(source: str) -> QueryExpression:
     """Parse comparisons without assigning field-specific meaning."""
 
     tokens = lex_query(source)
+    if not tokens:
+        raise QuerySyntaxError(
+            "empty_query",
+            "query must contain at least one comparison",
+            position=0,
+        )
     comparisons: list[QueryComparison] = []
     index = 0
     while index < len(tokens):

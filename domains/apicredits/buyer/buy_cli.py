@@ -92,7 +92,11 @@ def register(credits_app: typer.Typer) -> None:
     """
     import os
 
-    from core_buyer.cli import assume_yes_option, register_policy_verb
+    from core_buyer.cli import (
+        assume_yes_option,
+        parse_key_value_options,
+        register_policy_verb,
+    )
     from core_buyer.policy_surface import configured_buyer_policy
 
     _policy = configured_buyer_policy()
@@ -125,16 +129,11 @@ def register(credits_app: typer.Typer) -> None:
             "The key must be bound to the authenticated marketplace principal "
             "or carry no ownership claim.",
         ),
-        service_name: Optional[str] = typer.Option(
+        resource_query: Optional[str] = typer.Option(
             None,
-            "--service-name",
-            help="Filter listings by service name (registry-side contains match).",
-        ),
-        raw_filters: Optional[list[str]] = typer.Option(
-            None,
-            "--filter",
-            "-f",
-            help="Registry filter-spec parameter as name=value. Repeatable.",
+            "--resource",
+            help="Typed resource constraints, for example "
+            "'service_name=weather token in [0xabc,0xdef]'.",
         ),
         from_run: Optional[str] = typer.Option(
             None,
@@ -246,7 +245,6 @@ def register(credits_app: typer.Typer) -> None:
         """
         console = Console()
 
-        from core_buyer.cli import parse_filter_options
 
         # The configured policy's parameters arrive through the injected
         # flags. One policy-owned namespace: declared flag values merged
@@ -255,8 +253,9 @@ def register(credits_app: typer.Typer) -> None:
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
         policy_params_all.update(
-            parse_filter_options(
+            parse_key_value_options(
                 policy_values.get("policy_param") or [],
+                option_name="--policy-param",
             )
         )
         initial_price: Optional[float] = policy_params_all.get("initial_price")
@@ -331,7 +330,6 @@ def register(credits_app: typer.Typer) -> None:
         # Resolution: CLI flag > config.toml > derivation > default.
         from .common import (
             APICREDITS_SCHEMA_ID,
-            build_token_filter_params,
             resolve_buyer_wallet,
             resolve_discovery_timeout,
             resolve_indexer_urls,
@@ -455,16 +453,13 @@ def register(credits_app: typer.Typer) -> None:
             addr_config_path=addr_cfg or None,
         )
 
-        # Filter-aware discovery.
-        active_filters = build_token_filter_params(service_name=service_name)
-        active_filters.update(parse_filter_options(raw_filters))
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls,
                 timeout=deadline,
                 signer=signer,
                 registry_authorities=registry_authorities,
-                filters=active_filters or None,
+                resource_query=resource_query,
                 api_keys=registry_api_keys,
             )
         except RuntimeError as exc:
@@ -473,12 +468,7 @@ def register(credits_app: typer.Typer) -> None:
 
         if not matches:
             typer.secho(
-                "No listings matched. "
-                + (
-                    f"Filters applied: {active_filters}."
-                    if active_filters
-                    else "Registry returned nothing."
-                ),
+                "No listings matched the resource constraints.",
                 err=True,
                 fg=typer.colors.YELLOW,
             )
@@ -562,7 +552,6 @@ def register(credits_app: typer.Typer) -> None:
             key_id=resolved_key_id,
             max_matches=max_matches,
             max_rounds=max_rounds,
-            filters=active_filters or None,
             chain_name=selected_chain_name,
         )
 
@@ -583,10 +572,8 @@ def register(credits_app: typer.Typer) -> None:
             "Opening bid / ceiling (per token)", f"{initial_price} / {max_price}"
         )
         header.add_row("Max matches", str(max_matches))
-        if active_filters:
-            header.add_row(
-                "Filters", ", ".join(f"{k}={v}" for k, v in active_filters.items())
-            )
+        if resource_query is not None:
+            header.add_row("Resource query", "applied")
         console.print(Panel(header, title="market credits buy", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:

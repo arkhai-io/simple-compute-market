@@ -8,7 +8,7 @@ import typer
 from typer.testing import CliRunner
 
 import core_buyer.cli as cli_mod
-from core_buyer.cli import build_app, parse_filter_options
+from core_buyer.cli import build_app
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from core_buyer.registry_config import RegistryAuthority
 from market_core import (
@@ -60,11 +60,10 @@ def _quiet_config(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# No plugins: generic --filter passthrough, raw JSON, stubs for buy verbs
-# ---------------------------------------------------------------------------
+# No plugins: typed --resource query, raw JSON, stubs for buy verbs
 
 
-def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
+def test_generic_listing_list_passes_resource_query_and_prints_raw_json(monkeypatch):
     _quiet_config(monkeypatch)
     seen = {}
 
@@ -74,7 +73,10 @@ def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
         *,
         signer,
         registry_authorities,
-        filters=None,
+        resource_query=None,
+        status="open",
+        limit=100,
+        offset=0,
         api_keys=None,
     ):
         seen.update(
@@ -82,7 +84,9 @@ def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
             timeout=timeout,
             signer=signer,
             registry_authorities=registry_authorities,
-            filters=filters,
+            resource_query=resource_query,
+            limit=limit,
+            offset=offset,
             api_keys=api_keys,
         )
         return [{
@@ -99,16 +103,15 @@ def test_generic_listing_list_passes_filters_and_prints_raw_json(monkeypatch):
         [
             "listing", "list",
             "-r", "http://reg.example/",
-            "--filter", "gpu_model=H200",
-            "-f", "region=eu",
+            "--resource", "gpu_model=H200 region=eu",
             "--limit", "7",
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["urls"] == ["http://reg.example"]
-    assert seen["filters"] == {
-        "limit": 7, "offset": 0, "gpu_model": "H200", "region": "eu",
-    }
+    assert seen["resource_query"] == "gpu_model=H200 region=eu"
+    assert seen["limit"] == 7
+    assert seen["offset"] == 0
     assert json.loads(result.output) == [
         {
             "listing_id": "L1",
@@ -186,7 +189,9 @@ def _vm_like_plugin() -> MarketDomainContract:
         def buy(max_price: float = typer.Option(..., "--max-price")) -> None:
             typer.echo(f"plugin buy at {max_price}")
 
-    normalize = lambda value: value
+    def normalize(value):
+        return value
+
     return MarketDomainContract(
         identity=DomainIdentity("vms.compute"),
         contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
@@ -239,22 +244,3 @@ def test_version_reports_core_and_plugins():
     assert result.exit_code == 0
     assert "arkhai-core-buyer" in result.output
     assert "vms.compute" in result.output
-
-
-# ---------------------------------------------------------------------------
-# --filter parsing
-# ---------------------------------------------------------------------------
-
-
-def test_parse_filter_options_roundtrip():
-    assert parse_filter_options(["a=1", "b = x=y "]) == {"a": "1", "b": "x=y"}
-    assert parse_filter_options(None) == {}
-
-
-def test_parse_filter_options_rejects_bad_input():
-    import pytest
-
-    with pytest.raises(typer.Exit):
-        parse_filter_options(["novalue"])
-    with pytest.raises(typer.Exit):
-        parse_filter_options(["=v"])

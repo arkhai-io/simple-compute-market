@@ -33,7 +33,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from domains.vms.listings import build_vm_filter_params
 from domains.vms.settlement import escrow_proposal_from_accepted_entry
 
 from .buy_orchestrator import (
@@ -474,7 +473,11 @@ def register(app: typer.Typer) -> None:
     default surface is unchanged; a different policy contributes
     different knobs, plus the --policy-param escape hatch.
     """
-    from core_buyer.cli import assume_yes_option, register_policy_verb
+    from core_buyer.cli import (
+        assume_yes_option,
+        parse_key_value_options,
+        register_policy_verb,
+    )
 
     from .policy_surface import configured_buyer_policy
 
@@ -511,60 +514,11 @@ def register(app: typer.Typer) -> None:
             help="Requested lease start time in UTC (ISO-8601 or YYYY-MM-DD HH:MM). "
             "Omit or pass 'now' for immediate start.",
         ),
-        # Spec filters — slice fields
-        gpu_model: str | None = typer.Option(
-            None, "--gpu-model", help="Filter listings by GPU model (e.g., H200)."
-        ),
-        gpu_count_min: float | None = typer.Option(
-            None, "--gpu-count-min", help="Minimum slice GPU count."
-        ),
-        vcpu_count_min: float | None = typer.Option(
-            None, "--vcpu-min", help="Minimum slice vCPU count."
-        ),
-        ram_gb_min: float | None = typer.Option(
-            None, "--ram-gb-min", help="Minimum slice RAM (GB)."
-        ),
-        disk_gb_min: float | None = typer.Option(
-            None, "--disk-gb-min", help="Minimum slice disk (GB)."
-        ),
-        region: str | None = typer.Option(None, "--region", help="Filter by region."),
-        virtualization_type: str | None = typer.Option(
+        resource_query: str | None = typer.Option(
             None,
-            "--virt",
-            help="Virtualization mode (bare_metal|vm|container).",
-        ),
-        # Spec filters — host context
-        cpu_type: str | None = typer.Option(
-            None, "--cpu-type", help="Filter by host CPU model string."
-        ),
-        host_cpu_cores_min: float | None = typer.Option(
-            None, "--host-cores-min", help="Minimum host CPU cores."
-        ),
-        host_ram_gb_min: float | None = typer.Option(
-            None, "--host-ram-gb-min", help="Minimum host RAM (GB)."
-        ),
-        gpu_interconnect: str | None = typer.Option(
-            None,
-            "--interconnect",
-            help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
-        ),
-        datacenter_grade: bool | None = typer.Option(
-            None,
-            "--datacenter/--no-datacenter",
-            help="Restrict to datacenter-grade hosts.",
-        ),
-        static_ip: bool | None = typer.Option(
-            None,
-            "--static-ip/--no-static-ip",
-            help="Restrict to hosts with static public IP.",
-        ),
-        raw_filters: list[str] | None = typer.Option(
-            None,
-            "--filter",
-            "-f",
-            help="Registry filter-spec parameter as name=value. Repeatable. "
-            "Use this for schema-specific filters that do not have a "
-            "compute convenience flag.",
+            "--resource",
+            help="Typed resource constraints, for example "
+            "'gpu_model in [H200,A100] ram_gb>=64 static_ip=true'.",
         ),
         from_run: str | None = typer.Option(
             None,
@@ -681,7 +635,6 @@ def register(app: typer.Typer) -> None:
         """
         console = Console()
 
-        from .cli_helpers import parse_filter_options
 
         # The configured policy's parameters arrive through the injected
         # flags. They live in one policy-owned namespace: declared flag
@@ -690,8 +643,9 @@ def register(app: typer.Typer) -> None:
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
         policy_params_all.update(
-            parse_filter_options(
+            parse_key_value_options(
                 policy_values.get("policy_param") or [],
+                option_name="--policy-param",
             )
         )
         # The scalar names the rest of this body needs:
@@ -800,32 +754,15 @@ def register(app: typer.Typer) -> None:
                 )
             raise typer.Exit(2)
         tc = token_contract
-        # Filter-aware discovery: pre-fetch matches with spec filters applied
-        # so we can (a) show them to the user in interactive mode, (b) anchor
-        # auto-price derivation on each listing's seller-advertised min_price.
-        active_filters = build_vm_filter_params(
-            gpu_model=gpu_model,
-            gpu_count_min=gpu_count_min,
-            vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min,
-            disk_gb_min=disk_gb_min,
-            region=region,
-            virtualization_type=virtualization_type,
-            cpu_type=cpu_type,
-            host_cpu_cores_min=host_cpu_cores_min,
-            host_ram_gb_min=host_ram_gb_min,
-            gpu_interconnect=gpu_interconnect,
-            datacenter_grade=datacenter_grade,
-            static_ip=static_ip,
-        )
-        active_filters.update(parse_filter_options(raw_filters))
+        # Compile the same resource query against every selected registry
+        # before retrieving candidates.
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls,
                 timeout=deadline,
                 signer=signer,
                 registry_authorities=registry_authorities,
-                filters=active_filters or None,
+                resource_query=resource_query,
                 api_keys=registry_api_keys,
             )
         except RuntimeError as exc:
@@ -869,12 +806,7 @@ def register(app: typer.Typer) -> None:
 
         if not matches:
             typer.secho(
-                "No listings matched. "
-                + (
-                    f"Filters applied: {active_filters}."
-                    if active_filters
-                    else "Registry returned nothing."
-                ),
+                "No listings matched the resource and settlement constraints.",
                 err=True,
                 fg=typer.colors.YELLOW,
             )
@@ -1064,7 +996,6 @@ def register(app: typer.Typer) -> None:
             start_utc=requested_start_utc,
             max_matches=max_matches,
             max_rounds=max_rounds,
-            filters=active_filters or None,
             **settlement_policy.public_run_metadata(),
         )
 
@@ -1082,10 +1013,8 @@ def register(app: typer.Typer) -> None:
             header.add_row("EVM wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
-        if active_filters:
-            header.add_row(
-                "Filters", ", ".join(f"{k}={v}" for k, v in active_filters.items())
-            )
+        if resource_query is not None:
+            header.add_row("Resource query", "applied")
         if not quiet:
             console.print(Panel(header, title="market buy-sync", border_style="cyan"))
 

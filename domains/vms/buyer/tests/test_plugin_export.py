@@ -33,13 +33,12 @@ def test_assembled_app_exposes_vm_verbs():
         assert name in result.output, f"missing command {name!r}"
 
 
-def test_assembled_listing_is_vm_rendering_not_generic_fallback():
-    # The VM listing group documents the compute convenience flags; the
-    # generic core fallback only has --filter passthrough.
+def test_assembled_listing_uses_typed_resource_query() -> None:
     result = runner.invoke(app, ["listing", "list", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--gpu-model" in result.output
-    assert "--filter" in result.output
+    assert "--resource" in result.output
+    assert "--gpu-model" not in result.output
+    assert "--filter" not in result.output
 
 
 def test_version_reports_domain_contract():

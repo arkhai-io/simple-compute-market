@@ -142,7 +142,7 @@ def register(app: typer.Typer) -> None:
         """
         console = Console()
 
-        from core_buyer.cli import parse_filter_options
+        from core_buyer.cli import parse_key_value_options
 
         # The configured policy's parameters arrive through the injected
         # flags. One policy-owned namespace: declared flag values merged
@@ -151,8 +151,9 @@ def register(app: typer.Typer) -> None:
             k: v for k, v in policy_values.items() if k != "policy_param"
         }
         policy_params_all.update(
-            parse_filter_options(
+            parse_key_value_options(
                 policy_values.get("policy_param") or [],
+                option_name="--policy-param",
             )
         )
         initial_price: float | None = policy_params_all.get("initial_price")

@@ -226,12 +226,6 @@ def make_run_publisher_principals_refresh(
     return refresh
 
 
-def build_token_filter_params(*, service_name: str | None = None) -> dict[str, str]:
-    """Map the plugin's convenience flags to registry filter-spec params."""
-    params: dict[str, str] = {}
-    if service_name:
-        params["service_name"] = service_name
-    return params
 
 
 def resolve_key_disposition(

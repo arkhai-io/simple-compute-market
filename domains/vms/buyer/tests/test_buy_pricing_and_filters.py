@@ -10,7 +10,6 @@ from typing import Any
 from unittest import mock
 
 import pytest
-import typer
 from arkhai_vms import make_vm_provision_terms
 from core_buyer.registry_config import RegistryAuthority
 from domains.vms.buyer.buy_cli import _make_hosted_settle_hook
@@ -24,8 +23,8 @@ from domains.vms.buyer.buy_orchestrator import (
     query_registry_for_matches,
     run_buy,
 )
-from domains.vms.buyer.cli_helpers import parse_filter_options
 from domains.vms.buyer.settlement_composition import resolve_buyer_settlement_policy
+from registry_client import FilterSpecResponse
 from identity_helpers import BUYER_SIGNER, seller_principals
 from market_core.schemas import (
     EscrowProposal,
@@ -377,11 +376,11 @@ class TestExtractSellerMinPrice:
 
 
 # ---------------------------------------------------------------------------
-# query_registry_for_matches with filters
+# query_registry_for_matches with typed resource queries
 # ---------------------------------------------------------------------------
 
 
-class TestQueryRegistryFilters:
+class TestQueryRegistryResources:
     def _patch_client(self, monkeypatch, items=()):
         captured = {}
 
@@ -394,6 +393,39 @@ class TestQueryRegistryFilters:
 
             def __exit__(self, *_args):
                 return False
+
+            def get_filter_spec(self):
+                return FilterSpecResponse.from_dict(
+                    {
+                        "version": 1,
+                        "etag": "vm-v1",
+                        "filters": [
+                            {
+                                "name": "gpu_model",
+                                "op": "in",
+                                "value_type": "string",
+                            },
+                            {
+                                "name": "gpu_count_min",
+                                "query_name": "gpu_count",
+                                "query_aliases": ["gpu_count_min"],
+                                "op": "range",
+                                "value_type": "integer",
+                                "alias_kind": "lower_bound",
+                            },
+                            {
+                                "name": "datacenter_grade",
+                                "op": "in",
+                                "value_type": "boolean",
+                            },
+                            {
+                                "name": "static_ip",
+                                "op": "in",
+                                "value_type": "boolean",
+                            },
+                        ],
+                    }
+                )
 
             def list_listings(self, **kwargs):
                 captured["params"] = kwargs
@@ -410,7 +442,7 @@ class TestQueryRegistryFilters:
         )
         return captured
 
-    def _query(self, *, filters=None):
+    def _query(self, *, resource_query=None):
         return query_registry_for_matches(
             "http://reg",
             signer=BUYER_SIGNER,
@@ -418,56 +450,42 @@ class TestQueryRegistryFilters:
                 authority="registry",
                 principals=seller_principals(),
             ),
-            filters=filters,
+            resource_query=resource_query,
         )
 
-    def test_no_filters_sends_only_status(self, monkeypatch):
+    def test_no_resource_query_sends_only_common_parameters(self, monkeypatch):
         captured = self._patch_client(monkeypatch)
         self._query()
         assert captured["params"] == {
             "status": "open",
             "limit": 100,
             "offset": 0,
+            "etag": None,
         }
 
-    def test_filters_are_forwarded_as_typed_query_params(self, monkeypatch):
+    def test_resource_query_is_compiled_to_typed_parameters(self, monkeypatch):
         captured = self._patch_client(monkeypatch)
         self._query(
-            filters={
-                "gpu_model": "H200",
-                "gpu_count_min": 4,
-                "datacenter_grade": True,
-                "static_ip": False,
-                "region": None,
-            }
+            resource_query=(
+                "gpu_model=H200 gpu_count>=4 "
+                "datacenter_grade=true static_ip=false"
+            )
         )
         assert captured["params"] == {
             "status": "open",
             "limit": 100,
             "offset": 0,
+            "etag": "vm-v1",
             "gpu_model": "H200",
-            "gpu_count_min": 4,
-            "datacenter_grade": True,
-            "static_ip": False,
-            "region": None,
+            "gpu_count_min": "4",
+            "datacenter_grade": "true",
+            "static_ip": "false",
         }
 
     def test_returns_items_list(self, monkeypatch):
         items = [{"listing_id": "a"}, {"listing_id": "b"}]
         self._patch_client(monkeypatch, items)
         assert self._query() == items
-
-
-def test_parse_filter_options_accepts_repeatable_key_value_pairs():
-    assert parse_filter_options(["gpu_model=H200", "custom_axis=in:[a,b]"]) == {
-        "gpu_model": "H200",
-        "custom_axis": "in:[a,b]",
-    }
-
-
-def test_parse_filter_options_rejects_malformed_value():
-    with pytest.raises(typer.Exit):
-        parse_filter_options(["gpu_model"])
 
 
 # ---------------------------------------------------------------------------

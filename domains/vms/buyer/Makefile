@@ -11,6 +11,7 @@ reinit:
 	uv sync --dev --python 3.12 --find-links $(DIST_DIR) \
 	--upgrade-package arkhai-core         --reinstall-package arkhai-core \
 	--upgrade-package arkhai-core-buyer   --reinstall-package arkhai-core-buyer \
+	--upgrade-package arkhai-core-registry-client --reinstall-package arkhai-core-registry-client \
 	--upgrade-package arkhai-vms-buyer     --reinstall-package arkhai-vms-buyer \
 	--upgrade-package arkhai-kit-identity  --reinstall-package arkhai-kit-identity \
 	--upgrade-package arkhai-kit-alkahest --reinstall-package arkhai-kit-alkahest \

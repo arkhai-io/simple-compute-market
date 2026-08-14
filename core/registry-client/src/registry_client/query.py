@@ -13,9 +13,12 @@ from market_core import (
     QueryValueType,
     ValidatedComparison,
     compile_query,
+    field_reference_json,
 )
 
 from registry_client.models import FilterSpecResponse
+
+_RESERVED_PARAMETERS = frozenset({"etag", "limit", "offset", "publisher", "status"})
 
 
 class FilterVocabularyError(ValueError):
@@ -96,6 +99,10 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
                 f"registry filter declaration {index} must be an object"
             )
         parameter = _required_string(raw, "name", index)
+        if parameter in _RESERVED_PARAMETERS:
+            raise FilterVocabularyError(
+                f"registry filter declaration {index} uses a reserved parameter"
+            )
         query_name = raw.get("query_name") or parameter
         if not isinstance(query_name, str):
             raise FilterVocabularyError(
@@ -139,7 +146,7 @@ def _resource_fields(filters: Iterable[dict[str, Any]]) -> tuple[_ResourceField,
 
     # Shared validation performs the cross-declaration collision check.
     try:
-        compile_query("", (field.descriptor for field in fields))
+        field_reference_json(field.descriptor for field in fields)
     except ValueError as exc:
         raise FilterVocabularyError("registry filter query names are ambiguous") from exc
     return tuple(fields)

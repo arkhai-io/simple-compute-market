@@ -22,7 +22,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from domains.vms.listings import (
-    build_vm_filter_params,
     format_accepted_escrows,
     format_demands,
     format_resource,
@@ -103,63 +102,11 @@ def listing_list(
         help="Per-registry deadline in seconds (default: "
         "registry.discovery_timeout from config.toml, fallback 5).",
     ),
-    listing_id: str | None = typer.Option(
-        None, "--listing-id", help="Filter by listing ID."
-    ),
-    # Spec filters — slice fields
-    gpu_model: str | None = typer.Option(
-        None, "--gpu-model", help="Filter by GPU model (e.g., H200, RTX 5080)."
-    ),
-    gpu_count_min: int | None = typer.Option(
-        None, "--gpu-count-min", help="Minimum slice GPU count."
-    ),
-    vcpu_count_min: int | None = typer.Option(
-        None, "--vcpu-min", help="Minimum slice vCPU count."
-    ),
-    ram_gb_min: int | None = typer.Option(
-        None, "--ram-gb-min", help="Minimum slice RAM (GB)."
-    ),
-    disk_gb_min: int | None = typer.Option(
-        None, "--disk-gb-min", help="Minimum slice disk (GB)."
-    ),
-    region: str | None = typer.Option(None, "--region", help="Filter by region."),
-    virtualization_type: str | None = typer.Option(
+    resource_query: str | None = typer.Option(
         None,
-        "--virt",
-        help="Virtualization mode (bare_metal|vm|container).",
-    ),
-    # Spec filters — host context
-    cpu_type: str | None = typer.Option(
-        None, "--cpu-type", help="Filter by host CPU model string."
-    ),
-    host_cpu_cores_min: int | None = typer.Option(
-        None, "--host-cores-min", help="Minimum host CPU cores."
-    ),
-    host_ram_gb_min: int | None = typer.Option(
-        None, "--host-ram-gb-min", help="Minimum host RAM (GB)."
-    ),
-    gpu_interconnect: str | None = typer.Option(
-        None,
-        "--interconnect",
-        help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
-    ),
-    datacenter_grade: bool | None = typer.Option(
-        None,
-        "--datacenter/--no-datacenter",
-        help="Restrict to datacenter-grade hosts.",
-    ),
-    static_ip: bool | None = typer.Option(
-        None,
-        "--static-ip/--no-static-ip",
-        help="Restrict to hosts with static public IP.",
-    ),
-    raw_filters: list[str] | None = typer.Option(
-        None,
-        "--filter",
-        "-f",
-        help="Registry filter-spec parameter as name=value. Repeatable. "
-        "Use this for schema-specific filters that do not have a "
-        "compute convenience flag.",
+        "--resource",
+        help="Typed resource constraints, for example "
+        "'gpu_model in [H200,A100] ram_gb>=64 static_ip=true'.",
     ),
     # Pagination
     limit: int = typer.Option(
@@ -167,12 +114,7 @@ def listing_list(
     ),
     offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
-    """List open listings from the listing registry.
-
-    Spec filters mirror the registry API: equality for strings/enums/bools,
-    `_min` semantics for numerics. Without any filters, returns all open
-    listings up to ``--limit``.
-    """
+    """List open listings matching an optional typed resource query."""
     signer, urls, authorities, api_keys, deadline = _registry_context(
         registry_urls=registry_urls,
         discovery_timeout=discovery_timeout,
@@ -182,35 +124,6 @@ def listing_list(
     if offset < 0:
         raise typer.BadParameter("offset must be >= 0")
 
-    query_params: dict[str, str | int] = {
-        "status": "open",
-        "limit": limit,
-        "offset": offset,
-    }
-    if listing_id:
-        query_params["listing_id"] = listing_id
-
-    query_params.update(
-        build_vm_filter_params(
-            gpu_model=gpu_model,
-            gpu_count_min=gpu_count_min,
-            vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min,
-            disk_gb_min=disk_gb_min,
-            region=region,
-            virtualization_type=virtualization_type,
-            cpu_type=cpu_type,
-            host_cpu_cores_min=host_cpu_cores_min,
-            host_ram_gb_min=host_ram_gb_min,
-            gpu_interconnect=gpu_interconnect,
-            datacenter_grade=datacenter_grade,
-            static_ip=static_ip,
-        )
-    )
-    from .cli_helpers import parse_filter_options
-
-    query_params.update(parse_filter_options(raw_filters))
-
     from .buy_orchestrator import query_registry_for_matches_multi
 
     rows = query_registry_for_matches_multi(
@@ -218,7 +131,9 @@ def listing_list(
         timeout=deadline,
         signer=signer,
         registry_authorities=authorities,
-        filters=query_params,
+        resource_query=resource_query,
+        limit=limit,
+        offset=offset,
         api_keys=api_keys,
     )
     merged = {

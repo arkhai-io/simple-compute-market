@@ -40,16 +40,19 @@ def test_assembled_app_exposes_credits_group_only():
 def test_buy_surface_has_quantity_key_and_scalar_price_flags():
     result = runner.invoke(app, ["credits", "buy", "--help"])
     assert result.exit_code == 0, result.output
-    for flag in ("--quantity", "--new-key", "--key-id", "--service-name",
-                 "--initial-price", "--max-price"):
+    for flag in (
+        "--quantity", "--new-key", "--key-id", "--resource",
+        "--initial-price", "--max-price",
+    ):
         assert flag in result.output, f"missing flag {flag!r}"
 
 
-def test_listing_surface_is_token_rendering_not_generic_fallback():
+def test_listing_surface_uses_typed_resource_query():
     result = runner.invoke(app, ["credits", "listing", "list", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--service-name" in result.output
-    assert "--filter" in result.output
+    assert "--resource" in result.output
+    assert "--service-name" not in result.output
+    assert "--filter" not in result.output
 
 
 def test_version_reports_domain_contract():

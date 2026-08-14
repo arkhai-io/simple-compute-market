@@ -10,8 +10,6 @@ from typing import Optional
 
 from rich.console import Console
 
-from core_buyer.cli import parse_filter_options  # noqa: F401 — moved to core
-
 
 def resolve_prices_from_matches(
     *,

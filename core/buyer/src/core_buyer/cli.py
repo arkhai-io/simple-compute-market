@@ -5,9 +5,9 @@ Core owns the console script and the cross-schema verb shape (``listing``,
 concrete command behavior. Verbs a plugin registers replace the core
 fallbacks for those names. Without plugins:
 
-* ``market listing list/show`` work generically — repeatable
-  ``--filter name=value`` passthrough straight to the registry filter-spec
-  API, raw JSON output, no schema-specific flags or rendering;
+* ``market listing list/show`` work generically through one typed
+  ``--resource`` query compiled against each selected registry's filter spec,
+  with raw JSON output and no schema-specific rendering;
 * ``market buy``/``negotiate``/``settle`` are stubs that explain a schema
   plugin is required — core never fakes a concrete buy experience.
 """
@@ -56,13 +56,18 @@ def _registry_identity_context(registry_urls: list[str]):
     )
 
 
-def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
-    """Parse repeatable ``--filter name=value`` CLI options."""
+def parse_key_value_options(
+    raw_values: list[str] | None,
+    *,
+    option_name: str,
+) -> dict[str, str]:
+    """Parse repeatable key=value options without echoing supplied values."""
+
     parsed: dict[str, str] = {}
-    for raw in raw_filters or []:
+    for index, raw in enumerate(raw_values or []):
         if "=" not in raw:
             typer.secho(
-                f"Invalid --filter {raw!r}; expected name=value.",
+                f"Invalid {option_name} at index {index}; expected key=value.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -72,7 +77,8 @@ def parse_filter_options(raw_filters: list[str] | None) -> dict[str, str]:
         value = value.strip()
         if not name or not value:
             typer.secho(
-                f"Invalid --filter {raw!r}; name and value must be non-empty.",
+                f"Invalid {option_name} at index {index}; "
+                "key and value must be non-empty.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -168,13 +174,11 @@ def _build_generic_listing_app() -> typer.Typer:
             "--discovery-timeout",
             help="Per-registry deadline in seconds.",
         ),
-        raw_filters: Optional[list[str]] = typer.Option(
+        resource_query: Optional[str] = typer.Option(
             None,
-            "--filter",
-            "-f",
-            help="Registry filter-spec parameter as name=value. Repeatable. "
-            "This is the only filter surface without a schema plugin; "
-            "install one for named flags and rendered output.",
+            "--resource",
+            help="Typed resource constraints, for example "
+            "'gpu_model in [H200,A100] ram_gb>=64'.",
         ),
         limit: int = typer.Option(
             50, "--limit", "-l", help="Maximum listings to fetch (1-200)."
@@ -188,16 +192,20 @@ def _build_generic_listing_app() -> typer.Typer:
             raise typer.BadParameter("offset must be >= 0")
         urls = resolve_indexer_urls(override=registry_urls)
         signer, authorities, api_keys = _registry_identity_context(urls)
-        filters: dict[str, object] = {"limit": limit, "offset": offset}
-        filters.update(parse_filter_options(raw_filters))
-        items = query_registry_for_matches_multi(
-            urls,
-            timeout=resolve_discovery_timeout(override=discovery_timeout),
-            signer=signer,
-            registry_authorities=authorities,
-            filters=filters,
-            api_keys=api_keys,
-        )
+        try:
+            items = query_registry_for_matches_multi(
+                urls,
+                timeout=resolve_discovery_timeout(override=discovery_timeout),
+                signer=signer,
+                registry_authorities=authorities,
+                resource_query=resource_query,
+                limit=limit,
+                offset=offset,
+                api_keys=api_keys,
+            )
+        except RuntimeError as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=2) from exc
         typer.echo(json.dumps(items, indent=2, default=str))
 
     @listing_app.command("show")
@@ -249,7 +257,7 @@ def _make_plugin_required_stub(verb: str):
             f"`market {verb}` needs a buyer market domain and none is "
             f"installed. Install your market domain's buyer package; core "
             f"only provides generic listing browsing via "
-            f"`market listing list --filter name=value`.",
+            f"`market listing list --resource '<query>'`.",
             err=True,
             fg=typer.colors.RED,
         )
@@ -331,8 +339,8 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
         """List installed registry schema plugins."""
         if not domains:
             typer.echo(
-                "No buyer market domains installed. Only generic listing "
-                "browsing (--filter passthrough) is available."
+                "No buyer market domains installed. Only generic typed "
+                "resource-query listing is available."
             )
             return
         for domain in domains:
@@ -347,7 +355,7 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
         app.add_typer(
             _build_generic_listing_app(),
             name="listing",
-            help="Browse registry listings generically (raw JSON, --filter passthrough).",
+            help="Browse registry listings generically (raw JSON, typed --resource).",
         )
     for verb in ("buy", "negotiate", "settle"):
         if verb not in claimed:
