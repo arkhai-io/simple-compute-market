@@ -29,6 +29,8 @@ from pydantic import (
     model_validator,
 )
 
+from market_core.query_dsl import FieldDescriptor, field_reference_json
+from market_core.schemas import SettlementOption
 from .ports import ConditionalEscrowClient
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
@@ -137,6 +139,32 @@ OptionBuilder = Callable[
     [BaseModel, MechanismReadiness, Mapping[str, Any], SettlementRole], Any
 ]
 BuyerCompatibilityHook = Callable[[BaseModel, Any, Mapping[str, Any]], bool]
+SettlementClauseProjector = Callable[[SettlementOption], Any | None]
+PublicationInputValidator = Callable[[BaseModel, BaseModel, SettlementRole], BaseModel]
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementClauseField:
+    """One role-scoped public option projection owned by a mechanism."""
+
+    descriptor: FieldDescriptor
+    roles: frozenset[SettlementRole]
+    projector: SettlementClauseProjector = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.roles or not self.roles <= {"buyer", "seller"}:
+            raise SettlementConfigurationError(
+                f"settlement clause field {self.descriptor.name!r} has invalid roles"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RegisteredSettlementClauseField:
+    """A validated field bound to its owning canonical mechanism."""
+
+    mechanism_id: str
+    config_key: str
+    field: SettlementClauseField
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +179,9 @@ class MechanismRegistration:
     client_factory: ClientFactory
     option_builder: OptionBuilder
     buyer_compatibility: BuyerCompatibilityHook
+    clause_fields: tuple[SettlementClauseField, ...]
+    publication_input_model: type[BaseModel]
+    publication_input_validator: PublicationInputValidator
     command_group: Any | None = None
     public_detail_keys: frozenset[str] = frozenset()
 
@@ -172,10 +203,65 @@ class MechanismRegistration:
         ):
             raise SettlementConfigurationError("config_model must be a Pydantic model")
         enabled = self.config_model.model_fields.get("enabled")
-        if enabled is None or enabled.annotation is not bool or enabled.default is not False:
+        if (
+            enabled is None
+            or enabled.annotation is not bool
+            or enabled.default is not False
+        ):
             raise SettlementConfigurationError(
                 f"{self.mechanism_id!r} config must declare enabled: bool = False"
             )
+        if not isinstance(self.publication_input_model, type) or not issubclass(
+            self.publication_input_model, BaseModel
+        ):
+            raise SettlementConfigurationError(
+                "publication_input_model must be a Pydantic model"
+            )
+        if self.publication_input_model.model_config.get("extra") != "forbid":
+            raise SettlementConfigurationError(
+                f"{self.mechanism_id!r} publication input must forbid extra fields"
+            )
+        sensitive_inputs = sorted(
+            name
+            for name in self.publication_input_model.model_fields
+            if _looks_sensitive_key(name)
+        )
+        if sensitive_inputs:
+            raise SettlementConfigurationError(
+                "publication input fields are sensitive: " + ", ".join(sensitive_inputs)
+            )
+        expected_prefix = f"{self.config_key}."
+        for clause_field in self.clause_fields:
+            if not clause_field.roles <= self.roles:
+                raise SettlementConfigurationError(
+                    f"settlement clause field {clause_field.descriptor.name!r} "
+                    "declares a role not owned by its registration"
+                )
+            names = (
+                clause_field.descriptor.name,
+                *clause_field.descriptor.aliases,
+            )
+            unqualified = sorted(
+                name for name in names if not name.startswith(expected_prefix)
+            )
+            if unqualified:
+                raise SettlementConfigurationError(
+                    f"settlement clause fields for {self.mechanism_id!r} must use "
+                    f"the {expected_prefix!r} namespace: {', '.join(unqualified)}"
+                )
+            sensitive = sorted(name for name in names if _looks_sensitive_key(name))
+            if sensitive:
+                raise SettlementConfigurationError(
+                    "settlement clause fields are sensitive: " + ", ".join(sensitive)
+                )
+        try:
+            field_reference_json(
+                clause_field.descriptor for clause_field in self.clause_fields
+            )
+        except ValueError as exc:
+            raise SettlementConfigurationError(
+                f"invalid settlement clause fields for {self.mechanism_id!r}: {exc}"
+            ) from exc
         forbidden_details = sorted(
             key for key in self.public_detail_keys if _looks_sensitive_key(key)
         )
@@ -195,6 +281,7 @@ class SettlementConfigurationRegistry:
     def __init__(self, registrations: Iterable[MechanismRegistration] = ()) -> None:
         self._registrations: dict[str, MechanismRegistration] = {}
         self._config_keys: dict[str, str] = {}
+        self._clause_names: dict[str, str] = {}
         for registration in registrations:
             self.register(registration)
 
@@ -209,6 +296,23 @@ class SettlementConfigurationRegistry:
                 f"duplicate settlement config key {registration.config_key!r} "
                 f"for {existing!r} and {registration.mechanism_id!r}"
             )
+        for clause_field in registration.clause_fields:
+            for name in (
+                clause_field.descriptor.name,
+                *clause_field.descriptor.aliases,
+            ):
+                owner = self._clause_names.get(name)
+                if owner is not None:
+                    raise SettlementConfigurationError(
+                        f"duplicate settlement clause field {name!r} "
+                        f"for {owner!r} and {registration.mechanism_id!r}"
+                    )
+        for clause_field in registration.clause_fields:
+            for name in (
+                clause_field.descriptor.name,
+                *clause_field.descriptor.aliases,
+            ):
+                self._clause_names[name] = registration.mechanism_id
         self._registrations[registration.mechanism_id] = registration
         self._config_keys[registration.config_key] = registration.mechanism_id
 
@@ -223,6 +327,82 @@ class SettlementConfigurationRegistry:
             raise SettlementConfigurationError(
                 f"uninstalled settlement mechanism {mechanism_id!r}"
             ) from exc
+
+    def canonical_mechanism_id(
+        self,
+        value: str,
+        *,
+        role: SettlementRole,
+    ) -> str:
+        """Resolve a configuration key or canonical ID for one role."""
+
+        mechanism_id = self._config_keys.get(value, value)
+        registration = self.registration(mechanism_id)
+        if role not in registration.roles:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {mechanism_id!r} does not apply to role {role!r}"
+            )
+        return mechanism_id
+
+    def clause_fields(
+        self,
+        *,
+        role: SettlementRole,
+    ) -> tuple[RegisteredSettlementClauseField, ...]:
+        """Return validated public projections in deterministic field order."""
+
+        fields = (
+            RegisteredSettlementClauseField(
+                mechanism_id=registration.mechanism_id,
+                config_key=registration.config_key,
+                field=clause_field,
+            )
+            for registration in self.registrations
+            for clause_field in registration.clause_fields
+            if role in registration.roles and role in clause_field.roles
+        )
+        return tuple(sorted(fields, key=lambda item: item.field.descriptor.name))
+
+    def validate_publication_input(
+        self,
+        mechanism_id: str,
+        raw: Mapping[str, Any] | BaseModel,
+        config: SettlementConfig,
+        *,
+        role: SettlementRole,
+    ) -> BaseModel:
+        """Strictly parse and mechanism-validate one public publication input."""
+
+        registration = self.registration(mechanism_id)
+        if role not in registration.roles:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {mechanism_id!r} does not apply to role {role!r}"
+            )
+        section = config.mechanisms.get(registration.config_key)
+        if section is None:
+            raise SettlementConfigurationError(
+                f"settlement mechanism {mechanism_id!r} has no configured section"
+            )
+        try:
+            parsed = (
+                raw
+                if isinstance(raw, registration.publication_input_model)
+                else registration.publication_input_model.model_validate(raw)
+            )
+            validated = registration.publication_input_validator(
+                section,
+                parsed,
+                role,
+            )
+        except ValueError as exc:
+            raise SettlementConfigurationError(
+                f"invalid publication input for {mechanism_id!r}: {exc}"
+            ) from exc
+        if not isinstance(validated, registration.publication_input_model):
+            raise SettlementConfigurationError(
+                f"publication validator for {mechanism_id!r} returned invalid type"
+            )
+        return validated
 
     def resolve(
         self,
@@ -242,7 +422,10 @@ class SettlementConfigurationRegistry:
                 f"unknown Settlement keys: {', '.join(unknown_root)}"
             )
         schema_version = raw.get("schema_version", SETTLEMENT_CONFIG_SCHEMA_VERSION)
-        if type(schema_version) is not int or schema_version != SETTLEMENT_CONFIG_SCHEMA_VERSION:
+        if (
+            type(schema_version) is not int
+            or schema_version != SETTLEMENT_CONFIG_SCHEMA_VERSION
+        ):
             raise SettlementConfigurationError(
                 f"unsupported settlement schema_version {schema_version!r}; "
                 f"expected {SETTLEMENT_CONFIG_SCHEMA_VERSION}"
@@ -384,7 +567,12 @@ class SettlementConfigurationRegistry:
                         configured=False,
                         enabled=False,
                         ready=False,
-                        blockers=(ReadinessBlocker(code="not_configured", message="mechanism is not configured"),),
+                        blockers=(
+                            ReadinessBlocker(
+                                code="not_configured",
+                                message="mechanism is not configured",
+                            ),
+                        ),
                     )
                 )
                 continue
@@ -395,7 +583,11 @@ class SettlementConfigurationRegistry:
                         configured=True,
                         enabled=False,
                         ready=False,
-                        blockers=(ReadinessBlocker(code="disabled", message="mechanism is disabled"),),
+                        blockers=(
+                            ReadinessBlocker(
+                                code="disabled", message="mechanism is disabled"
+                            ),
+                        ),
                     )
                 )
                 continue
@@ -499,12 +691,21 @@ class SettlementConfigurationRegistry:
         mechanisms: list[dict[str, Any]] = []
         for registration in self.ordered_registrations(config, role=role):
             section = config.mechanisms.get(registration.config_key)
+            descriptors = [
+                item.field.descriptor
+                for item in self.clause_fields(role=role)
+                if item.mechanism_id == registration.mechanism_id
+            ]
             mechanisms.append(
                 {
                     "mechanism": registration.mechanism_id,
                     "config_key": registration.config_key,
                     "configured": section is not None,
                     "enabled": bool(section is not None and section.enabled),
+                    "clause_fields": field_reference_json(descriptors),
+                    "publication_input_schema": (
+                        registration.publication_input_model.model_json_schema()
+                    ),
                 }
             )
         return {
@@ -551,7 +752,9 @@ class SettlementConfigurationRegistry:
                 f"{', '.join(unknown_details)}"
             )
         secret_values = _secret_values(section)
-        public_payload = json.dumps(readiness.safe_projection(), sort_keys=True, ensure_ascii=True)
+        public_payload = json.dumps(
+            readiness.safe_projection(), sort_keys=True, ensure_ascii=True
+        )
         if any(value and value in public_payload for value in secret_values):
             raise SettlementConfigurationError(
                 f"preflight for {registration.mechanism_id!r} exposed a secret value"
@@ -626,7 +829,11 @@ def _reject_unknown_model_keys(
                         path=f"{path}.{name}.{dynamic_key}",
                         role=role,
                     )
-        elif nested is not None and container == "sequence" and isinstance(value, (list, tuple)):
+        elif (
+            nested is not None
+            and container == "sequence"
+            and isinstance(value, (list, tuple))
+        ):
             for index, item in enumerate(value):
                 if isinstance(item, Mapping):
                     _reject_unknown_model_keys(
@@ -634,7 +841,6 @@ def _reject_unknown_model_keys(
                     )
         elif nested is not None and isinstance(value, Mapping):
             _reject_unknown_model_keys(nested, value, path=f"{path}.{name}", role=role)
-
 
 
 def _model_container(annotation: Any) -> str:
@@ -649,6 +855,7 @@ def _model_container(annotation: Any) -> str:
             return nested
     return "direct"
 
+
 def _field_is_secret(field_info: Any) -> bool:
     extra = field_info.json_schema_extra
     if isinstance(extra, Mapping) and extra.get("secret") is True:
@@ -656,7 +863,9 @@ def _field_is_secret(field_info: Any) -> bool:
     annotation = field_info.annotation
     if annotation in (SecretStr, SecretBytes):
         return True
-    return any(argument in (SecretStr, SecretBytes) for argument in get_args(annotation))
+    return any(
+        argument in (SecretStr, SecretBytes) for argument in get_args(annotation)
+    )
 
 
 def _secret_values(model: BaseModel) -> set[str]:
@@ -664,7 +873,11 @@ def _secret_values(model: BaseModel) -> set[str]:
     for name, field_info in type(model).model_fields.items():
         value = getattr(model, name)
         if _field_is_secret(field_info):
-            revealed = value.get_secret_value() if isinstance(value, (SecretStr, SecretBytes)) else value
+            revealed = (
+                value.get_secret_value()
+                if isinstance(value, (SecretStr, SecretBytes))
+                else value
+            )
             if isinstance(revealed, bytes):
                 values.add(revealed.decode("utf-8", errors="ignore"))
             elif revealed is not None:
@@ -687,8 +900,16 @@ def _looks_sensitive_key(key: str) -> bool:
     return any(
         token in normalized
         for token in (
-            "secret", "password", "private_key", "credential", "access_token",
-            "api_key", "webhook", "provider_id", "admin", "database",
+            "secret",
+            "password",
+            "private_key",
+            "credential",
+            "access_token",
+            "api_key",
+            "webhook",
+            "provider_id",
+            "admin",
+            "database",
         )
     )
 
@@ -700,7 +921,9 @@ def _is_public_value(value: Any) -> bool:
         return all(_is_public_value(item) for item in value)
     if isinstance(value, Mapping):
         return all(
-            isinstance(key, str) and not _looks_sensitive_key(key) and _is_public_value(item)
+            isinstance(key, str)
+            and not _looks_sensitive_key(key)
+            and _is_public_value(item)
             for key, item in value.items()
         )
     return False

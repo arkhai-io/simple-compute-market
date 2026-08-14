@@ -18,9 +18,13 @@ from hosted_settlement_client import (
 )
 from market_identity import Identity, TrustedIdentitySet
 from market_settlement_runtime import (
+    ComparisonOperator,
+    FieldDescriptor,
     MechanismReadiness,
     MechanismRegistration,
+    QueryValueType,
     ReadinessBlocker,
+    SettlementClauseField,
     SettlementRole,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -50,6 +54,23 @@ _API_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 _MANIFEST_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 _CURRENCY = re.compile(r"^[a-z]{3}$")
+_CLAUSE_OPERATORS = frozenset(
+    {
+        ComparisonOperator.EQUAL,
+        ComparisonOperator.NOT_EQUAL,
+        ComparisonOperator.IN,
+        ComparisonOperator.NOT_IN,
+    }
+)
+
+
+class StripePublicationInput(BaseModel):
+    """Public hosted fields accepted from one publication clause."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    method: Literal["card"] = "card"
+    funds_flow: Literal["separate_charges_transfers"] = "separate_charges_transfers"
 
 
 class StripeAuthorityTrust(BaseModel):
@@ -565,6 +586,40 @@ def stripe_buyer_compatibility(
     )
 
 
+def stripe_method_projection(option: Any) -> tuple[str, ...] | None:
+    """Project only advertised public payment-method values."""
+
+    params = _value(option, "params", {})
+    methods = (
+        _value(params, "payment_method_types") if isinstance(params, Mapping) else None
+    )
+    if not isinstance(methods, (list, tuple)):
+        return None
+    projected = tuple(item for item in methods if isinstance(item, str) and item)
+    return projected or None
+
+
+def stripe_funds_flow_projection(option: Any) -> str | None:
+    """Project the advertised public Connect funds flow."""
+
+    params = _value(option, "params", {})
+    value = _value(params, "funds_flow") if isinstance(params, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
+def validate_stripe_publication_input(
+    section: BaseModel,
+    value: BaseModel,
+    role: SettlementRole,
+) -> BaseModel:
+    """Validate typed public clause input without provider access."""
+
+    StripeSettlementConfig.model_validate(section)
+    if role != "seller":
+        raise ValueError("hosted publication input is seller-owned")
+    return StripePublicationInput.model_validate(value)
+
+
 def create_stripe_registration() -> MechanismRegistration:
     """Return the explicit common-contract registration for hosted Stripe."""
 
@@ -578,6 +633,30 @@ def create_stripe_registration() -> MechanismRegistration:
         option_builder=stripe_option_builder,
         buyer_compatibility=stripe_buyer_compatibility,
         public_detail_keys=frozenset({"currency", "environment", "condition_profile"}),
+        clause_fields=(
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="stripe.method",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="advertised hosted payment method",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=stripe_method_projection,
+            ),
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="stripe.funds_flow",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="advertised hosted Connect funds flow",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=stripe_funds_flow_projection,
+            ),
+        ),
+        publication_input_model=StripePublicationInput,
+        publication_input_validator=validate_stripe_publication_input,
     )
 
 
@@ -587,6 +666,10 @@ __all__ = [
     "StripeAuthorityTrust",
     "StripeResolverConfig",
     "StripeSettlementConfig",
+    "StripePublicationInput",
+    "stripe_funds_flow_projection",
+    "stripe_method_projection",
+    "validate_stripe_publication_input",
     "create_stripe_registration",
     "stripe_buyer_compatibility",
     "stripe_client_factory",

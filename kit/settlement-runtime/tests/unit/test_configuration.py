@@ -1,18 +1,26 @@
 from __future__ import annotations
-
+import json
+import tomllib
 import inspect
+from dataclasses import replace
 from collections.abc import Mapping
 from typing import Any, cast
 
 import market_settlement_runtime as settlement_runtime
 import pytest
 from market_settlement_runtime import (
+    ComparisonOperator,
+    FieldDescriptor,
     MechanismReadiness,
     MechanismRegistration,
     ReadinessBlocker,
+    QueryValueType,
     SettlementConfig,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
+    SettlementClauseField,
+    SettlementPublicationClause,
+    compile_settlement_publication_clause,
 )
 from market_settlement_runtime.ports import ConditionalEscrowClient
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -38,6 +46,18 @@ class DemoSettings(BaseModel):
 
 class OtherSettings(BaseModel):
     enabled: bool = False
+
+
+class PublicationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    profile: str = "standard"
+
+
+class SecretPublicationSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_secret: str = ""
 
 
 def _registration(
@@ -103,6 +123,19 @@ def _registration(
         client_factory=client_factory,
         option_builder=option_builder,
         buyer_compatibility=buyer_compatibility,
+        clause_fields=(
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name=f"{config_key}.profile",
+                    value_type=QueryValueType.STRING,
+                    operators=frozenset({ComparisonOperator.EQUAL}),
+                ),
+                roles=cast(Any, roles),
+                projector=lambda option: option.params.get("profile"),
+            ),
+        ),
+        publication_input_model=PublicationSettings,
+        publication_input_validator=lambda section, value, role: value,
         public_detail_keys=frozenset({"network"}),
     )
 
@@ -154,6 +187,36 @@ def test_registration_and_priority_fail_deterministically() -> None:
         SettlementConfigurationError, match="enabled mechanisms missing"
     ):
         registry.resolve({"priority": [], "demo": {"enabled": True}}, role="buyer")
+
+
+def test_registration_rejects_unqualified_duplicate_and_sensitive_fields() -> None:
+    base = _registration()
+
+    def clause(name: str) -> SettlementClauseField:
+        return SettlementClauseField(
+            descriptor=FieldDescriptor(
+                name=name,
+                value_type=QueryValueType.STRING,
+                operators=frozenset({ComparisonOperator.EQUAL}),
+            ),
+            roles=frozenset({"buyer"}),
+            projector=lambda option: option.asset,
+        )
+
+    with pytest.raises(SettlementConfigurationError, match="must use"):
+        replace(base, clause_fields=(clause("profile"),))
+    with pytest.raises(SettlementConfigurationError, match="sensitive"):
+        replace(base, clause_fields=(clause("demo.provider_secret"),))
+    with pytest.raises(SettlementConfigurationError, match="duplicate"):
+        replace(
+            base,
+            clause_fields=(
+                clause("demo.first"),
+                clause("demo.first"),
+            ),
+        )
+    with pytest.raises(SettlementConfigurationError, match="publication input fields"):
+        replace(base, publication_input_model=SecretPublicationSettings)
 
 
 def test_role_and_nested_unknown_fields_are_rejected() -> None:
@@ -255,6 +318,179 @@ def test_public_fingerprint_is_source_free_and_secret_free() -> None:
     assert "source" not in repr(projection).lower()
     assert fingerprint.startswith("sha256:")
     assert secret not in fingerprint
+    assert projection["mechanisms"][0]["clause_fields"][0]["name"] == "demo.profile"
+    assert (
+        projection["mechanisms"][0]["publication_input_schema"]["properties"][
+            "profile"
+        ]["type"]
+        == "string"
+    )
+
+
+def test_publication_input_is_strictly_typed_and_role_scoped() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+
+    value = registry.validate_publication_input(
+        "demo.pay.v1",
+        {"profile": "premium"},
+        config,
+        role="seller",
+    )
+
+    assert value == PublicationSettings(profile="premium")
+    with pytest.raises(SettlementConfigurationError, match="invalid publication input"):
+        registry.validate_publication_input(
+            "demo.pay.v1",
+            {"profile": "premium", "provider_secret": "canary"},
+            config,
+            role="seller",
+        )
+
+
+def test_publication_clause_compiles_dsl_and_round_trips_structured_data() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+
+    clause = compile_settlement_publication_clause(
+        "mechanism=demo asset=usd rate=2.50/hour "
+        "public.condition=delivered demo.profile=premium",
+        registry=registry,
+        config=config,
+        role="seller",
+    )
+
+    assert clause == SettlementPublicationClause(
+        mechanism="demo.pay.v1",
+        asset="usd",
+        rate="2.50",
+        per="hour",
+        public={"condition": "delivered"},
+        mechanism_input={"profile": "premium"},
+    )
+    encoded = json.dumps(clause.model_dump(mode="json"))
+    assert (
+        compile_settlement_publication_clause(
+            json.loads(encoded),
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        == clause
+    )
+
+    toml_payload = tomllib.loads(
+        """
+[[settlements]]
+mechanism = "demo.pay.v1"
+asset = "usd"
+rate = "2.50"
+per = "hour"
+
+[settlements.public]
+condition = "delivered"
+
+[settlements.mechanism_input]
+profile = "premium"
+"""
+    )
+    assert (
+        compile_settlement_publication_clause(
+            toml_payload["settlements"][0],
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        == clause
+    )
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        (
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "rate": 2.5,
+                "per": "hour",
+            },
+            "binary floating-point",
+        ),
+        (
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "rate": "2",
+                "per": "hour",
+                "unknown": True,
+            },
+            "Extra inputs",
+        ),
+        (
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "rate": "2",
+                "per": "hour",
+                "public": {"ratio": 0.5},
+            },
+            "binary floating-point",
+        ),
+    ],
+)
+def test_publication_clause_rejects_unknown_fields_and_binary_floats(
+    payload: dict[str, Any],
+    message: str,
+) -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+
+    with pytest.raises(SettlementConfigurationError, match=message):
+        compile_settlement_publication_clause(
+            payload,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+
+
+def test_publication_clause_rejects_unknown_or_unqualified_mechanism_fields() -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": ["demo.pay.v1"], "demo": {"enabled": True}},
+        role="seller",
+    )
+
+    with pytest.raises(SettlementConfigurationError, match="unknown"):
+        compile_settlement_publication_clause(
+            "mechanism=demo asset=usd rate=2/hour profile=premium",
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+    with pytest.raises(SettlementConfigurationError, match="invalid publication input"):
+        compile_settlement_publication_clause(
+            {
+                "mechanism": "demo.pay.v1",
+                "asset": "usd",
+                "rate": "2",
+                "per": "hour",
+                "mechanism_input": {"typo": "premium"},
+            },
+            registry=registry,
+            config=config,
+            role="seller",
+        )
 
 
 @pytest.mark.asyncio

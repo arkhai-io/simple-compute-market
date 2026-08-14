@@ -11,6 +11,13 @@ from market_alkahest import (
     create_alkahest_registration,
 )
 from market_alkahest.settlement_config import alkahest_preflight
+from market_core.schemas import SettlementOption
+from market_settlement_runtime import (
+    SettlementConfigurationError,
+    SettlementConfigurationRegistry,
+    compile_settlement_clause,
+    settlement_clause_matches,
+)
 from pydantic import ValidationError
 
 
@@ -134,7 +141,11 @@ def test_alkahest_registration_has_exact_contract_and_factory() -> None:
     clients = {"ethereum_sepolia": object()}
     client = registration.client_factory(
         AlkahestSettlementConfig(enabled=False),
-        {"clients": clients, "chains": {"ethereum_sepolia": {}}, "chain_name": "ethereum_sepolia"},
+        {
+            "clients": clients,
+            "chains": {"ethereum_sepolia": {}},
+            "chain_name": "ethereum_sepolia",
+        },
         "buyer",
     )
     assert type(client) is AlkahestConditionalEscrowClient
@@ -173,3 +184,81 @@ async def test_alkahest_option_builder_emits_canonical_buyer_choice() -> None:
         option,
         {"chains": {"ethereum_sepolia"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_alkahest_clause_projection_is_public_pure_and_identity_preserving() -> (
+    None
+):
+    config = AlkahestSettlementConfig(enabled=True)
+    registration = create_alkahest_registration()
+    registry = SettlementConfigurationRegistry([registration])
+    resources = {
+        "wallet": {"address": "0x" + "11" * 20},
+        "chains": {"base_sepolia": {"rpc_url": "https://rpc.example"}},
+    }
+    readiness = await alkahest_preflight(config, resources, "seller")
+    wire = registration.option_builder(
+        config,
+        readiness,
+        {
+            "accepted_escrows": [
+                {
+                    "chain_name": "base_sepolia",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                    "escrow_address": "0x" + "22" * 20,
+                    "literal_fields": {"token": "0x" + "33" * 20},
+                    "rates": [{"field": "amount", "per": "hour", "value": "125"}],
+                }
+            ]
+        },
+        "seller",
+    )["settlement_options"][0]
+    option = SettlementOption.model_validate(wire)
+    before = option.model_dump(mode="json")
+    clause = compile_settlement_clause(
+        "mechanism=alkahest alkahest.chain=base_sepolia "
+        "alkahest.escrow_kind=erc20_escrow_obligation_default",
+        registry,
+    )
+
+    assert settlement_clause_matches(clause, option, registry) is True
+    assert option.model_dump(mode="json") == before
+    assert option.option_id == wire["option_id"]
+
+
+def test_alkahest_publication_input_rejects_secret_canary() -> None:
+    registry = SettlementConfigurationRegistry([create_alkahest_registration()])
+    config = registry.resolve(
+        {
+            "priority": [ALKAHEST_MECHANISM_ID],
+            "alkahest": {"enabled": True},
+        },
+        role="seller",
+    )
+
+    value = registry.validate_publication_input(
+        ALKAHEST_MECHANISM_ID,
+        {
+            "chain": "base_sepolia",
+            "escrow_kind": "erc20_escrow_obligation_default",
+        },
+        config,
+        role="seller",
+    )
+
+    assert value.model_dump(mode="json") == {
+        "chain": "base_sepolia",
+        "escrow_kind": "erc20_escrow_obligation_default",
+    }
+    with pytest.raises(SettlementConfigurationError, match="invalid publication input"):
+        registry.validate_publication_input(
+            ALKAHEST_MECHANISM_ID,
+            {
+                "chain": "base_sepolia",
+                "escrow_kind": "erc20_escrow_obligation_default",
+                "private_key": "canary",
+            },
+            config,
+            role="seller",
+        )

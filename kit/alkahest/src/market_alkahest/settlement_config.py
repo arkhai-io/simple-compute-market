@@ -11,18 +11,54 @@ from pathlib import Path
 from typing import Any
 
 from market_settlement_runtime import (
+    ComparisonOperator,
+    FieldDescriptor,
     MechanismReadiness,
     MechanismRegistration,
+    QueryValueType,
     ReadinessBlocker,
+    SettlementClauseField,
     SettlementRole,
 )
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .claim_hooks import AlkahestConditionalEscrowClient
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
 _EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_ESCROW_KIND = re.compile(r"^[a-z][a-z0-9_]*$")
+_CLAUSE_OPERATORS = frozenset(
+    {
+        ComparisonOperator.EQUAL,
+        ComparisonOperator.NOT_EQUAL,
+        ComparisonOperator.IN,
+        ComparisonOperator.NOT_IN,
+    }
+)
+
+
+class AlkahestPublicationInput(BaseModel):
+    """Public Alkahest fields accepted from one publication clause."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    chain: str = Field(min_length=1, max_length=128)
+    escrow_kind: str = Field(min_length=1, max_length=128)
+
+    @field_validator("chain")
+    @classmethod
+    def validate_chain(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("chain must be trimmed")
+        return value
+
+    @field_validator("escrow_kind")
+    @classmethod
+    def validate_escrow_kind(cls, value: str) -> str:
+        if not _ESCROW_KIND.fullmatch(value):
+            raise ValueError("escrow_kind must be a canonical lowercase identifier")
+        return value
 
 
 class AlkahestSettlementConfig(BaseModel):
@@ -398,6 +434,51 @@ def alkahest_buyer_compatibility(
     )
 
 
+def _alkahest_escrow(option: Any) -> Mapping[str, Any] | None:
+    params = _value(option, "params", {})
+    if not isinstance(params, Mapping):
+        return None
+    escrow = params.get("accepted_escrow")
+    return escrow if isinstance(escrow, Mapping) else None
+
+
+def alkahest_chain_projection(option: Any) -> str | None:
+    """Project only the chain identifier carried by the advertised escrow."""
+
+    escrow = _alkahest_escrow(option)
+    value = (
+        _value(escrow, "chain_name") or _value(escrow, "chain")
+        if escrow is not None
+        else None
+    )
+    return value if isinstance(value, str) and value else None
+
+
+def alkahest_escrow_kind_projection(option: Any) -> str | None:
+    """Project only an explicitly advertised public escrow kind."""
+
+    escrow = _alkahest_escrow(option)
+    value = (
+        _value(escrow, "escrow_kind") or _value(escrow, "kind")
+        if escrow is not None
+        else None
+    )
+    return value if isinstance(value, str) and value else None
+
+
+def validate_alkahest_publication_input(
+    section: BaseModel,
+    value: BaseModel,
+    role: SettlementRole,
+) -> BaseModel:
+    """Validate typed public clause input without chain access."""
+
+    AlkahestSettlementConfig.model_validate(section)
+    if role != "seller":
+        raise ValueError("Alkahest publication input is seller-owned")
+    return AlkahestPublicationInput.model_validate(value)
+
+
 def create_alkahest_registration() -> MechanismRegistration:
     """Return the explicit common-contract registration for Alkahest."""
 
@@ -409,6 +490,30 @@ def create_alkahest_registration() -> MechanismRegistration:
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
+        clause_fields=(
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="alkahest.chain",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="advertised Alkahest chain",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=alkahest_chain_projection,
+            ),
+            SettlementClauseField(
+                descriptor=FieldDescriptor(
+                    name="alkahest.escrow_kind",
+                    value_type=QueryValueType.STRING,
+                    operators=_CLAUSE_OPERATORS,
+                    description="advertised Alkahest escrow kind",
+                ),
+                roles=frozenset({"buyer", "seller"}),
+                projector=alkahest_escrow_kind_projection,
+            ),
+        ),
+        publication_input_model=AlkahestPublicationInput,
+        publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
             {"chain", "asset", "oracle_gated", "interruptible"}
@@ -418,6 +523,10 @@ def create_alkahest_registration() -> MechanismRegistration:
 
 __all__ = [
     "ALKAHEST_CONFIG_KEY",
+    "AlkahestPublicationInput",
+    "alkahest_chain_projection",
+    "alkahest_escrow_kind_projection",
+    "validate_alkahest_publication_input",
     "ALKAHEST_MECHANISM_ID",
     "AlkahestSettlementConfig",
     "alkahest_buyer_compatibility",

@@ -6,10 +6,13 @@ from types import SimpleNamespace
 import pytest
 from market_identity import Identity, IdentityScheme
 from market_settlement_runtime import (
+    compile_settlement_clause,
+    settlement_clause_matches,
     SettlementConfigurationError,
     SettlementConfigurationRegistry,
 )
 from pydantic import ValidationError
+from market_core.schemas import SettlementOption
 
 from market_hosted_settlement import (
     MECHANISM,
@@ -294,3 +297,67 @@ async def test_stripe_option_builder_is_deterministic_and_buyer_compatible() -> 
     assert option["asset"] == "usd"
     assert option["rates"] == [{"field": "amount", "per": "hour", "value": "125"}]
     assert registration.buyer_compatibility(config, option, {"currencies": {"usd"}})
+
+
+@pytest.mark.asyncio
+async def test_stripe_clause_projection_is_public_pure_and_identity_preserving() -> (
+    None
+):
+    registration = create_stripe_registration()
+    registry = SettlementConfigurationRegistry([registration])
+    config = _config()
+    readiness = await registration.preflight(
+        config,
+        {
+            "marketplace_signer": FakeSigner(),
+            "preflight_client": ObservationalClient(),
+        },
+        "seller",
+    )
+    wire = registration.option_builder(
+        config,
+        readiness,
+        {"claimant_principal": _identity(8), "rate_minor_units": 125},
+        "seller",
+    )["settlement_options"][0]
+    option = SettlementOption.model_validate(wire)
+    before = option.model_dump(mode="json")
+    clause = compile_settlement_clause(
+        "mechanism=stripe stripe.method=card "
+        "stripe.funds_flow=separate_charges_transfers",
+        registry,
+    )
+
+    assert settlement_clause_matches(clause, option, registry) is True
+    assert option.model_dump(mode="json") == before
+    assert option.option_id == wire["option_id"]
+
+
+def test_stripe_publication_input_rejects_secret_canary() -> None:
+    registry = SettlementConfigurationRegistry([create_stripe_registration()])
+    config = registry.resolve(
+        {
+            "priority": [MECHANISM],
+            "stripe": _config().model_dump(mode="python"),
+        },
+        role="seller",
+    )
+
+    value = registry.validate_publication_input(
+        MECHANISM,
+        {"method": "card"},
+        config,
+        role="seller",
+    )
+
+    assert value.model_dump(mode="json") == {
+        "method": "card",
+        "funds_flow": "separate_charges_transfers",
+    }
+    with pytest.raises(SettlementConfigurationError, match="invalid publication input"):
+        registry.validate_publication_input(
+            MECHANISM,
+            {"method": "card", "provider_secret": "canary"},
+            config,
+            role="seller",
+        )
