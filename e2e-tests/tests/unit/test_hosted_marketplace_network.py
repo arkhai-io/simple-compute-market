@@ -82,6 +82,33 @@ def test_public_status_wait_retries_authority_unavailability(monkeypatch) -> Non
     assert marketplace._wait_public_status("settlement-1", {"funded"}) == {"status": "funded"}
 
 
+def test_refund_funding_reconciles_materialization_without_fulfillment(
+    monkeypatch,
+) -> None:
+    marketplace = object.__new__(NetworkMarketplacePort)
+    marketplace._stripe_test_case = "refund"
+    marketplace._buyer_authority = SimpleNamespace(
+        get_status=lambda *_args, **_kwargs: SimpleNamespace(
+            financial_state=SimpleNamespace(value="funded")
+        )
+    )
+    monkeypatch.setattr(
+        marketplace,
+        "_buyer_call",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("GET http://storefront/settlement failed: timed out")
+        ),
+    )
+    monkeypatch.setattr(
+        marketplace,
+        "_release_refund_fulfillment_failure",
+        lambda: None,
+    )
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "1")
+
+    assert marketplace.wait_funded("settlement-1") is True
+
+
 def test_refund_request_retries_transient_settlement_conflict(monkeypatch) -> None:
     marketplace = object.__new__(NetworkMarketplacePort)
     terminal = SimpleNamespace(marketplace_status="reclaimed")

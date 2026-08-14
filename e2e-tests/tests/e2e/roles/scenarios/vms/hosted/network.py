@@ -150,7 +150,7 @@ class NetworkMarketplacePort:
             caller_role="seller",
             expected_publishers=seller_trust,
         )
-        provisioning_trust = TrustedIdentitySet(
+        self._provisioning_trust = TrustedIdentitySet(
             identities=tuple(
                 Identity.model_validate(principal)
                 for principal in self.storefront_config["provisioning"]["identity"]["principals"]
@@ -159,9 +159,9 @@ class NetworkMarketplacePort:
         self.capacity_admin = SiteCapacityAdminClient(
             self.provisioning_url,
             seller_signer,
-            provisioning_trust,
+            self._provisioning_trust,
         )
-        admin_signer = create_signer(
+        self._admin_signer = create_signer(
             "ed25519",
             _required("HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL"),
         )
@@ -169,8 +169,8 @@ class NetworkMarketplacePort:
         self._host_id = self._resource_id
         with SyncProvisioningClient(
             self.provisioning_url,
-            admin_signer,
-            provisioning_trust,
+            self._admin_signer,
+            self._provisioning_trust,
         ) as provisioning_admin:
             provisioning_admin.register_host(
                 HostCreate(
@@ -250,9 +250,37 @@ class NetworkMarketplacePort:
         if case not in {"collection", "refund"}:
             raise ValueError("unsupported Stripe test lifecycle case")
         self._stripe_test_case = cast(Literal["collection", "refund"], case)
+        if case == "refund":
+            self._keep_refund_fulfillment_unresolved()
 
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
+
+    def _keep_refund_fulfillment_unresolved(self) -> None:
+        with SyncProvisioningClient(
+            self.provisioning_url,
+            self._admin_signer,
+            self._provisioning_trust,
+        ) as client:
+            client._post(
+                "/test/mock-rules",
+                {
+                    "rule_id": "hosted-stripe-refund-unresolved",
+                    "match": {"vm_action": "create"},
+                    "pause_before_result": True,
+                    "fail_with": "protected refund keeps fulfillment unresolved",
+                },
+            )
+            evaluation = client._post(
+                "/test/evaluate-job",
+                {
+                    "host": self._host_id,
+                    "vm_target": "hosted-refund-unresolved",
+                    "vm_action": "create",
+                },
+            )
+        if evaluation.get("rule_matched") != "hosted-stripe-refund-unresolved":
+            raise AssertionError("refund fulfillment failure is not active")
 
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(
@@ -388,9 +416,41 @@ class NetworkMarketplacePort:
                 request_id=f"stripe-test-status-{uuid.uuid4().hex}",
             )
             if status.financial_state.value in {"funded", "collected", "refunded"}:
+                if self._stripe_test_case == "refund":
+                    self._reconcile_refund_materialization(settlement_ref)
                 return True
             time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
         return False
+
+    def _reconcile_refund_materialization(self, settlement_ref: str) -> None:
+        from domains.vms.buyer.hosted_settlement import poll_hosted_settlement
+
+        status: dict[str, Any] | None = None
+        try:
+            status = self._buyer_call(
+                poll_hosted_settlement,
+                settlement_ref,
+                timeout=5.0,
+            )
+        except RuntimeError as exc:
+            detail = str(exc)
+            if "authenticated HTTP 503:" not in detail and " failed: timed out" not in detail:
+                raise
+        finally:
+            self._release_refund_fulfillment_failure()
+        if status and status.get("fulfillment_ref"):
+            raise AssertionError("refund scenario unexpectedly completed fulfillment")
+
+    def _release_refund_fulfillment_failure(self) -> None:
+        with SyncProvisioningClient(
+            self.provisioning_url,
+            self._admin_signer,
+            self._provisioning_trust,
+        ) as client:
+            client._post(
+                "/test/mock-rules/hosted-stripe-refund-unresolved/resume",
+                {},
+            )
 
     def complete_vm_fulfillment(self, settlement_ref: str) -> FulfillmentSnapshot:
         status = self._buyer_status(settlement_ref)
@@ -456,14 +516,23 @@ class NetworkMarketplacePort:
 
         return self._buyer_call(poll_hosted_settlement, settlement_ref)
 
-    def _buyer_call(self, function, settlement_ref: str):
-        return function(
-            seller_url=self.storefront_url,
-            settlement_ref=settlement_ref,
-            principal=self._buyer_signer.identity,
-            signer=self._buyer_signer,
-            resolve_seller_principals=self._publisher_resolver(),
-        )
+    def _buyer_call(
+        self,
+        function,
+        settlement_ref: str,
+        *,
+        timeout: float | None = None,
+    ):
+        kwargs = {
+            "seller_url": self.storefront_url,
+            "settlement_ref": settlement_ref,
+            "principal": self._buyer_signer.identity,
+            "signer": self._buyer_signer,
+            "resolve_seller_principals": self._publisher_resolver(),
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return function(**kwargs)
 
     def _operation(self, settlement_ref: str) -> str:
         try:
