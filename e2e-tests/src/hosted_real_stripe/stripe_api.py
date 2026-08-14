@@ -200,7 +200,6 @@ class StripeApi:
         refund = refunds[0]
         if (
             session.get("livemode") is not False
-            or refund.get("livemode") is not False
             or session.get("amount_total") != expected.amount
             or session.get("currency") != expected.currency
             or refund.get("amount") != expected.amount

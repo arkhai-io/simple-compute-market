@@ -34,7 +34,12 @@ def _expected() -> ExpectedEffect:
     )
 
 
-def _transport(*, duplicate: bool = False, wrong_destination: bool = False):
+def _transport(
+    *,
+    duplicate: bool = False,
+    wrong_destination: bool = False,
+    refund: bool = False,
+):
     checkout_metadata = {"escrow_ref": ESCROW, "operation_ref": _ref("checkout", ESCROW)}
     charge = {
         "id": "ch_private",
@@ -73,6 +78,19 @@ def _transport(*, duplicate: bool = False, wrong_destination: bool = False):
         "transfer_group": ESCROW,
         "metadata": {"operation_ref": _ref("collect", ESCROW)},
     }
+    refunded = {
+        "id": "re_private",
+        "amount": 1250,
+        "currency": "usd",
+        "status": "succeeded",
+        "metadata": {
+            "operation_ref": _ref(
+                "refund",
+                ESCROW,
+                hashlib.sha256(charge["id"].encode()).hexdigest(),
+            )
+        },
+    }
 
     def request(path: str, params: Mapping[str, str]) -> dict[str, Any]:
         if path == f"/v1/checkout/sessions/{SESSION}":
@@ -83,9 +101,12 @@ def _transport(*, duplicate: bool = False, wrong_destination: bool = False):
             if duplicate:
                 data.append({**session, "id": "cs_duplicate"})
             return {"data": data, "has_more": False}
+        if path == "/v1/refunds":
+            assert params["charge"] == charge["id"]
+            return {"data": [refunded] if refund else [], "has_more": False}
         if path == "/v1/transfers":
             assert params["transfer_group"] == ESCROW
-            return {"data": [transfer], "has_more": False}
+            return {"data": [] if refund else [transfer], "has_more": False}
         raise AssertionError(f"unexpected retrieval: {path}")
 
     return request
@@ -104,6 +125,24 @@ def test_collection_retrieves_exact_checkout_and_metadata_related_transfer() -> 
     assert evidence.payment_intent_count == 1
     assert evidence.charge_count == 1
     assert evidence.transfer_count == 1
+    assert evidence.operation_metadata_matches is True
+
+
+def test_refund_accepts_released_refund_shape_without_livemode() -> None:
+    evidence = StripeApi(
+        "rk_test_secret",
+        transport=_transport(refund=True),
+    ).inspect_refund(
+        _expected(),
+        TerminalProjection(
+            marketplace_state="reclaimed",
+            authority_state="refunded",
+            fulfillment_state="completed",
+        ),
+    )
+
+    assert evidence.refund_count == 1
+    assert evidence.transfer_count == 0
     assert evidence.operation_metadata_matches is True
 
 
