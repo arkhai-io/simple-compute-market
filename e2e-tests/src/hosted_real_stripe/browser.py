@@ -91,6 +91,9 @@ class ChromiumCheckout:
                     page = context.new_page()
                     page.set_default_timeout(self._timeout_ms)
                     page.goto(checkout_url, wait_until="domcontentloaded")
+                    page.locator("input[name='cardNumber'], #cardNumber").first.wait_for(
+                        state="visible", timeout=self._timeout_ms
+                    )
                     _fill_optional(page, ("input[name='email']", "#email"), test_inputs.email)
                     _fill_required(
                         page,
@@ -139,7 +142,7 @@ class ChromiumCheckout:
                         page.wait_for_url(
                             lambda url: urlsplit(str(url)).hostname != "checkout.stripe.com",
                             timeout=self._timeout_ms,
-                            wait_until="domcontentloaded",
+                            wait_until="commit",
                         )
                 finally:
                     browser.close()
