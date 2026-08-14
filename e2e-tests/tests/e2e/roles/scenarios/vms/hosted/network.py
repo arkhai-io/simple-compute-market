@@ -6,7 +6,7 @@ import time
 import tomllib
 import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 from market_identity import Identity, TrustedIdentitySet, create_signer
@@ -180,6 +180,7 @@ class NetworkMarketplacePort:
         self._listing_id: str | None = None
         self._operations: dict[str, str] = {}
         self._condition_decision: Literal["satisfied"] = "satisfied"
+        self._stripe_test_case: Literal["collection", "refund"] = "collection"
 
     def ensure_capacity(self) -> None:
         resource = asyncio.run(
@@ -241,6 +242,7 @@ class NetworkMarketplacePort:
     def select_stripe_test_case(self, case: str) -> None:
         if case not in {"collection", "refund"}:
             raise ValueError("unsupported Stripe test lifecycle case")
+        self._stripe_test_case = cast(Literal["collection", "refund"], case)
 
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
@@ -289,10 +291,11 @@ class NetworkMarketplacePort:
         option = [
             item for item in listing.settlement_options if item.get("mechanism") == "fiat.stripe.v1"
         ][0]
+        expiration_unix = int(time.time()) + (10 if self._stripe_test_case == "refund" else 3600)
         selection = {
             "mechanism": "fiat.stripe.v1",
             "option_id": option["option_id"],
-            "expiration_unix": int(time.time()) + 3600,
+            "expiration_unix": expiration_unix,
         }
         response = self.buyer.negotiate_new(
             listing_id=registry_listing_id,
@@ -411,6 +414,13 @@ class NetworkMarketplacePort:
             authority_status=str(result["status"]),
             effect_kind="refund",
         )
+
+    def request_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
+        expiration_unix = int(self._accepted_obligation["expiration_unix"])
+        delay = expiration_unix - time.time() + 1
+        if delay > 0:
+            time.sleep(delay)
+        return self.reclaim(settlement_ref)
 
     def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
         return self.reclaim(settlement_ref)
