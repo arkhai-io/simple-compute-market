@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 from urllib.parse import urlsplit
@@ -86,6 +87,7 @@ class ChromiumCheckout:
                     headless=True,
                     env=_browser_environment(),
                 )
+                page: Any | None = None
                 try:
                     context = browser.new_context()
                     page = context.new_page()
@@ -133,20 +135,21 @@ class ChromiumCheckout:
                     )
                     if submit is None:
                         raise CheckoutContractError("Checkout submit action is unavailable")
-                    submit.click()
+                    _submit_checkout(page, submit, outcome)
                     if outcome == "authentication":
                         _complete_authentication(page, self._timeout_ms)
                     if outcome in {"decline", "insufficient_funds"}:
                         _wait_for_decline(page, self._timeout_ms)
                     else:
-                        page.wait_for_url(
-                            lambda url: urlsplit(str(url)).hostname != "checkout.stripe.com",
-                            timeout=self._timeout_ms,
-                            wait_until="commit",
-                        )
+                        page.wait_for_timeout(min(5_000, self._timeout_ms))
+                        _raise_if_interactive_captcha(page)
+                except Exception:
+                    if page is not None:
+                        _raise_if_interactive_captcha(page)
+                    raise
                 finally:
                     browser.close()
-        except CheckoutContractError:
+        except (CheckoutContractError, ChromiumUnavailable):
             raise
         except Exception as exc:
             name = type(exc).__name__.lower()
@@ -224,19 +227,61 @@ def _wait_for_decline(page: Any, timeout_ms: int) -> None:
         raise CheckoutContractError("declined Checkout unexpectedly completed")
 
 
-def _complete_authentication(page: Any, timeout_ms: int) -> None:
+def _submit_checkout(page: Any, submit: Any, outcome: CheckoutOutcome) -> None:
+    if outcome in {"decline", "insufficient_funds"}:
+        submit.click()
+        return
+    bounds = submit.bounding_box()
+    if bounds is None:
+        raise CheckoutContractError("Checkout submit action is unavailable")
+    page.mouse.click(
+        bounds["x"] + bounds["width"] / 2,
+        bounds["y"] + bounds["height"] / 2,
+    )
+
+
+def _interactive_captcha_visible(frame: Any) -> bool:
+    host = urlsplit(str(getattr(frame, "url", ""))).hostname or ""
+    if host != "hcaptcha.com" and not host.endswith(".hcaptcha.com"):
+        return False
+    try:
+        return frame.locator("[aria-label='Verify Answers']").first.is_visible()
+    except Exception:
+        return False
+
+
+def _raise_if_interactive_captcha(page: Any) -> None:
+    if any(_interactive_captcha_visible(frame) for frame in page.frames):
+        raise ChromiumUnavailable("Stripe Checkout requires an interactive CAPTCHA")
+
+
+def _complete_authentication(
+    page: Any,
+    timeout_ms: int,
+    *,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
     selectors = (
         "#test-source-authorize-3ds",
         "button[data-testid='test-source-authorize-3ds']",
         "button:has-text('Complete authentication')",
+        "button:has-text('Complete')",
+        "button:has-text('Authorize')",
     )
-    for frame in page.frames:
-        for selector in selectors:
-            locator = frame.locator(selector).first
-            try:
-                locator.wait_for(state="visible", timeout=timeout_ms)
-                locator.click()
-                return
-            except Exception:
-                continue
+    deadline = monotonic() + timeout_ms / 1000
+    while True:
+        _raise_if_interactive_captcha(page)
+        for frame in page.frames:
+            for selector in selectors:
+                locator = frame.locator(selector).first
+                try:
+                    if locator.is_visible():
+                        locator.click()
+                        return
+                except Exception:
+                    continue
+        remaining_ms = (deadline - monotonic()) * 1000
+        if remaining_ms <= 0:
+            break
+        page.wait_for_timeout(min(100, remaining_ms))
     raise CheckoutContractError("Stripe test authentication challenge was unavailable")
