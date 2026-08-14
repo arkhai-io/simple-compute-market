@@ -16,7 +16,6 @@ from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 from storefront_client import SyncStorefrontClient
-from src.provisioning_test_client import ProvisioningTestClient
 
 from .authority import released_authority_client
 from .driver import (
@@ -145,7 +144,7 @@ class NetworkMarketplacePort:
             caller_role="seller",
             expected_publishers=seller_trust,
         )
-        provisioning_trust = TrustedIdentitySet(
+        self._provisioning_trust = TrustedIdentitySet(
             identities=tuple(
                 Identity.model_validate(principal)
                 for principal in self.storefront_config["provisioning"]["identity"]["principals"]
@@ -154,9 +153,9 @@ class NetworkMarketplacePort:
         self.capacity_admin = SiteCapacityAdminClient(
             self.provisioning_url,
             seller_signer,
-            provisioning_trust,
+            self._provisioning_trust,
         )
-        admin_signer = create_signer(
+        self._admin_signer = create_signer(
             "ed25519",
             _required("HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL"),
         )
@@ -164,8 +163,8 @@ class NetworkMarketplacePort:
         self._host_id = self._resource_id
         with SyncProvisioningClient(
             self.provisioning_url,
-            admin_signer,
-            provisioning_trust,
+            self._admin_signer,
+            self._provisioning_trust,
         ) as provisioning_admin:
             provisioning_admin.register_host(
                 HostCreate(
@@ -250,13 +249,27 @@ class NetworkMarketplacePort:
         return True
 
     def hold_fulfillment_for_refund(self) -> None:
-        with ProvisioningTestClient(self.provisioning_url) as client:
-            client.add_mock_rule(
-                rule_id="hosted-stripe-refund-hold",
-                match={"vm_action": "create"},
-                pause_before_result=True,
+        with SyncProvisioningClient(
+            self.provisioning_url,
+            self._admin_signer,
+            self._provisioning_trust,
+        ) as client:
+            client._post(
+                "/test/mock-rules",
+                {
+                    "rule_id": "hosted-stripe-refund-hold",
+                    "match": {"vm_action": "create"},
+                    "pause_before_result": True,
+                },
             )
-            evaluation = client.evaluate_job(self._host_id, vm_action="create")
+            evaluation = client._post(
+                "/test/evaluate-job",
+                {
+                    "host": self._host_id,
+                    "vm_target": "hosted-refund-hold",
+                    "vm_action": "create",
+                },
+            )
         if evaluation.get("would_pause") is not True:
             raise AssertionError("refund fulfillment hold is not active")
 
