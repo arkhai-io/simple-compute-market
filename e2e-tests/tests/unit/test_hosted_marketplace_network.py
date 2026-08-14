@@ -82,6 +82,31 @@ def test_public_status_wait_retries_authority_unavailability(monkeypatch) -> Non
     assert marketplace._wait_public_status("settlement-1", {"funded"}) == {"status": "funded"}
 
 
+def test_refund_request_retries_transient_settlement_conflict(monkeypatch) -> None:
+    marketplace = object.__new__(NetworkMarketplacePort)
+    terminal = SimpleNamespace(marketplace_status="reclaimed")
+    responses = iter(
+        (
+            RuntimeError(
+                "POST http://storefront/settlement/reclaim -> authenticated HTTP 409: busy"
+            ),
+            terminal,
+        )
+    )
+
+    def reclaim(_settlement_ref: str):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(marketplace, "reclaim", reclaim)
+    monkeypatch.setattr(network.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "1")
+
+    assert marketplace.request_eligible_pretransfer_refund("settlement-1") is terminal
+
+
 def test_public_status_wait_rejects_nontransient_authenticated_errors(
     monkeypatch,
 ) -> None:

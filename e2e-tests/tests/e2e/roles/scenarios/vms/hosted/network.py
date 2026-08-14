@@ -458,7 +458,21 @@ class NetworkMarketplacePort:
         )
 
     def request_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
-        return self.reclaim(settlement_ref)
+        timeout = float(os.environ.get("HOSTED_SETTLEMENT_E2E_LIFECYCLE_TIMEOUT", "180"))
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return self.reclaim(settlement_ref)
+            except RuntimeError as exc:
+                detail = str(exc)
+                if not any(
+                    marker in detail
+                    for marker in ("authenticated HTTP 409:", "authenticated HTTP 503:")
+                ):
+                    raise
+            if time.monotonic() >= deadline:
+                raise TimeoutError("eligible hosted refund did not converge")
+            time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
     def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
         return self.reclaim(settlement_ref)
