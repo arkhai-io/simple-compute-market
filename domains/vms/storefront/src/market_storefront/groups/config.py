@@ -163,7 +163,9 @@ def config_migrate(
     """Migrate a legacy seller configuration through an explicit clean cutover."""
 
     if scope != "settlement":
-        typer.secho("Only --scope settlement is supported.", err=True, fg=typer.colors.RED)
+        typer.secho(
+            "Only --scope settlement is supported.", err=True, fg=typer.colors.RED
+        )
         raise typer.Exit(2)
     try:
         result = migrate_settlement_config(
@@ -320,6 +322,11 @@ _INIT_USER_TEMPLATE = """\
 # buyer_model_path  = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.pt"
 
 [pricing]
+# settlements = [                             # complete structured publication
+#   { mechanism = "fiat.stripe.v1", asset = "usd", rate = "2", per = "hour",
+#     mechanism_input = { method = "card", funds_flow = "separate_charges_transfers" } },
+# ]
+# Per-resource or command clauses replace this list; fields are never merged.
 # default_min_price = "1"                      # human / whole-token units (per-hour rate). The publish CLI
                                                 # scales by the token's on-chain decimals: "1" with USDC
                                                 # (6 decimals) = 1_000_000 base units = $1/hr. Fallback for

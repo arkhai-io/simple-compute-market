@@ -103,6 +103,39 @@ def settlement_config_mapping(source: Dynaconf | None = None) -> dict[str, Any]:
     return value
 
 
+def settlement_publication_defaults(
+    source: Dynaconf | None = None,
+) -> tuple[Any, ...]:
+    """Return validated structured publication defaults as complete clauses."""
+
+    from market_settlement_runtime import compile_settlement_publication_clause
+
+    from market_storefront.settlement_composition import (
+        build_storefront_settlement_registry,
+    )
+
+    active = source or settings
+    raw = _plain_config_value(active.get("pricing.settlements", []) or [])
+    if not isinstance(raw, list):
+        raise ValueError("pricing.settlements must be a list of complete clauses")
+    if not raw:
+        return ()
+    if any(not isinstance(item, dict) for item in raw):
+        raise ValueError("each pricing.settlements entry must be a table")
+
+    registry = build_storefront_settlement_registry()
+    config = registry.resolve(settlement_config_mapping(active), role="seller")
+    return tuple(
+        compile_settlement_publication_clause(
+            item,
+            registry=registry,
+            config=config,
+            role="seller",
+        )
+        for item in raw
+    )
+
+
 def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:
     """Build the typed CHAINS dict from the merged dynaconf settings."""
     raw = s.get("chains")

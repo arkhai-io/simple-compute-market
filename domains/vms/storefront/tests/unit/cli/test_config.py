@@ -84,7 +84,9 @@ def test_config_get_key_found_scalar(monkeypatch, runner, app):
 def test_config_get_key_found_dict(monkeypatch, runner, app):
     import market_storefront.groups.config as config_group
 
-    monkeypatch.setattr(config_group, "load_storefront_config", lambda: {"wallet": {"address": "0xabc"}})
+    monkeypatch.setattr(
+        config_group, "load_storefront_config", lambda: {"wallet": {"address": "0xabc"}}
+    )
     monkeypatch.setattr(config_group, "get_dotted", lambda doc, key: doc.get(key))
 
     result = runner.invoke(app, ["config", "get", "wallet"])
@@ -190,12 +192,10 @@ def test_config_init_user_new_file(monkeypatch, tmp_path, runner, app):
     assert result.exit_code == 0
     assert cfg.exists()
     assert "arkhai storefront config" in cfg.read_text()
+    assert "# settlements = [" in cfg.read_text()
 
 
-
-def test_config_migrate_registers_settlement_check(
-    monkeypatch, tmp_path, runner, app
-):
+def test_config_migrate_registers_settlement_check(monkeypatch, tmp_path, runner, app):
     from market_config.settlement_migration import (
         MigrationAction,
         SettlementMigrationResult,

@@ -20,6 +20,10 @@ class _Section(BaseModel):
     enabled: bool = False
 
 
+class _PublicationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
 def _registration(
     mechanism: str,
     key: str,
@@ -57,6 +61,9 @@ def _registration(
         client_factory=lambda section, resources, role: object(),
         option_builder=option_builder,
         buyer_compatibility=lambda section, option, context: False,
+        clause_fields=(),
+        publication_input_model=_PublicationInput,
+        publication_input_validator=lambda section, value, role: value,
     )
 
 
@@ -122,9 +129,9 @@ async def test_ready_mechanisms_are_built_in_priority_order(
         composition, resources
     )
 
-    assert [value.split(":", 1)[1] for value in calls if value.startswith("option:")] == [
-        "fiat.stripe.v1" if item == "stripe" else "alkahest.v1" for item in expected
-    ]
+    assert [
+        value.split(":", 1)[1] for value in calls if value.startswith("option:")
+    ] == ["fiat.stripe.v1" if item == "stripe" else "alkahest.v1" for item in expected]
     assert options == ([{"mechanism": "fiat.stripe.v1"}] if stripe_enabled else [])
     assert accepted == ([{"mechanism": "alkahest.v1"}] if alkahest_enabled else [])
 

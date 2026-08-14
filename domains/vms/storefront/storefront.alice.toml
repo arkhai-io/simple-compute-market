@@ -85,6 +85,9 @@ principals = [
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 
 [pricing]
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "100", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
+]
 default_min_price            = "100"
 default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 default_max_duration_seconds = 0

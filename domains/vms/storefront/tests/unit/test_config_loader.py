@@ -16,7 +16,6 @@ from market_identity import TrustedIdentitySet, create_signer
 
 from market_storefront.utils import config as agent_config
 
-
 # ---------------------------------------------------------------------------
 # settings.toml defaults — the committed schema is the source of truth.
 # Every key callers depend on must have a default here.
@@ -43,19 +42,90 @@ def test_settings_toml_provides_baseline_defaults():
         "bisection",
     ]
     assert s.pricing.publish_priceless is False
+    assert list(s.pricing.settlements) == []
     # On by default -- the projection path has parity with the local-table
     # path it supersedes. A staged/canary rollout sets this false
     # explicitly rather than relying on a default that no longer matches.
     assert s.capacity.use_site_projection_for_listings is True
 
 
+def test_structured_settlement_publication_defaults_are_validated() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
+    source.set(
+        "pricing.settlements",
+        [
+            {
+                "mechanism": "alkahest.v1",
+                "asset": "0x" + "11" * 20,
+                "rate": "2.00",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "base_sepolia",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                },
+            }
+        ],
+    )
+
+    clauses = agent_config.settlement_publication_defaults(source)
+
+    assert len(clauses) == 1
+    assert clauses[0].mechanism == "alkahest.v1"
+    assert clauses[0].rate == "2.00"
+    assert clauses[0].mechanism_input == {
+        "chain": "base_sepolia",
+        "escrow_kind": "erc20_escrow_obligation_default",
+    }
+
+
+def test_structured_publication_defaults_reject_partial_or_secret_input() -> None:
+    source = Dynaconf(environments=False)
+    source.set(
+        "settlement",
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1"],
+            "alkahest": {"enabled": True},
+        },
+    )
+    source.set(
+        "pricing.settlements",
+        [
+            {
+                "mechanism": "alkahest.v1",
+                "asset": "0x" + "11" * 20,
+                "rate": "2",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "base_sepolia",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                    "private_key": "must-not-cross",
+                },
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="invalid publication input"):
+        agent_config.settlement_publication_defaults(source)
+
+
 def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The default flip doesn't remove the ability to opt back out for a
     staged/canary rollout -- an explicit override still wins."""
     monkeypatch.setenv(
-        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS", "false",
+        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS",
+        "false",
     )
     cfg = _build_isolated(tmp_path, [])
     assert cfg.capacity.use_site_projection_for_listings is False

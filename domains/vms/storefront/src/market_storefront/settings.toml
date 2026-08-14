@@ -204,6 +204,9 @@ buyer_model_path   = "domains/vms/negotiation/rl/models/arkhai_negotiator_buyer.
 extra_policy_paths = []
 
 [pricing]
+# Structured settlement option defaults. Each entry is one complete clause;
+# inventory-row or command clauses replace this list rather than merging fields.
+settlements = []
 default_min_price            = ""
 default_token_address        = ""
 default_max_duration_seconds = 0   # 0 means unlimited
