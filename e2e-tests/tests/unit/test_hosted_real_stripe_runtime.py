@@ -132,7 +132,10 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
             line.split("=", 1) for line in authority_env.read_text(encoding="utf-8").splitlines()
         )
         assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
-        assert values["HOSTED_SETTLEMENT_RELEASE_PATH"] == "/release/release-manifest.json"
+        assert (
+            values["HOSTED_SETTLEMENT_RELEASE_PATH"]
+            == "/opt/hosted-settlement/release/release-manifest.json"
+        )
         assert values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID"] == "release-authority"
         assert (
             values["HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS"]

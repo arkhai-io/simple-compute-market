@@ -157,7 +157,7 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_SECRET_KEY": api_key,
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
             "HOSTED_SETTLEMENT_MANIFEST_DIGEST": manifest_digest,
-            "HOSTED_SETTLEMENT_RELEASE_PATH": "/release/release-manifest.json",
+            "HOSTED_SETTLEMENT_RELEASE_PATH": "/opt/hosted-settlement/release/release-manifest.json",
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,
             "HOSTED_SETTLEMENT_RELEASE_REPOSITORY": release_repository,
