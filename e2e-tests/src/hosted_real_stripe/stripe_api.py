@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -441,8 +442,6 @@ def _metadata_matches(obj: JsonObject, operation_ref: str) -> bool:
 
 
 def _hash_text(value: str) -> str:
-    import hashlib
-
     return hashlib.sha256(value.encode()).hexdigest()
 
 
@@ -452,8 +451,6 @@ def _escrow_metadata_matches(obj: JsonObject, escrow_ref: str) -> bool:
 
 
 def _provider_ref(prefix: str, *parts: str) -> str:
-    import hashlib
-
     digest = hashlib.sha256("\x00".join(parts).encode()).hexdigest()
     return f"{prefix}_{digest[:40]}"
 
