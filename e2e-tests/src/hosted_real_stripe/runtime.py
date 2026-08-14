@@ -157,6 +157,8 @@ class EphemeralServiceEnv:
             "HOSTED_SETTLEMENT_STRIPE_SECRET_KEY": api_key,
             "HOSTED_SETTLEMENT_STRIPE_WEBHOOK_SECRET": webhook_secret,
             "HOSTED_SETTLEMENT_MANIFEST_DIGEST": manifest_digest,
+            "HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL": "http://127.0.0.1:18081/checkout/success",
+            "HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL": "http://127.0.0.1:18081/checkout/cancel",
             "HOSTED_SETTLEMENT_RELEASE_PATH": "/opt/hosted-settlement/release/release-manifest.json",
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ID": release_authority_id,
             "HOSTED_SETTLEMENT_RELEASE_AUTHORITY_ADDRESS": release_authority_address,

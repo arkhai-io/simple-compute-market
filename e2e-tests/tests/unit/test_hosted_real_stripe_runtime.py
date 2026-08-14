@@ -133,6 +133,14 @@ def test_ephemeral_container_inputs_use_shared_directory(tmp_path: Path) -> None
         )
         assert values["HOSTED_SETTLEMENT_MANIFEST_DIGEST"] == "sha256:" + ("2" * 64)
         assert (
+            values["HOSTED_SETTLEMENT_CHECKOUT_SUCCESS_URL"]
+            == "http://127.0.0.1:18081/checkout/success"
+        )
+        assert (
+            values["HOSTED_SETTLEMENT_CHECKOUT_CANCEL_URL"]
+            == "http://127.0.0.1:18081/checkout/cancel"
+        )
+        assert (
             values["HOSTED_SETTLEMENT_RELEASE_PATH"]
             == "/opt/hosted-settlement/release/release-manifest.json"
         )
