@@ -28,6 +28,13 @@ from registry_client.models import (
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
+from registry_client.query import (
+    CompiledResourceQuery,
+    FilterVocabularyError,
+    ResourceQueryCompilationError,
+    compile_resource_query,
+    resource_query_descriptors,
+)
 
 __all__ = [
     "RegistryClient",
@@ -47,4 +54,9 @@ __all__ = [
     "UpdateListingRequest",
     "ValidatePublishRequest",
     "ValidatePublishResponse",
+    "CompiledResourceQuery",
+    "FilterVocabularyError",
+    "ResourceQueryCompilationError",
+    "compile_resource_query",
+    "resource_query_descriptors",
 ]

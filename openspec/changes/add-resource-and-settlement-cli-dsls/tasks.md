@@ -7,7 +7,7 @@
 ## 2. Filter-spec-owned resource queries
 
 - [x] 2.1 Extended registry filter declarations with validated `query_name`/`query_aliases`, added friendly names plus canonical aliases for all lower-bound VM filters, and covered duplicate/invalid vocabulary and the shipped spec.
-- [ ] 2.2 Implement filter-spec-to-descriptor conversion and resource-query compilation in `core/registry-client/src/registry_client/`, including declared type/operator/list coercion, aliases, canonical query parameters, schema identity, URL+ETag binding, and fail-closed errors; add sync/async client unit tests for heterogeneous specs and 412 rotation.
+- [x] 2.2 Added registry-client filter-spec descriptor conversion and resource-query compilation with typed operators, friendly/canonical aliases, exact wire encoding, schema and URL+ETag binding, fail-closed vocabulary checks, and sync/async 412 coverage; the full client suite and typing pass.
 - [ ] 2.3 Replace generic core buyer `-f/--filter name=value` handling with one `--resource '<query>'` path in `core/buyer/src/core_buyer/cli.py`, compiling independently against every selected authenticated registry before listing requests and rejecting partial multi-registry vocabulary matches; update focused core buyer CLI tests.
 - [ ] 2.4 Replace VM buyer resource convenience flags and direct `build_vm_filter_params` construction in `domains/vms/buyer/` with the shared `--resource` compiler across listing, discovery, negotiation, and buy entry points; remove obsolete parsers/helpers/tests and add typed numeric/list/boolean and multi-registry behavior coverage.
 
