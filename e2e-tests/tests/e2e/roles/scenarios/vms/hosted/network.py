@@ -31,6 +31,7 @@ from .driver import (
 )
 
 _RESOURCE_ID_PREFIX = "hosted-e2e-vm"
+_REFUND_EXPIRATION_SECONDS = 31 * 60
 _OFFER = {
     "resource_id": "",
     "gpu_model": "H100",
@@ -291,7 +292,9 @@ class NetworkMarketplacePort:
         option = [
             item for item in listing.settlement_options if item.get("mechanism") == "fiat.stripe.v1"
         ][0]
-        expiration_unix = int(time.time()) + (120 if self._stripe_test_case == "refund" else 3600)
+        expiration_unix = int(time.time()) + (
+            _REFUND_EXPIRATION_SECONDS if self._stripe_test_case == "refund" else 3600
+        )
         selection = {
             "mechanism": "fiat.stripe.v1",
             "option_id": option["option_id"],
