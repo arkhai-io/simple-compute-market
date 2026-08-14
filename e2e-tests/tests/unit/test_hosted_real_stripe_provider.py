@@ -77,8 +77,8 @@ def _transport(*, duplicate: bool = False, wrong_destination: bool = False):
     def request(path: str, params: Mapping[str, str]) -> dict[str, Any]:
         if path == f"/v1/checkout/sessions/{SESSION}":
             return session
-        if path == "/v1/checkout/sessions/search":
-            assert params["query"] == f"metadata['operation_ref']:'{_ref('checkout', ESCROW)}'"
+        if path == "/v1/checkout/sessions":
+            assert params["limit"] == "100"
             data = [session]
             if duplicate:
                 data.append({**session, "id": "cs_duplicate"})

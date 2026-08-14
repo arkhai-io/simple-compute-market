@@ -331,8 +331,7 @@ class StripeApi:
             or session.get("client_reference_id") != expected.transfer_group
         ):
             raise ProviderInvariantError("exact Checkout session did not match the operation")
-        query = f"metadata['operation_ref']:'{_search_literal(checkout_ref)}'"
-        matches = self._list_all("/v1/checkout/sessions/search", {"query": query, "limit": "100"})
+        matches = self._list_all("/v1/checkout/sessions", {"limit": "100"})
         matching_ids = {
             _object_id(item, "Checkout search result")
             for item in matches
@@ -475,12 +474,6 @@ def _nested(value: JsonObject, *keys: str) -> object:
             return None
         current = current.get(key)
     return current
-
-
-def _search_literal(value: str) -> str:
-    if not value or any(character in value for character in ("'", "\\", "\n", "\r")):
-        raise ProviderInvariantError("operation metadata is not safe for exact retrieval")
-    return value
 
 
 def _collected_state(value: str) -> Literal["collected"]:
