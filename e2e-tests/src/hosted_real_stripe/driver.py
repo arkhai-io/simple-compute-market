@@ -394,6 +394,7 @@ def _execute_scenario(
             execution.stage = "recovery"
             stack.restart("worker")
         execution.stage = "marketplace_lifecycle"
+        _wait_until_reclaim_eligible(prepared)
         lifecycle.request(
             "request_eligible_pretransfer_refund",
             operation_ref=expected.operation_ref,
@@ -483,6 +484,15 @@ def _execute_scenario(
         collection=collection,
         recovery=recovery,
     )
+
+
+def _wait_until_reclaim_eligible(prepared: dict[str, Any]) -> None:
+    eligible_at = prepared.get("reclaim_eligible_at_unix")
+    if not isinstance(eligible_at, int) or isinstance(eligible_at, bool):
+        raise LifecycleContractError("refund lifecycle omitted its eligibility deadline")
+    delay = eligible_at - time.time() + 1
+    if delay > 0:
+        time.sleep(delay)
 
 
 def _prepared_effect(

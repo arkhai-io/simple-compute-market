@@ -367,6 +367,7 @@ class NetworkMarketplacePort:
             ),
             amount=amount,
             currency=currency,
+            expiration_unix=int(obligation["expiration_unix"]),
             destination_account_ref=self.account_ref,
             transfer_group=str(settlement_ref),
             source_relation="checkout-charge",
@@ -419,10 +420,6 @@ class NetworkMarketplacePort:
         )
 
     def request_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:
-        expiration_unix = int(self._accepted_obligation["expiration_unix"])
-        delay = expiration_unix - time.time() + 1
-        if delay > 0:
-            time.sleep(delay)
         return self.reclaim(settlement_ref)
 
     def recover_eligible_pretransfer_refund(self, settlement_ref: str) -> TerminalSnapshot:

@@ -48,6 +48,7 @@ class MaterializationSnapshot:
     action: BuyerAction
     amount: int
     currency: str
+    expiration_unix: int
     destination_account_ref: str
     transfer_group: str
     source_relation: str

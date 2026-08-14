@@ -40,6 +40,7 @@ class _Marketplace:
             operation_ref="market-operation-001",
             amount=1250,
             currency="usd",
+            expiration_unix=2_000_000_000,
             transfer_group="market-group-001",
             action=SimpleNamespace(
                 kind="redirect",
@@ -71,11 +72,10 @@ def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness(
     prepared = bridge.request({"action": "prepare_collection"})
     assert prepared["accepted_mechanism"] == "fiat.stripe.v1"
     assert prepared["condition_profile"] == "portable"
+    assert prepared["reclaim_eligible_at_unix"] == 2_000_000_000
     operation_ref = prepared["operation_ref"]
     bridge.request({"action": "wait_authoritative_funding", "operation_ref": operation_ref})
-    bridge.request(
-        {"action": "complete_portable_vm_fulfillment", "operation_ref": operation_ref}
-    )
+    bridge.request({"action": "complete_portable_vm_fulfillment", "operation_ref": operation_ref})
     terminal = bridge.request(
         {"action": "wait_authoritative_collection", "operation_ref": operation_ref}
     )

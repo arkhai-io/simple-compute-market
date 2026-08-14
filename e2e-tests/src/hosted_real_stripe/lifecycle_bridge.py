@@ -135,6 +135,7 @@ class LifecycleBridge:
             "amount": deal.amount,
             "currency": deal.currency,
             "transfer_group": deal.transfer_group,
+            "reclaim_eligible_at_unix": materialized.expiration_unix,
         }
 
     def _deal(self, body: dict[str, Any]) -> _Deal:

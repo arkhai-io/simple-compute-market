@@ -13,6 +13,7 @@ from src.hosted_real_stripe.driver import (
     _browser_outcome,
     _maintained_account_binding,
     _prepared_effect,
+    _wait_until_reclaim_eligible,
     _terminal_projection,
 )
 from src.hosted_real_stripe.runtime import LifecycleContractError
@@ -34,6 +35,7 @@ def _prepared() -> dict[str, object]:
         "destination_account_ref": "acct_protected",
         "transfer_group": "escrow-protected-001",
         "source_relation": "checkout-charge",
+        "reclaim_eligible_at_unix": 2_000_000_000,
     }
 
 
@@ -73,6 +75,21 @@ def test_prepared_effect_binds_public_lifecycle_to_exact_checkout_terms() -> Non
     assert expected.transfer_group == "escrow-protected-001"
     assert expected.destination_account == "acct_protected"
     assert checkout_url.startswith("https://checkout.stripe.com/")
+
+
+def test_refund_eligibility_wait_happens_outside_lifecycle_request(monkeypatch) -> None:
+    delays: list[float] = []
+    monkeypatch.setattr("src.hosted_real_stripe.driver.time.time", lambda: 100.0)
+    monkeypatch.setattr("src.hosted_real_stripe.driver.time.sleep", delays.append)
+
+    _wait_until_reclaim_eligible({"reclaim_eligible_at_unix": 120})
+
+    assert delays == [21.0]
+
+
+def test_refund_eligibility_requires_public_deadline() -> None:
+    with pytest.raises(LifecycleContractError):
+        _wait_until_reclaim_eligible({})
 
 
 def test_prepared_effect_rejects_incomplete_lifecycle_milestones() -> None:
