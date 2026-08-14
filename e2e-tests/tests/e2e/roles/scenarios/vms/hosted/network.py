@@ -230,7 +230,7 @@ class NetworkMarketplacePort:
             request_id=f"stripe-test-account-{uuid.uuid4().hex}",
         )
         wallet_free = not self.buyer_config.get("Wallet") and not self.buyer_config.get("Chains")
-        required_capabilities = {"card_payments", "transfers"}
+        required_capabilities = {"transfers"}
         return RuntimeSnapshot(
             wallet_free=bool(wallet_free),
             runtime_ready=status.status_code == 200,
