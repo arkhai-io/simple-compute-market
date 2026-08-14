@@ -66,6 +66,17 @@ class _Marketplace:
         )
 
 
+class _RefundMarketplace(_Marketplace):
+    def eligible_pretransfer_refund_available(self):
+        return True
+
+    def select_stripe_test_case(self, case: str):
+        self.calls.append(f"select:{case}")
+
+    def hold_fulfillment_for_refund(self):
+        self.calls.append("hold_fulfillment")
+
+
 def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness() -> None:
     marketplace = _Marketplace()
     bridge = LifecycleBridge(marketplace)
@@ -95,6 +106,24 @@ def test_bridge_drives_public_marketplace_ports_without_test_provider_readiness(
         "wait_funded",
         "fulfill",
         "wait_terminal",
+    ]
+
+
+def test_bridge_holds_fulfillment_before_returning_refund_checkout() -> None:
+    marketplace = _RefundMarketplace()
+    prepared = LifecycleBridge(marketplace).request({"action": "prepare_refund"})
+
+    assert prepared["available"] is True
+    assert prepared["reclaim_eligible_at_unix"] == 2_000_000_000
+    assert marketplace.calls == [
+        "select:refund",
+        "verify_composition",
+        "verify_runtime",
+        "publish",
+        "discover",
+        "negotiate",
+        "materialize",
+        "hold_fulfillment",
     ]
 
 

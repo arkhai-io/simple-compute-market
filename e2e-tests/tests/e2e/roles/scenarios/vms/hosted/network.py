@@ -16,6 +16,7 @@ from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
 from vm_provisioning_operator import HostCreate, SyncProvisioningClient
 from storefront_client import SyncStorefrontClient
+from src.provisioning_test_client import ProvisioningTestClient
 
 from .authority import released_authority_client
 from .driver import (
@@ -247,6 +248,17 @@ class NetworkMarketplacePort:
 
     def eligible_pretransfer_refund_available(self) -> bool:
         return True
+
+    def hold_fulfillment_for_refund(self) -> None:
+        with ProvisioningTestClient(self.provisioning_url) as client:
+            client.add_mock_rule(
+                rule_id="hosted-stripe-refund-hold",
+                match={"vm_action": "create"},
+                pause_before_result=True,
+            )
+            evaluation = client.evaluate_job(self._host_id, vm_action="create")
+        if evaluation.get("would_pause") is not True:
+            raise AssertionError("refund fulfillment hold is not active")
 
     def create_and_publish_listing(self) -> ListingSnapshot:
         created = self.seller.create_listing(

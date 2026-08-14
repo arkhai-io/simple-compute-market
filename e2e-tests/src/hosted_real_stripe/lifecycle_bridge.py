@@ -114,6 +114,11 @@ class LifecycleBridge:
         materialized = self._marketplace.materialize(negotiation.negotiation_id)
         if materialized.action.kind != "redirect":
             raise RuntimeError("materialization did not return a Checkout redirect")
+        if case == "refund":
+            hold_fulfillment = getattr(self._marketplace, "hold_fulfillment_for_refund", None)
+            if hold_fulfillment is None:
+                raise RuntimeError("refund scenario has no deterministic unfulfilled control")
+            hold_fulfillment()
         deal = _Deal(
             settlement_ref=materialized.settlement_ref,
             operation_ref=materialized.operation_ref,
