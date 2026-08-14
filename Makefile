@@ -156,6 +156,8 @@ hosted-compose-clean: ## Tear down partial or complete hosted stacks and delete 
 			'HOSTED_SETTLEMENT_VERIFIED_RELEASE_DIR=$(CURDIR)' > "$$env_file"; \
 	fi; \
 	VMS_REGISTRY_ADMIN_API_KEY=cleanup VMS_REGISTRY_BOOTSTRAP_API_KEY=cleanup \
+	HOSTED_SETTLEMENT_ENV_FILE=/dev/null \
+	VMS_BOB_STRIPE_STOREFRONT_CONFIG=/dev/null \
 	VMS_BOB_STOREFRONT_SECRETS_FILE=/dev/null \
 	VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE=/dev/null \
 	VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE=/dev/null \
