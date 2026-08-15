@@ -15,6 +15,18 @@ if _SPEC is None or _SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"cannot load hosted release verifier from {_VERIFIER_PATH}")
 _VERIFIER = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_VERIFIER)
+_MARKETPLACE_VERIFIER_PATH = Path(__file__).with_name("verify-marketplace-release.py")
+_MARKETPLACE_SPEC = importlib.util.spec_from_file_location(
+    "verify_marketplace_release",
+    _MARKETPLACE_VERIFIER_PATH,
+)
+if _MARKETPLACE_SPEC is None or _MARKETPLACE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(
+        f"cannot load marketplace release verifier from {_MARKETPLACE_VERIFIER_PATH}"
+    )
+_MARKETPLACE_VERIFIER = importlib.util.module_from_spec(_MARKETPLACE_SPEC)
+_MARKETPLACE_SPEC.loader.exec_module(_MARKETPLACE_VERIFIER)
+
 
 
 class ComposePreparationError(RuntimeError):
@@ -74,12 +86,29 @@ def prepare_compose_env(
     trust_path: Path,
     manifest_path: Path,
     wheel_path: Path,
+    marketplace_manifest_path: Path,
+    marketplace_manifest_sha256: str,
+    marketplace_commit: str,
+    marketplace_workflow_ref: str,
+    marketplace_workflow_run_id: str,
+    marketplace_image_digest: str,
     output_path: Path,
 ) -> str:
     production: dict[str, Any] = _VERIFIER.verify_release(
         trust_path=_required_file(trust_path, "HOSTED_RELEASE_TRUST"),
         manifest_path=_required_file(manifest_path, "HOSTED_RELEASE_MANIFEST"),
         wheel_path=_required_file(wheel_path, "HOSTED_CLIENT_WHEEL"),
+    )
+    marketplace: dict[str, Any] = _MARKETPLACE_VERIFIER.verify_marketplace_release(
+        manifest_path=_required_file(
+            marketplace_manifest_path,
+            "HOSTED_MARKETPLACE_RELEASE_MANIFEST",
+        ),
+        expected_manifest_sha256=marketplace_manifest_sha256,
+        expected_commit=marketplace_commit,
+        expected_workflow_ref=marketplace_workflow_ref,
+        expected_workflow_run_id=marketplace_workflow_run_id,
+        expected_image_digest=marketplace_image_digest,
     )
     verified_image = _image(
         production["service_image_reference"], production["service_image_digest"]
@@ -94,6 +123,35 @@ def prepare_compose_env(
     verified_authority_id = str(production["authority_id"])
     verified_authority_scheme = str(production["authority_scheme"])
     verified_authority_address = str(production["authority_address"])
+    verified_marketplace_image = _image(
+        marketplace["service_image_reference"],
+        marketplace["service_image_digest"],
+    )
+    verified_marketplace_contract = {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": str(
+            marketplace["artifacts"]["provenance"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": str(
+            marketplace["artifacts"]["settlement_config_schema"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": str(
+            marketplace["artifacts"]["wheelhouse"]["sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": verified_marketplace_image,
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": str(
+            marketplace["manifest_sha256"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": str(marketplace["repository"]),
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": str(
+            marketplace["source_commit"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": str(
+            marketplace["workflow_ref"]
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": str(
+            marketplace["workflow_run_id"]
+        ),
+    }
     verified_contract = {
         "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(production["api_version"]),
         "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
@@ -124,6 +182,8 @@ def prepare_compose_env(
         + str(production["service_wheel_sha256"]),
     }
     for name, expected in verified_contract.items():
+        _reject_mismatched_override(name, expected)
+    for name, expected in verified_marketplace_contract.items():
         _reject_mismatched_override(name, expected)
     _reject_mismatched_override("HOSTED_SETTLEMENT_VERIFIED_IMAGE", verified_image)
     _reject_mismatched_override(
@@ -179,6 +239,7 @@ def prepare_compose_env(
             "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": verified_source_commit,
             "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": verified_repository,
             "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": verified_workflow_ref,
+            **verified_marketplace_contract,
             **verified_contract,
         }
     )
@@ -195,15 +256,31 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--marketplace-manifest", type=Path, required=True)
+    parser.add_argument("--marketplace-manifest-sha256", required=True)
+    parser.add_argument("--marketplace-source-commit", required=True)
+    parser.add_argument("--marketplace-workflow-ref", required=True)
+    parser.add_argument("--marketplace-workflow-run-id", required=True)
+    parser.add_argument("--marketplace-image-digest", required=True)
     args = parser.parse_args()
     try:
         image = prepare_compose_env(
             trust_path=args.trust,
             manifest_path=args.manifest,
             wheel_path=args.wheel,
+            marketplace_manifest_path=args.marketplace_manifest,
+            marketplace_manifest_sha256=args.marketplace_manifest_sha256,
+            marketplace_commit=args.marketplace_source_commit,
+            marketplace_workflow_ref=args.marketplace_workflow_ref,
+            marketplace_workflow_run_id=args.marketplace_workflow_run_id,
+            marketplace_image_digest=args.marketplace_image_digest,
             output_path=args.output,
         )
-    except (_VERIFIER.ReleaseVerificationError, ComposePreparationError) as exc:
+    except (
+        _VERIFIER.ReleaseVerificationError,
+        _MARKETPLACE_VERIFIER.MarketplaceReleaseVerificationError,
+        ComposePreparationError,
+    ) as exc:
         parser.error(str(exc))
     print(image)
     return 0

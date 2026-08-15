@@ -10,6 +10,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = (REPO_ROOT / "compose.hosted-settlement.yml").read_text(encoding="utf-8")
 ROOT_MAKE = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 E2E_MAKE = (REPO_ROOT / "e2e-tests" / "Makefile").read_text(encoding="utf-8")
+WORKFLOW = (REPO_ROOT / ".github" / "workflows" / "hosted-stripe-test.yml").read_text(
+    encoding="utf-8"
+)
 
 
 def test_authority_port_coexists_with_registry_container_port() -> None:
@@ -80,16 +83,58 @@ def test_only_hosted_service_secret_environment_is_required() -> None:
         assert token in preparer
 
 
-def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
+def test_protected_report_signer_is_role_scoped_masked_and_ephemeral() -> None:
+    assert ".evidence_signer_credential" in WORKFLOW
+    assert ".evidence_signer_scheme" in WORKFLOW
+    assert ".evidence_signer_identifier" in WORKFLOW
+    assert 'echo "::add-mask::$value"' in WORKFLOW
+    for variable in (
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL",
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME",
+        "HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER",
+    ):
+        assert f"export {variable}=" in WORKFLOW
+        assert f"unset {variable}" in WORKFLOW
+
+
+def test_protected_lane_activates_one_attested_marketplace_consumer_image() -> None:
+    storefront = COMPOSE.split("  bob-storefront:", 1)[1].split("\nvolumes:", 1)[0]
+    assert (
+        "image: ${HOSTED_MARKETPLACE_VERIFIED_IMAGE:?run the selected marketplace "
+        "release preflight}"
+    ) in storefront
+    preflight = ROOT_MAKE.split("prepare-hosted-compose:", 1)[1].split(
+        "hosted-compose-up:", 1
+    )[0]
+    assert 'gh attestation verify "$(HOSTED_MARKETPLACE_RELEASE_MANIFEST)"' in preflight
+    assert "--marketplace-manifest-sha256" in preflight
+    assert "--marketplace-image-digest" in preflight
+    assert "Download exact attested marketplace consumer release" in WORKFLOW
+    assert "MARKETPLACE_RELEASE_ARTIFACT" in WORKFLOW
+    assert (
+        'HOSTED_MARKETPLACE_RELEASE_MANIFEST="$MARKETPLACE_RELEASE_DIR/'
+        'marketplace-release-manifest.json"'
+    ) in WORKFLOW
+
+
+def test_up_restart_and_clean_have_distinct_volume_and_recreate_behavior() -> None:
+    up = ROOT_MAKE.split("hosted-compose-up:", 1)[1].split(
+        "hosted-compose-restart:", 1
+    )[0]
     restart = ROOT_MAKE.split("hosted-compose-restart:", 1)[1].split(
         "hosted-compose-clean:", 1
     )[0]
     clean = ROOT_MAKE.split("hosted-compose-clean:", 1)[1].split(
         "hosted-stripe-test:", 1
     )[0]
-    assert " restart" in restart
-    assert " down -v --remove-orphans" in clean
+    assert "hosted-preflight" in up
+    assert "up -d --wait" in up
+    assert "down" not in up
+    assert "--force-recreate" not in up
+    assert "up -d --wait --force-recreate" in restart
+    assert " restart" not in restart
     assert "down -v" not in restart
+    assert " down -v --remove-orphans" in clean
     for variable in (
         "VMS_REGISTRY_ADMIN_API_KEY",
         "VMS_REGISTRY_BOOTSTRAP_API_KEY",
@@ -104,7 +149,7 @@ def test_clean_and_restart_targets_have_opposite_volume_behavior() -> None:
 def test_only_production_and_protected_stripe_targets_exist() -> None:
     for target in (
         "hosted-preflight:",
-        "hosted-compose-start:",
+        "hosted-compose-up:",
         "hosted-compose-restart:",
         "hosted-compose-clean:",
         "hosted-stripe-test:",
@@ -116,6 +161,7 @@ def test_only_production_and_protected_stripe_targets_exist() -> None:
         "hosted-local-eas:",
         "build-hosted:",
         "hosted-real-stripe:",
+        "hosted-compose-start:",
     ):
         assert retired not in ROOT_MAKE
         assert retired not in E2E_MAKE

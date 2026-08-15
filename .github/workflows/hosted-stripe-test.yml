@@ -7,6 +7,26 @@ on:
         description: Exact trusted marketplace commit on the default branch
         required: true
         type: string
+      marketplace_release_run_id:
+        description: Exact trusted marketplace release workflow run ID
+        required: true
+        type: string
+      marketplace_release_artifact:
+        description: Exact attested marketplace consumer release artifact name
+        required: true
+        type: string
+      marketplace_workflow_ref:
+        description: Exact trusted marketplace release workflow reference
+        required: true
+        type: string
+      marketplace_manifest_sha256:
+        description: Exact signed marketplace artifact manifest digest
+        required: true
+        type: string
+      marketplace_image_digest:
+        description: Exact immutable marketplace image digest
+        required: true
+        type: string
       hosted_release_run_id:
         description: Exact trusted hosted producer workflow run ID
         required: true
@@ -35,6 +55,25 @@ on:
         description: Exact ordinary hosted production image digest
         required: true
         type: string
+      funding_profile:
+        description: Exact funding profile, or all valid profile scenarios
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - card.v1
+          - us_bank_transfer.v1
+          - us_ach_debit.v1
+      interaction:
+        description: Exact payer interaction, or all valid interactions
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - interactive
+          - saved_instrument
       scenario:
         description: Protected Stripe test scenario
         required: true
@@ -47,6 +86,12 @@ on:
           - missed_webhook
           - api_restart
           - worker_restart
+          - funding_restart
+          - delayed_funding
+          - off_session_success
+          - requires_action
+          - ach_return
+          - post_collection_loss
           - decline
           - insufficient_funds
           - authentication
@@ -71,13 +116,18 @@ concurrency:
 
 permissions:
   contents: read
+  attestations: read
   actions: read
   packages: read
   id-token: write
 
 jobs:
   stripe-test:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name != 'workflow_dispatch' || inputs.scenario == 'all' || inputs.scenario == matrix.scenario) &&
+      (github.event_name != 'workflow_dispatch' || inputs.funding_profile == 'all' || inputs.funding_profile == matrix.funding_profile) &&
+      (github.event_name != 'workflow_dispatch' || inputs.interaction == 'all' || inputs.interaction == matrix.interaction)
     environment: hosted-stripe-test
     runs-on: [self-hosted, hosted-stripe-test]
     timeout-minutes: 90
@@ -85,11 +135,30 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        scenario: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.scenario != 'all' && format('["{0}"]', inputs.scenario) || '["collection","reclaim","missed_webhook","api_restart","worker_restart","decline","insufficient_funds","authentication"]') }}
+        include:
+          - {funding_profile: card.v1, interaction: interactive, scenario: collection}
+          - {funding_profile: card.v1, interaction: interactive, scenario: reclaim}
+          - {funding_profile: card.v1, interaction: interactive, scenario: missed_webhook}
+          - {funding_profile: card.v1, interaction: interactive, scenario: api_restart}
+          - {funding_profile: card.v1, interaction: interactive, scenario: worker_restart}
+          - {funding_profile: card.v1, interaction: interactive, scenario: decline}
+          - {funding_profile: card.v1, interaction: interactive, scenario: insufficient_funds}
+          - {funding_profile: card.v1, interaction: interactive, scenario: authentication}
+          - {funding_profile: card.v1, interaction: saved_instrument, scenario: off_session_success}
+          - {funding_profile: card.v1, interaction: saved_instrument, scenario: requires_action}
+          - {funding_profile: us_bank_transfer.v1, interaction: interactive, scenario: collection}
+          - {funding_profile: us_bank_transfer.v1, interaction: interactive, scenario: delayed_funding}
+          - {funding_profile: us_bank_transfer.v1, interaction: interactive, scenario: funding_restart}
+          - {funding_profile: us_ach_debit.v1, interaction: interactive, scenario: delayed_funding}
+          - {funding_profile: us_ach_debit.v1, interaction: interactive, scenario: ach_return}
+          - {funding_profile: us_ach_debit.v1, interaction: interactive, scenario: post_collection_loss}
+          - {funding_profile: us_ach_debit.v1, interaction: saved_instrument, scenario: off_session_success}
     env:
       COMPOSE_PROJECT_NAME: simple-market-service-hosted-stripe-test
+      GH_TOKEN: ${{ github.token }}
       HOSTED_RELEASE_DIR: ${{ github.workspace }}/.protected-hosted-release
       EVIDENCE_DIR: ${{ github.workspace }}/stripe-test-evidence
+      MARKETPLACE_RELEASE_DIR: ${{ github.workspace }}/.protected-marketplace-release
       TRUSTED_MARKETPLACE_COMMIT: ${{ inputs.marketplace_commit || github.sha }}
       HOSTED_RELEASE_RUN_ID: ${{ inputs.hosted_release_run_id || vars.HOSTED_STRIPE_TEST_RELEASE_RUN_ID }}
       HOSTED_RELEASE_ARTIFACT: ${{ inputs.hosted_release_artifact || vars.HOSTED_STRIPE_TEST_RELEASE_ARTIFACT }}
@@ -98,6 +167,11 @@ jobs:
       HOSTED_SOURCE_COMMIT: ${{ inputs.hosted_source_commit || vars.HOSTED_STRIPE_TEST_SOURCE_COMMIT }}
       HOSTED_WORKFLOW_REF: ${{ inputs.hosted_workflow_ref || vars.HOSTED_STRIPE_TEST_WORKFLOW_REF }}
       HOSTED_IMAGE_DIGEST: ${{ inputs.hosted_image_digest || vars.HOSTED_STRIPE_TEST_IMAGE_DIGEST }}
+      MARKETPLACE_RELEASE_RUN_ID: ${{ inputs.marketplace_release_run_id || vars.HOSTED_STRIPE_TEST_MARKETPLACE_RELEASE_RUN_ID }}
+      MARKETPLACE_RELEASE_ARTIFACT: ${{ inputs.marketplace_release_artifact || vars.HOSTED_STRIPE_TEST_MARKETPLACE_RELEASE_ARTIFACT }}
+      MARKETPLACE_WORKFLOW_REF: ${{ inputs.marketplace_workflow_ref || vars.HOSTED_STRIPE_TEST_MARKETPLACE_WORKFLOW_REF }}
+      MARKETPLACE_MANIFEST_SHA256: ${{ inputs.marketplace_manifest_sha256 || vars.HOSTED_STRIPE_TEST_MARKETPLACE_MANIFEST_SHA256 }}
+      MARKETPLACE_IMAGE_DIGEST: ${{ inputs.marketplace_image_digest || vars.HOSTED_STRIPE_TEST_MARKETPLACE_IMAGE_DIGEST }}
     steps:
       - name: Checkout exact trusted marketplace source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -113,6 +187,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$TRUSTED_MARKETPLACE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$MARKETPLACE_RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$MARKETPLACE_WORKFLOW_REF" =~ ^[A-Za-z0-9.][A-Za-z0-9._/@:-]{7,255}$ ]]
+          [[ "$MARKETPLACE_MANIFEST_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$MARKETPLACE_RELEASE_ARTIFACT" ]]
+          [[ "$MARKETPLACE_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$HOSTED_RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$HOSTED_MANIFEST_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$HOSTED_CLIENT_WHEEL_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -122,6 +201,14 @@ jobs:
           [[ -n "$HOSTED_RELEASE_ARTIFACT" ]]
           test "$(git rev-parse HEAD)" = "$TRUSTED_MARKETPLACE_COMMIT"
           git merge-base --is-ancestor "$TRUSTED_MARKETPLACE_COMMIT" "origin/$DEFAULT_BRANCH"
+      - name: Download exact attested marketplace consumer release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ env.MARKETPLACE_RELEASE_ARTIFACT }}
+          path: ${{ env.MARKETPLACE_RELEASE_DIR }}
+          run-id: ${{ env.MARKETPLACE_RELEASE_RUN_ID }}
+          github-token: ${{ github.token }}
+
 
       - name: Mint short-lived hosted artifact token
         id: hosted-token
@@ -155,16 +242,23 @@ jobs:
         env:
           CREDENTIAL_BROKER_URL: ${{ vars.HOSTED_E2E_CREDENTIAL_BROKER_URL }}
           SCENARIO: ${{ matrix.scenario }}
+          FUNDING_PROFILE: ${{ matrix.funding_profile }}
+          INTERACTION: ${{ matrix.interaction }}
         run: |
           set -euo pipefail
           umask 077
           secret_dir="$(mktemp -d)"
           cleanup() {
             unset credentials oidc_response oidc_token registry_token expires_at
+            unset evidence_signer_credential evidence_signer_scheme evidence_signer_identifier
             unset STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
             unset HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL
+            unset HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_SCHEME
             unset HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL
             unset HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL
+            unset HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL
+            unset HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME
+            unset HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER
             unset VMS_REGISTRY_ADMIN_API_KEY VMS_REGISTRY_BOOTSTRAP_API_KEY
             unset VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE
             unset VMS_PROVISIONING_IDENTITY_ENV_FILE VMS_BOB_IDENTITY_ENV_FILE
@@ -191,8 +285,14 @@ jobs:
           account_ref="$(jq --exit-status --raw-output '.account_ref' <<<"$credentials")"
           authority_environment="$(jq --exit-status --raw-output '.authority_environment' <<<"$credentials")"
           buyer_credential="$(jq --exit-status --raw-output '.buyer_identity_credential' <<<"$credentials")"
+          buyer_identity_scheme="$(jq --exit-status --raw-output '.buyer_identity_scheme' <<<"$credentials")"
+          [[ "$buyer_identity_scheme" == "eip191" || "$buyer_identity_scheme" == "ed25519" ]]
           storefront_credential="$(jq --exit-status --raw-output '.storefront_identity_credential' <<<"$credentials")"
           admin_credential="$(jq --exit-status --raw-output '.admin_identity_credential' <<<"$credentials")"
+          evidence_signer_credential="$(jq --exit-status --raw-output '.evidence_signer_credential' <<<"$credentials")"
+          evidence_signer_scheme="$(jq --exit-status --raw-output '.evidence_signer_scheme' <<<"$credentials")"
+          evidence_signer_identifier="$(jq --exit-status --raw-output '.evidence_signer_identifier' <<<"$credentials")"
+          [[ "$evidence_signer_scheme" == "eip191" || "$evidence_signer_scheme" == "ed25519" ]]
           registry_a_credential="$(jq --exit-status --raw-output '.registry_a_identity_credential' <<<"$credentials")"
           registry_b_credential="$(jq --exit-status --raw-output '.registry_b_identity_credential' <<<"$credentials")"
           provisioning_credential="$(jq --exit-status --raw-output '.provisioning_identity_credential' <<<"$credentials")"
@@ -213,14 +313,19 @@ jobs:
           : >"$secret_dir/storefront.secrets.toml"
           for value in "$registry_token" "$STRIPE_SECRET_KEY" "$STRIPE_CONNECTED_ACCOUNT_ID" \
             "$buyer_credential" "$storefront_credential" "$admin_credential" \
+            "$evidence_signer_credential" \
             "$registry_a_credential" "$registry_b_credential" "$provisioning_credential" \
             "$registry_admin_key" "$registry_bootstrap_key"; do
             echo "::add-mask::$value"
           done
           export STRIPE_SECRET_KEY STRIPE_CONNECTED_ACCOUNT_ID
           export HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL="$buyer_credential"
+          export HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_SCHEME="$buyer_identity_scheme"
           export HOSTED_SETTLEMENT_E2E_STOREFRONT_IDENTITY_CREDENTIAL="$storefront_credential"
           export HOSTED_SETTLEMENT_E2E_ADMIN_IDENTITY_CREDENTIAL="$admin_credential"
+          export HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_CREDENTIAL="$evidence_signer_credential"
+          export HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_SCHEME="$evidence_signer_scheme"
+          export HOSTED_SETTLEMENT_E2E_EVIDENCE_SIGNER_IDENTIFIER="$evidence_signer_identifier"
           export VMS_REGISTRY_IDENTITY_CREDENTIAL_FILE="$secret_dir/registry-a"
           export VMS_REGISTRY_B_IDENTITY_CREDENTIAL_FILE="$secret_dir/registry-b"
           export VMS_PROVISIONING_IDENTITY_ENV_FILE="$secret_dir/provisioning.env"
@@ -234,6 +339,7 @@ jobs:
           make hosted-stripe-test \
             HOSTED_RELEASE_MANIFEST="$HOSTED_RELEASE_DIR/release-manifest.json" \
             HOSTED_CLIENT_WHEEL="$HOSTED_RELEASE_DIR/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl" \
+            HOSTED_MARKETPLACE_RELEASE_MANIFEST="$MARKETPLACE_RELEASE_DIR/marketplace-release-manifest.json" \
             HOSTED_PRODUCTION_MANIFEST_SHA256="$HOSTED_MANIFEST_SHA256" \
             HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256="$HOSTED_CLIENT_WHEEL_SHA256" \
             HOSTED_PRODUCTION_IMAGE_DIGEST="$HOSTED_IMAGE_DIGEST" \
@@ -241,19 +347,25 @@ jobs:
             HOSTED_PRODUCTION_WORKFLOW_REF="$HOSTED_WORKFLOW_REF" \
             HOSTED_PRODUCTION_WORKFLOW_RUN_ID="$HOSTED_RELEASE_RUN_ID" \
             HOSTED_MARKETPLACE_COMMIT="$TRUSTED_MARKETPLACE_COMMIT" \
-            HOSTED_STRIPE_TEST_RUN_REF="${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.${SCENARIO}" \
+            HOSTED_MARKETPLACE_WORKFLOW_RUN_ID="$MARKETPLACE_RELEASE_RUN_ID" \
+            HOSTED_MARKETPLACE_WORKFLOW_REF="$MARKETPLACE_WORKFLOW_REF" \
+            HOSTED_MARKETPLACE_MANIFEST_SHA256="$MARKETPLACE_MANIFEST_SHA256" \
+            HOSTED_MARKETPLACE_IMAGE_DIGEST="$MARKETPLACE_IMAGE_DIGEST" \
+            HOSTED_STRIPE_TEST_RUN_REF="${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.${FUNDING_PROFILE}.${INTERACTION}.${SCENARIO}" \
             HOSTED_STRIPE_TEST_SCENARIO="$SCENARIO" \
+            HOSTED_STRIPE_TEST_FUNDING_PROFILE="$FUNDING_PROFILE" \
+            HOSTED_STRIPE_TEST_INTERACTION="$INTERACTION" \
             HOSTED_STRIPE_TEST_ACCOUNT_REF="$account_ref" \
             HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT="$authority_environment" \
             HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE="$secret_dir/authority.env" \
-            HOSTED_STRIPE_TEST_EVIDENCE="$EVIDENCE_DIR/${SCENARIO}.json"
+            HOSTED_STRIPE_TEST_EVIDENCE="$EVIDENCE_DIR/${FUNDING_PROFILE}-${INTERACTION}-${SCENARIO}.json"
 
       - name: Upload allowlisted sanitized evidence only
-        if: always() && hashFiles(format('stripe-test-evidence/{0}.json', matrix.scenario)) != ''
+        if: always() && hashFiles(format('stripe-test-evidence/{0}-{1}-{2}.json', matrix.funding_profile, matrix.interaction, matrix.scenario)) != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: hosted-stripe-test-${{ matrix.scenario }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: stripe-test-evidence/${{ matrix.scenario }}.json
+          name: hosted-stripe-test-${{ matrix.funding_profile }}-${{ matrix.interaction }}-${{ matrix.scenario }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: stripe-test-evidence/${{ matrix.funding_profile }}-${{ matrix.interaction }}-${{ matrix.scenario }}.json
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 7

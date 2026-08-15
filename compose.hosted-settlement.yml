@@ -79,6 +79,7 @@ services:
 
   bob-storefront:
     profiles: [hosted-production, hosted-stripe-test]
+    image: ${HOSTED_MARKETPLACE_VERIFIED_IMAGE:?run the selected marketplace release preflight}
     environment:
       STOREFRONT_CLAIMS_SWEEP_INTERVAL: ${HOSTED_STOREFRONT_SERVICING_INTERVAL_SECONDS:-30}
     depends_on:

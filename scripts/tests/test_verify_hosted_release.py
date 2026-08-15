@@ -244,6 +244,55 @@ def _stage_release(
     trust_path = root / "marketplace-trust.json"
     trust_path.write_text(json.dumps(trust), encoding="utf-8")
     return trust_path, manifest_path, client_path
+def _marketplace_args(root: Path) -> dict[str, Any]:
+    release_dir = root / "marketplace-release"
+    release_dir.mkdir(exist_ok=True)
+    artifacts: dict[str, dict[str, str]] = {}
+    for name, filename in {
+        "wheelhouse": "marketplace-wheelhouse.tar.gz",
+        "settlement_config_schema": "settlement-config-schema.json",
+        "provenance": "provenance.intoto.json",
+    }.items():
+        path = release_dir / filename
+        path.write_bytes(name.encode())
+        artifacts[name] = {
+            "filename": filename,
+            "sha256": "sha256:" + _sha(path.read_bytes()),
+        }
+    manifest = release_dir / "marketplace-release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "contract": "arkhai.marketplace-release.v1",
+                "repository": "arkhai/simple-market-service",
+                "source_commit": "34" * 20,
+                "workflow_ref": (
+                    ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+                ),
+                "workflow_run_id": "123456",
+                "service_image": {
+                    "reference": "ghcr.io/arkhai/simple-market-service",
+                    "digest": "sha256:" + "cd" * 32,
+                },
+                "artifacts": artifacts,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "marketplace_manifest_path": manifest,
+        "marketplace_manifest_sha256": "sha256:" + _sha(manifest.read_bytes()),
+        "marketplace_commit": "34" * 20,
+        "marketplace_workflow_ref": (
+            ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+        ),
+        "marketplace_workflow_run_id": "123456",
+        "marketplace_image_digest": "sha256:" + "cd" * 32,
+    }
+
+
 
 
 def _verify(root: Path, **kwargs: Any) -> dict[str, Any]:
@@ -366,10 +415,12 @@ def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> N
         wheel_path=client_path,
     )
 
+    marketplace_args = _marketplace_args(tmp_path)
     image = preparer.prepare_compose_env(
         trust_path=trust_path,
         manifest_path=manifest_path,
         wheel_path=client_path,
+        **marketplace_args,
         output_path=output_path,
     )
     values = dict(
@@ -380,6 +431,27 @@ def test_compose_env_uses_exact_verified_release_identities(tmp_path: Path) -> N
 
     assert image == f"ghcr.io/arkhai/hosted-settlement-service@sha256:{'ab' * 32}"
     assert values == {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256": (
+            "sha256:" + _sha(b"provenance")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256": (
+            "sha256:" + _sha(b"settlement_config_schema")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256": (
+            "sha256:" + _sha(b"wheelhouse")
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE": (
+            "ghcr.io/arkhai/simple-market-service@sha256:" + "cd" * 32
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256": marketplace_args[
+            "marketplace_manifest_sha256"
+        ],
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY": "arkhai/simple-market-service",
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT": "34" * 20,
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF": (
+            ".github/workflows/release.yml@refs/tags/marketplace-v0.2.0"
+        ),
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID": "123456",
         "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": release["api_version"],
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS": release["authority_address"],
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID": release["authority_id"],
@@ -436,6 +508,7 @@ def test_compose_env_rejects_arbitrary_image_override(
             trust_path=trust_path,
             manifest_path=manifest_path,
             wheel_path=client_path,
+            **_marketplace_args(tmp_path),
             output_path=tmp_path / "hosted-compose.env",
         )
 
@@ -454,6 +527,7 @@ def test_compose_env_rejects_tampered_digest_override(
             trust_path=trust_path,
             manifest_path=manifest_path,
             wheel_path=client_path,
+            **_marketplace_args(tmp_path),
             output_path=tmp_path / "hosted-compose.env",
         )
 
@@ -475,6 +549,7 @@ def test_compose_env_rejects_arbitrary_release_directory_override(
             trust_path=trust_path,
             manifest_path=manifest_path,
             wheel_path=client_path,
+            **_marketplace_args(tmp_path),
             output_path=tmp_path / "hosted-compose.env",
         )
 
@@ -503,6 +578,7 @@ def test_generated_environment_contains_only_allowlisted_nonsecret_keys(
         trust_path=trust_path,
         manifest_path=manifest_path,
         wheel_path=client_path,
+        **_marketplace_args(tmp_path),
         output_path=output,
     )
     keys = {
@@ -511,6 +587,15 @@ def test_generated_environment_contains_only_allowlisted_nonsecret_keys(
         if line and not line.startswith("#")
     }
     assert keys == {
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_PROVENANCE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_SCHEMA_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_ARTIFACT_WHEELHOUSE_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_IMAGE",
+        "HOSTED_MARKETPLACE_VERIFIED_MANIFEST_SHA256",
+        "HOSTED_MARKETPLACE_VERIFIED_REPOSITORY",
+        "HOSTED_MARKETPLACE_VERIFIED_SOURCE_COMMIT",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_REF",
+        "HOSTED_MARKETPLACE_VERIFIED_WORKFLOW_RUN_ID",
         "HOSTED_SETTLEMENT_VERIFIED_API_VERSION",
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ADDRESS",
         "HOSTED_SETTLEMENT_VERIFIED_AUTHORITY_ID",
