@@ -1,254 +1,168 @@
 # Bare-metal seller quickstart
 
-How to bring up a bare-metal storefront: publish whole-machine SSH access
-listings, grant a buyer SSH access after settlement, and reclaim that access
-when the lease ends.
+This stack publishes exclusive whole-host capacity, schedules fulfillment
+through one explicitly trusted site authority, grants SSH access after
+settlement, and revokes that access at teardown. It uses the dedicated
+wheel-only `arkhai:bare-metal-storefront` image and the ordinary compute
+provisioning service; it does not use a direct executor or mock provisioning.
 
-The operator model is one storefront per domain. To sell VM slices and
-bare-metal access for the same physical host, run a VM storefront and a
-bare-metal storefront against the same provisioning/site authority. Use the
-same `attribute.physical_host_id` in both storefront inventories so shared
-host accounting can prevent double selling.
-
-For VM slices, see [`seller-quickstart.md`](./seller-quickstart.md). To run
-your own listing registry instead of pointing at an existing one, see
-[`indexer-quickstart.md`](./indexer-quickstart.md).
-
-> Transitional packaging note: the bare-metal domain schema lives in
-> `domains/bare_metal`, while the current runnable provisioning/site authority
-> still lives under `provisioning/compute/service`. Until the storefront
-> package split is complete, some compose service names and commands still use
-> the VM seller image.
+For VM slices, see [`seller-quickstart.md`](./seller-quickstart.md). A single
+Physical Resource may back VM and bare-metal offers only when both listings
+use the same stable physical-host identity and their Resource Pools explicitly
+declare the relevant `deliverable_modes`.
 
 ## Prerequisites
 
-- Linux host with Docker + `docker compose` v2.
-- A canonical public marketplace identity and matching signer credential
-  injected through `ARKHAI_IDENTITY_CREDENTIAL`.
-- A wallet on the EVM chain you'll operate on, funded with gas plus whatever
-  ERC-20 you'll accept as payment. The examples use Base Sepolia + USDC at
-  `0x036CbD53842c5426634e7929541eC2318f3dCF7e`.
-- An RPC URL for that chain.
-- A listing registry URL + write token if the registry gates writes.
-- A physical machine that the provisioning service can reach over SSH.
-- An SSH keypair for the provisioning container, with the public key installed
-  on each bare-metal node and passwordless sudo enabled for the Ansible user.
+- Docker/Podman with Compose v2 on a Linux host.
+- The staged internal wheels and the images built from this checkout.
+- Canonical marketplace principals and matching role-scoped signer files for
+  the registry, storefront, and selected-site provisioning authority.
+- An Ansible inventory containing a real whole-host SSH target and a dedicated
+  provisioning SSH private-key file.
+- A Resource Pool document that explicitly declares `bare_metal`; absence is
+  not a permissive default.
+- A chain/settlement deployment accepted by the storefront and a funded public
+  seller address. Never put a wallet private key in Compose or this document.
 
-## 1. Get the code and build
+The marketplace buyer contribution is a separate prerequisite. A running
+seller stack is not end-to-end evidence until the installed `market
+bare-metal` plugin completes discovery, negotiation, settlement, access,
+teardown, and access revocation.
 
-```bash
-git clone https://github.com/arkhai-io/simple-compute-market.git
-cd simple-compute-market
-make build-seller
-```
-
-`build-seller` currently builds the shared seller images used by the
-transitional VM and bare-metal paths.
-
-## 2. Configure
-
-The storefront reads `/etc/arkhai/storefront.toml` inside the container,
-which the compose mounts from `./config.seller.toml`:
-
-```toml
-agent_id         = "bare_metal_seller_one"
-
-port             = 8001
-base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
-
-db_path          = "./src/market_storefront/data/storefront/agent.db"
-log_file_path    = "./logs/seller.log"
-
-[identity.principal]
-scheme = "ed25519"
-identifier = "<unpadded-base64url-public-key>"
-
-[wallet]
-address = "0x<YOUR_SELLER_ADDRESS>"
-# Supply private_key through the deployment Secret overlay.
-ssh_public_key = "ssh-ed25519 AAAA...placeholder seller@host"
-
-[chains.base_sepolia]
-chain_id = 84532
-rpc_url  = "https://sepolia.base.org"
-alkahest_address_config_path = "/path/to/alkahest.json"
-
-[registry]
-urls = ["http://34.41.205.175/registry"]
-
-[registry.auth]
-# Supply any write token through the deployment Secret overlay. Its key must
-# match the registry URL exactly.
-
-[provisioning]
-service_url = "http://seller-provisioning:8081"
-mode        = "http"
-
-[Settlement]
-schema_version = 1
-priority = ["alkahest.v1"]
-
-[Settlement.alkahest]
-enabled = true
-address_config_path = "/path/to/alkahest.json"
-
-[pricing]
-default_min_price = "10"                # negotiation floor only
-default_max_duration_seconds = 86400
-```
-
-For co-selling with a VM storefront, use a distinct `agent_id`, `base_url`,
-port, database, and canonical marketplace principal for the bare-metal
-storefront. Both storefronts can point at the same provisioning service.
-
-## 3. resources.csv
-
-Use one `resources.csv` row per whole machine:
-
-```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.physical_host_id,attribute.allocation_mode,attribute.machine_id,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb,attribute.virtualization_type,settlements
-whole-host-001,compute.gpu,H200,count,8,available,10,,86400,H200,99.0,"California, US",,host-ca-h200-01,exclusive,bm-host-ca-h200-01,192,2048,20000,bare_metal,"[{""mechanism"":""alkahest.v1"",""asset"":""0x036CbD53842c5426634e7929541eC2318f3dCF7e"",""rate"":""10"",""per"":""hour"",""mechanism_input"":{""chain"":""base_sepolia"",""escrow_kind"":""erc20_escrow_obligation_default""}}]"
-```
-
-Important fields:
-
-- `attribute.allocation_mode = exclusive` marks the row as a whole-host
-  listing candidate.
-- `attribute.physical_host_id` is the stable physical identity used for
-  cross-domain accounting. VM slice rows for the same host must use the same
-  value in the VM storefront inventory.
-- `attribute.machine_id` is the provisioning executor's bare-metal node alias.
-  It must match `[bare_metal_nodes]` in the provisioning inventory. If omitted,
-  `resource_id` is used.
-- `attribute.vm_host` is for VM slices; leave it empty in bare-metal rows.
-- `value` is the total units on the physical host. For GPU hosts, this is
-  normally the total GPU count.
-
-## 4. Add the bare-metal inventory group
-
-Edit the provisioning inventory and add each bare-metal node under
-`[bare_metal_nodes]`:
+## Build the images
 
 ```bash
-cd domains/vms/provisioning/iac/ansible/inventory
-cp hosts.example hosts
-# edit hosts with your real bare-metal node(s)
+make dist build-registry build-provisioning build-bare-metal-storefront
 ```
+
+`domains/bare_metal/storefront/Dockerfile` installs
+`arkhai_bare_metal_storefront-0.2.0` from `.dist`. The runtime image does not
+copy repository source or resolve an editable sibling package.
+
+## Define the selected site
+
+Create an operator-owned inventory file outside the repository:
 
 ```ini
 [bare_metal_nodes]
-bm-host-ca-h200-01  ansible_host=10.0.0.25  public_host=203.0.113.25  ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
+host-ca-h200-01 ansible_host=10.0.0.25 public_host=203.0.113.25 ansible_user=ubuntu
 ```
 
-The alias (`bm-host-ca-h200-01`) must match `attribute.machine_id`.
-`ansible_host` is how the provisioning service reaches the node.
-`public_host` is optional; set it when buyers should SSH to a different
-address than the one Ansible uses. Rebuild after editing the baked inventory:
-
-```bash
-make build-seller
-```
-
-## 5. Choose reclaim behavior
-
-Bare-metal grant installs the buyer's SSH public key for a tenant account.
-On release, the provisioning service runs `node_reclaim_access` using one
-of these policies:
-
-- `remove_lease_key` removes only the SSH key recorded for the lease.
-- `lock_user` removes the lease key and locks the tenant account.
-- `delete_user` deletes the tenant account and home directory.
-
-The default is `remove_lease_key`. Override with provisioning config:
+Create a Resource Pool document outside the repository. The executor target
+and inventory group must name real operator-controlled resources:
 
 ```yaml
-bare_metal_reclaim_policy: "lock_user"
+pools:
+  - id: whole-host-california
+    label: Whole Host California
+    provider: ansible
+    enabled: true
+    policy_tags:
+      deliverable_modes: [bare_metal]
+      region: California, US
+    provider_config:
+      playbook_path: /opt/domains/vms/provisioning/iac/ansible/playbooks/bare-metal/node-access.yaml
+      inventory_group: bare_metal_nodes
 ```
 
-or with an environment variable:
+The pool declaration is authoritative. Do not add `vm` merely to make a
+request pass; add it only if the same pool and executor can actually deliver
+that mode.
+
+## Prepare role credentials
+
+Use separate owner-readable files:
+
+- `BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE` contains only the registry
+  signing credential expected by its configured public principal.
+- `BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE` contains the storefront's
+  `ARKHAI_IDENTITY_CREDENTIAL`.
+- `BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE` contains the provisioning
+  authority's `ARKHAI_IDENTITY_CREDENTIAL`.
+- `BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE` is the Ansible key for the
+  selected host. It is not a marketplace credential.
+
+The files must be regular owner-readable files. Do not reuse one principal or
+credential across roles, and do not commit credential values.
+
+## Configure public bindings
+
+Export the paths plus exact public principals. Values shown in angle brackets
+are required deployment inputs, not defaults:
 
 ```bash
-PROVISIONING_BARE_METAL_RECLAIM_POLICY=lock_user
+export BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=/run/operator/registry-credential
+export BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=/run/operator/storefront-identity.env
+export BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=/run/operator/provisioning-identity.env
+export BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=/run/operator/site-ssh-key
+export BARE_METAL_PROVISIONING_INVENTORY_FILE=/run/operator/bare-metal-hosts.ini
+export BARE_METAL_POOL_DEFINITIONS_FILE=/run/operator/resource-pools.yaml
+
+export BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry
+export BARE_METAL_REGISTRY_AUTHORITY_SCHEME=<scheme>
+export BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=<canonical-identifier>
+
+export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
+export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
+export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
+export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
+export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>
+
+export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
+export BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=<canonical-site-authority-identifier>
+export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=<scheme>
+export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=<canonical-admin-identifier>
+export BARE_METAL_SITE_ID=california-1
+
+export BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first
+export BARE_METAL_STOREFRONT_SITES_JSON='[{"site_id":"california-1","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"<scheme>","identifier":"<canonical-site-authority-identifier>"}}]'
 ```
 
-Use `delete_user` only for machines where tenant home directories are
-expected to be disposable.
+The site object is an exact trust binding. The storefront does not infer a
+site from inventory, payload fields, reachability, or list order. With
+`most_available`, it compares authoritative capacity projections only among
+the listed trusted sites.
 
-## 6. Bring it up
+## Start and inspect
 
 ```bash
-SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
-SELLER_RESOURCES_CSV="$PWD/resources.csv" \
-SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
-docker compose -f compose/seller.yml -f compose/seller.live.yml up -d
+docker compose -f compose.bare-metal.yml up -d
+docker compose -f compose.bare-metal.yml ps
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8081/health
+curl -fsS http://localhost:8080/health
 ```
 
-For co-selling, run the VM and bare-metal storefronts as separate deployments
-with separate configs and public ports, while pointing both at the same
-provisioning/site authority.
+The stack persists registry, Redis, provisioning, and storefront state in
+separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
+inspect the storefront health projection and stop if database, selected-site
+capacity, fulfillment, or the configured settlement mechanism is unavailable.
 
-## 7. Validate the live node
+## Release-qualified deal evidence
 
-Before publishing, check that the provisioning container can reach the
-bare-metal node:
+Once the buyer contribution, selected-site authority, settlement authority,
+and real host are available, inject the E2E role inputs and run:
 
 ```bash
-docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
-  seller-provisioning ansible \
-  -i /opt/domains/vms/provisioning/iac/ansible/inventory/hosts \
-  bm-host-ca-h200-01 -m ping
+uv run pytest -m e2e_bare_metal_deal -v
 ```
 
-Then verify the host is registered and enabled in the provisioning service:
+The scenario drives the installed `market bare-metal` command. It checks the
+public lifecycle in order, performs real SSH with the returned access
+descriptor, requests teardown through the buyer command, waits for the
+accepted terminal teardown status, and proves that the same SSH access is
+revoked. A mock job, unit result, Compose render, health response, or
+provisioning database row is not substitute evidence.
 
-```bash
-docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
-  seller-provisioning curl -s \
-  -H "X-Admin-Key: <admin_api_key>" \
-  http://localhost:8081/api/v1/hosts/bm-host-ca-h200-01 | jq .
-```
+## Operational rules
 
-Bare-metal grant/reclaim refuses to queue work for a missing or disabled
-machine.
-
-## 8. Publish and inspect
-
-```bash
-docker compose -f compose/seller.yml exec seller-storefront \
-  market-storefront publish --inventory /app/resources.csv
-```
-
-Bare-metal listing payloads have `kind = "bare_metal.v1"` and include
-`machine_id`, `physical_host_id`, `access_method = "ssh"`, and the advertised
-duration/price constraints. Inspect local listings:
-
-```bash
-curl -s http://<YOUR_PUBLIC_IP>:8001/api/v1/listings \
-  | jq '.listings[] | select(.offer_resource.kind == "bare_metal.v1")'
-```
-
-## Operational notes
-
-- Do not use the same machine as a general-purpose operator login and a
-  bare-metal tenant target unless the tenant account is tightly isolated.
-- `remove_lease_key` is safest for preserving tenant data; `lock_user` and
-  `delete_user` are stronger cleanup actions with more operational blast
-  radius.
-- Keep `physical_host_id` stable across CSV edits. Changing it breaks
-  cross-domain accounting for existing rows.
-- Keep `machine_id` stable while leases are active. It is the executor target
-  used for grant/reclaim.
-- Re-run publish after importing resource or capacity changes so stale listings
-  close and newly available listings reopen.
-
-## Common pitfalls
-
-- **`attribute.machine_id` must match `[bare_metal_nodes]`.** Wrong alias =
-  grant/reclaim fails before Ansible runs.
-- **Bare-metal and VM rows for one physical host must share
-  `attribute.physical_host_id`.** Otherwise the site ledger cannot prevent
-  cross-mode double selling.
-- **Do not put VM slice and bare-metal rows in the same storefront inventory
-  once the storefront split is complete.** Run one storefront per domain and
-  let the shared site authority coordinate host accounting.
-- **`agent_id` must be a Python identifier** — no dashes.
+- Keep Physical Resource, Resource Pool, site, listing, negotiation, and
+  fulfillment identities stable through recovery.
+- Never provision or reserve a whole host before the accepted settlement
+  lifecycle permits it.
+- `remove_lease_key`, `lock_user`, and `delete_user` have different blast
+  radii. Configure the reclaim policy deliberately for the selected site.
+- Teardown releases whole-host access; it is not VM destruction. Collection
+  and post-collection lease teardown remain independent of payment reclaim.
+- Preserve the storefront and provisioning volumes while a listing,
+  negotiation, reservation, fulfillment, or teardown is recoverable.

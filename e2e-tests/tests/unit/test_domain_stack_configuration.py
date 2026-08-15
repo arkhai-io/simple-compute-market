@@ -40,3 +40,39 @@ def test_api_credit_storefront_runtime_uses_staged_wheel_only():
     assert "arkhai-apicredits-storefront==0.2.0" in dockerfile
     assert "COPY domains/apicredits/storefront/src" not in dockerfile
     assert 'ENV PYTHONPATH="/app"' not in dockerfile
+
+
+def test_bare_metal_stack_requires_real_selected_site_inputs():
+    domain_compose = (_REPO_ROOT / "domains/bare_metal/compose.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (_REPO_ROOT / "compose.bare-metal.yml").read_text(encoding="utf-8")
+    rendered = domain_compose + wrapper
+
+    assert "arkhai:bare-metal-storefront" in domain_compose
+    assert "ACTIVE_PROFILES=docker" in domain_compose
+    assert "ACTIVE_PROFILES=mock" not in rendered
+    assert "MOCK_PROVISIONING" not in rendered
+    assert "${BARE_METAL_STOREFRONT_SITES_JSON:?" in domain_compose
+    assert "${BARE_METAL_POOL_DEFINITIONS_FILE:?" in domain_compose
+    assert "${BARE_METAL_PROVISIONING_INVENTORY_FILE:?" in domain_compose
+    assert "${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?" in domain_compose
+
+
+def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
+    domain_compose = (_REPO_ROOT / "domains/bare_metal/compose.yml").read_text(
+        encoding="utf-8"
+    )
+    wrapper = (_REPO_ROOT / "compose.bare-metal.yml").read_text(encoding="utf-8")
+
+    assert "ARKHAI_IDENTITY_CREDENTIAL=" not in wrapper
+    assert "BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?" in wrapper
+    assert "BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?" in wrapper
+    assert "BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?" in wrapper
+    for name in (
+        "bare-metal-registry-data",
+        "bare-metal-redis-data",
+        "bare-metal-provisioning-data",
+        "bare-metal-storefront-data",
+    ):
+        assert f"{name}:" in domain_compose
