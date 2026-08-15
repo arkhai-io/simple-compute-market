@@ -232,6 +232,26 @@ jobs:
           repository: arkhai-io/stripe-settlement-service
           run-id: ${{ env.HOSTED_RELEASE_RUN_ID }}
           github-token: ${{ secrets.HOSTED_RELEASE_TOKEN }}
+      - name: Verify and stage exact marketplace wheelhouse
+        if: env.SELECTED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in "$MARKETPLACE_RELEASE_DIR"/*; do
+            gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY"
+          done
+          uv run --no-project python scripts/verify-marketplace-release.py \
+            --manifest "$MARKETPLACE_RELEASE_DIR/marketplace-release-manifest.json" \
+            --manifest-sha256 "$MARKETPLACE_MANIFEST_SHA256" \
+            --source-commit "$TRUSTED_MARKETPLACE_COMMIT" \
+            --workflow-ref "$MARKETPLACE_WORKFLOW_REF" \
+            --workflow-run-id "$MARKETPLACE_RELEASE_RUN_ID" \
+            --image-digest "$MARKETPLACE_IMAGE_DIGEST"
+          test ! -e .dist
+          tar -xzf "$MARKETPLACE_RELEASE_DIR/marketplace-wheelhouse.tar.gz" \
+            -C "$GITHUB_WORKSPACE"
+          test -f .dist/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
+
 
       - name: Install protected Chromium runtime
         if: env.SELECTED == 'true'
