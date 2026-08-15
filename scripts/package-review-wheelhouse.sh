@@ -86,15 +86,34 @@ verified_release = json.loads(
 client_wheel_path = wheelhouse / sys.argv[3]
 try:
     with zipfile.ZipFile(client_wheel_path) as archive:
+        client_members = tuple(archive.namelist())
         entry_point_files = [
             name
-            for name in archive.namelist()
+            for name in client_members
             if name.endswith(".dist-info/entry_points.txt")
         ]
 except zipfile.BadZipFile as exc:
     raise SystemExit(f"hosted client is not a readable wheel: {exc}") from exc
 if entry_point_files:
     raise SystemExit("hosted client wheel must not contain seller entry-point metadata")
+for member in client_members:
+    normalized = member.lower()
+    if normalized.startswith("hosted_settlement_service/") or normalized.startswith("stripe/"):
+        raise SystemExit("hosted client wheel contains service/provider implementation")
+    if normalized.startswith("hosted_settlement_client/") and any(
+        part in {
+            "authority",
+            "database",
+            "migrations",
+            "providers",
+            "recovery",
+            "storage",
+            "webhook",
+            "webhooks",
+        }
+        for part in Path(normalized).parts
+    ):
+        raise SystemExit("hosted client wheel contains service/provider implementation")
 
 expected_capabilities = [
     "scheme-tagged-identities.v1",

@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import tarfile
 import zipfile
+
+import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
@@ -60,7 +62,11 @@ def _identity_wheel() -> bytes:
 
 
 
-def _hosted_client_wheel(*, entry_points: str | None = None) -> bytes:
+def _hosted_client_wheel(
+    *,
+    entry_points: str | None = None,
+    extra_member: str | None = None,
+) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w") as archive:
         archive.writestr(
@@ -82,6 +88,8 @@ def _hosted_client_wheel(*, entry_points: str | None = None) -> bytes:
                 "arkhai_hosted_settlement_client-0.2.0.dist-info/entry_points.txt",
                 entry_points,
             )
+        if extra_member is not None:
+            archive.writestr(extra_member, "")
     return buffer.getvalue()
 
 
@@ -116,6 +124,7 @@ def _stage_root(
     *,
     lock_extra: str = "",
     hosted_entry_points: str | None = None,
+    hosted_extra_member: str | None = None,
 ) -> tuple[Path, dict[str, str]]:
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True)
@@ -131,7 +140,10 @@ def _stage_root(
     (root / ".dist" / "arkhai_kit_identity-0.3.0-py3-none-any.whl").write_bytes(
         _identity_wheel()
     )
-    hosted_client_wheel = _hosted_client_wheel(entry_points=hosted_entry_points)
+    hosted_client_wheel = _hosted_client_wheel(
+        entry_points=hosted_entry_points,
+        extra_member=hosted_extra_member,
+    )
     client_filename = "arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl"
     client_path = root / ".dist" / client_filename
     client_path.write_bytes(hosted_client_wheel)
@@ -358,6 +370,29 @@ def test_wheelhouse_rejects_hosted_seller_entry_point(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "console-script entry-point metadata" in result.stderr
+
+@pytest.mark.parametrize(
+    "member",
+    (
+        "hosted_settlement_service/api.py",
+        "stripe/__init__.py",
+        "hosted_settlement_client/database.py",
+        "hosted_settlement_client/migrations/0005.py",
+        "hosted_settlement_client/providers.py",
+        "hosted_settlement_client/storage.py",
+        "hosted_settlement_client/webhooks.py",
+    ),
+)
+def test_wheelhouse_rejects_service_or_provider_module_in_client(
+    tmp_path: Path,
+    member: str,
+) -> None:
+    root, env = _stage_root(tmp_path, hosted_extra_member=member)
+
+    result = _run(root, env)
+
+    assert result.returncode != 0
+    assert "service/provider implementation" in result.stderr
 
 
 def test_wheelhouse_rejects_portable_lock_source_leakage(tmp_path: Path) -> None:
