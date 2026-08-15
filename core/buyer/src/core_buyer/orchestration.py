@@ -274,6 +274,33 @@ def _signed_json(
     )
 
 
+def signed_storefront_json(
+    url: str,
+    body: dict[str, Any] | None,
+    *,
+    signer: Signer,
+    principal: Identity,
+    method: str,
+    operation: str,
+    resource: str,
+    timeout: float,
+    resolve_response_principals: Callable[[], TrustedIdentitySet],
+) -> dict[str, Any]:
+    """Call one signed storefront route and verify its signed JSON response."""
+
+    return _signed_json(
+        url,
+        body,
+        signer=signer,
+        principal=principal,
+        method=method,
+        operation=operation,
+        resource=resource,
+        timeout=timeout,
+        resolve_response_principals=resolve_response_principals,
+    )
+
+
 def wait_for_settlement(
     *,
     seller_url: str,

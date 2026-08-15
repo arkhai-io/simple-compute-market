@@ -410,6 +410,18 @@ class BareMetalFulfillmentProvider(FulfillmentProvider):
             escrow_uid=metadata.escrow_uid,
             settlement_obligation_ref=metadata.settlement_obligation_ref,
             access_grant_ref=metadata.create_job_id,
+            host=(
+                result.get("host")
+                if isinstance(result.get("host"), str) and result["host"].strip()
+                else None
+            ),
+            port=(
+                int(result["port"])
+                if not isinstance(result.get("port"), bool)
+                and isinstance(result.get("port"), (int, str))
+                and str(result["port"]).isdigit()
+                else None
+            ),
             lease_expires_at=metadata.lease_end_utc,
             timestamp=(
                 result.get("timestamp")

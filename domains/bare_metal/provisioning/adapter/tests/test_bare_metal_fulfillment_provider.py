@@ -39,6 +39,8 @@ class FakeJobs:
                 error=None,
                 result={
                     "tenant_user": "buyer",
+                    "host": "203.0.113.25",
+                    "port": "2222",
                     "timestamp": "2030-01-01T00:00:01Z",
                     "result_message": "access granted",
                     "authentication": {"private_key": "must-not-escape"},
@@ -131,6 +133,8 @@ async def test_selected_resource_drives_idempotent_grant_result_and_teardown():
         "machine_id": "machine-1",
         "physical_host_id": "physical-host-1",
         "ssh_user": "buyer",
+        "host": "203.0.113.25",
+        "port": 2222,
         "escrow_uid": "escrow-1",
         "access_grant_ref": "job-create",
         "lease_expires_at": "2030-01-02T00:00:00Z",

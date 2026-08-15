@@ -59,9 +59,7 @@ class BareMetalFulfillmentService:
                 status_code=403,
             )
         if context["terminal_state"] != "success":
-            raise BareMetalFulfillmentError(
-                "bare-metal negotiation is not accepted"
-            )
+            raise BareMetalFulfillmentError("bare-metal negotiation is not accepted")
         return context
 
     async def _verified_escrow(
@@ -128,9 +126,7 @@ class BareMetalFulfillmentService:
             negotiation_id=negotiation_id,
             escrow_uid=escrow_uid,
         )
-        terms = await self.db.load_bare_metal_terms(
-            negotiation_id=negotiation_id
-        )
+        terms = await self.db.load_bare_metal_terms(negotiation_id=negotiation_id)
         if terms is None:
             raise BareMetalFulfillmentError("accepted bare-metal terms are missing")
         if (
@@ -178,9 +174,7 @@ class BareMetalFulfillmentService:
                 raise BareMetalFulfillmentError(
                     "capacity reservation returned a conflicting site binding"
                 )
-            reservation_id = str(
-                reserved.get("capacity_reservation_id") or ""
-            )
+            reservation_id = str(reserved.get("capacity_reservation_id") or "")
             if not reservation_id:
                 raise BareMetalFulfillmentError(
                     "capacity reservation response has no identity"
@@ -266,6 +260,42 @@ class BareMetalFulfillmentService:
             fulfillment_id=accepted.fulfillment_id,
         )
 
+    async def _active_access_result(
+        self,
+        *,
+        capacity_reservation_id: str,
+        fulfillment_id: str,
+    ) -> Any:
+        result_envelope = await self.fulfillment_client.get_fulfillment_result(
+            fulfillment_id,
+            capacity_reservation_id=capacity_reservation_id,
+        )
+        if (
+            result_envelope.kind != "fulfillment.result.v1"
+            or result_envelope.schema_version != 1
+            or not isinstance(result_envelope.payload, dict)
+            or result_envelope.payload.get("state") != "active"
+        ):
+            raise BareMetalFulfillmentError(
+                "provisioning returned an unsupported fulfillment result"
+            )
+        try:
+            domain_envelope = VersionedEnvelope.model_validate(
+                result_envelope.payload["domain_result"]
+            )
+        except Exception as exc:
+            raise BareMetalFulfillmentError(
+                "active fulfillment returned no bare-metal result"
+            ) from exc
+        if (
+            domain_envelope.kind != "bare_metal.fulfillment.result.v1"
+            or domain_envelope.schema_version != 1
+        ):
+            raise BareMetalFulfillmentError(
+                "provisioning returned an unsupported bare-metal result envelope"
+            )
+        return self.db._market_domain.codecs.result(domain_envelope.payload)
+
     async def status(
         self,
         *,
@@ -289,9 +319,7 @@ class BareMetalFulfillmentService:
         reservation_id = lifecycle.get("capacity_reservation_id")
         fulfillment_id = lifecycle.get("fulfillment_id")
         if not reservation_id or not fulfillment_id:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment has not begun"
-            )
+            raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
 
         teardown_pending = lifecycle["state"] in {
             "teardown_dispatch_pending",
@@ -335,37 +363,12 @@ class BareMetalFulfillmentService:
             )
 
         if remote.state == "active":
-            result_envelope = await self.fulfillment_client.get_fulfillment_result(
-                str(fulfillment_id),
-                capacity_reservation_id=str(reservation_id),
-            )
-            if (
-                result_envelope.kind != "fulfillment.result.v1"
-                or result_envelope.schema_version != 1
-                or not isinstance(result_envelope.payload, dict)
-                or result_envelope.payload.get("state") != "active"
-            ):
-                raise BareMetalFulfillmentError(
-                    "provisioning returned an unsupported fulfillment result"
+            result = (
+                await self._active_access_result(
+                    capacity_reservation_id=str(reservation_id),
+                    fulfillment_id=str(fulfillment_id),
                 )
-            try:
-                domain_envelope = VersionedEnvelope.model_validate(
-                    result_envelope.payload["domain_result"]
-                )
-            except Exception as exc:
-                raise BareMetalFulfillmentError(
-                    "active fulfillment returned no bare-metal result"
-                ) from exc
-            if (
-                domain_envelope.kind != "bare_metal.fulfillment.result.v1"
-                or domain_envelope.schema_version != 1
-            ):
-                raise BareMetalFulfillmentError(
-                    "provisioning returned an unsupported bare-metal result envelope"
-                )
-            result = self.db._market_domain.codecs.result(
-                domain_envelope.payload
-            ).model_copy(update={"details": None})
+            ).model_copy(update={"details": None, "host": None, "port": None})
             await self.db.save_bare_metal_result(
                 negotiation_id=negotiation_id,
                 result=result,
@@ -388,12 +391,57 @@ class BareMetalFulfillmentService:
                     status="ready",
                     access_ref={"fulfillment_id": str(fulfillment_id)},
                     result_ref={
-                        "kind": domain_envelope.kind,
-                        "schema_version": domain_envelope.schema_version,
+                        "kind": "bare_metal.fulfillment.result.v1",
+                        "schema_version": 1,
                     },
                 ),
             )
         return lifecycle
+
+    async def access(
+        self,
+        *,
+        negotiation_id: str,
+        buyer_principal: Identity,
+    ) -> dict[str, Any]:
+        """Return transient SSH coordinates only to the accepted buyer."""
+
+        lifecycle = await self.status(
+            negotiation_id=negotiation_id,
+            buyer_principal=buyer_principal,
+        )
+        if lifecycle["state"] != "active":
+            raise BareMetalFulfillmentError(
+                "bare-metal access is unavailable outside an active lease"
+            )
+        reservation_id = lifecycle.get("capacity_reservation_id")
+        fulfillment_id = lifecycle.get("fulfillment_id")
+        if not reservation_id or not fulfillment_id:
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment has no active access identity"
+            )
+        result = await self._active_access_result(
+            capacity_reservation_id=str(reservation_id),
+            fulfillment_id=str(fulfillment_id),
+        )
+        if (
+            result.action != "node_grant_access"
+            or result.status != "success"
+            or result.ssh_user is None
+            or result.host is None
+            or result.port is None
+        ):
+            raise BareMetalFulfillmentError(
+                "bare-metal fulfillment has no buyer-ready SSH access"
+            )
+        return {
+            "negotiation_id": negotiation_id,
+            "method": "ssh",
+            "host": result.host,
+            "port": result.port,
+            "username": result.ssh_user,
+            "expires_at": result.lease_expires_at,
+        }
 
     async def teardown(
         self,
@@ -416,9 +464,7 @@ class BareMetalFulfillmentService:
         reservation_id = lifecycle.get("capacity_reservation_id")
         fulfillment_id = lifecycle.get("fulfillment_id")
         if not reservation_id or not fulfillment_id:
-            raise BareMetalFulfillmentError(
-                "bare-metal fulfillment has not begun"
-            )
+            raise BareMetalFulfillmentError("bare-metal fulfillment has not begun")
         accepted = await self.fulfillment_client.begin_fulfillment_teardown(
             str(fulfillment_id),
             capacity_reservation_id=str(reservation_id),

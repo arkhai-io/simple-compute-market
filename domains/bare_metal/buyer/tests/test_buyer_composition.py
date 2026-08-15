@@ -8,6 +8,8 @@ from arkhai_bare_metal_buyer.config import load_bare_metal_buyer_config
 from arkhai_bare_metal_buyer.plugin import domain
 from market_core import DomainCapability
 
+from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from market_identity import IdentityScheme, TrustedIdentitySet, create_signer
 
 PRINCIPAL = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -58,3 +60,58 @@ def test_plugin_declares_real_buyer_capability() -> None:
     assert DomainCapability.BUYER in contract.declared_capabilities
     assert contract.buyer is not None
     assert contract.buyer.register_commands is not None
+
+
+
+def test_physical_transport_uses_signed_buyer_routes(monkeypatch) -> None:
+    calls = []
+
+    def signed(url, body, **kwargs):
+        calls.append((url, body, kwargs))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "arkhai_bare_metal_buyer.fulfillment.signed_storefront_json",
+        signed,
+    )
+    signer = create_signer(IdentityScheme.ED25519, bytes(range(32)))
+    trust = TrustedIdentitySet(
+        identities=(
+            create_signer(IdentityScheme.ED25519, bytes([1]) * 32).identity,
+        )
+    )
+    transport = BareMetalFulfillmentTransport(
+        seller_url="https://seller.example/",
+        principal=signer.identity,
+        signer=signer,
+        resolve_seller_principals=lambda: trust,
+    )
+
+    assert transport.result("neg-1") == {"ok": True}
+    assert transport.access("neg-1") == {"ok": True}
+    assert transport.teardown("neg-1") == {"ok": True}
+
+    assert [
+        (url, kwargs["method"], kwargs["operation"], kwargs["resource"])
+        for url, _body, kwargs in calls
+    ] == [
+        (
+            "https://seller.example/api/v1/fulfillments/neg-1/result",
+            "GET",
+            "bare_metal_fulfillment_result",
+            "neg-1",
+        ),
+        (
+            "https://seller.example/api/v1/fulfillments/neg-1/access",
+            "GET",
+            "bare_metal_fulfillment_access",
+            "neg-1",
+        ),
+        (
+            "https://seller.example/api/v1/fulfillments/neg-1/teardown",
+            "POST",
+            "bare_metal_fulfillment_teardown",
+            "neg-1",
+        ),
+    ]
+    assert all(body is None for _url, body, _kwargs in calls)

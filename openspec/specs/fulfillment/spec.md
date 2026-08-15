@@ -392,6 +392,14 @@ A query for an unknown `fulfillment_id` is rejected as a not-found error by both
 - **WHEN** `get_fulfillment_result` is called for a `fulfillment_id` whose aggregate is `active`
 - **THEN** the returned envelope's provisioned-resource outputs reflect that aggregate's `ProvisionedResource` rows, and its domain result reflects a live `fetch_credentials` call against the aggregate's provider metadata
 
+For the bare-metal provider, the live domain result MAY additionally carry the buyer-reachable SSH host and port reported by the access-grant job. These coordinates are a transient delivery input: the provisioning aggregate does not persist them separately, and a storefront MUST remove them before saving its durable public result. The storefront MAY return them only through a separately authenticated active-lease access route.
+
+#### Scenario: Bare-metal coordinates cross only the transient access seam
+
+- **WHEN** an active bare-metal grant result contains host, port, and public tenant user
+- **THEN** a fresh provider result read makes those coordinates available to the accepted buyer's access route
+- **AND** the storefront's durable result omits host, port, provider details, private key material, and credentials
+
 #### Scenario: Live credential fetch fails on an otherwise-healthy fulfillment
 
 - **WHEN** `FulfillmentProvider.fetch_credentials` raises during a `get_fulfillment_result` call for an `active` fulfillment

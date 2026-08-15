@@ -1,6 +1,7 @@
 """Bare-metal-owned HTTP carriers that must not imply VM fulfillment."""
 
 from __future__ import annotations
+from datetime import datetime
 
 from typing import Literal
 
@@ -134,6 +135,19 @@ class BareMetalFulfillmentResultResponse(BaseModel):
     negotiation_id: str
     receipt: BareMetalReceipt
     result: BareMetalAccessResult
+
+
+class BareMetalAccessDeliveryResponse(BaseModel):
+    """Transient buyer-authorized SSH coordinates; never durable market state."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    negotiation_id: str = Field(min_length=1)
+    method: Literal["ssh"] = "ssh"
+    host: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    username: str = Field(min_length=1)
+    expires_at: datetime | None = None
 
 
 class BareMetalSettleRequest(BaseModel):

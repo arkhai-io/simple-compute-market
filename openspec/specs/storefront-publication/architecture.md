@@ -72,7 +72,7 @@ This separation prevents address-shaped data from silently becoming authorizatio
 
 Bare-metal fulfillment reloads this binding for every step. Site-targeted capacity reservation, scheduling, fulfillment begin/status/result, teardown, and capacity release use the configured client selected by the recorded site or the durable reservation-to-site map. A buyer assertion, provider response, or opaque artifact cannot replace the site, URL, principal, Physical Resource, machine, or physical-host identity. Restart therefore changes neither authority nor executor, and capacity is released exactly once only after authoritative teardown succeeds.
 
-The result channel is pull-based: the storefront polls the recorded fulfillment and converts its versioned bare-metal envelope to a buyer-safe receipt and access result. Provider payloads, private SSH material, authority URLs, and credentials are not copied into market state or responses.
+The result channel is pull-based: the storefront polls the recorded fulfillment and converts its versioned bare-metal envelope to a durable buyer-safe receipt and credential-free access result. Provider payloads, private SSH material, authority URLs, credentials, and connection coordinates are not copied into market state, evidence, listings, or run logs. A separate buyer-authenticated access read re-fetches the active selected-site result and returns only the transient SSH host, port, public tenant user, and lease expiry. It is unavailable after teardown begins and is never persisted by the storefront.
 
 ## Role and service-peer identity
 

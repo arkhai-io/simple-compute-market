@@ -42,6 +42,7 @@ from core_buyer.orchestrator import (
     query_registry_for_matches_multi,
     run_buy,
 )
+from core_buyer.orchestration import signed_storefront_json
 from core_buyer.plugins import DOMAIN_GROUP, discover_domains
 from core_buyer.registry_config import (
     RegistryAuthority,
@@ -100,4 +101,5 @@ __all__ = [
     "resolve_registry_authorities",
     "resolve_buyer_action_policy",
     "run_buy",
+    "signed_storefront_json",
 ]

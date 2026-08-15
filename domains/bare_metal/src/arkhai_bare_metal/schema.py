@@ -404,6 +404,16 @@ class BareMetalAccessResult(BaseModel):
         default=None,
         description="Opaque access-authority operation reference.",
     )
+    host: str | None = Field(
+        default=None,
+        description="Transient buyer-reachable SSH host.",
+    )
+    port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="Transient buyer-reachable SSH port.",
+    )
     lease_expires_at: datetime | None = Field(
         default=None,
         description="Authoritative lease expiry for access-ready projection.",
@@ -429,6 +439,10 @@ class BareMetalAccessResult(BaseModel):
             )
         if not self.machine_id.strip():
             raise ValueError("machine_id must be non-empty")
+        if self.host is not None and not self.host.strip():
+            raise ValueError("host must be non-empty")
+        if (self.host is None) != (self.port is None):
+            raise ValueError("host and port must be provided together")
         return self
 
 

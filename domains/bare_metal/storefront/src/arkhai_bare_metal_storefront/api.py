@@ -27,6 +27,7 @@ from market_settlement_runtime import (
     HostedSettlementStart,
 )
 from .models import (
+    BareMetalAccessDeliveryResponse,
     BareMetalFulfillRequest,
     BareMetalFulfillmentResponse,
     BareMetalFulfillmentResultResponse,
@@ -512,6 +513,34 @@ async def fulfillment_status(
             buyer_principal=identity,
         )
         return BareMetalFulfillmentResponse.model_validate(lifecycle)
+    except BareMetalFulfillmentError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail,
+        ) from exc
+
+
+@router.get(
+    "/api/v1/fulfillments/{negotiation_id}/access",
+    response_model=BareMetalAccessDeliveryResponse,
+)
+async def fulfillment_access(
+    negotiation_id: str,
+    request: Request,
+) -> BareMetalAccessDeliveryResponse:
+    runtime = _runtime(request)
+    try:
+        identity = await _fulfillment_identity(
+            request=request,
+            runtime=runtime,
+            negotiation_id=negotiation_id,
+            operation="bare_metal_fulfillment_access",
+        )
+        access = await runtime.fulfillment_service().access(
+            negotiation_id=negotiation_id,
+            buyer_principal=identity,
+        )
+        return BareMetalAccessDeliveryResponse.model_validate(access)
     except BareMetalFulfillmentError as exc:
         raise HTTPException(
             status_code=exc.status_code,

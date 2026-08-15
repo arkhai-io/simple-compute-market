@@ -309,13 +309,21 @@ Generated buyer configuration MUST reference the XDG profile store and credentia
 
 ### Requirement: Bare-metal buyers preserve accepted hosted authority
 
-The installed `bare-metal` buyer plugin MUST use the selected persistent profile signer, authenticated registry results, and one exact advertised settlement option. Hosted start, status, resume, and reclaim MUST use the core schema-opaque storefront transport. Buyer inputs MAY choose an advertised funding profile, bounded off-session behavior, lease duration, and an SSH public key; they MUST NOT supply seller, site, Physical Resource, executor, condition, or provider identities.
+The installed `bare-metal` buyer plugin MUST use the selected persistent profile signer, authenticated registry results, and one exact advertised settlement option. The accepted run MUST retain the registry authority, publisher subject and principals, storefront URL, settlement selection, plan, and operation identities. Every later hosted and physical command MUST recover those fields from the signed run, refresh the same publisher subject through the recorded registry authority, and reject caller-supplied seller, site, Physical Resource, executor, condition, or provider identities.
+
+The buyer MAY choose an advertised funding profile, bounded off-session behavior, lease duration, SSH public key, and transient action policy. `complete` MUST authorize the exact accepted obligation, start or resume the same hosted operation, wait for authoritative settlement and physical readiness, and retrieve the durable public result plus buyer-authorized transient SSH coordinates. Status, result, access, teardown, and reclaim MUST reuse the recorded signer and authority. Access coordinates MUST NOT be written to the run log.
 
 #### Scenario: Hosted-only buyer has no wallet
 
 - **WHEN** an Ed25519 buyer selects a ready `fiat.stripe.v1` bare-metal option
-- **THEN** discovery and settlement start without wallet, chain, RPC, Stripe model, or provider credential configuration
-- **AND** persisted run output contains only accepted marketplace identities, operation-scoped references, safe action metadata, and physical public results
+- **THEN** discovery, funding authorization, settlement, physical fulfillment, and access delivery run without wallet, chain, RPC, Stripe model, or provider credential configuration
+- **AND** persisted run output contains only accepted marketplace identities, operation-scoped references, safe action metadata, and credential-free physical public results
+
+#### Scenario: Accepted buyer retrieves SSH coordinates
+
+- **WHEN** the recorded buyer requests access for an active fulfilled lease
+- **THEN** the storefront authenticates that exact buyer and returns the current host, port, public SSH user, and lease expiry from a fresh selected-site result read
+- **AND** the host and port are absent from the durable run log, storefront result row, receipt, evidence, and public listing
 
 ### Requirement: API-credit hosted buys share accepted-state transport
 

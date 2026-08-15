@@ -36,6 +36,7 @@ def _app(runtime: BareMetalStorefrontRuntime):
         runtime=runtime,
     )
 
+
 PRIVATE_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
 )
@@ -46,6 +47,7 @@ ADMIN_SIGNER = Eip191Signer(bytes.fromhex("33" * 32))
 ESCROW_ADDRESS = "0x1111111111111111111111111111111111111111"
 ESCROW_UID = "0x" + "ab" * 32
 OTHER_ESCROW_UID = "0x" + "cd" * 32
+
 
 def _settle_body(negotiation_id: str) -> dict:
     return {
@@ -105,8 +107,12 @@ def _plan(**kwargs):
                     "asset": "0x2222222222222222222222222222222222222222",
                     "expiration_unix": expiration_unix,
                     "mechanism": "alkahest.v1",
-                    "payer_principal": kwargs["seller_principal"].model_dump(mode="json"),
-                    "claimant_principal": kwargs["buyer_principal"].model_dump(mode="json"),
+                    "payer_principal": kwargs["seller_principal"].model_dump(
+                        mode="json"
+                    ),
+                    "claimant_principal": kwargs["buyer_principal"].model_dump(
+                        mode="json"
+                    ),
                     "params": {"chain_name": "anvil", "kind": "seller-bond"},
                 },
                 {
@@ -117,8 +123,12 @@ def _plan(**kwargs):
                     "expiration_unix": expiration_unix,
                     "mechanism": "alkahest.v1",
                     "params": {"chain_name": "anvil", "kind": "primary-payment"},
-                    "payer_principal": kwargs["buyer_principal"].model_dump(mode="json"),
-                    "claimant_principal": kwargs["seller_principal"].model_dump(mode="json"),
+                    "payer_principal": kwargs["buyer_principal"].model_dump(
+                        mode="json"
+                    ),
+                    "claimant_principal": kwargs["seller_principal"].model_dump(
+                        mode="json"
+                    ),
                 },
             ],
             "service_terms": {},
@@ -424,7 +434,6 @@ async def test_status_fails_closed_without_canonical_verified_adoption(
     )
 
 
-
 class _FulfillmentSite:
     def __init__(self) -> None:
         self.releases = []
@@ -508,10 +517,10 @@ class _ProvisioningClient:
                         "machine_id": "machine-1",
                         "physical_host_id": "host-1",
                         "ssh_user": "tenant-a",
+                        "host": "203.0.113.25",
+                        "port": 2222,
                         "status": "success",
-                        "details": {
-                            "private_key": "must-not-cross-storefront"
-                        },
+                        "details": {"private_key": "must-not-cross-storefront"},
                     },
                 },
             },
@@ -580,6 +589,14 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
                 method="GET",
             ),
         )
+        access = client.get(
+            f"/api/v1/fulfillments/{negotiation_id}/access",
+            headers=_headers(
+                "bare_metal_fulfillment_access",
+                negotiation_id,
+                method="GET",
+            ),
+        )
         tearing_down = client.post(
             f"/api/v1/fulfillments/{negotiation_id}/teardown",
             headers=_headers(
@@ -627,6 +644,16 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
     public_result = result.json()
     assert public_result["receipt"]["status"] == "ready"
     assert public_result["result"]["ssh_user"] == "tenant-a"
+    assert public_result["result"]["host"] is None
+    assert public_result["result"]["port"] is None
+    assert access.json() == {
+        "negotiation_id": negotiation_id,
+        "method": "ssh",
+        "host": "203.0.113.25",
+        "port": 2222,
+        "username": "tenant-a",
+        "expires_at": None,
+    }
     serialized_result = json.dumps(public_result, sort_keys=True)
     for forbidden in (
         "authority_url",
