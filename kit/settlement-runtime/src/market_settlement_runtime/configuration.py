@@ -397,10 +397,10 @@ class SettlementConfigurationRegistry:
                 parsed,
                 role,
             )
-        except ValueError as exc:
+        except ValueError:
             raise SettlementConfigurationError(
                 f"invalid publication input for {mechanism_id!r}"
-            ) from exc
+            ) from None
         if not isinstance(validated, registration.publication_input_model):
             raise SettlementConfigurationError(
                 f"publication validator for {mechanism_id!r} returned invalid type"
@@ -463,10 +463,10 @@ class SettlementConfigurationRegistry:
             )
             try:
                 typed[config_key] = registration.config_model.model_validate(section)
-            except ValueError as exc:
+            except ValueError:
                 raise SettlementConfigurationError(
                     f"invalid Settlement.{config_key}"
-                ) from exc
+                ) from None
         return self.validate(
             SettlementConfig(
                 schema_version=schema_version,
