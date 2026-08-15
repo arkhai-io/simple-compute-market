@@ -817,7 +817,10 @@ def stripe_option_builder(
         raise ValueError("hosted option requires a configured condition profile")
     rates = [{"field": "amount", "per": clause.per, "value": str(rate)}]
     params = {
+        "authority_id": config.authority_id,
         "account_ref": account_ref,
+        "country": config.country,
+        "environment": config.environment,
         "claimant_principal": _principal_json(claimant),
         "funds_flow": publication_input.funds_flow,
         "funding_profile": publication_input.funding_profile.value,
@@ -872,6 +875,12 @@ def stripe_buyer_compatibility(
         profile = FundingProfile(_value(params, "funding_profile"))
         interaction = FundingMode(_value(params, "interaction"))
     except (TypeError, ValueError):
+        return False
+    if (
+        _value(params, "authority_id") != config.authority_id
+        or _value(params, "environment") != config.environment
+        or _value(params, "country") != config.country
+    ):
         return False
     if interaction not in _PROFILE_INTERACTIONS[profile]:
         return False

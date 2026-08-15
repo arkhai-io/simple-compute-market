@@ -451,11 +451,22 @@ def test_options_are_deterministic_distinct_and_profile_exact() -> None:
         },
         "seller",
     )["settlement_options"][0]
+    other_authority_config = _config(authority_id="other-authority")
+    other_authority = registration.option_builder(
+        other_authority_config,
+        _readiness(other_authority_config),
+        {**resources, "publication_clause": _clause(FundingProfile.CARD)},
+        "seller",
+    )["settlement_options"][0]
     assert card == card_retry
     assert card["option_id"] != ach["option_id"]
+    assert card["option_id"] != other_authority["option_id"]
     assert card["params"]["funding_profile"] == "card.v1"
     assert ach["params"]["funding_profile"] == "us_ach_debit.v1"
     assert card["params"]["interaction"] == "interactive"
+    assert card["params"]["authority_id"] == "authority-main"
+    assert card["params"]["environment"] == "production"
+    assert card["params"]["country"] == "US"
     assert card["params"]["funds_flow"] == "separate_charges_transfers"
     assert "payment_method_types" not in card["params"]
     assert "method" not in card["params"]
@@ -590,6 +601,39 @@ def test_buyer_compatibility_requires_exact_binding_readiness_and_release() -> N
     }
     assert not registration.buyer_compatibility(
         buyer_config, changed, _compatibility_context()
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authority_id", "other-authority"),
+        ("environment", "staging"),
+        ("country", "CA"),
+    ],
+)
+def test_buyer_compatibility_rejects_mismatched_advertised_binding_scope(
+    field: str, value: str
+) -> None:
+    config = _config()
+    registration = create_stripe_registration()
+    option = registration.option_builder(
+        config,
+        _readiness(config),
+        {
+            "claimant_principal": _identity(9),
+            "publication_clause": _clause(FundingProfile.CARD),
+        },
+        "seller",
+    )["settlement_options"][0]
+    changed = {
+        **option,
+        "params": {**option["params"], field: value},
+    }
+    assert not registration.buyer_compatibility(
+        config,
+        changed,
+        _compatibility_context(),
     )
 
 

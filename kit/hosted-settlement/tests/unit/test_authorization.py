@@ -70,9 +70,12 @@ def _obligation(profile: FundingProfile = FundingProfile.CARD) -> dict:
         "mechanism": "fiat.stripe.v1",
         "params": {
             "account_ref": "seller-account",
+            "authority_id": "authority-main",
             "claimant_principal": MarketplaceSignerAdapter(
                 Ed25519Signer(bytes(reversed(range(32))))
             ).principal.model_dump(mode="json"),
+            "country": "US",
+            "environment": "production",
             "funds_flow": "separate_charges_transfers",
             "funding_profile": profile.value,
             "interaction": "saved_instrument",
@@ -170,6 +173,9 @@ def test_derivation_uses_marketplace_obligation_hash_and_safe_receipt() -> None:
     assert accepted.obligation_hash == "0x" + obligation_payload_hash(obligation)
     assert accepted.marketplace_operation_id == "a" * 64
     assert accepted.amount == 60
+    assert accepted.authority_id == "authority-main"
+    assert accepted.environment == "production"
+    assert accepted.country == "US"
 
 
 @pytest.mark.asyncio
@@ -192,6 +198,48 @@ async def test_exact_saved_authorization_revalidates_once_and_signs_released_mod
         "funding_authorization_ref": "funding-auth-safe-1",
         "expires_at_unix": 2000,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authority_id", "other-authority"),
+        ("environment", "staging"),
+    ],
+)
+async def test_authorization_rejects_mismatched_accepted_authority_binding(
+    field: str, value: str
+) -> None:
+    obligation = _obligation()
+    obligation["params"] = {**obligation["params"], field: value}
+    accepted = derive_accepted_funding_authorization(
+        obligation_ref="a" * 64,
+        obligation=obligation,
+    )
+    client = Client()
+    with pytest.raises(HostedAuthorizationError, match="authority binding"):
+        await HostedFundingAuthorizer(
+            config=_config(), client=client, signer=SIGNER
+        ).authorize(
+            accepted,
+            binding=_binding(),
+            selection=FundingSelection(
+                FundingMode.SAVED_INSTRUMENT,
+                "instrument-opaque-1",
+            ),
+        )
+    assert client.calls == []
+
+
+def test_accepted_authorization_rejects_non_us_country() -> None:
+    obligation = _obligation()
+    obligation["params"] = {**obligation["params"], "country": "CA"}
+    with pytest.raises(ValueError):
+        derive_accepted_funding_authorization(
+            obligation_ref="a" * 64,
+            obligation=obligation,
+        )
 
 
 @pytest.mark.asyncio

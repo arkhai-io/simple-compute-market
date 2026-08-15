@@ -60,8 +60,19 @@ class AuthorizationModel(BaseModel):
 
 class _AcceptedAuthorizationParams(AuthorizationModel):
     account_ref: str = Field(min_length=1, max_length=256)
+    authority_id: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
     claimant_principal: Principal
     funds_flow: Literal["separate_charges_transfers"]
+    country: Literal["US"]
+    environment: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
     funding_profile: Annotated[FundingProfile, Field(strict=False)]
     interaction: Annotated[FundingMode, Field(strict=False)]
     contract_fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
@@ -76,8 +87,19 @@ class AcceptedFundingAuthorization(AuthorizationModel):
     payer_principal: Identity
     seller_principal: Identity
     amount: int = Field(gt=0)
+    authority_id: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
     currency: Literal["usd"]
+    country: Literal["US"]
     destination_account_ref: str = Field(min_length=1, max_length=256)
+    environment: str = Field(
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
     funding_profile: Annotated[FundingProfile, Field(strict=False)]
     interaction: Annotated[FundingMode, Field(strict=False)]
     funds_flow: Literal["separate_charges_transfers"]
@@ -175,8 +197,11 @@ def derive_accepted_funding_authorization(
         payer_principal=payer,
         seller_principal=seller,
         amount=amount,
+        authority_id=params.authority_id,
         currency=obligation.get("asset"),
+        country=params.country,
         destination_account_ref=params.account_ref,
+        environment=params.environment,
         funding_profile=params.funding_profile,
         interaction=params.interaction,
         funds_flow=params.funds_flow,
@@ -249,6 +274,14 @@ class HostedFundingAuthorizer:
         """Re-fetch release, payer, profile, instrument, and consent readiness."""
 
         self._validate_binding(binding)
+        if (
+            accepted.authority_id != self._config.authority_id
+            or accepted.environment != self._config.environment
+            or accepted.country != self._config.country
+        ):
+            raise HostedAuthorizationError(
+                "accepted hosted authority binding does not match buyer configuration"
+            )
         if selection.mode is not accepted.interaction:
             raise HostedAuthorizationError(
                 "funding selection differs from the accepted interaction"

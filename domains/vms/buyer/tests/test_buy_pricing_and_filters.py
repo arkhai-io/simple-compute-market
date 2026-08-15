@@ -102,7 +102,10 @@ def _hosted_option() -> SettlementOption:
     config = StripeSettlementConfig(enabled=True)
     params = {
         "account_ref": "acct-seller",
+        "authority_id": "authority-main",
         "funding_profile": "card.v1",
+        "country": "US",
+        "environment": "production",
         "interaction": "interactive",
         "funds_flow": "separate_charges_transfers",
         "contract_fingerprint": stripe_contract_fingerprint(config),
