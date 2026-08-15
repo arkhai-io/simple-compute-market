@@ -1,0 +1,30 @@
+name: Resolve hosted release run
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact hosted release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Resolve exact successful tag run
+        env:
+          GH_TOKEN: ${{ secrets.HOSTED_RELEASE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh run list \
+            --repo arkhai-io/stripe-settlement-service \
+            --workflow release.yml \
+            --event push \
+            --limit 20 \
+            --json databaseId,headBranch,headSha,status,conclusion,url \
+            --jq '.[] | select(.headBranch == env.TAG and .status == "completed" and .conclusion == "success")'
