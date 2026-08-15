@@ -4,9 +4,9 @@
 # speaking the api_credits schema, the credits service (keys / prepaid credits /
 # quota ledger), the credits storefront (self-seeds one quota-backed listing on
 # startup), and a sample gated app behind the Python token-gating middleware.
-# The buyer drives it with `market credits buy`; its schema filter routes
-# discovery to the api-credits registry and leaves the vms.compute registry
-# alone.
+# The buyer drives it with `market credits buy` through the root overlay's
+# one-shot buyer service. Mutable XDG profile/run state and the strict
+# provider-secret mount are separate from this seller-only domain stack.
 #
 # Chain-touching services gate on a service named `anvil` (the local dev
 # chain) which this file does NOT define — the root `compose.dev.yml` supplies

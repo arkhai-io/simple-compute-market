@@ -17,9 +17,44 @@
     "createSecret": {"const": false},
     "secretName": {"type": "string", "minLength": 1},
     "seller": {"$ref": "#/definitions/publicPrincipal"},
-    "buyer": {"$ref": "#/definitions/publicPrincipal"}
+    "buyer": {"$ref": "#/definitions/buyerRuntime"}
   },
   "definitions": {
+    "buyerRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "profileStore", "credentialSecret"],
+      "properties": {
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scheme", "identifier"],
+          "properties": {
+            "scheme": {"enum": ["ed25519", "eip191"]},
+            "identifier": {"type": "string", "minLength": 1}
+          }
+        },
+        "profileStore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["existingClaim", "mountPath"],
+          "properties": {
+            "existingClaim": {"type": "string", "minLength": 1},
+            "mountPath": {"type": "string", "pattern": "^/"}
+          }
+        },
+        "credentialSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "key", "mountPath"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "key": {"type": "string", "minLength": 1},
+            "mountPath": {"type": "string", "pattern": "^/"}
+          }
+        }
+      }
+    },
     "publicPrincipal": {
       "type": "object",
       "properties": {

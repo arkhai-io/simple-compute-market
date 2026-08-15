@@ -26,6 +26,7 @@ api_url            = ""
 [default.buyer]
 api_url           = ""
 base_url_override = ""
+marketplace_credential = ""  # exact profile-provider secret, independent of wallet
 private_key       = ""
 wallet_address    = ""
 chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to rpc.url

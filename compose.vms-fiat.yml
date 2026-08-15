@@ -1,6 +1,6 @@
-# Hosted-fiat VM profile. No Anvil/RPC service or EVM wallet environment is
-# included. Public Ed25519 principals live in the mounted storefront profile;
-# signer material comes only from the referenced identity env file.
+# Hosted-fiat VM profile. No Anvil/RPC service or buyer wallet environment is
+# included. The buyer uses compose.vms.yml's persistent XDG profile mount and
+# strict credential-file reference; seller/service signers remain role-owned.
 
 services:
   registry:

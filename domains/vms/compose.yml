@@ -71,12 +71,10 @@ services:
       start_period: 10s
 
   # 2. Bob's storefront — the primary test seller.
-  # Buyers are pure HTTP clients (the `market` CLI / domains.vms.buyer
-  # library). The buyer-side e2e runs as a one-shot container on this same
-  # network (the e2e-tests image, which bundles the `market`
-  # binary), so discovery resolves the seller's registry-advertised URL
-  # (bob-storefront:8001) and reaches it the way a real remote buyer would.
-  # See `make test-buyer-machine`.
+  # Buyers are pure HTTP clients. The root overlay supplies the one-shot
+  # `market` container with separate persistent XDG profile/run directories,
+  # public config, and strict provider-secret mounts; this seller stack does
+  # not own or inspect buyer profile state.
   bob-storefront:
     image: arkhai:storefront
     platform: linux/amd64

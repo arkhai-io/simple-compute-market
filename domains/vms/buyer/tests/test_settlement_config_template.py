@@ -25,6 +25,10 @@ def test_fiat_buyer_template_uses_shared_settlement_without_evm_or_seller_fields
     assert "provider" not in rendered
     assert "webhook" not in rendered
     assert "database" not in rendered
+    assert "[BuyerProfile]" in rendered
+    assert "store_path" in rendered
+    assert "[Identity" not in rendered
+    assert "ARKHAI_IDENTITY_CREDENTIAL" not in rendered
 
 
 def test_evm_resources_are_opt_in_for_buyer_template(monkeypatch, tmp_path):

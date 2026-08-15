@@ -11,8 +11,9 @@ from pathlib import Path
 import os
 import subprocess
 
-from typing import TYPE_CHECKING
+from typing import Any
 import typer
+from market_config.config_loader import ChainConfig, chains_from_config
 
 # Generic buyer config remains core-owned; chain selection below is VM-owned.
 from core_buyer.buyer_config import (  # noqa: F401
@@ -31,8 +32,6 @@ from core_buyer.registry_config import (  # noqa: F401
     resolve_registry_authorities,
 )
 
-if TYPE_CHECKING:
-    from market_config.config_loader import ChainConfig
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -46,8 +45,6 @@ VMS_SCHEMA_ID = "vms.compute"
 
 def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the VM buyer's configured chain tables."""
-    from market_config.config_loader import chains_from_config
-
     return chains_from_config()
 
 

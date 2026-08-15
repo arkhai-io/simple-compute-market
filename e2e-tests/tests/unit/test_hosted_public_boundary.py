@@ -13,14 +13,15 @@ from tests.e2e.roles.scenarios.vms.hosted.boundaries import (
     hosted_selection_requested,
 )
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
-def test_wallet_free_hosted_config_requires_identity_and_common_settlement(tmp_path: Path) -> None:
+
+def test_wallet_free_hosted_config_requires_profile_store_and_common_settlement(tmp_path: Path) -> None:
     config = tmp_path / "buyer.toml"
     config.write_text(
         """
-[Identity]
-scheme = "ed25519"
-identifier = "buyer-fixture"
+[BuyerProfile]
+store_path = "/var/lib/arkhai/buyer/profiles.json"
 
 [Settlement]
 priority = ["fiat.stripe.v1"]
@@ -50,9 +51,8 @@ def test_wallet_free_config_rejects_wallet_chain_rpc_provider_and_control(
     config = tmp_path / "buyer.toml"
     config.write_text(
         """
-[Identity]
-scheme = "ed25519"
-identifier = "buyer-fixture"
+[BuyerProfile]
+store_path = "/var/lib/arkhai/buyer/profiles.json"
 
 [Settlement]
 priority = ["fiat.stripe.v1"]
@@ -63,6 +63,52 @@ priority = ["fiat.stripe.v1"]
     with pytest.raises(HostedBoundaryError, match="forbidden"):
         assert_wallet_free_config(config)
 
+
+def test_wallet_free_config_rejects_legacy_identity(tmp_path: Path) -> None:
+    config = tmp_path / "buyer.toml"
+    config.write_text(
+        """
+[Identity]
+scheme = "ed25519"
+identifier = "legacy"
+[Settlement]
+priority = ["fiat.stripe.v1"]
+[Settlement.stripe]
+enabled = true
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(HostedBoundaryError, match="BuyerProfile"):
+        assert_wallet_free_config(config)
+
+
+
+def test_buyer_deployment_mounts_separate_profile_state_and_credential() -> None:
+    for relative in ("compose.vms.yml", "compose.apicredits.yml"):
+        rendered = (_REPO_ROOT / relative).read_text(encoding="utf-8")
+        assert "XDG_DATA_HOME" in rendered
+        assert "XDG_STATE_HOME" in rendered
+        assert "PROFILE_DIR" in rendered
+        assert "CREDENTIAL_FILE" in rendered
+        assert "ARKHAI_IDENTITY_CREDENTIAL" not in rendered
+
+    helm_job = (
+        _REPO_ROOT
+        / "helm/charts/e2e-tests/templates/tests/e2e-deal-test.yaml"
+    ).read_text(encoding="utf-8")
+    assert "buyer-profile-store" in helm_job
+    assert "buyer-credential" in helm_job
+    assert "persistentVolumeClaim" in helm_job
+    assert "secretKeyRef" not in helm_job
+
+
+def test_hosted_public_config_has_no_legacy_identity_or_secret_canary() -> None:
+    rendered = (_REPO_ROOT / "e2e-tests/config/hosted-buyer.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "[BuyerProfile]" in rendered
+    assert "[Identity" not in rendered
+    assert "PRIVATE-SEED-CANARY" not in rendered
 
 def test_public_import_discovery_works_without_fixture_distribution(monkeypatch) -> None:
     for name in tuple(sys.modules):

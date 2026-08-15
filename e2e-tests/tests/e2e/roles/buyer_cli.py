@@ -19,6 +19,7 @@ If none of those exist the fixture skips, with instructions.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -29,6 +30,14 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
+from market_identity import (
+    CredentialProviderKind,
+    CredentialReference,
+    Eip191Signer,
+    ProfileRepository,
+    ProfileStore,
+    new_profile,
+)
 
 import pytest
 
@@ -216,11 +225,22 @@ class BuyerCli:
     then ``settle --from <run_id>``); both write to the same run-log dir.
     """
 
-    def __init__(self, *, binary: Path, config_path: Path, state_dir: Path, home_dir: Path):
+    def __init__(
+        self,
+        *,
+        binary: Path,
+        config_path: Path,
+        state_dir: Path,
+        data_dir: Path,
+        home_dir: Path,
+        credential_env: dict[str, str],
+    ):
         self.binary = binary
         self.config_path = config_path
         self.state_dir = state_dir
+        self.data_dir = data_dir
         self.home_dir = home_dir
+        self.credential_env = credential_env
 
     @property
     def run_dir(self) -> Path:
@@ -261,6 +281,8 @@ class BuyerCli:
         env = dict(os.environ)
         env["XDG_STATE_HOME"] = str(self.state_dir)
         env["XDG_CONFIG_HOME"] = str(self.config_path.parent.parent)
+        env["XDG_DATA_HOME"] = str(self.data_dir)
+        env.update(self.credential_env)
         env["HOME"] = str(self.home_dir)
 
         cmd = [str(self.binary), "--config", str(self.config_path), *args_list]
@@ -344,25 +366,52 @@ def buyer_cli_binary() -> Path:
 
 @pytest.fixture(scope="module")
 def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
-    """A ``BuyerCli`` wired to a hermetic XDG state/config dir for the module.
-
-    Writes a buyer ``config.toml`` populated from the integration-test
-    settings (BUYER.PRIVATE_KEY/WALLET_ADDRESS/SSH_PUBLIC_KEY,
-    chain RPC/name/alkahest addresses, registry URL). All buyer-side
-    subcommand invocations resolve config from this file.
-    """
+    """A ``BuyerCli`` with separate XDG config, profile metadata, state, and secrets."""
     base = tmp_path_factory.mktemp("buyer_cli")
     home_dir = base / "home"
     state_dir = base / "state"
+    data_dir = base / "data"
     config_root = base / "config"
     config_dir = config_root / "arkhai"
-    for d in (home_dir, state_dir, config_dir):
+    for d in (home_dir, state_dir, data_dir, config_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     private_key = str(settings.BUYER.PRIVATE_KEY or "")
     wallet_address = str(settings.BUYER.WALLET_ADDRESS or "")
     if not private_key or not wallet_address:
         pytest.skip("BUYER.PRIVATE_KEY / BUYER.WALLET_ADDRESS not configured")
+    marketplace_credential = str(
+        getattr(settings.BUYER, "MARKETPLACE_CREDENTIAL", None) or ""
+    )
+    if not marketplace_credential:
+        pytest.skip("BUYER.MARKETPLACE_CREDENTIAL not configured")
+    raw_marketplace_key = marketplace_credential.removeprefix("0x")
+    marketplace_seed = bytes.fromhex(raw_marketplace_key)
+    marketplace_signer = Eip191Signer(marketplace_seed)
+    credential_variable = "ARKHAI_E2E_BUYER_MARKETPLACE_CREDENTIAL"
+    credential_reference = CredentialReference(
+        provider=CredentialProviderKind.ENVIRONMENT,
+        locator=credential_variable,
+    )
+    profile = new_profile(
+        name="e2e-buyer",
+        principal=marketplace_signer.identity,
+        credential_reference=credential_reference,
+    )
+    profile_path = data_dir / "arkhai" / "buyer" / "profiles.json"
+    repository = ProfileRepository(profile_path)
+    repository.replace(
+        ProfileStore(
+            selected_profile_id=profile.profile_id,
+            profiles=(profile,),
+        ),
+        expected_revision=0,
+    )
+    credential_env = {
+        credential_variable: base64.urlsafe_b64encode(marketplace_seed)
+        .rstrip(b"=")
+        .decode("ascii")
+    }
 
     ssh_public_key = str(
         getattr(settings.BUYER, "SSH_PUBLIC_KEY", None)
@@ -398,6 +447,9 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
             f"address        = {_toml_quote(wallet_address)}",
             f"private_key    = {_toml_quote(private_key)}",
             f"ssh_public_key = {_toml_quote(ssh_public_key)}",
+            "[BuyerProfile]",
+            f"store_path = {_toml_quote(str(profile_path))}",
+            "",
             "",
             "[chains.anvil]",
             f"rpc_url                      = {_toml_quote(rpc_url)}",
@@ -430,5 +482,7 @@ def buyer_cli(buyer_cli_binary: Path, tmp_path_factory) -> BuyerCli:
         config_path=config_path,
         state_dir=state_dir,
         home_dir=home_dir,
+        data_dir=data_dir,
+        credential_env=credential_env,
     )
     yield cli

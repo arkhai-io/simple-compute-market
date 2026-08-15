@@ -33,3 +33,10 @@ buyer:
   identity:
     scheme: eip191
     identifier: "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+  profileStore:
+    existingClaim: arkhai-buyer-profiles
+    mountPath: /var/lib/arkhai-buyer
+  credentialSecret:
+    name: arkhai-buyer-profile-credential
+    key: credential
+    mountPath: /run/secrets/arkhai/buyer-credential

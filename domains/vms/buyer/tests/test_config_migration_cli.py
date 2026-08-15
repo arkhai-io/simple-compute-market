@@ -78,3 +78,18 @@ def test_buyer_config_set_rejects_legacy_path_with_exact_command(
 
     assert result.exit_code == 2
     assert BUYER_MIGRATION_COMMAND in result.output
+
+
+def test_buyer_config_rejects_removed_marketplace_identity(monkeypatch, tmp_path):
+    from domains.vms.buyer import config_cli
+
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        "[Identity.principal]\nscheme = 'ed25519'\nidentifier = 'legacy'\n"
+    )
+    monkeypatch.setattr(config_cli, "user_config_file", lambda: path)
+
+    result = CliRunner().invoke(_app(), ["config", "show"])
+    assert result.exit_code == 2
+    assert "market profile import" in result.output
+    assert "legacy" not in result.output

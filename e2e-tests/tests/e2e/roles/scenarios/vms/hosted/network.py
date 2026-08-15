@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import httpx
-from market_identity import Identity, TrustedIdentitySet, create_signer
-from core_buyer.registry_config import RegistryAuthority
+from market_identity import Identity, ProfileRepository, TrustedIdentitySet, create_signer
+from core_buyer.profile_service import BuyerProfileService
 from market_settlement_runtime import derive_obligation_ref
 from market_site_client import SiteCapacityAdminClient
 from registry_client import SyncRegistryClient
@@ -68,6 +68,19 @@ def _signer(config: dict[str, Any], credential: str):
     return signer
 
 
+def _buyer_profile_signer(config: dict[str, Any]):
+    profile_config = config.get("BuyerProfile")
+    if not isinstance(profile_config, dict):
+        raise RuntimeError("buyer configuration has no profile-store reference")
+    store_path = profile_config.get("store_path")
+    if not isinstance(store_path, str):
+        raise RuntimeError("buyer profile-store reference is malformed")
+    _profile, signer = BuyerProfileService(
+        repository=ProfileRepository(Path(store_path))
+    ).resolve_fresh_signer()
+    return signer
+
+
 def _primary_registry_authority(config: dict[str, Any]) -> dict[str, Any]:
     registry = config.get("registry")
     if not isinstance(registry, dict):
@@ -109,10 +122,7 @@ class NetworkMarketplacePort:
         self.provisioning_url = _required("HOSTED_PROVISIONING_URL")
         self.authority_url = _required("HOSTED_SETTLEMENT_AUTHORITY_URL")
         self.account_ref = _required("HOSTED_SETTLEMENT_E2E_ACCOUNT_REF")
-        self._buyer_signer = _signer(
-            self.buyer_config,
-            _required("HOSTED_SETTLEMENT_E2E_BUYER_IDENTITY_CREDENTIAL"),
-        )
+        self._buyer_signer = _buyer_profile_signer(self.buyer_config)
         buyer_signer = self._buyer_signer
         self._buyer_authority = released_authority_client(
             config_path=storefront_path,

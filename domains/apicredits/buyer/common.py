@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import typer
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from core_buyer.orchestrator import fetch_listing_dict
 from core_buyer.run_log import read_run
 from market_identity import Signer, TrustedIdentitySet
+from market_config.config_loader import ChainConfig, chains_from_config
 
 
 from core_buyer.buyer_config import (  # noqa: F401 — re-exports
@@ -30,8 +31,6 @@ from core_buyer.registry_config import (  # noqa: F401 — re-exports
     resolve_registry_authorities,
 )
 
-if TYPE_CHECKING:
-    from market_config.config_loader import ChainConfig
 
 
 #: The registry schema understood by the API-credit buyer domain. Discovery
@@ -44,8 +43,6 @@ APICREDITS_SCHEMA_ID = "api_credits"
 
 def buyer_chains() -> dict[str, "ChainConfig"]:
     """Return the API-credit buyer's configured chain tables."""
-    from market_config.config_loader import chains_from_config
-
     return chains_from_config()
 
 

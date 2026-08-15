@@ -1,7 +1,6 @@
-# VM compute market with explicit local-EVM effects. Marketplace signer
-# credentials are loaded from operator-owned env files containing only
-# ARKHAI_IDENTITY_CREDENTIAL; wallet/chain settings remain in the selected
-# EVM runtime profile and its separate secret overlay.
+# VM compute market with explicit local-EVM effects. Buyer marketplace signing
+# uses a selected profile under the separately mounted XDG data directory;
+# provider secret files and optional wallet/chain overlays remain distinct.
 include:
   - compose.dev.yml
   - domains/vms/compose.yml
@@ -42,3 +41,18 @@ services:
       - PROVISIONING_STOREFRONT_SITE_ID=default
       - PROVISIONING_ADMIN_IDENTITY__SCHEME=eip191
       - PROVISIONING_ADMIN_IDENTITY__IDENTIFIER=0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
+  buyer-cli:
+    image: ${VMS_BUYER_IMAGE:-arkhai:e2e-tests}
+    profiles: [buyer]
+    user: "${VMS_BUYER_UID:-1000}:${VMS_BUYER_GID:-1000}"
+    entrypoint: ["market"]
+    command: ["profile", "show"]
+    environment:
+      XDG_CONFIG_HOME: /etc
+      XDG_DATA_HOME: /var/lib/arkhai-buyer
+      XDG_STATE_HOME: /var/lib/arkhai-buyer-state
+    volumes:
+      - ${VMS_BUYER_CONFIG_PATH:?set buyer public config path}:/etc/arkhai/config.toml:ro
+      - ${VMS_BUYER_PROFILE_DIR:?set persistent buyer profile directory}:/var/lib/arkhai-buyer/arkhai/buyer:rw
+      - ${VMS_BUYER_STATE_DIR:?set persistent buyer run-state directory}:/var/lib/arkhai-buyer-state/arkhai:rw
+      - ${VMS_BUYER_CREDENTIAL_FILE:?set strict buyer credential file}:/run/secrets/arkhai/buyer-credential:ro

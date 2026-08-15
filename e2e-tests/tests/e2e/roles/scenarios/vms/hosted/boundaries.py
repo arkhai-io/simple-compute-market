@@ -56,10 +56,13 @@ def assert_wallet_free_config(path: Path) -> Mapping[str, Any]:
             "wallet-free hosted profile contains forbidden field(s): "
             + ", ".join(sorted(forbidden))
         )
-    identity = document.get("Identity")
+    buyer_profile = document.get("BuyerProfile")
     settlement = document.get("Settlement")
-    if not isinstance(identity, Mapping):
-        raise HostedBoundaryError("hosted profile requires [Identity]")
+    if not isinstance(buyer_profile, Mapping):
+        raise HostedBoundaryError("hosted profile requires [BuyerProfile]")
+    store_path = buyer_profile.get("store_path")
+    if not isinstance(store_path, str) or not Path(store_path).is_absolute():
+        raise HostedBoundaryError("hosted profile requires an absolute profile-store path")
     if not isinstance(settlement, Mapping):
         raise HostedBoundaryError("hosted profile requires [Settlement]")
     stripe = settlement.get("stripe")

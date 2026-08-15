@@ -1,6 +1,5 @@
-[Identity]
-scheme = "ed25519"
-identifier = "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0"
+[BuyerProfile]
+store_path = "/var/lib/arkhai/buyer/profiles.json"
 
 [provisioning]
 ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForHostedE2E hosted@e2e"
