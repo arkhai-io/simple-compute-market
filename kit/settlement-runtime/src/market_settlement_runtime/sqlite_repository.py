@@ -20,6 +20,10 @@ SETTLEMENT_MIGRATION_ID = "20260810_001_settlement_obligation_lifecycle"
 SETTLEMENT_PRINCIPAL_MIGRATION_ID = (
     "20260811_003_settlement_principal_authorization"
 )
+SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID = (
+    "20260815_004_settlement_mechanism_materialization_params"
+)
+_LEGACY_HOSTED_CARD_RECOVERY = {"legacy_recovery": "hosted-card.v1"}
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,7 @@ def _create_schema(conn: sqlite3.Connection) -> None:
           obligation_index INTEGER NOT NULL CHECK (obligation_index >= 0),
           obligation_hash TEXT NOT NULL,
           obligation TEXT NOT NULL,
+          mechanism_params TEXT NOT NULL DEFAULT '{}',
           payer_principal TEXT NOT NULL,
           claimant_principal TEXT NOT NULL,
           mechanism_ref TEXT,
@@ -258,6 +263,82 @@ def _extend_principal_schema(conn: sqlite3.Connection) -> None:
         "WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' "
         "OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' "
         "BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
+    )
+
+def _extend_mechanism_params_schema(conn: sqlite3.Connection) -> None:
+    known = _columns(conn, "settlement_obligations")
+    if "mechanism_params" not in known:
+        conn.execute(
+            "ALTER TABLE settlement_obligations ADD COLUMN mechanism_params "
+            "TEXT NOT NULL DEFAULT '{}'"
+        )
+    rows = conn.execute(
+        "SELECT obligation_ref, obligation, mechanism_params "
+        "FROM settlement_obligations ORDER BY obligation_ref"
+    ).fetchall()
+    classified: list[tuple[str, str]] = []
+    for obligation_ref, raw_obligation, raw_mechanism_params in rows:
+        try:
+            obligation = json.loads(raw_obligation)
+            mechanism_params = json.loads(raw_mechanism_params or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"settlement obligation {obligation_ref!r} has invalid JSON"
+            ) from exc
+        if not isinstance(obligation, dict) or not isinstance(mechanism_params, dict):
+            raise ValueError(
+                f"settlement obligation {obligation_ref!r} has invalid materialization state"
+            )
+        if obligation.get("mechanism") != "fiat.stripe.v1":
+            continue
+        params = obligation.get("params")
+        if not isinstance(params, dict):
+            raise ValueError(
+                f"hosted settlement obligation {obligation_ref!r} has no exact params"
+            )
+        legacy_methods = params.get("payment_method_types")
+        funding_profile = params.get("funding_profile")
+        if legacy_methods is not None and funding_profile is not None:
+            raise ValueError(
+                f"hosted settlement obligation {obligation_ref!r} mixes legacy and current funding fields"
+            )
+        if legacy_methods is not None:
+            if (
+                legacy_methods != ["card"]
+                or "funding_authorization_ref" in params
+                or (
+                    mechanism_params
+                    and mechanism_params != _LEGACY_HOSTED_CARD_RECOVERY
+                )
+            ):
+                raise ValueError(
+                    f"hosted settlement obligation {obligation_ref!r} is ambiguous legacy funding"
+                )
+            classified.append(
+                (canonical_json(_LEGACY_HOSTED_CARD_RECOVERY), str(obligation_ref))
+            )
+            continue
+        if funding_profile is None:
+            raise ValueError(
+                f"hosted settlement obligation {obligation_ref!r} has no funding classification"
+            )
+        if mechanism_params:
+            accepted_profile = mechanism_params.get("funding_profile")
+            authorization_ref = mechanism_params.get("funding_authorization_ref")
+            if (
+                accepted_profile != funding_profile
+                or not isinstance(authorization_ref, str)
+                or not authorization_ref
+                or set(mechanism_params)
+                != {"funding_profile", "funding_authorization_ref"}
+            ):
+                raise ValueError(
+                    f"hosted settlement obligation {obligation_ref!r} has ambiguous materialization params"
+                )
+    conn.executemany(
+        "UPDATE settlement_obligations SET mechanism_params=? "
+        "WHERE obligation_ref=?",
+        classified,
     )
 
 
@@ -476,6 +557,10 @@ def settlement_migrations() -> tuple[SettlementMigration, ...]:
             SETTLEMENT_PRINCIPAL_MIGRATION_ID,
             _extend_principal_schema,
         ),
+        SettlementMigration(
+            SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
+            _extend_mechanism_params_schema,
+        ),
     )
 
 
@@ -486,6 +571,7 @@ class SettlementSQLiteRepository:
         "obligation",
         "payer_principal",
         "claimant_principal",
+        "mechanism_params",
         "mechanism_state",
         "buyer_action",
         "materialization_receipt",
@@ -499,6 +585,7 @@ class SettlementSQLiteRepository:
         "obligation_index",
         "obligation_hash",
         "obligation",
+        "mechanism_params",
         "payer_principal",
         "claimant_principal",
         "mechanism_ref",
@@ -596,8 +683,11 @@ class SettlementSQLiteRepository:
                 continue
             value[field] = (
                 json.loads(raw)
-                if raw
-                else ({} if field in {"obligation", "mechanism_state"} else None)
+                else (
+                    {}
+                    if field in {"obligation", "mechanism_params", "mechanism_state"}
+                    else None
+                )
             )
         return value
 
@@ -631,16 +721,16 @@ class SettlementSQLiteRepository:
                     """
                     INSERT OR IGNORE INTO settlement_obligations
                       (obligation_ref, agreement_ref, obligation_index,
-                       obligation_hash, obligation, payer_principal,
-                       claimant_principal, mechanism_ref, mechanism_status,
-                       mechanism_state, buyer_action,
+                       obligation_hash, obligation, mechanism_params,
+                       payer_principal, claimant_principal, mechanism_ref,
+                       mechanism_status, mechanism_state, buyer_action,
                        condition_anchor, fulfillment_ref, materialization_state,
                        condition_state, collection_state, reclaim_state,
                        materialization_receipt, status_receipt,
                        collection_receipt, reclaim_receipt, last_error,
                        version, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?)
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         obligation["obligation_ref"],
@@ -648,6 +738,7 @@ class SettlementSQLiteRepository:
                         int(obligation["obligation_index"]),
                         obligation["obligation_hash"],
                         canonical_json(obligation["obligation"]),
+                        canonical_json(obligation.get("mechanism_params") or {}),
                         payer_principal,
                         claimant_principal,
                         obligation.get("mechanism_ref"),
@@ -825,6 +916,65 @@ class SettlementSQLiteRepository:
                 ).rowcount
                 conn.commit()
                 return changed == 1
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(run)
+
+    async def bind_settlement_mechanism_params(
+        self, *, obligation_ref: str, mechanism_params: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not mechanism_params:
+            raise ValueError("mechanism_params must be non-empty")
+        encoded = canonical_json(mechanism_params)
+
+        def run() -> dict[str, Any]:
+            conn = self._connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT mechanism_params, materialization_state "
+                    "FROM settlement_obligations WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown settlement obligation {obligation_ref!r}")
+                existing, materialization_state = row
+                existing = existing or "{}"
+                if existing == encoded:
+                    pass
+                elif existing != "{}":
+                    raise ValueError("mechanism_params are immutable once bound")
+                else:
+                    operation = conn.execute(
+                        "SELECT 1 FROM settlement_operations "
+                        "WHERE obligation_ref=? AND operation='materialize'",
+                        (obligation_ref,),
+                    ).fetchone()
+                    if materialization_state != "pending" or operation is not None:
+                        raise ValueError(
+                            "mechanism_params cannot bind after materialization starts"
+                        )
+                    changed = conn.execute(
+                        "UPDATE settlement_obligations SET mechanism_params=?, "
+                        "version=version+1, updated_at=? "
+                        "WHERE obligation_ref=? AND mechanism_params='{}' "
+                        "AND materialization_state='pending'",
+                        (encoded, self._now(), obligation_ref),
+                    ).rowcount
+                    if changed != 1:
+                        raise ValueError("mechanism_params binding lost its compare-and-set")
+                result = conn.execute(
+                    f"SELECT {', '.join(self._OBLIGATION_COLUMNS)} "
+                    "FROM settlement_obligations WHERE obligation_ref=?",
+                    (obligation_ref,),
+                ).fetchone()
+                conn.commit()
+                assert result is not None
+                return self._obligation(result)
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 

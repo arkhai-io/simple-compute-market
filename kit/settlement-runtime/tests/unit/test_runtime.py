@@ -58,6 +58,7 @@ def obligation(
 class Client:
     def __init__(self) -> None:
         self.materialize_refs: list[str] = []
+        self.materialize_obligations: list[dict[str, Any]] = []
         self.check_states: list[dict[str, Any]] = []
         self.materialize_error: Exception | None = None
         self.decisions = ["ready"]
@@ -65,6 +66,7 @@ class Client:
         self.reclaim_calls = 0
 
     async def materialize(self, obligation, *, operation_ref):
+        self.materialize_obligations.append(obligation)
         self.materialize_refs.append(operation_ref)
         if self.materialize_error is not None:
             error, self.materialize_error = self.materialize_error, None
@@ -352,3 +354,77 @@ async def test_collect_and_reclaim_share_atomic_winner(repository) -> None:
     )
     assert {collect.status, reclaim.status} == {"succeeded", "busy"}
     assert client.collect_calls + client.reclaim_calls == 1
+
+
+async def test_mechanism_params_bind_after_acceptance_without_changing_identity(
+    repository,
+) -> None:
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    accepted_ref = record.obligation_ref
+    accepted_hash = record.obligation_hash
+    params = {
+        "funding_profile": "card.v1",
+        "funding_authorization_ref": "funding-authorization-1",
+    }
+
+    bound = await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        params,
+        local_principal=BUYER,
+    )
+    retried = await runtime.bind_mechanism_params(
+        record.obligation_ref,
+        params,
+        local_principal=BUYER,
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        await runtime.bind_mechanism_params(
+            record.obligation_ref,
+            {**params, "funding_authorization_ref": "changed"},
+            local_principal=BUYER,
+        )
+
+    assert bound.obligation_ref == retried.obligation_ref == accepted_ref
+    assert bound.obligation_hash == retried.obligation_hash == accepted_hash
+    assert "funding_authorization_ref" not in bound.obligation["params"]
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="materialize",
+    )
+    assert client.materialize_obligations == [
+        {
+            **record.obligation,
+            "params": {
+                **record.obligation["params"],
+                **params,
+            },
+        }
+    ]
+
+
+async def test_mechanism_params_require_exact_payer_and_pre_materialization_binding(
+    repository,
+) -> None:
+    client = Client()
+    runtime = SettlementRuntime(repository, {"test.v1": client}, clock=lambda: 50)
+    record = await register(runtime, obligation())
+    with pytest.raises(PermissionError, match="payer"):
+        await runtime.bind_mechanism_params(
+            record.obligation_ref,
+            {"authorization": "ref"},
+            local_principal=SELLER,
+        )
+    await runtime.materialize(
+        obligation_ref=record.obligation_ref,
+        local_principal=BUYER,
+        worker_id="materialize",
+    )
+    with pytest.raises(ValueError, match="after materialization starts"):
+        await runtime.bind_mechanism_params(
+            record.obligation_ref,
+            {"authorization": "ref"},
+            local_principal=BUYER,
+        )

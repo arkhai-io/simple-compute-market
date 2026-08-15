@@ -114,6 +114,24 @@ class SettlementRuntime:
         )
         return self._outcome(record, "materialize", "succeeded", receipt)
 
+    async def bind_mechanism_params(
+        self,
+        obligation_ref: str,
+        mechanism_params: Mapping[str, Any],
+        *,
+        local_principal: Identity,
+    ) -> SettlementObligationRecord:
+        """Bind immutable, mechanism-safe materialization inputs after acceptance."""
+        record = await self._load(obligation_ref)
+        self._require_principal(record, local_principal, "payer")
+        if not mechanism_params:
+            raise ValueError("mechanism_params must be non-empty")
+        row = await self._repository.bind_settlement_mechanism_params(
+            obligation_ref=obligation_ref,
+            mechanism_params=dict(mechanism_params),
+        )
+        return SettlementObligationRecord.model_validate(row)
+
     async def bind_fulfillment(
         self,
         obligation_ref: str,
@@ -231,7 +249,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.materialize(
-                record.obligation,
+                self._operation_obligation(record),
                 operation_ref=settlement_operation_ref(
                     record.obligation_ref, "materialize"
                 ),
@@ -295,7 +313,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.get_status(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 operation_ref=settlement_operation_ref(record.obligation_ref, "status"),
                 mechanism_state=dict(record.mechanism_state),
@@ -350,7 +368,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.check(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 fulfillment_ref=fulfillment_ref,
                 operation_ref=settlement_operation_ref(record.obligation_ref, "check"),
@@ -413,7 +431,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.collect(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 fulfillment_ref=fulfillment_ref,
                 operation_ref=settlement_operation_ref(
@@ -457,7 +475,7 @@ class SettlementRuntime:
             return terminal
         try:
             result = await client.reclaim_expired(
-                record.obligation,
+                self._operation_obligation(record),
                 mechanism_ref=mechanism_ref,
                 operation_ref=settlement_operation_ref(
                     record.obligation_ref, "reclaim"
@@ -491,6 +509,27 @@ class SettlementRuntime:
             return self._clients[mechanism]
         except KeyError as exc:
             raise ValueError(f"no conditional escrow client for {mechanism!r}") from exc
+
+    @staticmethod
+    def _operation_obligation(record: SettlementObligationRecord) -> dict[str, Any]:
+        snapshot = dict(record.obligation)
+        if not record.mechanism_params:
+            return snapshot
+        raw_params = snapshot.get("params")
+        if raw_params is None:
+            params: dict[str, Any] = {}
+        elif isinstance(raw_params, Mapping):
+            params = dict(raw_params)
+        else:
+            raise ValueError("settlement obligation params must be an object")
+        for key, value in record.mechanism_params.items():
+            if key in params and params[key] != value:
+                raise ValueError(
+                    f"immutable mechanism parameter {key!r} conflicts with accepted terms"
+                )
+            params[key] = value
+        snapshot["params"] = params
+        return snapshot
 
     @staticmethod
     def _require_participant(
@@ -706,5 +745,6 @@ def _request_hash(
         "operation": operation,
         "principal": principal_binding,
         "request": dict(request_values or {}),
+        "mechanism_params": record.mechanism_params,
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()

@@ -99,6 +99,7 @@ class SettlementObligationRecord(BaseModel):
     mechanism_ref: str | None = None
     mechanism_status: str | None = None
     mechanism_state: dict[str, Any] = Field(default_factory=dict)
+    mechanism_params: dict[str, Any] = Field(default_factory=dict)
     buyer_action: dict[str, Any] | None = None
     condition_anchor: str | None = None
     fulfillment_ref: str | None = None

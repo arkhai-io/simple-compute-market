@@ -9,6 +9,7 @@ from market_identity import Identity, IdentityScheme
 
 from market_settlement_runtime import (
     SETTLEMENT_MIGRATION_ID,
+    SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,
     SETTLEMENT_PRINCIPAL_MIGRATION_ID,
     SettlementObligationRecord,
     SettlementOperationRecord,
@@ -40,6 +41,31 @@ def obligation(*, payer: str = "buyer") -> dict:
         ).model_dump(mode="json"),
         "mechanism": "test.v1",
         "expiration_unix": 100,
+    }
+
+
+def hosted_obligation(
+    *,
+    payment_method_types: list[str] | None = None,
+    funding_profile: str | None = None,
+) -> dict:
+    params: dict = {
+        "account_ref": "account-1",
+        "payer_principal": BUYER.model_dump(mode="json"),
+        "claimant_principal": SELLER.model_dump(mode="json"),
+        "funds_flow": "separate_charges_transfers",
+        "condition": {"kind": "accepted"},
+    }
+    if payment_method_types is not None:
+        params["payment_method_types"] = payment_method_types
+    if funding_profile is not None:
+        params["funding_profile"] = funding_profile
+    return {
+        **obligation(),
+        "amount": "100",
+        "asset": "usd",
+        "mechanism": "fiat.stripe.v1",
+        "params": params,
     }
 
 
@@ -376,7 +402,7 @@ async def test_legacy_migration_preserves_id_and_exact_state(tmp_path) -> None:
     assert SETTLEMENT_MIGRATION_ID in ids
     assert SETTLEMENT_PRINCIPAL_MIGRATION_ID in ids
     assert settlement_migrations()[0].id == SETTLEMENT_MIGRATION_ID
-    assert settlement_migrations()[-1].id == SETTLEMENT_PRINCIPAL_MIGRATION_ID
+    assert settlement_migrations()[-1].id == SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID
 
 
 def test_legacy_conflict_rolls_back_whole_migration(tmp_path) -> None:
@@ -417,3 +443,147 @@ def test_legacy_conflict_rolls_back_whole_migration(tmp_path) -> None:
             )
     finally:
         conn.close()
+
+
+async def test_hosted_materialization_params_are_immutable_and_identity_preserving(
+    tmp_path,
+) -> None:
+    repository = SettlementSQLiteRepository(str(tmp_path / "mechanism-params.db"))
+    record = SettlementObligationRecord.from_obligation(
+        agreement_ref="agreement",
+        obligation_index=0,
+        obligation=hosted_obligation(funding_profile="card.v1"),
+    )
+    stored = await repository.upsert_settlement_obligation(record.model_dump())
+    params = {
+        "funding_profile": "card.v1",
+        "funding_authorization_ref": "funding-authorization-1",
+    }
+
+    bound = await repository.bind_settlement_mechanism_params(
+        obligation_ref=record.obligation_ref,
+        mechanism_params=params,
+    )
+    retried = await repository.bind_settlement_mechanism_params(
+        obligation_ref=record.obligation_ref,
+        mechanism_params=params,
+    )
+    with pytest.raises(ValueError, match="immutable"):
+        await repository.bind_settlement_mechanism_params(
+            obligation_ref=record.obligation_ref,
+            mechanism_params={**params, "funding_authorization_ref": "changed"},
+        )
+
+    assert bound["obligation_ref"] == retried["obligation_ref"] == stored["obligation_ref"]
+    assert bound["obligation_hash"] == retried["obligation_hash"] == stored["obligation_hash"]
+    assert bound["obligation"] == retried["obligation"] == stored["obligation"]
+    assert bound["mechanism_params"] == retried["mechanism_params"] == params
+
+
+async def test_legacy_hosted_card_migration_classifies_without_rewriting_identity(
+    tmp_path,
+) -> None:
+    path = tmp_path / "legacy-hosted-card.db"
+    repository = SettlementSQLiteRepository(str(path))
+    record = SettlementObligationRecord.from_obligation(
+        agreement_ref="accepted-negotiation",
+        obligation_index=0,
+        obligation=hosted_obligation(payment_method_types=["card"]),
+    ).model_copy(
+        update={
+            "mechanism_ref": "hosted-settlement-1",
+            "mechanism_status": "ready",
+            "materialization_state": "materialized",
+            "materialization_receipt": {"historical": True},
+        }
+    )
+    before = await repository.upsert_settlement_obligation(record.model_dump())
+    operation = SettlementOperationRecord(
+        obligation_ref=record.obligation_ref,
+        operation="status",
+        request_hash="a" * 64,
+    )
+    before_operation = await repository.upsert_settlement_operation(
+        operation.model_dump()
+    )
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE id=?",
+            (SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    migrated_repository = SettlementSQLiteRepository(str(path))
+    migrated = await migrated_repository.load_settlement_obligation(
+        record.obligation_ref
+    )
+    migrated_operation = await migrated_repository.load_settlement_operation(
+        record.obligation_ref,
+        "status",
+    )
+
+    assert migrated is not None
+    assert migrated["mechanism_params"] == {
+        "legacy_recovery": "hosted-card.v1"
+    }
+    for field in (
+        "obligation_ref",
+        "agreement_ref",
+        "obligation_hash",
+        "obligation",
+        "mechanism_ref",
+        "mechanism_status",
+        "materialization_receipt",
+    ):
+        assert migrated[field] == before[field]
+    assert migrated_operation == before_operation
+    assert settlement_migrations()[-1].id == SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID
+
+
+async def test_legacy_hosted_card_migration_rolls_back_ambiguous_rows(
+    tmp_path,
+) -> None:
+    path = tmp_path / "ambiguous-hosted-card.db"
+    repository = SettlementSQLiteRepository(str(path))
+    for index, value in enumerate(
+        (
+            hosted_obligation(payment_method_types=["card"]),
+            hosted_obligation(payment_method_types=["card", "us_bank_account"]),
+        )
+    ):
+        record = SettlementObligationRecord.from_obligation(
+            agreement_ref=f"negotiation-{index}",
+            obligation_index=0,
+            obligation=value,
+        )
+        await repository.upsert_settlement_obligation(record.model_dump())
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "DELETE FROM schema_migrations WHERE id=?",
+            (SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(ValueError, match="ambiguous legacy funding"):
+        SettlementSQLiteRepository(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT mechanism_params FROM settlement_obligations "
+            "ORDER BY obligation_ref"
+        ).fetchall()
+        migration = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE id=?",
+            (SETTLEMENT_MECHANISM_PARAMS_MIGRATION_ID,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert rows == [("{}",), ("{}",)]
+    assert migration is None
