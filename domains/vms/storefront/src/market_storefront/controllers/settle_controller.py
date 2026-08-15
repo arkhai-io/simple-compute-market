@@ -279,6 +279,10 @@ class SettlementsController:
             sqlite_client=self._db,
             negotiation_id=record.agreement_ref,
             obligation_ref=record.obligation_ref,
+            expected_claimant=self._composition().local_principal,
+            allow_legacy_recovery=(
+                record.mechanism_params.get("legacy_recovery") == "hosted-card.v1"
+            ),
         )
         auth = await buyer_auth._verify(
             request,
@@ -306,14 +310,10 @@ class SettlementsController:
                 sqlite_client=self._db,
                 negotiation_id=body.negotiation_id,
                 obligation_ref=body.obligation_ref,
+                expected_claimant=composition.local_principal,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        if (
-            body.payer_principal != agreement.buyer_principal
-            or body.claimant_principal != composition.local_principal
-        ):
-            raise HTTPException(status_code=403, detail="settlement parties mismatch")
         auth = await buyer_auth._verify(
             request,
             "settlement_start",
@@ -334,9 +334,20 @@ class SettlementsController:
             obligations=[agreement.obligation],
         )
         record = records[0]
+        try:
+            record = await composition.runtime.bind_mechanism_params(
+                record.obligation_ref,
+                {
+                    "funding_profile": agreement.funding_profile.value,
+                    "funding_authorization_ref": body.funding_authorization_ref,
+                },
+                local_principal=agreement.buyer_principal,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         worker_id = f"settlement-start:{uuid.uuid4().hex}"
         try:
-            await composition.runtime.materialize(
+            outcome = await composition.runtime.materialize(
                 obligation_ref=record.obligation_ref,
                 local_principal=agreement.buyer_principal,
                 worker_id=worker_id,
@@ -356,6 +367,8 @@ class SettlementsController:
             projected = await hosted_settlement_projection(
                 composition=composition,
                 record=record,
+                transient_action=outcome.action,
+                transient_receipt=outcome.receipt,
             )
         except Exception as exc:
             logger.warning(
@@ -379,14 +392,20 @@ class SettlementsController:
     ) -> SettlementPublicResponse:
         composition = self._composition()
         record = await self._record(settlement_ref)
-        await self._authorize(
+        auth = await self._authorize(
             request,
             operation="settlement_status",
             resource_id=settlement_ref,
             record=record,
         )
+        if auth.exact_retry:
+            assert auth.recorded_outcome is not None
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return SettlementPublicResponse.model_validate(payload)
         try:
-            await composition.runtime.reconcile_status(
+            outcome = await composition.runtime.reconcile_status(
                 obligation_ref=record.obligation_ref,
                 local_principal=record.payer_principal,
                 worker_id=f"settlement-status:{uuid.uuid4().hex}",
@@ -403,9 +422,21 @@ class SettlementsController:
                     record=record,
                     worker_id=f"settlement-fulfill:{uuid.uuid4().hex}",
                 )
+            elif (
+                record.mechanism_status == "failed"
+                and record.fulfillment_ref
+                and record.collection_state != "succeeded"
+            ):
+                await truncate_lease_for_terminal_settlement(
+                    escrow_uid=record.mechanism_ref,
+                    reason="hosted funding returned before collection",
+                    sqlite_client=self._db,
+                )
             projected = await hosted_settlement_projection(
                 composition=composition,
                 record=record,
+                transient_action=outcome.action,
+                transient_receipt=outcome.receipt,
             )
         except Exception as exc:
             logger.exception(
@@ -429,12 +460,18 @@ class SettlementsController:
     ) -> SettlementPublicResponse:
         composition = self._composition()
         record = await self._record(settlement_ref)
-        await self._authorize(
+        auth = await self._authorize(
             request,
             operation="settlement_reclaim",
             resource_id=settlement_ref,
             record=record,
         )
+        if auth.exact_retry:
+            assert auth.recorded_outcome is not None
+            status_code, payload = auth.recorded_outcome
+            if status_code >= 400:
+                raise HTTPException(status_code=status_code, detail=payload)
+            return SettlementPublicResponse.model_validate(payload)
         try:
             outcome = await composition.runtime.reclaim(
                 obligation_ref=record.obligation_ref,
@@ -460,6 +497,7 @@ class SettlementsController:
             projected = await hosted_settlement_projection(
                 composition=composition,
                 record=record,
+                transient_receipt=outcome.receipt,
             )
         except HTTPException:
             raise

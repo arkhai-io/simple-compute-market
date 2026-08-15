@@ -306,6 +306,19 @@ def _buyer_response_contract(request: Request, body: Any) -> tuple[str, str] | N
     return None
 
 
+
+def _safe_replay_body(operation: str, body: Any) -> Any:
+    """Exclude transient hosted buyer actions from the durable replay journal."""
+
+    if operation not in {"settlement_start", "settlement_status"}:
+        return body
+    if not isinstance(body, dict) or "action" not in body:
+        return body
+    safe = dict(body)
+    safe["action"] = None
+    return safe
+
+
 async def _signed_buyer_response(
     *,
     request: Request,
@@ -337,7 +350,7 @@ async def _signed_buyer_response(
             authenticated.reservation,
             attempt_token=authenticated.attempt_token,
             status=response.status_code,
-            body=body,
+            body=_safe_replay_body(operation, body),
         )
     headers = dict(response.headers)
     headers.update(

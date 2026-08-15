@@ -127,23 +127,37 @@ async def test_hosted_projection_exposes_portable_fulfillment_binding():
         obligation_ref="obligation-1",
         payer_principal=_BUYER,
         claimant_principal=_SELLER,
+        obligation={
+            "params": {
+                "funding_profile": "card.v1",
+            }
+        },
+        mechanism_params={
+            "funding_profile": "card.v1",
+            "funding_authorization_ref": "authorization-1",
+        },
         mechanism_status="ready",
+        mechanism_state={"funding_reason": "available"},
         reclaim_state="pending",
         collection_state="pending",
-        materialization_state="succeeded",
+        materialization_state="materialized",
         condition_state="pending",
         fulfillment_ref="0xfulfillment",
-        condition_anchor="0xanchor",
         buyer_action=None,
+        status_receipt={"funding_reason": "available"},
+        materialization_receipt=None,
+        collection_receipt=None,
+        reclaim_receipt=None,
     )
     projection = await hosted_settlement_projection(
-        composition=SimpleNamespace(mechanism_clients={}),
+        composition=SimpleNamespace(),
         record=record,
     )
 
     response = SettlementPublicResponse.model_validate(projection)
-    assert response.condition_anchor == "0xanchor"
-    assert response.fulfillment_ref == "0xfulfillment"
+    assert response.funding_profile.value == "card.v1"
+    assert response.funding_authorization_ref == "authorization-1"
+    assert response.receipt == {"funding_reason": "available"}
 
 
 @pytest.mark.asyncio
@@ -220,93 +234,40 @@ async def test_prepare_pins_the_exact_verified_obligation(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prepare_hosted_requires_funded_exact_listed_selection(db, monkeypatch):
-    from market_core.schemas import (
-        RateValue,
-        SettlementOption,
-        derive_settlement_option_id,
-    )
-
-    rates = [RateValue(field="amount", value=42)]
-    params = {
-        "account_ref": "acct-seller",
-        "claimant_principal": _SELLER.model_dump(mode="json"),
-        "condition": {
-            "kind": "builtin",
-            "arbiter": "trusted_oracle",
-            "demand": {"oracle": "0x" + "11" * 20},
-        },
-    }
-    option = SettlementOption(
-        option_id=derive_settlement_option_id(
-            mechanism="fiat.stripe.v1",
-            asset="usd",
-            rates=rates,
-            params=params,
-        ),
-        mechanism="fiat.stripe.v1",
-        asset="usd",
-        rates=rates,
-        params=params,
-    )
-    selection = {
-        "mechanism": "fiat.stripe.v1",
-        "option_id": option.option_id,
-        "expiration_unix": 1_900_000_000,
-    }
+async def test_prepare_hosted_rejects_the_removed_legacy_start_route(db, monkeypatch):
+    del monkeypatch
     db.load_negotiation_thread_row = AsyncMock(
         return_value={
             "negotiation_id": "neg-hosted",
             "terminal_state": "success",
             "agreed_price": 42,
-            "agreed_duration_seconds": 3600,
             "our_listing_id": "listing-hosted",
             "buyer_principal": _BUYER.model_dump(mode="json"),
-            "buyer_escrow_proposal": {"settlement_selection": selection},
+            "buyer_escrow_proposal": {
+                "settlement_selection": {
+                    "mechanism": "fiat.stripe.v1",
+                    "option_id": "accepted-option",
+                    "expiration_unix": 1_900_000_000,
+                }
+            },
             "provision_terms": _ACCEPTED_PROVISION,
         }
     )
-    db.load_listing = AsyncMock(
-        return_value={
-            "listing_id": "listing-hosted",
-            "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
-            "settlement_options": [option.model_dump(mode="json")],
-            "max_duration_seconds": 3600,
-        }
-    )
-    mechanism = SimpleNamespace(
-        get_status=AsyncMock(
-            return_value=SimpleNamespace(
-                status="ready",
-                receipt={"financial_state": "funded"},
-            )
+    db.load_listing = AsyncMock(return_value={"listing_id": "listing-hosted"})
+
+    with pytest.raises(
+        ValueError,
+        match="accepted settlement endpoint",
+    ):
+        await prepare_vm_settlement(
+            escrow_uid="settlement-1",
+            negotiation_id="neg-hosted",
+            local_principal=_SELLER,
+            mechanism_client=object(),
+            chain_name="",
+            request={"caller_override": "rejected"},
+            sqlite_client=db,
         )
-    )
-    monkeypatch.setattr(
-        "domains.vms.listings.reconciler.site_id_for_listing",
-        lambda *_args: "site-1",
-    )
-    monkeypatch.setattr("market_storefront.utils.config.CHAINS", {})
-
-    prepared = await prepare_vm_settlement(
-        escrow_uid="settlement-1",
-        negotiation_id="neg-hosted",
-        local_principal=_SELLER,
-        mechanism_client=mechanism,
-        chain_name="",
-        request={"ssh_public_key": "ssh-ed25519 AAAA"},
-        sqlite_client=db,
-    )
-
-    assert prepared.mechanism_ref == "settlement-1"
-    assert prepared.obligations[0]["payer_principal"] == _BUYER.model_dump(mode="json")
-    assert prepared.obligations[0]["claimant_principal"] == _SELLER.model_dump(
-        mode="json"
-    )
-    assert prepared.obligations[0]["mechanism"] == "fiat.stripe.v1"
-    assert prepared.obligations[0]["amount"] == "42"
-    assert prepared.mechanism_receipt["financial_state"] == "funded"
-    mechanism.get_status.assert_awaited_once()
 
 
 @pytest.mark.asyncio
