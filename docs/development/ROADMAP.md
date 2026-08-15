@@ -193,14 +193,28 @@ verification tasks; it does not restore legacy identity precedence.
 
 ## Hosted settlement release status
 
-The marketplace consumes `fiat.stripe.v1` through the signed
-hosted-settlement client and image contract described by
-[`settlement-servicing`](../../openspec/specs/settlement-servicing/spec.md).
-The platform authority owns Checkout, Connect transfer, refund, and recovery
-state; portable attestations and EAS arbiters supply condition evidence without
-turning provider-custodied funds into on-chain or segregated escrow. New hosted
-mechanisms must preserve that authority boundary and the immutable
-manifest/capability verification path.
+The common VM consumer supports exact hosted funding profiles `card.v1`,
+`us_bank_transfer.v1`, and `us_ach_debit.v1` through the released
+provider-neutral client. VM publication keeps ready profiles as distinct
+options; the persistent buyer profile owns its opaque authority/environment
+payer binding; exact post-acceptance purchase authorization is direct; escrow
+materialization, status, fulfillment, collection, and reclaim remain
+storefront-mediated through the shared settlement runtime. Historical
+card-only accepted state is recovery-only, and Alkahest remains an independent
+mechanism lane.
+
+Production activation and protected profile evidence still require the exact
+signed hosted manifest, service-image digest, provenance/SBOM, repository and
+workflow attestations, matching client/OpenAPI/conformance/schema-5 artifacts,
+and each selected Stripe test-mode rail/account/instrument/mandate/browser
+prerequisite. Local client/service wheels and unsigned contract artifacts do
+not satisfy those external release checks.
+
+API-credit and bare-metal hosted settlement composition remain separate
+adopters. API credits must reuse the common payer/authorization and settlement
+runtime seams without VM imports. Bare metal additionally remains gated on its
+runnable buyer, seller/composition, real fulfillment/teardown, and selected-site
+capacity contracts; neither gap is filled by the VM consumer.
 
 ---
 

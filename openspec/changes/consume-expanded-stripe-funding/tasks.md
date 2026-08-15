@@ -65,7 +65,7 @@
 - [x] 9.2 Promote separate publication, safe exact start, delayed fulfillment gate, legacy recovery, immutable runtime, reclaim/loss semantics, and tests to `openspec/specs/{storefront-publication,settlement-servicing,test-compatibility}/{spec,architecture}.md`.
 - [ ] 9.3 Promote direct payer versus storefront-mediated escrow composition, released-client ownership, signer/profile boundaries, package layers, and principal flows to `openspec/specs/{buyer-orchestration,market-composition}/{spec,architecture}.md`, `docs/development/ARCHITECTURE.md`, and VM buyer/seller current-state docs.
 - [x] 9.4 Promote exact artifact/config/Secret/migration/activation/rollback/evidence behavior to `openspec/specs/deployment-state/{spec,architecture}.md`, `docs/development/{DEPLOYMENT_AND_CONFIG,TESTING}.md`, and applicable operator/quickstart docs; describe current system state rather than completion history.
-- [ ] 9.5 Update `docs/development/ROADMAP.md` with the completed common VM hosted-profile consumer and remaining API-credit/bare-metal adoption gaps, or record an explicit no-impact finding in the design-promotion record if roadmap structure no longer requires an edit.
+- [x] 9.5 Update `docs/development/ROADMAP.md` with the completed common VM hosted-profile consumer and remaining API-credit/bare-metal adoption gaps, or record an explicit no-impact finding in the design-promotion record if roadmap structure no longer requires an edit.
 
 ## 10. Validation and closeout
 
