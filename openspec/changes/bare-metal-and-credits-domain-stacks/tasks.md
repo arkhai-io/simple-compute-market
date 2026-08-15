@@ -2,9 +2,9 @@
 
 ## 1. Generalize the e2e fixtures
 
-- [ ] 1.1 Re-verify that no e2e file references bare metal or API credits, and inventory
+- [x] 1.1 Re-verify that no e2e file references bare metal or API credits, and inventory
       the VM assumptions in shared fixtures and helpers.
-- [ ] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
+- [x] 1.2 Generalize fixtures and helpers away from VM-specific listing shape,
       provisioning, and teardown assumptions.
 - [ ] 1.3 Keep scenarios thin. Copying the VM scenarios and editing them per domain
       reproduces, one layer up, exactly the duplication this goal removes.
