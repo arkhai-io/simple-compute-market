@@ -12,9 +12,9 @@ DIST_DIR ?= ../../../.dist
 # Podman may reuse cross-stage layers after an internal wheel changes. Make the
 # wheel set an explicit cache key for both image stages.
 DIST_FINGERPRINT := $(shell find $(DIST_DIR) -maxdepth 1 -type f -name '*.whl' -exec cksum {} + 2>/dev/null | LC_ALL=C sort | cksum | awk '{print $$1}')
-HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.1.0-trust.json
+HOSTED_RELEASE_TRUST ?= ../../../manifests/hosted-settlement-v0.2.0-trust.json
 HOSTED_RELEASE_MANIFEST ?= $(DIST_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+HOSTED_CLIENT_WHEEL ?= $(DIST_DIR)/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python ../../../scripts/verify-hosted-release.py \
 	--trust $(HOSTED_RELEASE_TRUST) \

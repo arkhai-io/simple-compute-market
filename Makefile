@@ -8,10 +8,10 @@ GIT_NAME   ?= simple-compute-market
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.3.0-py3-none-any.whl
-HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.1.0-trust.json
+HOSTED_RELEASE_TRUST ?= manifests/hosted-settlement-v0.2.0-trust.json
 HOSTED_RELEASE_DIR ?= $(DIST_DIR)
 HOSTED_RELEASE_MANIFEST ?= $(HOSTED_RELEASE_DIR)/release-manifest.json
-HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl
+HOSTED_CLIENT_WHEEL ?= $(HOSTED_RELEASE_DIR)/arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl
 HOSTED_COMPOSE_ENV ?= $(DIST_DIR)/hosted-settlement-compose.env
 HOSTED_PRODUCTION_MANIFEST_SHA256 ?=
 HOSTED_PRODUCTION_CLIENT_WHEEL_SHA256 ?=
@@ -27,8 +27,8 @@ HOSTED_STRIPE_TEST_AUTHORITY_ENVIRONMENT ?=
 HOSTED_STRIPE_TEST_AUTHORITY_ENV_FILE ?=
 HOSTED_STRIPE_TEST_EVIDENCE ?= $(DIST_DIR)/hosted-stripe-test-evidence.json
 HOSTED_RELEASE_FILES := release-manifest.json \
-	arkhai_hosted_settlement_client-0.1.0-py3-none-any.whl \
-	openapi-v0.1.0.json conformance-v0.1.0.json migrations-v4.json \
+	arkhai_hosted_settlement_client-0.2.0-py3-none-any.whl \
+	openapi-v0.2.0.json conformance-v0.2.0.json migrations-v5.json \
 	sbom.spdx.json provenance.intoto.json
 VERIFY_HOSTED_RELEASE = uv run --no-project --with 'eth-account>=0.13,<0.14' \
 	python scripts/verify-hosted-release.py \

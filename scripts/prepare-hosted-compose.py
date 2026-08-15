@@ -94,6 +94,37 @@ def prepare_compose_env(
     verified_authority_id = str(production["authority_id"])
     verified_authority_scheme = str(production["authority_scheme"])
     verified_authority_address = str(production["authority_address"])
+    verified_contract = {
+        "HOSTED_SETTLEMENT_VERIFIED_API_VERSION": str(production["api_version"]),
+        "HOSTED_SETTLEMENT_VERIFIED_CAPABILITIES": ",".join(
+            str(value) for value in production["capabilities"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_CONFORMANCE_SHA256": str(
+            production["artifact_sha256"]["conformance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_FUNDING_PROFILES": ",".join(
+            str(value) for value in production["funding_profiles"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_MIGRATIONS_SHA256": str(
+            production["artifact_sha256"]["migrations"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_OPENAPI_SHA256": str(
+            production["artifact_sha256"]["openapi"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_PROVENANCE_SHA256": str(
+            production["artifact_sha256"]["provenance"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_RELEASE_VERSION": str(
+            production["release_version"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_SCHEMA_VERSION": str(
+            production["schema_version"]
+        ),
+        "HOSTED_SETTLEMENT_VERIFIED_SERVICE_WHEEL_SHA256": "sha256:"
+        + str(production["service_wheel_sha256"]),
+    }
+    for name, expected in verified_contract.items():
+        _reject_mismatched_override(name, expected)
     _reject_mismatched_override("HOSTED_SETTLEMENT_VERIFIED_IMAGE", verified_image)
     _reject_mismatched_override(
         "HOSTED_SETTLEMENT_VERIFIED_MANIFEST_SHA256",
@@ -148,6 +179,7 @@ def prepare_compose_env(
             "HOSTED_SETTLEMENT_VERIFIED_SOURCE_COMMIT": verified_source_commit,
             "HOSTED_SETTLEMENT_VERIFIED_REPOSITORY": verified_repository,
             "HOSTED_SETTLEMENT_VERIFIED_WORKFLOW_REF": verified_workflow_ref,
+            **verified_contract,
         }
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

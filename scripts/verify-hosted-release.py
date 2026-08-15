@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import re
@@ -12,45 +13,66 @@ from pathlib import Path
 from typing import Any
 
 _RELEASE_CONTRACT = "arkhai.hosted-settlement-release.v2"
-_RELEASE_VERSION = "0.1.0"
-_API_VERSION = "0.1.0"
-_SCHEMA_VERSION = 4
+_RELEASE_VERSION = "0.2.0"
+_API_VERSION = "0.2.0"
+_SCHEMA_VERSION = 5
+_FUNDING_PROFILES = ("card.v1", "us_bank_transfer.v1", "us_ach_debit.v1")
 _CAPABILITIES = (
-    "conditional-escrow.v1",
-    "stripe-connect-separate-charges-transfers.v1",
-    "portable-attestation.v1",
-    "eas-arbiter.v1",
     "scheme-tagged-identities.v1",
     "account-owner-admission.v1",
     "account-owner-rotation.v1",
     "account-owner-retirement.v1",
     "signer-injected-client.v1",
     "provider-neutral-seller-onboarding.v1",
+    "conditional-escrow.v2",
+    "stripe-connect-separate-charges-transfers.v2",
+    "portable-attestation.v1",
+    "eas-arbiter.v1",
+    "payer-profile.v1",
+    "funding-authorization.v1",
+    "funding-profile.card.v1",
+    "funding-profile.us_bank_transfer.v1",
+    "funding-profile.us_ach_debit.v1",
+    "normalized-funding-reversal.v1",
+    "operator-recovery-redaction.v1",
 )
 _IDENTITY_CONTRACT = {
     "request_signature_protocol": "arkhai.hosted-request-signature.v2",
     "response_signature_protocol": "arkhai.hosted-response-signature.v2",
     "supported_identity_schemes": ["eip191", "ed25519"],
-    "capabilities": [
-        "scheme-tagged-identities.v1",
-        "account-owner-admission.v1",
-        "account-owner-rotation.v1",
-        "account-owner-retirement.v1",
-        "signer-injected-client.v1",
-        "provider-neutral-seller-onboarding.v1",
-    ],
+    "capabilities": list(_CAPABILITIES),
     "account_owner_admission_protocol": "arkhai.account-owner-admission.v1",
     "account_owner_rotation_protocol": "arkhai.account-owner-rotation.v1",
     "client_signer_api": "hosted_settlement_client.Signer",
     "seller_onboarding_api": "hosted_settlement_client.SellerOnboarding",
+    "payer_profile_protocol": "arkhai.payer-profile.v1",
+    "funding_authorization_protocol": "arkhai.funding-authorization.v1",
+    "funding_profiles": list(_FUNDING_PROFILES),
 }
 _ARTIFACT_FILENAMES = {
-    "openapi": "openapi-v0.1.0.json",
-    "conformance": "conformance-v0.1.0.json",
-    "migrations": "migrations-v4.json",
+    "openapi": "openapi-v0.2.0.json",
+    "conformance": "conformance-v0.2.0.json",
+    "migrations": "migrations-v5.json",
     "sbom": "sbom.spdx.json",
     "provenance": "provenance.intoto.json",
 }
+_REQUIRED_CLIENT_EXPORTS = frozenset(
+    {
+        "CreatePayerProfileRequest",
+        "FundingAuthorizationRequest",
+        "FundingAuthorizationResult",
+        "FundingProfile",
+        "FundingProfileReadiness",
+        "HostedSettlementAsyncClient",
+        "HostedSettlementClient",
+        "InstrumentListResult",
+        "PayerAction",
+        "PayerProfileResult",
+        "PayerSetupRequest",
+        "PayerSetupResult",
+        "Signer",
+    }
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
@@ -210,6 +232,59 @@ def _wheel_metadata(path: Path, field: str) -> tuple[str, str]:
         ) from exc
 
 
+def _verify_client_boundary(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = archive.namelist()
+            lowered = tuple(name.lower() for name in names)
+            if any(
+                "hosted_settlement_service" in name
+                or name.startswith("stripe/")
+                or "/stripe/" in name
+                for name in lowered
+            ):
+                raise ReleaseVerificationError(
+                    "staged client wheel crosses the hosted service/provider boundary"
+                )
+            source_names = [
+                name
+                for name in names
+                if name.startswith("hosted_settlement_client/") and name.endswith(".py")
+            ]
+            imports: set[str] = set()
+            exports: set[str] = set()
+            for name in source_names:
+                tree = ast.parse(archive.read(name).decode("utf-8"), filename=name)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        imports.update(alias.name.split(".", 1)[0] for alias in node.names)
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        imports.add(node.module.split(".", 1)[0])
+                if name == "hosted_settlement_client/__init__.py":
+                    for node in tree.body:
+                        if (
+                            isinstance(node, ast.Assign)
+                            and any(
+                                isinstance(target, ast.Name) and target.id == "__all__"
+                                for target in node.targets
+                            )
+                        ):
+                            exports.update(ast.literal_eval(node.value))
+            if imports.intersection({"hosted_settlement_service", "stripe"}):
+                raise ReleaseVerificationError(
+                    "staged client wheel imports hosted service/provider modules"
+                )
+            missing = sorted(_REQUIRED_CLIENT_EXPORTS - exports)
+            if missing:
+                raise ReleaseVerificationError(
+                    "staged client wheel is missing expanded public exports: "
+                    + ", ".join(missing)
+                )
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError, zipfile.BadZipFile) as exc:
+        raise ReleaseVerificationError(
+            f"staged client wheel boundary is unreadable: {exc}"
+        ) from exc
+
 def _verify_wheel(
     path: Path,
     descriptor: dict[str, Any],
@@ -239,6 +314,8 @@ def _verify_wheel(
     )
     if (distribution, version) != (wanted_distribution, wanted_version):
         raise ReleaseVerificationError(f"staged {field} wheel metadata does not match")
+    if field == "client":
+        _verify_client_boundary(path)
     return expected_sha
 
 
@@ -257,6 +334,54 @@ def _verify_file(root: Path, descriptor: dict[str, Any], field: str) -> Path:
     if actual != expected:
         raise ReleaseVerificationError(f"staged {field} artifact hash does not match")
     return path
+
+def _verify_contract_artifacts(paths: dict[str, Path]) -> None:
+    _, openapi = _read_json(paths["openapi"], "staged OpenAPI")
+    info = _object(openapi.get("info"), "openapi.info")
+    _equal(info.get("version"), _API_VERSION, "OpenAPI version")
+
+    _, conformance = _read_json(paths["conformance"], "staged conformance")
+    _equal(conformance.get("api_version"), _API_VERSION, "conformance api_version")
+    _equal(
+        conformance.get("schema_version"),
+        _SCHEMA_VERSION,
+        "conformance schema_version",
+    )
+    _equal(
+        tuple(conformance.get("funding_profiles") or ()),
+        _FUNDING_PROFILES,
+        "conformance funding_profiles",
+    )
+    _equal(
+        conformance.get("identity_contract"),
+        _IDENTITY_CONTRACT,
+        "conformance identity_contract",
+    )
+
+    _, migrations = _read_json(paths["migrations"], "staged migrations")
+    _equal(
+        migrations.get("schema_version"),
+        _SCHEMA_VERSION,
+        "migration artifact schema_version",
+    )
+    migration_rows = migrations.get("migrations")
+    if not isinstance(migration_rows, list):
+        raise ReleaseVerificationError("migration artifact migrations must be a list")
+    positions = [
+        row.get("position") for row in migration_rows if isinstance(row, dict)
+    ]
+    if positions != list(range(1, _SCHEMA_VERSION + 1)):
+        raise ReleaseVerificationError(
+            "migration artifact must contain the exact ordered schema history"
+        )
+    if (
+        not migration_rows
+        or not isinstance(migration_rows[-1], dict)
+        or migration_rows[-1].get("migration_id") != "0005_payer_funding_profiles"
+    ):
+        raise ReleaseVerificationError(
+            "migration artifact does not end at payer funding schema 5"
+        )
 
 
 def _verify_image(image: dict[str, Any], field: str) -> tuple[str, str]:
@@ -324,10 +449,21 @@ def verify_release(
     _equal(
         migrations.get("schema_version"), _SCHEMA_VERSION, "migration schema_version"
     )
+    artifact_paths: dict[str, Path] = {}
+    artifact_sha256: dict[str, str] = {}
     for artifact_name, filename in _ARTIFACT_FILENAMES.items():
         descriptor = _object(payload.get(artifact_name), f"payload.{artifact_name}")
         _equal(descriptor.get("filename"), filename, f"{artifact_name}.filename")
-        _verify_file(manifest_path.parent, descriptor, artifact_name)
+        artifact_paths[artifact_name] = _verify_file(
+            manifest_path.parent,
+            descriptor,
+            artifact_name,
+        )
+        artifact_sha256[artifact_name] = "sha256:" + _sha(
+            descriptor.get("sha256"),
+            f"{artifact_name}.sha256",
+        )
+    _verify_contract_artifacts(artifact_paths)
 
     build = _object(payload.get("build"), "payload.build")
     _equal(build.get("repository"), repository, "build.repository")
@@ -385,7 +521,9 @@ def verify_release(
         "release_version": _RELEASE_VERSION,
         "api_version": _API_VERSION,
         "schema_version": _SCHEMA_VERSION,
+        "funding_profiles": list(_FUNDING_PROFILES),
         "capabilities": list(_CAPABILITIES),
+        "artifact_sha256": artifact_sha256,
         "authority_id": authority_id,
         "authority_scheme": "eip191",
         "authority_address": authority_address,
