@@ -460,12 +460,21 @@ def stripe_contract_fingerprint(config: StripeSettlementConfig) -> str:
 
 
 def _profile_records(source: Any) -> dict[FundingProfile, Any]:
+    raw_records = _value(source, "funding_profiles", ())
+    if not isinstance(raw_records, (tuple, list)):
+        raise ValueError("hosted funding profile readiness must be a sequence")
     records: dict[FundingProfile, Any] = {}
-    for item in _value(source, "funding_profiles", ()) or ():
+    for item in raw_records:
         try:
             profile = FundingProfile(_value(item, "profile"))
         except (TypeError, ValueError):
-            continue
+            raise ValueError(
+                "hosted funding profile readiness contains an invalid profile"
+            ) from None
+        if profile in records:
+            raise ValueError(
+                "hosted funding profile readiness contains a duplicate profile"
+            )
         records[profile] = item
     return records
 

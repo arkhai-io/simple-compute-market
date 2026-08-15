@@ -390,6 +390,39 @@ async def test_profile_readiness_is_independent_and_ordered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_signed_profile_readiness_fails_closed() -> None:
+    class DuplicateProfileClient(ObservationalClient):
+        async def health(self, *, request_id: str):
+            health = await super().health(request_id=request_id)
+            return SimpleNamespace(
+                **{
+                    **vars(health),
+                    "funding_profiles": (
+                        _profile_readiness(FundingProfile.CARD, ready=True),
+                        _profile_readiness(FundingProfile.CARD, ready=False),
+                    ),
+                }
+            )
+
+    status = await stripe_preflight(
+        _config(account_ref=None, condition_profile=None, condition_profiles={}),
+        {
+            "marketplace_signer": FakeSigner(),
+            "preflight_client": DuplicateProfileClient(),
+        },
+        "buyer",
+    )
+    assert status.ready is False
+    assert [blocker.code for blocker in status.blockers] == [
+        "hosted.preflight_failed"
+    ]
+    assert all(
+        profile["ready"] is False
+        for profile in status.public_details["profiles"].values()
+    )
+
+
+@pytest.mark.asyncio
 async def test_missing_profile_capability_blocks_only_that_profile() -> None:
     capabilities = tuple(
         capability
