@@ -113,7 +113,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-buyer"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -122,28 +122,31 @@ dependencies = [
     { name = "arkhai-core-buyer" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-config" },
+    { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-settlement-runtime" },
     { name = "eth-account" },
     { name = "rich" },
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_buyer-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_buyer-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
+    { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -159,8 +162,33 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-bare-metal-storefront"
+version = "0.2.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-bare-metal" },
+    { name = "arkhai-compute-provisioning" },
+    { name = "arkhai-core" },
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-hosted-settlement-client" },
+    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-hosted-settlement" },
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
+    { name = "arkhai-kit-settlement-runtime" },
+    { name = "arkhai-kit-site-client" },
+    { name = "arkhai-kit-storefront" },
+    { name = "fastapi" },
+    { name = "typer" },
+    { name = "uvicorn" },
+]
+wheels = [
+    { path = "arkhai_bare_metal_storefront-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-compute-provisioning"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-fulfillment" },
@@ -171,7 +199,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -347,6 +375,19 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capacity-publication"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-core-registry-client" },
+    { name = "arkhai-core-storefront" },
+    { name = "arkhai-kit-site-client" },
+]
+wheels = [
+    { path = "arkhai_kit_capacity_publication-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-config"
 version = "0.1.0"
 source = { registry = "../.dist" }
@@ -362,7 +403,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-resource-pools" },
@@ -372,7 +413,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -384,6 +425,7 @@ dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
+    { name = "typer" },
 ]
 wheels = [
     { path = "arkhai_kit_hosted_settlement-0.1.0-py3-none-any.whl" },
@@ -405,6 +447,18 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-negotiation-runtime"
+version = "0.1.0"
+source = { registry = "../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-policy" },
+]
+wheels = [
+    { path = "arkhai_kit_negotiation_runtime-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-policy"
 version = "0.1.1"
 source = { registry = "../.dist" }
@@ -419,7 +473,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "pydantic" },
@@ -427,7 +481,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -445,15 +499,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 dependencies = [
+    { name = "arkhai-kit-resource-pools" },
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -540,17 +595,19 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-bare-metal" },
+    { name = "arkhai-bare-metal-storefront" },
     { name = "arkhai-compute-provisioning" },
     { name = "arkhai-core" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront" },
     { name = "arkhai-core-storefront-client" },
-    { name = "arkhai-hosted-settlement-client" },
     { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-capacity-publication" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
     { name = "arkhai-kit-hosted-settlement" },
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -584,15 +641,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9a/8e/82a0fe20a541c03148528be8cac2408564a6c9a0cc7e9171802bc1d26985/attrs-26.1.0.tar.gz", hash = "sha256:d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32", size = 952055, upload-time = "2026-03-19T14:22:25.026Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e028ed19f90d4cd97c36717afef2bc2f395/attrs-26.1.0-py3-none-any.whl", hash = "sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309", size = 67548, upload-time = "2026-03-19T14:22:23.645Z" },
-]
-
-[[package]]
-name = "backports-tarfile"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/86/72/cd9b395f25e290e633655a100af28cb253e4393396264a98bd5f5951d50f/backports_tarfile-1.2.0.tar.gz", hash = "sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991", size = 86406, upload-time = "2024-05-28T17:01:54.731Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/fa/123043af240e49752f1c4bd24da5053b6bd00cad78c2be53c0d1e8b975bc/backports.tarfile-1.2.0-py3-none-any.whl", hash = "sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34", size = 30181, upload-time = "2024-05-28T17:01:53.112Z" },
 ]
 
 [[package]]
@@ -1332,9 +1380,6 @@ wheels = [
 name = "jaraco-context"
 version = "6.1.2"
 source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "backports-tarfile", marker = "python_full_version < '3.12'" },
-]
 sdist = { url = "https://files.pythonhosted.org/packages/af/50/4763cd07e722bb6285316d390a164bc7e479db9d90daa769f22578f698b4/jaraco_context-6.1.2.tar.gz", hash = "sha256:f1a6c9d391e661cc5b8d39861ff077a7dc24dc23833ccee564b234b81c82dfe3", size = 16801, upload-time = "2026-03-20T22:13:33.922Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f2/58/bc8954bda5fcda97bd7c19be11b85f91973d67a706ed4a3aec33e7de22db/jaraco_context-6.1.2-py3-none-any.whl", hash = "sha256:bf8150b79a2d5d91ae48629d8b427a8f7ba0e1097dd6202a9059f29a36379535", size = 7871, upload-time = "2026-03-20T22:13:32.808Z" },
@@ -1378,7 +1423,6 @@ name = "keyring"
 version = "25.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "importlib-metadata", marker = "python_full_version < '3.12'" },
     { name = "jaraco-classes" },
     { name = "jaraco-context" },
     { name = "jaraco-functools" },
